@@ -182,13 +182,13 @@ npm run lint
 See the [Project Structure](README.md#project-structure) in the README for the
 current package map. Key directories:
 
-| Directory | Language | Purpose |
-|-----------|----------|---------|
-| `bashgym/` | Python | Backend — Arena, Judge, Factory, Gym, API |
-| `frontend/src/` | TypeScript | React + Electron UI |
-| `assistant/` | Go | Peony chat assistant (Discord/Telegram) |
-| `tests/` | Python | Test suite |
-| `docs/` | Markdown | Durable public documentation |
+| Directory       | Language   | Purpose                                   |
+| --------------- | ---------- | ----------------------------------------- |
+| `bashgym/`      | Python     | Backend — Arena, Judge, Factory, Gym, API |
+| `frontend/src/` | TypeScript | React + Electron UI                       |
+| `assistant/`    | Go         | Peony chat assistant (Discord/Telegram)   |
+| `tests/`        | Python     | Test suite                                |
+| `docs/`         | Markdown   | Durable public documentation              |
 
 ---
 

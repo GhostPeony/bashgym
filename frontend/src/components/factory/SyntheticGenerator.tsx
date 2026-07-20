@@ -1,13 +1,5 @@
 import { useState, useEffect } from 'react'
-import {
-  Sparkles,
-  Loader2,
-  Zap,
-  Target,
-  Database,
-  Layers,
-  ChevronDown,
-} from 'lucide-react'
+import { Sparkles, Loader2, Zap, Target, Database, Layers, ChevronDown } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
   syntheticApi,
@@ -29,7 +21,10 @@ type RepoFilter = 'single' | 'all' | 'selected'
 const EMPTY_PRESETS: Record<string, SyntheticPreset> = {}
 const EMPTY_REPOS: RepoInfo[] = []
 
-const STRATEGY_INFO: Record<Strategy, { label: string; description: string; icon: typeof Sparkles }> = {
+const STRATEGY_INFO: Record<
+  Strategy,
+  { label: string; description: string; icon: typeof Sparkles }
+> = {
   trace_seeded: {
     label: 'Trace-Seeded',
     description: 'From gold trace patterns',
@@ -72,7 +67,8 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
   const [repoDropdownOpen, setRepoDropdownOpen] = useState(false)
 
   // Data state (session-cached; renders instantly on remount)
-  const { data: presetsData, loading: presetsLoading } = useSessionResource(syntheticPresetsResource)
+  const { data: presetsData, loading: presetsLoading } =
+    useSessionResource(syntheticPresetsResource)
   const { data: repoList, loading: reposLoading } = useSessionResource(traceReposResource)
   const { data: traceCounts, loading: countsLoading } = useSessionResource(traceCountsResource)
   const presets = presetsData ?? EMPTY_PRESETS
@@ -92,9 +88,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
     const interval = setInterval(async () => {
       const result = await syntheticApi.getJobStatus(activeJobId)
       if (result.ok && result.data) {
-        setJobs(prev => prev.map(j =>
-          j.job_id === activeJobId ? result.data! : j
-        ))
+        setJobs((prev) => prev.map((j) => (j.job_id === activeJobId ? result.data! : j)))
 
         if (result.data.status === 'completed' || result.data.status === 'failed') {
           setActiveJobId(null)
@@ -126,7 +120,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
           status: 'queued',
           progress: { current: 0, total: 0 }
         }
-        setJobs(prev => [newJob, ...prev])
+        setJobs((prev) => [newJob, ...prev])
         setActiveJobId(result.data.job_id)
         void syntheticJobsResource.getState().refresh()
         completeTutorialStep('generate_examples')
@@ -137,10 +131,8 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
   }
 
   const toggleRepo = (repoName: string) => {
-    setSelectedRepos(prev =>
-      prev.includes(repoName)
-        ? prev.filter(r => r !== repoName)
-        : [...prev, repoName]
+    setSelectedRepos((prev) =>
+      prev.includes(repoName) ? prev.filter((r) => r !== repoName) : [...prev, repoName]
     )
   }
 
@@ -168,8 +160,17 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
         onGenerate: handleGenerate
       })
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isGenerating, canGenerate, preset, customTarget, traceCount, repoFilter, selectedRepos, isLoading])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isGenerating,
+    canGenerate,
+    preset,
+    customTarget,
+    traceCount,
+    repoFilter,
+    selectedRepos,
+    isLoading
+  ])
 
   const getRepoLabel = () => {
     if (repoFilter === 'all') return 'All repositories'
@@ -188,181 +189,211 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
 
   return (
     <div className="space-y-4">
-        {/* Repository Filter - Dropdown at top */}
-        <div className="flex items-center gap-4">
-          <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">Source:</label>
-          <div className="relative flex-1">
-            <button
-              onClick={() => setRepoDropdownOpen(!repoDropdownOpen)}
-              className="w-full flex items-center justify-between px-3 py-2 bg-background-secondary border-brutal border-border rounded-brutal text-sm text-text-primary hover:border-accent transition-colors"
-            >
-              <span className="font-mono">{getRepoLabel()}</span>
-              <ChevronDown className={clsx('w-4 h-4 text-text-muted transition-transform', repoDropdownOpen && 'rotate-180')} />
-            </button>
-            {repoDropdownOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-background-secondary border-brutal border-border rounded-brutal shadow-brutal z-10 max-h-64 overflow-auto">
-                <button
-                  onClick={() => {
-                    setRepoFilter('all')
-                    setSelectedRepos([])
-                    setRepoDropdownOpen(false)
-                  }}
-                  className={clsx(
-                    'w-full px-3 py-2 text-left text-sm font-mono hover:bg-accent-light transition-colors',
-                    repoFilter === 'all' ? 'text-accent-dark font-semibold' : 'text-text-primary'
-                  )}
-                >
-                  All repositories ({traceCount} traces)
-                </button>
-                <div className="border-t-2 border-border" />
-                {repos.map(repo => (
-                  <button
-                    key={repo.name}
-                    onClick={() => {
-                      setRepoFilter('selected')
-                      toggleRepo(repo.name)
-                    }}
-                    className={clsx(
-                      'w-full px-3 py-2 text-left text-sm font-mono hover:bg-accent-light transition-colors flex items-center justify-between',
-                      selectedRepos.includes(repo.name) ? 'text-accent-dark font-semibold' : 'text-text-primary'
-                    )}
-                  >
-                    <span>{repo.name}</span>
-                    {repo.trace_count && <span className="text-xs text-text-muted">{repo.trace_count}</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Strategy Selection - Compact toggle with description */}
-        <div className="flex items-center gap-4">
-          <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">Strategy:</label>
-          <div className="flex gap-1 p-1 border-brutal border-border rounded-brutal bg-background-secondary">
-            {(Object.entries(STRATEGY_INFO) as [Strategy, typeof STRATEGY_INFO['trace_seeded']][]).map(([key, info]) => (
+      {/* Repository Filter - Dropdown at top */}
+      <div className="flex items-center gap-4">
+        <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">
+          Source:
+        </label>
+        <div className="relative flex-1">
+          <button
+            onClick={() => setRepoDropdownOpen(!repoDropdownOpen)}
+            className="w-full flex items-center justify-between px-3 py-2 bg-background-secondary border-brutal border-border rounded-brutal text-sm text-text-primary hover:border-accent transition-colors"
+          >
+            <span className="font-mono">{getRepoLabel()}</span>
+            <ChevronDown
+              className={clsx(
+                'w-4 h-4 text-text-muted transition-transform',
+                repoDropdownOpen && 'rotate-180'
+              )}
+            />
+          </button>
+          {repoDropdownOpen && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-background-secondary border-brutal border-border rounded-brutal shadow-brutal z-10 max-h-64 overflow-auto">
               <button
-                key={key}
-                onClick={() => setStrategy(key)}
+                onClick={() => {
+                  setRepoFilter('all')
+                  setSelectedRepos([])
+                  setRepoDropdownOpen(false)
+                }}
                 className={clsx(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
-                  strategy === key
-                    ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
-                    : 'text-text-secondary hover:text-text-primary border border-transparent'
+                  'w-full px-3 py-2 text-left text-sm font-mono hover:bg-accent-light transition-colors',
+                  repoFilter === 'all' ? 'text-accent-dark font-semibold' : 'text-text-primary'
                 )}
               >
-                <info.icon className="w-4 h-4" />
-                {info.label}
+                All repositories ({traceCount} traces)
               </button>
-            ))}
-          </div>
-          <span className="text-xs text-text-muted font-mono">
-            {STRATEGY_INFO[strategy].description}
-          </span>
-        </div>
-
-        {/* Target Size - Compact preset buttons + custom slider */}
-        <div className="flex items-center gap-4">
-          <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">Target:</label>
-          <div className="flex items-center gap-2 flex-1">
-            <div className="flex gap-1 p-1 border-brutal border-border rounded-brutal bg-background-secondary">
-              {Object.entries(presets).map(([key, presetData]) => (
+              <div className="border-t-2 border-border" />
+              {repos.map((repo) => (
                 <button
-                  key={key}
-                  onClick={() => setPreset(key as Preset)}
+                  key={repo.name}
+                  onClick={() => {
+                    setRepoFilter('selected')
+                    toggleRepo(repo.name)
+                  }}
                   className={clsx(
-                    'px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
-                    key === preset
-                      ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
-                      : 'text-text-secondary hover:text-text-primary border border-transparent'
+                    'w-full px-3 py-2 text-left text-sm font-mono hover:bg-accent-light transition-colors flex items-center justify-between',
+                    selectedRepos.includes(repo.name)
+                      ? 'text-accent-dark font-semibold'
+                      : 'text-text-primary'
                   )}
-                  title={presetData.label}
                 >
-                  {presetData.target_examples ? presetData.target_examples.toLocaleString() : 'Custom'}
+                  <span>{repo.name}</span>
+                  {repo.trace_count && (
+                    <span className="text-xs text-text-muted">{repo.trace_count}</span>
+                  )}
                 </button>
               ))}
             </div>
-            {preset === 'custom' ? (
-              <div className="flex items-center gap-2 flex-1">
-                <input
-                  type="range"
-                  min="50"
-                  max="5000"
-                  step="50"
-                  value={customTarget}
-                  onChange={(e) => setCustomTarget(parseInt(e.target.value))}
-                  className="flex-1 h-1.5 bg-background-secondary rounded-brutal appearance-none cursor-pointer accent-accent"
-                />
-                <input
-                  type="number"
-                  min="50"
-                  max="10000"
-                  value={customTarget}
-                  onChange={(e) => setCustomTarget(parseInt(e.target.value))}
-                  className="input w-20 text-sm text-center font-mono"
-                />
-              </div>
-            ) : (
-              <span className="text-xs text-text-muted font-mono">
-                {presets[preset]?.label || ''}
-              </span>
-            )}
-          </div>
+          )}
         </div>
+      </div>
 
-        {/* Provider Selection - Compact toggle */}
-        <div className="flex items-center gap-4">
-          <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">Provider:</label>
+      {/* Strategy Selection - Compact toggle with description */}
+      <div className="flex items-center gap-4">
+        <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">
+          Strategy:
+        </label>
+        <div className="flex gap-1 p-1 border-brutal border-border rounded-brutal bg-background-secondary">
+          {(
+            Object.entries(STRATEGY_INFO) as [Strategy, (typeof STRATEGY_INFO)['trace_seeded']][]
+          ).map(([key, info]) => (
+            <button
+              key={key}
+              onClick={() => setStrategy(key)}
+              className={clsx(
+                'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
+                strategy === key
+                  ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
+                  : 'text-text-secondary hover:text-text-primary border border-transparent'
+              )}
+            >
+              <info.icon className="w-4 h-4" />
+              {info.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-text-muted font-mono">
+          {STRATEGY_INFO[strategy].description}
+        </span>
+      </div>
+
+      {/* Target Size - Compact preset buttons + custom slider */}
+      <div className="flex items-center gap-4">
+        <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">
+          Target:
+        </label>
+        <div className="flex items-center gap-2 flex-1">
           <div className="flex gap-1 p-1 border-brutal border-border rounded-brutal bg-background-secondary">
-            <button
-              onClick={() => setProvider('nim')}
-              className={clsx(
-                'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
-                provider === 'nim'
-                  ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
-                  : 'text-text-secondary hover:text-text-primary border border-transparent'
-              )}
-            >
-              <Zap className="w-4 h-4" />
-              NVIDIA NIM
-            </button>
-            <button
-              onClick={() => setProvider('anthropic')}
-              className={clsx(
-                'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
-                provider === 'anthropic'
-                  ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
-                  : 'text-text-secondary hover:text-text-primary border border-transparent'
-              )}
-            >
-              <Sparkles className="w-4 h-4" />
-              Claude
-            </button>
+            {Object.entries(presets).map(([key, presetData]) => (
+              <button
+                key={key}
+                onClick={() => setPreset(key as Preset)}
+                className={clsx(
+                  'px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
+                  key === preset
+                    ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
+                    : 'text-text-secondary hover:text-text-primary border border-transparent'
+                )}
+                title={presetData.label}
+              >
+                {presetData.target_examples
+                  ? presetData.target_examples.toLocaleString()
+                  : 'Custom'}
+              </button>
+            ))}
           </div>
-          <span className="text-xs text-text-muted font-mono">
-            {provider === 'nim' ? 'Fast, cost-effective' : 'Higher quality'}
+          {preset === 'custom' ? (
+            <div className="flex items-center gap-2 flex-1">
+              <input
+                type="range"
+                min="50"
+                max="5000"
+                step="50"
+                value={customTarget}
+                onChange={(e) => setCustomTarget(parseInt(e.target.value))}
+                className="flex-1 h-1.5 bg-background-secondary rounded-brutal appearance-none cursor-pointer accent-accent"
+              />
+              <input
+                type="number"
+                min="50"
+                max="10000"
+                value={customTarget}
+                onChange={(e) => setCustomTarget(parseInt(e.target.value))}
+                className="input w-20 text-sm text-center font-mono"
+              />
+            </div>
+          ) : (
+            <span className="text-xs text-text-muted font-mono">
+              {presets[preset]?.label || ''}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Provider Selection - Compact toggle */}
+      <div className="flex items-center gap-4">
+        <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">
+          Provider:
+        </label>
+        <div className="flex gap-1 p-1 border-brutal border-border rounded-brutal bg-background-secondary">
+          <button
+            onClick={() => setProvider('nim')}
+            className={clsx(
+              'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
+              provider === 'nim'
+                ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
+                : 'text-text-secondary hover:text-text-primary border border-transparent'
+            )}
+          >
+            <Zap className="w-4 h-4" />
+            NVIDIA NIM
+          </button>
+          <button
+            onClick={() => setProvider('anthropic')}
+            className={clsx(
+              'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
+              provider === 'anthropic'
+                ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
+                : 'text-text-secondary hover:text-text-primary border border-transparent'
+            )}
+          >
+            <Sparkles className="w-4 h-4" />
+            Claude
+          </button>
+        </div>
+        <span className="text-xs text-text-muted font-mono">
+          {provider === 'nim' ? 'Fast, cost-effective' : 'Higher quality'}
+        </span>
+      </div>
+
+      {/* Summary Stats */}
+      <div className="flex items-center gap-6 pt-2">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs uppercase tracking-widest text-text-muted">
+            Seeds:
+          </span>
+          <span className="font-mono text-sm font-semibold text-text-primary">{traceCount}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs uppercase tracking-widest text-text-muted">
+            Target:
+          </span>
+          <span className="font-mono text-sm font-semibold text-text-primary">
+            {getTargetExamples().toLocaleString()}
           </span>
         </div>
-
-        {/* Summary Stats */}
-        <div className="flex items-center gap-6 pt-2">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Seeds:</span>
-            <span className="font-mono text-sm font-semibold text-text-primary">{traceCount}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Target:</span>
-            <span className="font-mono text-sm font-semibold text-text-primary">{getTargetExamples().toLocaleString()}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Multiplier:</span>
-            <span className="font-mono text-sm font-semibold text-accent">{getMultiplier()}x</span>
-          </div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs uppercase tracking-widest text-text-muted">
+            Multiplier:
+          </span>
+          <span className="font-mono text-sm font-semibold text-accent">{getMultiplier()}x</span>
         </div>
+      </div>
 
       {/* Info text */}
       <p className="text-xs text-text-muted font-mono pt-2">
-        Generates NeMo-compatible JSONL saved to data/synthetic/. Recommended: 500-2000 examples for LoRA fine-tuning.
+        Generates NeMo-compatible JSONL saved to data/synthetic/. Recommended: 500-2000 examples for
+        LoRA fine-tuning.
       </p>
     </div>
   )

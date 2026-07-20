@@ -5,7 +5,7 @@ import {
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis,
+  YAxis
 } from 'recharts'
 import { BrainCircuit } from 'lucide-react'
 import { useTrainingStore } from '../../stores'
@@ -15,7 +15,7 @@ const AXIS_STYLE = {
   stroke: 'var(--text-muted)',
   fontSize: 10,
   fontFamily: "'JetBrains Mono', monospace",
-  tickLine: false,
+  tickLine: false
 } as const
 
 const TOOLTIP_STYLE = {
@@ -24,7 +24,7 @@ const TOOLTIP_STYLE = {
   borderRadius: 'var(--radius)',
   boxShadow: 'var(--shadow-sm)',
   fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
+  fontSize: '11px'
 } as const
 
 function metric(v: number | undefined): string {
@@ -48,20 +48,10 @@ function hasWorldModelMetric(point: GrpoMetric): boolean {
   )
 }
 
-function StatTile({
-  label,
-  value,
-  hint,
-}: {
-  label: string
-  value: string
-  hint: string
-}) {
+function StatTile({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
     <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-      <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
-        {label}
-      </p>
+      <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">{label}</p>
       <p className="font-brand text-xl text-text-primary mt-1">{value}</p>
       <p className="font-mono text-[10px] text-text-muted mt-1">{hint}</p>
     </div>

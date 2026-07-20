@@ -236,10 +236,7 @@ class TestParsers:
         assert result.total == 70
         assert result.metrics["trajectory_overall_accuracy"] == 0.72
         assert result.metrics["action_overall_accuracy"] == 0.65
-        assert (
-            result.metrics["trajectory.by_task_type.spreadsheet.overall_accuracy"]
-            == 0.8
-        )
+        assert result.metrics["trajectory.by_task_type.spreadsheet.overall_accuracy"] == 0.8
         assert result.metrics["action.by_reward_type.redundant.overall_accuracy"] == 0.7
 
     def test_normalize_external_cua_rewardbench_rows(self):

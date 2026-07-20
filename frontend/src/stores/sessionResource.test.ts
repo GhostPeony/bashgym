@@ -139,10 +139,13 @@ test('setData seeds the cache and suppresses the next fetch', async () => {
 
 test('staleAfterMs triggers a refetch after expiry but serves cache before it', async () => {
   let calls = 0
-  const store = createSessionResource<number>(async () => {
-    calls += 1
-    return { ok: true, data: calls }
-  }, { staleAfterMs: 10 })
+  const store = createSessionResource<number>(
+    async () => {
+      calls += 1
+      return { ok: true, data: calls }
+    },
+    { staleAfterMs: 10 }
+  )
   await store.getState().ensureLoaded()
   await store.getState().ensureLoaded()
   assert.equal(calls, 1)
@@ -196,7 +199,7 @@ test('keyed invalidate without a key marks every known key stale', async () => {
   assert.equal(store.getState().entries['b']?.data, 4)
 })
 
-test('keyed failed refresh keeps that key\'s stale data', async () => {
+test("keyed failed refresh keeps that key's stale data", async () => {
   let fail = false
   const store = createKeyedSessionResource<string>(async (key) =>
     fail ? { ok: false, error: 'nope' } : { ok: true, data: `ok:${key}` }

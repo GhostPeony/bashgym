@@ -20,13 +20,22 @@ import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
 export function RouterDashboard() {
-  const { strategy, studentRate, stats, setStudentRate, setStrategy: _setStrategy, updateStats } = useRouterStore()
+  const {
+    strategy,
+    studentRate,
+    stats,
+    setStudentRate,
+    setStrategy: _setStrategy,
+    updateStats
+  } = useRouterStore()
   const { theme } = useThemeStore()
   const [showSettings, setShowSettings] = useState(false)
   const { data: routerStats, refreshing } = useSessionResource(routerStatsResource)
 
   // Latency history - one point appended per stats fetch (capped at 60)
-  const [latencyHistory, setLatencyHistory] = useState<Array<{ time: string; teacher: number; student: number }>>([])
+  const [latencyHistory, setLatencyHistory] = useState<
+    Array<{ time: string; teacher: number; student: number }>
+  >([])
 
   // Push each fetched stats payload into the router store + latency history
   useEffect(() => {
@@ -43,7 +52,11 @@ export function RouterDashboard() {
     })
     setLatencyHistory((prev) => {
       const point = {
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        time: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        }),
         teacher: routerStats.avg_teacher_latency ?? 0,
         student: routerStats.avg_student_latency ?? 0
       }
@@ -70,10 +83,12 @@ export function RouterDashboard() {
 
   // Performance data from stats (or empty if no data yet)
   const hasStats = stats.totalRequests > 0
-  const performanceData = hasStats ? [
-    { model: 'Teacher', success: stats.teacherSuccessRate, latency: stats.avgTeacherLatency },
-    { model: 'Student', success: stats.studentSuccessRate, latency: stats.avgStudentLatency }
-  ] : []
+  const performanceData = hasStats
+    ? [
+        { model: 'Teacher', success: stats.teacherSuccessRate, latency: stats.avgTeacherLatency },
+        { model: 'Student', success: stats.studentSuccessRate, latency: stats.avgStudentLatency }
+      ]
+    : []
 
   // Poll stats every 15s while mounted so the latency chart accumulates history
   useEffect(() => {
@@ -90,10 +105,15 @@ export function RouterDashboard() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="font-brand text-2xl text-text-primary">Router Dashboard</h1>
-            <span className="tag"><span>ROUTER</span></span>
+            <span className="tag">
+              <span>ROUTER</span>
+            </span>
           </div>
           <p className="text-sm text-text-secondary mt-1">
-            Strategy: <span className="font-mono text-xs uppercase tracking-widest text-accent-dark">{strategy.replace('_', ' ')}</span>
+            Strategy:{' '}
+            <span className="font-mono text-xs uppercase tracking-widest text-accent-dark">
+              {strategy.replace('_', ' ')}
+            </span>
           </p>
         </div>
 
@@ -106,7 +126,10 @@ export function RouterDashboard() {
           >
             <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
           </button>
-          <button onClick={() => setShowSettings(!showSettings)} className="btn-secondary flex items-center gap-2">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="btn-secondary flex items-center gap-2"
+          >
             <Settings className="w-4 h-4" />
             Configure
           </button>
@@ -153,19 +176,30 @@ export function RouterDashboard() {
           {/* Legend */}
           <div className="flex items-center justify-center gap-6 mt-4">
             <div className="flex items-center gap-2">
-              <div className="status-dot" style={{ backgroundColor: colors.teacher, borderColor: colors.teacher }} />
-              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Teacher ({100 - studentRate}%)</span>
+              <div
+                className="status-dot"
+                style={{ backgroundColor: colors.teacher, borderColor: colors.teacher }}
+              />
+              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+                Teacher ({100 - studentRate}%)
+              </span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="status-dot" style={{ backgroundColor: colors.student, borderColor: colors.student }} />
-              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Student ({studentRate}%)</span>
+              <div
+                className="status-dot"
+                style={{ backgroundColor: colors.student, borderColor: colors.student }}
+              />
+              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+                Student ({studentRate}%)
+              </span>
             </div>
           </div>
 
           {/* Slider Control */}
           <div className="mt-6 border-t border-border-subtle pt-4">
             <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-2">
-              Student Traffic Rate: <span className="font-brand text-lg text-text-primary">{studentRate}%</span>
+              Student Traffic Rate:{' '}
+              <span className="font-brand text-lg text-text-primary">{studentRate}%</span>
             </label>
             <input
               type="range"
@@ -208,18 +242,15 @@ export function RouterDashboard() {
                     }}
                     formatter={(value: number) => [`${value}%`, 'Success Rate']}
                   />
-                  <Bar
-                    dataKey="success"
-                    fill={colors.teacher}
-                    radius={[0, 2, 2, 0]}
-                    barSize={24}
-                  />
+                  <Bar dataKey="success" fill={colors.teacher} radius={[0, 2, 2, 0]} barSize={24} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-text-muted">
                 <TrendingUp className="w-12 h-12 mb-3" />
-                <p className="font-mono text-xs uppercase tracking-widest">Router metrics will appear once models are deployed</p>
+                <p className="font-mono text-xs uppercase tracking-widest">
+                  Router metrics will appear once models are deployed
+                </p>
               </div>
             )}
           </div>
@@ -232,7 +263,9 @@ export function RouterDashboard() {
               <CheckCircle className="w-5 h-5 text-status-success" />
             </div>
             <div>
-              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Teacher Success</p>
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                Teacher Success
+              </p>
               <p className="font-brand text-2xl text-text-primary">
                 {hasStats ? `${stats.teacherSuccessRate}%` : '--'}
               </p>
@@ -246,7 +279,9 @@ export function RouterDashboard() {
               <TrendingUp className="w-5 h-5 text-accent" />
             </div>
             <div>
-              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Student Success</p>
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                Student Success
+              </p>
               <p className="font-brand text-2xl text-text-primary">
                 {hasStats ? `${stats.studentSuccessRate}%` : '--'}
               </p>
@@ -260,7 +295,9 @@ export function RouterDashboard() {
               <Clock className="w-5 h-5 text-accent-dark" />
             </div>
             <div>
-              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Avg Teacher Latency</p>
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                Avg Teacher Latency
+              </p>
               <p className="font-brand text-2xl text-text-primary">
                 {hasStats ? `${stats.avgTeacherLatency}ms` : '--'}
               </p>
@@ -274,7 +311,9 @@ export function RouterDashboard() {
               <Clock className="w-5 h-5 text-status-info" />
             </div>
             <div>
-              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Avg Student Latency</p>
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                Avg Student Latency
+              </p>
               <p className="font-brand text-2xl text-text-primary">
                 {hasStats ? `${stats.avgStudentLatency}ms` : '--'}
               </p>
@@ -288,7 +327,10 @@ export function RouterDashboard() {
           <div className="h-48">
             {latencyHistory.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={latencyHistory} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <LineChart
+                  data={latencyHistory}
+                  margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} vertical={false} />
                   <XAxis dataKey="time" stroke={colors.text} fontSize={11} />
                   <YAxis stroke={colors.text} fontSize={11} />
@@ -323,7 +365,9 @@ export function RouterDashboard() {
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-text-muted">
                 <Clock className="w-10 h-10 mb-3" />
-                <p className="font-mono text-xs uppercase tracking-widest">Collecting latency data...</p>
+                <p className="font-mono text-xs uppercase tracking-widest">
+                  Collecting latency data...
+                </p>
               </div>
             )}
           </div>

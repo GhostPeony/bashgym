@@ -6,7 +6,7 @@ import {
   pruneArchivedForCampaigns,
   readArchivedCampaignIds,
   useCampaignArchiveStore,
-  writeArchivedCampaignIds,
+  writeArchivedCampaignIds
 } from './campaignArchive'
 import { campaignsForCanvasAutoMaterialization } from './campaignCanvasLifecycle'
 import type { CampaignRecord, CampaignStatus } from './campaignStore'
@@ -14,7 +14,7 @@ import type { CampaignRecord, CampaignStatus } from './campaignStore'
 function campaign(
   id: string,
   status: CampaignStatus = 'paused',
-  workspaceId = 'workspace-a',
+  workspaceId = 'workspace-a'
 ): CampaignRecord {
   return {
     schema_version: 'campaign.v1',
@@ -29,7 +29,7 @@ function campaign(
     status,
     version: 1,
     created_at: '2026-07-17T00:00:00Z',
-    updated_at: '2026-07-17T00:00:00Z',
+    updated_at: '2026-07-17T00:00:00Z'
   }
 }
 
@@ -39,7 +39,7 @@ function fakeStorage(initial: Record<string, string> = {}) {
     getItem: (key: string) => data.get(key) ?? null,
     setItem: (key: string, value: string) => void data.set(key, value),
     removeItem: (key: string) => void data.delete(key),
-    entries: () => Object.fromEntries(data),
+    entries: () => Object.fromEntries(data)
   }
 }
 
@@ -50,8 +50,14 @@ function resetStore() {
 test('partition splits campaigns into visible and archived without reordering', () => {
   const campaigns = [campaign('a'), campaign('b'), campaign('c')]
   const { visible, archived } = partitionCampaignsByArchive(campaigns, new Set(['b']))
-  assert.deepEqual(visible.map((item) => item.campaign_id), ['a', 'c'])
-  assert.deepEqual(archived.map((item) => item.campaign_id), ['b'])
+  assert.deepEqual(
+    visible.map((item) => item.campaign_id),
+    ['a', 'c']
+  )
+  assert.deepEqual(
+    archived.map((item) => item.campaign_id),
+    ['b']
+  )
 })
 
 test('prune drops archived ids whose campaign is active and keeps everything else', () => {
@@ -78,14 +84,12 @@ test('store archive/unarchive updates the workspace set idempotently', () => {
   store.archive('workspace-a', 'campaign-1')
   store.archive('workspace-a', 'campaign-1')
   store.archive('workspace-b', 'campaign-2')
-  assert.deepEqual(
-    useCampaignArchiveStore.getState().archivedByWorkspace['workspace-a'],
-    ['campaign-1'],
-  )
-  assert.deepEqual(
-    useCampaignArchiveStore.getState().archivedByWorkspace['workspace-b'],
-    ['campaign-2'],
-  )
+  assert.deepEqual(useCampaignArchiveStore.getState().archivedByWorkspace['workspace-a'], [
+    'campaign-1'
+  ])
+  assert.deepEqual(useCampaignArchiveStore.getState().archivedByWorkspace['workspace-b'], [
+    'campaign-2'
+  ])
   useCampaignArchiveStore.getState().unarchive('workspace-a', 'campaign-1')
   assert.deepEqual(useCampaignArchiveStore.getState().archivedByWorkspace['workspace-a'], [])
 })
@@ -95,15 +99,13 @@ test('reconcile auto-unarchives campaigns that turned active', () => {
   useCampaignArchiveStore.getState().archive('workspace-a', 'campaign-1')
   useCampaignArchiveStore.getState().archive('workspace-a', 'campaign-2')
 
-  useCampaignArchiveStore.getState().reconcile('workspace-a', [
-    campaign('campaign-1', 'active'),
-    campaign('campaign-2', 'paused'),
-  ])
+  useCampaignArchiveStore
+    .getState()
+    .reconcile('workspace-a', [campaign('campaign-1', 'active'), campaign('campaign-2', 'paused')])
 
-  assert.deepEqual(
-    useCampaignArchiveStore.getState().archivedByWorkspace['workspace-a'],
-    ['campaign-2'],
-  )
+  assert.deepEqual(useCampaignArchiveStore.getState().archivedByWorkspace['workspace-a'], [
+    'campaign-2'
+  ])
 })
 
 test('reconcile without changes keeps the same array reference', () => {
@@ -117,12 +119,13 @@ test('reconcile without changes keeps the same array reference', () => {
 test('auto materialization skips archived campaigns', () => {
   const campaigns = [campaign('keep', 'paused'), campaign('hidden', 'paused')]
   assert.deepEqual(
-    campaignsForCanvasAutoMaterialization(campaigns, new Set(['hidden']))
-      .map((item) => item.campaign_id),
-    ['keep'],
+    campaignsForCanvasAutoMaterialization(campaigns, new Set(['hidden'])).map(
+      (item) => item.campaign_id
+    ),
+    ['keep']
   )
   assert.deepEqual(
     campaignsForCanvasAutoMaterialization(campaigns).map((item) => item.campaign_id),
-    ['keep', 'hidden'],
+    ['keep', 'hidden']
   )
 })

@@ -8,7 +8,7 @@ import {
   type SystemInfo,
   type ModelRecommendations,
   type OllamaModelsResponse,
-  type RepoInfo,
+  type RepoInfo
 } from '../services/api'
 import { createKeyedSessionResource, createSessionResource } from './sessionResource'
 

@@ -45,43 +45,49 @@ export default function TraceUpload({ onImportComplete }: TraceUploadProps) {
 
   const acceptedTypes: Record<UploadSource, string> = {
     chatgpt: '.zip,.json',
-    mcp: '.json,.jsonl',
+    mcp: '.json,.jsonl'
   }
 
   const sourceHints: Record<UploadSource, string> = {
     chatgpt: 'ZIP export or conversations.json',
-    mcp: 'JSON-RPC log or simple .json/.jsonl',
+    mcp: 'JSON-RPC log or simple .json/.jsonl'
   }
 
-  const handleUpload = useCallback(async (file: File) => {
-    setUploading(true)
-    uploadingRef.current = true
-    setResult(null)
-    setError(null)
-    setImportProgress(null)
+  const handleUpload = useCallback(
+    async (file: File) => {
+      setUploading(true)
+      uploadingRef.current = true
+      setResult(null)
+      setError(null)
+      setImportProgress(null)
 
-    const resp = await tracesApi.uploadAndImport(file, source)
+      const resp = await tracesApi.uploadAndImport(file, source)
 
-    if (resp.ok && resp.data) {
-      setResult(resp.data)
-      if (resp.data.imported_count > 0) {
-        onImportComplete()
+      if (resp.ok && resp.data) {
+        setResult(resp.data)
+        if (resp.data.imported_count > 0) {
+          onImportComplete()
+        }
+      } else {
+        setError(resp.error || 'Upload failed')
       }
-    } else {
-      setError(resp.error || 'Upload failed')
-    }
 
-    setUploading(false)
-    uploadingRef.current = false
-    setImportProgress(null)
-  }, [source, onImportComplete])
+      setUploading(false)
+      uploadingRef.current = false
+      setImportProgress(null)
+    },
+    [source, onImportComplete]
+  )
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-    const file = e.dataTransfer.files[0]
-    if (file) handleUpload(file)
-  }, [handleUpload])
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      setIsDragging(false)
+      const file = e.dataTransfer.files[0]
+      if (file) handleUpload(file)
+    },
+    [handleUpload]
+  )
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -93,21 +99,30 @@ export default function TraceUpload({ onImportComplete }: TraceUploadProps) {
     setIsDragging(false)
   }, [])
 
-  const onFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) handleUpload(file)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [handleUpload])
+  const onFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (file) handleUpload(file)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    },
+    [handleUpload]
+  )
 
   return (
     <div className="space-y-2">
       {/* Source selector */}
       <div className="flex items-center gap-1.5">
-        <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted">Upload:</span>
+        <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted">
+          Upload:
+        </span>
         {(['chatgpt', 'mcp'] as const).map((s) => (
           <button
             key={s}
-            onClick={() => { setSource(s); setResult(null); setError(null) }}
+            onClick={() => {
+              setSource(s)
+              setResult(null)
+              setError(null)
+            }}
             disabled={uploading}
             className={clsx(
               'px-2 py-1 text-[10px] font-mono font-semibold uppercase tracking-wide border-brutal border-border rounded-brutal transition-press',
@@ -159,28 +174,26 @@ export default function TraceUpload({ onImportComplete }: TraceUploadProps) {
             {importProgress.current_item ? ` — ${importProgress.current_item}` : ''}
           </span>
         )}
-        <span className="text-[10px] font-mono text-text-muted">
-          {sourceHints[source]}
-        </span>
+        <span className="text-[10px] font-mono text-text-muted">{sourceHints[source]}</span>
       </div>
 
       {/* Result */}
       {result && (
-        <div className={clsx(
-          'flex items-start gap-2 px-2.5 py-1.5 text-[11px] font-mono border-brutal rounded-brutal',
-          result.failed_count > 0
-            ? 'border-status-error/30 bg-status-error/5 text-status-error'
-            : 'border-status-success/30 bg-status-success/5 text-status-success'
-        )}>
+        <div
+          className={clsx(
+            'flex items-start gap-2 px-2.5 py-1.5 text-[11px] font-mono border-brutal rounded-brutal',
+            result.failed_count > 0
+              ? 'border-status-error/30 bg-status-error/5 text-status-error'
+              : 'border-status-success/30 bg-status-success/5 text-status-success'
+          )}
+        >
           {result.failed_count > 0 ? (
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
           ) : (
             <Check className="w-3.5 h-3.5 mt-0.5 shrink-0" />
           )}
           <div>
-            <span className="font-semibold">
-              {result.imported_count} imported
-            </span>
+            <span className="font-semibold">{result.imported_count} imported</span>
             {result.skipped_count > 0 && (
               <span className="text-text-muted"> / {result.skipped_count} skipped</span>
             )}

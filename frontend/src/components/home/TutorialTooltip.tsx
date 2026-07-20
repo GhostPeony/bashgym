@@ -16,14 +16,16 @@ const TOOLTIP_CONFIGS: TooltipConfig[] = [
     step: 'install_hooks',
     targetSelector: '[data-tutorial="hooks-section"]',
     title: 'Install Capture Hooks',
-    description: 'Hooks capture your Claude Code sessions automatically. Click Install to enable them.',
+    description:
+      'Hooks capture your Claude Code sessions automatically. Click Install to enable them.',
     position: 'left'
   },
   {
     step: 'import_traces',
     targetSelector: '[data-tutorial="import-button"]',
     title: 'Import Your Traces',
-    description: 'You already have session history! Click Import to bring in your Claude Code traces.',
+    description:
+      'You already have session history! Click Import to bring in your Claude Code traces.',
     position: 'bottom'
   },
   {
@@ -50,7 +52,8 @@ const TOOLTIP_CONFIGS: TooltipConfig[] = [
 ]
 
 export function TutorialTooltip() {
-  const { isTutorialActive, currentStep, showTooltip, dismissTooltip, completeStep } = useTutorialStore()
+  const { isTutorialActive, currentStep, showTooltip, dismissTooltip, completeStep } =
+    useTutorialStore()
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
   const [tooltipConfig, setTooltipConfig] = useState<TooltipConfig | null>(null)
 
@@ -61,7 +64,7 @@ export function TutorialTooltip() {
       return
     }
 
-    const config = TOOLTIP_CONFIGS.find(c => c.step === currentStep)
+    const config = TOOLTIP_CONFIGS.find((c) => c.step === currentStep)
     if (!config) {
       setPosition(null)
       setTooltipConfig(null)
@@ -135,7 +138,7 @@ export function TutorialTooltip() {
       window.removeEventListener('resize', handleUpdate)
       clearInterval(interval)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTutorialActive, currentStep, showTooltip])
 
   if (!isTutorialActive || !showTooltip || !position || !tooltipConfig) {
@@ -167,10 +170,7 @@ export function TutorialTooltip() {
         {/* Header */}
         <div className="flex items-center justify-between p-3 bg-accent-light border-b border-border">
           <h4 className="font-brand text-sm text-text-primary">{tooltipConfig.title}</h4>
-          <button
-            onClick={handleGotIt}
-            className="btn-icon w-7 h-7 text-text-muted"
-          >
+          <button onClick={handleGotIt} className="btn-icon w-7 h-7 text-text-muted">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -208,12 +208,28 @@ export function TutorialTooltip() {
           )}
           style={
             tooltipConfig.position === 'top'
-              ? { borderLeft: '8px solid transparent', borderRight: '8px solid transparent', borderTop: '8px solid var(--accent)' }
+              ? {
+                  borderLeft: '8px solid transparent',
+                  borderRight: '8px solid transparent',
+                  borderTop: '8px solid var(--accent)'
+                }
               : tooltipConfig.position === 'bottom'
-              ? { borderLeft: '8px solid transparent', borderRight: '8px solid transparent', borderBottom: '8px solid var(--accent)' }
-              : tooltipConfig.position === 'left'
-              ? { borderTop: '8px solid transparent', borderBottom: '8px solid transparent', borderLeft: '8px solid var(--accent)' }
-              : { borderTop: '8px solid transparent', borderBottom: '8px solid transparent', borderRight: '8px solid var(--accent)' }
+                ? {
+                    borderLeft: '8px solid transparent',
+                    borderRight: '8px solid transparent',
+                    borderBottom: '8px solid var(--accent)'
+                  }
+                : tooltipConfig.position === 'left'
+                  ? {
+                      borderTop: '8px solid transparent',
+                      borderBottom: '8px solid transparent',
+                      borderLeft: '8px solid var(--accent)'
+                    }
+                  : {
+                      borderTop: '8px solid transparent',
+                      borderBottom: '8px solid transparent',
+                      borderRight: '8px solid var(--accent)'
+                    }
           }
         />
       </div>

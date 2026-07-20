@@ -27,7 +27,7 @@ export function CheckpointBrowser() {
     loading,
     refreshing,
     error: fetchError,
-    refresh,
+    refresh
   } = useSessionResource(checkpointsResource)
   const checkpoints = data ?? []
   const [error, setError] = useState<string | null>(null)
@@ -71,8 +71,8 @@ export function CheckpointBrowser() {
     const removableMb = removable.reduce((sum, cp) => sum + cp.size_mb, 0)
     const confirmed = window.confirm(
       `Keep only the final adapter for ${runId}?\n\n` +
-      `This permanently deletes ${removable.length} merged/checkpoint/GGUF artifact(s) ` +
-      `and frees about ${formatSize(removableMb)}.`,
+        `This permanently deletes ${removable.length} merged/checkpoint/GGUF artifact(s) ` +
+        `and frees about ${formatSize(removableMb)}.`
     )
     if (!confirmed) return
     setPruningRun(runId)
@@ -154,7 +154,10 @@ export function CheckpointBrowser() {
             </thead>
             <tbody>
               {checkpoints.map((cp) => (
-                <tr key={cp.id} className="border-b border-border-subtle hover:bg-background-secondary">
+                <tr
+                  key={cp.id}
+                  className="border-b border-border-subtle hover:bg-background-secondary"
+                >
                   <td className="py-2 px-2 text-text-primary">{cp.run_id}</td>
                   <td className="py-2 px-2">
                     <span className="tag text-[10px] py-0 px-1.5">
@@ -178,17 +181,25 @@ export function CheckpointBrowser() {
                         <ArrowRight className="w-3 h-3" />
                         Use as base
                       </button>
-                      {cp.kind === 'final' && checkpoints.some((candidate) => candidate.run_id === cp.run_id && candidate.kind !== 'final') && (
-                        <button
-                          onClick={() => handleKeepAdapterOnly(cp.run_id)}
-                          disabled={pruningRun === cp.run_id}
-                          className="btn-secondary flex items-center gap-1 py-1 px-2 text-[10px]"
-                          title="Delete merged weights, GGUF exports, and intermediate checkpoints for this run"
-                        >
-                          {pruningRun === cp.run_id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
-                          Keep adapter only
-                        </button>
-                      )}
+                      {cp.kind === 'final' &&
+                        checkpoints.some(
+                          (candidate) =>
+                            candidate.run_id === cp.run_id && candidate.kind !== 'final'
+                        ) && (
+                          <button
+                            onClick={() => handleKeepAdapterOnly(cp.run_id)}
+                            disabled={pruningRun === cp.run_id}
+                            className="btn-secondary flex items-center gap-1 py-1 px-2 text-[10px]"
+                            title="Delete merged weights, GGUF exports, and intermediate checkpoints for this run"
+                          >
+                            {pruningRun === cp.run_id ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Package className="w-3 h-3" />
+                            )}
+                            Keep adapter only
+                          </button>
+                        )}
                       <button
                         onClick={() => handleDelete(cp)}
                         disabled={deleting === cp.id}

@@ -20,10 +20,10 @@
 
   /* Botanical surfaces */
   --bg-primary: #f4f1eb;
-  --bg-secondary: #EDE8E3;
-  --bg-tertiary: #E5E0DB;
-  --bg-card: #FFFFFF;
-  --bg-terminal: #1E1E1E;
+  --bg-secondary: #ede8e3;
+  --bg-tertiary: #e5e0db;
+  --bg-card: #ffffff;
+  --bg-terminal: #1e1e1e;
 
   /* Text */
   --text-primary: #1e1e24;
@@ -32,7 +32,7 @@
 
   /* Brutalist structure */
   --border-color: var(--text-primary);
-  --border-subtle: #C8C4BF;
+  --border-subtle: #c8c4bf;
   --border-weight: 2px;
 
   --shadow-color: var(--text-primary);
@@ -43,9 +43,9 @@
   --radius: 8px;
 
   /* Status — botanical tones */
-  --status-success: #4A8C5C;
-  --status-warning: #C4923A;
-  --status-error: #B84A4A;
+  --status-success: #4a8c5c;
+  --status-warning: #c4923a;
+  --status-error: #b84a4a;
   --status-info: var(--accent);
 
   /* Charts — accent-derived */
@@ -87,9 +87,9 @@
   --radius: 8px;
 
   /* Status — slightly warmer for dark bg */
-  --status-success: #5CAA6E;
-  --status-warning: #D4A24A;
-  --status-error: #C85A5A;
+  --status-success: #5caa6e;
+  --status-warning: #d4a24a;
+  --status-error: #c85a5a;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -98,7 +98,12 @@
 
 @layer base {
   html {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    font-family:
+      'Inter',
+      -apple-system,
+      BlinkMacSystemFont,
+      system-ui,
+      sans-serif;
   }
 
   body {
@@ -121,7 +126,7 @@
   }
 
   .grain::before {
-    content: "";
+    content: '';
     position: absolute;
     inset: 0;
     border-radius: inherit;
@@ -172,7 +177,6 @@
    ═══════════════════════════════════════════════════ */
 
 @layer components {
-
   /* ── Cards ── */
   .card {
     background: var(--bg-card);
@@ -180,7 +184,10 @@
     box-shadow: var(--shadow-sm);
     border-radius: var(--radius);
     position: relative;
-    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
   }
 
   /* Containers keep their physical depth on hover. Pressed depth belongs to :active only. */
@@ -237,8 +244,12 @@
     white-space: nowrap;
     user-select: none;
     cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease,
-      background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease,
+      background 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
     border: var(--border-weight) solid var(--border-color);
     border-radius: var(--radius);
   }
@@ -257,7 +268,7 @@
   /* Primary — parallelogram via skewed pseudo-element (no content clipping) */
   .btn-primary {
     padding: 10px 28px;
-    color: #FFFFFF;
+    color: #ffffff;
     text-transform: uppercase;
     position: relative;
     z-index: 0;
@@ -276,7 +287,9 @@
     transform: skewX(-4deg);
     box-shadow: var(--shadow-sm);
     z-index: -1;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease;
   }
 
   .btn-primary:not(:disabled):active {
@@ -416,8 +429,12 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow-sm);
     cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease,
-      background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease,
+      background 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
   }
 
   .node-btn:hover {
@@ -502,7 +519,9 @@
     line-height: 1.25;
     outline: none;
     box-shadow: inset 2px 2px 0px rgba(30, 30, 36, 0.08);
-    transition: border-color 0.15s ease, background 0.15s ease,
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease,
       box-shadow 0.15s ease;
   }
 
@@ -651,8 +670,7 @@
     padding: clamp(16px, 2.4vw, 26px);
     scrollbar-gutter: stable;
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0)),
-      var(--bg-primary);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0)), var(--bg-primary);
   }
 
   .modal-canvas-body-workspace {
@@ -923,10 +941,18 @@
     white-space: nowrap;
   }
 
-  .activity-severity-info { color: var(--text-muted); }
-  .activity-severity-success { color: var(--status-success); }
-  .activity-severity-warning { color: var(--status-warning); }
-  .activity-severity-error { color: var(--status-error); }
+  .activity-severity-info {
+    color: var(--text-muted);
+  }
+  .activity-severity-success {
+    color: var(--status-success);
+  }
+  .activity-severity-warning {
+    color: var(--status-warning);
+  }
+  .activity-severity-error {
+    color: var(--status-error);
+  }
 
   .activity-center-detail {
     display: grid;
@@ -1689,7 +1715,9 @@
     color: var(--text-primary);
     font-family: 'Inter', sans-serif;
     font-size: 0.9rem;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
   }
 
   .input::placeholder {
@@ -1757,7 +1785,9 @@
     font-family: 'Inter', sans-serif;
     font-size: 0.9rem;
     cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background 0.15s ease;
     position: relative;
   }
 
@@ -1823,15 +1853,73 @@
     height: 8px;
     background: var(--border-color);
     clip-path: polygon(
-      0% 100%, 1.5% 0%, 3% 100%, 4.5% 0%, 6% 100%, 7.5% 0%, 9% 100%, 10.5% 0%,
-      12% 100%, 13.5% 0%, 15% 100%, 16.5% 0%, 18% 100%, 19.5% 0%, 21% 100%, 22.5% 0%,
-      24% 100%, 25.5% 0%, 27% 100%, 28.5% 0%, 30% 100%, 31.5% 0%, 33% 100%, 34.5% 0%,
-      36% 100%, 37.5% 0%, 39% 100%, 40.5% 0%, 42% 100%, 43.5% 0%, 45% 100%, 46.5% 0%,
-      48% 100%, 49.5% 0%, 51% 100%, 52.5% 0%, 54% 100%, 55.5% 0%, 57% 100%, 58.5% 0%,
-      60% 100%, 61.5% 0%, 63% 100%, 64.5% 0%, 66% 100%, 67.5% 0%, 69% 100%, 70.5% 0%,
-      72% 100%, 73.5% 0%, 75% 100%, 76.5% 0%, 78% 100%, 79.5% 0%, 81% 100%, 82.5% 0%,
-      84% 100%, 85.5% 0%, 87% 100%, 88.5% 0%, 90% 100%, 91.5% 0%, 93% 100%, 94.5% 0%,
-      96% 100%, 97.5% 0%, 100% 100%
+      0% 100%,
+      1.5% 0%,
+      3% 100%,
+      4.5% 0%,
+      6% 100%,
+      7.5% 0%,
+      9% 100%,
+      10.5% 0%,
+      12% 100%,
+      13.5% 0%,
+      15% 100%,
+      16.5% 0%,
+      18% 100%,
+      19.5% 0%,
+      21% 100%,
+      22.5% 0%,
+      24% 100%,
+      25.5% 0%,
+      27% 100%,
+      28.5% 0%,
+      30% 100%,
+      31.5% 0%,
+      33% 100%,
+      34.5% 0%,
+      36% 100%,
+      37.5% 0%,
+      39% 100%,
+      40.5% 0%,
+      42% 100%,
+      43.5% 0%,
+      45% 100%,
+      46.5% 0%,
+      48% 100%,
+      49.5% 0%,
+      51% 100%,
+      52.5% 0%,
+      54% 100%,
+      55.5% 0%,
+      57% 100%,
+      58.5% 0%,
+      60% 100%,
+      61.5% 0%,
+      63% 100%,
+      64.5% 0%,
+      66% 100%,
+      67.5% 0%,
+      69% 100%,
+      70.5% 0%,
+      72% 100%,
+      73.5% 0%,
+      75% 100%,
+      76.5% 0%,
+      78% 100%,
+      79.5% 0%,
+      81% 100%,
+      82.5% 0%,
+      84% 100%,
+      85.5% 0%,
+      87% 100%,
+      88.5% 0%,
+      90% 100%,
+      91.5% 0%,
+      93% 100%,
+      94.5% 0%,
+      96% 100%,
+      97.5% 0%,
+      100% 100%
     );
     opacity: 0.15;
   }
@@ -1864,7 +1952,7 @@
   }
 
   .dark .terminal-header {
-    background: #2A2A2A;
+    background: #2a2a2a;
   }
 
   .terminal-dot {
@@ -1969,11 +2057,16 @@
 
   /* Transition */
   .transition-theme {
-    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    transition:
+      color 0.15s ease,
+      background-color 0.15s ease,
+      border-color 0.15s ease;
   }
 
   .transition-press {
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease;
   }
 
   /* Press-in helper: hover is visual only; movement waits for an actual press. */
@@ -2011,30 +2104,21 @@
     image-rendering: auto;
     pointer-events: none;
     user-select: none;
-    filter:
-      drop-shadow(0 1px 0 rgba(42, 31, 31, 0.32))
+    filter: drop-shadow(0 1px 0 rgba(42, 31, 31, 0.32)) drop-shadow(0 0 1px rgba(42, 31, 31, 0.28));
+  }
+
+  .ghost-peony-icon[data-tone='accent'] img,
+  .ghost-peony-icon[data-tone='node'] img {
+    filter: sepia(1) saturate(1.65) hue-rotate(calc((var(--ghost-peony-icon-hue) - 46) * 1deg))
+      brightness(0.96) contrast(1.08) drop-shadow(0 1px 0 rgba(42, 31, 31, 0.32))
       drop-shadow(0 0 1px rgba(42, 31, 31, 0.28));
   }
 
-  .ghost-peony-icon[data-tone="accent"] img,
-  .ghost-peony-icon[data-tone="node"] img {
-    filter:
-      sepia(1)
-      saturate(1.65)
-      hue-rotate(calc((var(--ghost-peony-icon-hue) - 46) * 1deg))
-      brightness(0.96)
-      contrast(1.08)
-      drop-shadow(0 1px 0 rgba(42, 31, 31, 0.32))
-      drop-shadow(0 0 1px rgba(42, 31, 31, 0.28));
+  .ghost-peony-icon[data-tone='color'] img {
+    filter: drop-shadow(0 1px 0 rgba(42, 31, 31, 0.32)) drop-shadow(0 0 1px rgba(42, 31, 31, 0.28));
   }
 
-  .ghost-peony-icon[data-tone="color"] img {
-    filter:
-      drop-shadow(0 1px 0 rgba(42, 31, 31, 0.32))
-      drop-shadow(0 0 1px rgba(42, 31, 31, 0.28));
-  }
-
-  .ghost-peony-icon[data-muted="true"] {
+  .ghost-peony-icon[data-muted='true'] {
     opacity: 0.82;
   }
 
@@ -2125,30 +2209,58 @@
   }
 
   @keyframes canvas-state-strip-flow {
-    from { background-position: 0 0; }
-    to { background-position: 200% 0; }
+    from {
+      background-position: 0 0;
+    }
+    to {
+      background-position: 200% 0;
+    }
   }
 
   @keyframes canvas-edge-pulse {
-    from { stroke-dashoffset: 28; }
-    to { stroke-dashoffset: 0; }
+    from {
+      stroke-dashoffset: 28;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
   }
 
   @keyframes canvas-progress-indeterminate {
-    from { transform: translate3d(-110%, 0, 0); }
-    to { transform: translate3d(310%, 0, 0); }
+    from {
+      transform: translate3d(-110%, 0, 0);
+    }
+    to {
+      transform: translate3d(310%, 0, 0);
+    }
   }
 
   @keyframes canvas-action-flash-success {
-    0%, 100% { border-color: var(--border-color); }
-    30% { border-color: var(--status-success); }
+    0%,
+    100% {
+      border-color: var(--border-color);
+    }
+    30% {
+      border-color: var(--status-success);
+    }
   }
 
   @keyframes canvas-action-flash-error {
-    0%, 100% { border-color: var(--border-color); transform: translateX(0); }
-    20% { border-color: var(--status-error); transform: translateX(-1px); }
-    40% { transform: translateX(1px); }
-    60% { transform: translateX(-1px); }
+    0%,
+    100% {
+      border-color: var(--border-color);
+      transform: translateX(0);
+    }
+    20% {
+      border-color: var(--status-error);
+      transform: translateX(-1px);
+    }
+    40% {
+      transform: translateX(1px);
+    }
+    60% {
+      transform: translateX(-1px);
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -2205,10 +2317,18 @@ html.electron-window {
   line-height: 1.3;
 }
 
-.prose-brutal h1 { font-size: 1.25rem; }
-.prose-brutal h2 { font-size: 1.1rem; }
-.prose-brutal h3 { font-size: 1rem; }
-.prose-brutal h4 { font-size: 0.9rem; }
+.prose-brutal h1 {
+  font-size: 1.25rem;
+}
+.prose-brutal h2 {
+  font-size: 1.1rem;
+}
+.prose-brutal h3 {
+  font-size: 1rem;
+}
+.prose-brutal h4 {
+  font-size: 0.9rem;
+}
 
 .prose-brutal h2 {
   padding-bottom: 0.3em;
@@ -2289,11 +2409,11 @@ html.electron-window {
   border: none;
   padding: 0;
   font-size: 0.8em;
-  color: #1B2040;
+  color: #1b2040;
 }
 
 .dark .prose-brutal pre code {
-  color: #F0EDE8;
+  color: #f0ede8;
 }
 
 /* Lists — accent-styled markers */
@@ -2359,7 +2479,7 @@ html.electron-window {
 }
 
 /* Task lists (GFM) */
-.prose-brutal li input[type="checkbox"] {
+.prose-brutal li input[type='checkbox'] {
   margin-right: 0.4em;
   accent-color: var(--accent);
 }
@@ -2430,7 +2550,7 @@ html.electron-window {
 .prose-brutal-inverted h2,
 .prose-brutal-inverted h3,
 .prose-brutal-inverted h4 {
-  color: #FFFFFF;
+  color: #ffffff;
 }
 
 .prose-brutal-inverted h2 {
@@ -2438,14 +2558,14 @@ html.electron-window {
 }
 
 .prose-brutal-inverted a {
-  color: #FFFFFF;
+  color: #ffffff;
   text-decoration: underline;
 }
 
 .prose-brutal-inverted code {
   background: rgba(255, 255, 255, 0.15);
   border-color: rgba(255, 255, 255, 0.2);
-  color: #FFFFFF;
+  color: #ffffff;
 }
 
 .prose-brutal-inverted pre {
@@ -2458,11 +2578,11 @@ html.electron-window {
 }
 
 .prose-brutal-inverted ul > li::before {
-  background: #FFFFFF;
+  background: #ffffff;
 }
 
 .prose-brutal-inverted ol > li::before {
-  color: #FFFFFF;
+  color: #ffffff;
 }
 
 .prose-brutal-inverted li > ul > li::before {
@@ -2480,7 +2600,7 @@ html.electron-window {
 
 .prose-brutal-inverted thead th {
   background: rgba(255, 255, 255, 0.15);
-  color: #FFFFFF;
+  color: #ffffff;
   border-bottom-color: rgba(255, 255, 255, 0.2);
 }
 
@@ -2527,8 +2647,12 @@ html.electron-window {
 
 /* Flywheel rotation */
 @keyframes flywheel-rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .flywheel-animate {
@@ -2537,8 +2661,13 @@ html.electron-window {
 
 /* Float animation for hero elements */
 @keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
 }
 
 .animate-float {

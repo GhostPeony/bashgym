@@ -25,7 +25,7 @@ import {
   type SynthesisJob,
   type SyntheticJobStatus,
   type SyntheticPreset,
-  type TraceAnalytics,
+  type TraceAnalytics
 } from '../services/api'
 import { createKeyedSessionResource, createSessionResource } from './sessionResource'
 
@@ -55,8 +55,8 @@ export const syntheticJobsResource = createSessionResource<SyntheticJobStatus[]>
 )
 
 /** Synthetic generation target-size presets. */
-export const syntheticPresetsResource = createSessionResource<Record<string, SyntheticPreset>>(
-  () => syntheticApi.getPresets()
+export const syntheticPresetsResource = createSessionResource<Record<string, SyntheticPreset>>(() =>
+  syntheticApi.getPresets()
 )
 
 /** Data Designer pipeline catalog + install availability. */
@@ -89,7 +89,7 @@ export const sourceRecommendationsResource = createKeyedSessionResource<SourceRe
     const result = await sourcesApi.recommend({
       domain: domain || undefined,
       goal,
-      include_eval_only: includeEvalOnly,
+      include_eval_only: includeEvalOnly
     })
     return result.ok && result.data
       ? { ok: true, data: result.data.recommendations }
@@ -124,19 +124,17 @@ export const guardrailStatsResource = createSessionResource<GuardrailStats>(() =
 )
 
 /** Guardrail activity log keyed by JSON.stringify([action, checkType]). */
-export const guardrailEventsResource = createKeyedSessionResource<GuardrailEvent[]>(
-  async (key) => {
-    const [action, checkType] = JSON.parse(key) as [string | null, string | null]
-    const result = await observabilityApi.listGuardrailEvents({
-      action: action ?? undefined,
-      check_type: checkType ?? undefined,
-      limit: 100,
-    })
-    return result.ok && result.data
-      ? { ok: true, data: result.data.events }
-      : { ok: false, error: result.error || 'Failed to fetch guardrail events' }
-  }
-)
+export const guardrailEventsResource = createKeyedSessionResource<GuardrailEvent[]>(async (key) => {
+  const [action, checkType] = JSON.parse(key) as [string | null, string | null]
+  const result = await observabilityApi.listGuardrailEvents({
+    action: action ?? undefined,
+    check_type: checkType ?? undefined,
+    limit: 100
+  })
+  return result.ok && result.data
+    ? { ok: true, data: result.data.events }
+    : { ok: false, error: result.error || 'Failed to fetch guardrail events' }
+})
 
 /** Aggregated trace analytics (Traces page analytics view). */
 export const traceAnalyticsResource = createSessionResource<TraceAnalytics>(() =>

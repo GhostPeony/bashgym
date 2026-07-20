@@ -9,11 +9,21 @@ class MemoryStorage {
   private values = new Map<string, string>()
   failKey: string | null = null
 
-  get length() { return this.values.size }
-  clear() { this.values.clear() }
-  getItem(key: string) { return this.values.get(key) ?? null }
-  key(index: number) { return Array.from(this.values.keys())[index] ?? null }
-  removeItem(key: string) { this.values.delete(key) }
+  get length() {
+    return this.values.size
+  }
+  clear() {
+    this.values.clear()
+  }
+  getItem(key: string) {
+    return this.values.get(key) ?? null
+  }
+  key(index: number) {
+    return Array.from(this.values.keys())[index] ?? null
+  }
+  removeItem(key: string) {
+    this.values.delete(key)
+  }
   setItem(key: string, value: string) {
     if (key === this.failKey) {
       this.failKey = null
@@ -47,20 +57,25 @@ function terminalSession(id: string): TerminalSession {
 
 test('indexes active and background sessions under their owning workspace', () => {
   storage.clear()
-  storage.setItem(wsKey('background', 'panels'), JSON.stringify([{
-    id: 'panel-background',
-    type: 'terminal',
-    title: 'Codex',
-    terminalId: 'terminal-background',
-    cwd: 'C:\\research',
-    agentKind: 'codex',
-    sessionState: {
-      status: 'running',
-      attention: 'none',
-      lastActivity: 99,
-      taskSummary: 'Indexing papers'
-    }
-  }]))
+  storage.setItem(
+    wsKey('background', 'panels'),
+    JSON.stringify([
+      {
+        id: 'panel-background',
+        type: 'terminal',
+        title: 'Codex',
+        terminalId: 'terminal-background',
+        cwd: 'C:\\research',
+        agentKind: 'codex',
+        sessionState: {
+          status: 'running',
+          attention: 'none',
+          lastActivity: 99,
+          taskSummary: 'Indexing papers'
+        }
+      }
+    ])
+  )
 
   const activePanel: Panel = {
     id: 'panel-main',

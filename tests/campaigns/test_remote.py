@@ -328,11 +328,7 @@ async def test_collect_requires_every_non_symlink_output(tmp_path):
 @pytest.mark.asyncio
 async def test_collect_terminal_evidence_requires_closed_supervisor_files(tmp_path):
     session = MockSession(
-        [
-            result(
-                "effective_config.json\ntraining_manifest.json\ntraining_metrics.jsonl\n"
-            )
-        ]
+        [result("effective_config.json\ntraining_manifest.json\ntraining_metrics.jsonl\n")]
     )
     adapter = RemoteTrainingAdapter(
         config(), compute_profile_id="ssh-gpu-lab", session_factory=lambda: session

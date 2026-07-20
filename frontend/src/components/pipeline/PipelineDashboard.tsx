@@ -1,8 +1,16 @@
 import { useState, useEffect } from 'react'
 import {
-  Eye, Filter, Sparkles, GraduationCap,
-  Play, ArrowRight, RefreshCw,
-  CheckCircle2, XCircle, Clock, Layers
+  Eye,
+  Filter,
+  Sparkles,
+  GraduationCap,
+  Play,
+  ArrowRight,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Layers
 } from 'lucide-react'
 import { pipelineApi, PipelineConfig } from '../../services/api'
 import { pipelineOverviewResource } from '../../stores/opsResources'
@@ -25,12 +33,28 @@ interface StageCardProps {
   isTriggering?: boolean
 }
 
-function StageCard({ title, icon, enabled, onToggle, count, threshold, onThresholdChange, description, color, showThreshold, triggerable, onTrigger, isTriggering }: StageCardProps) {
+function StageCard({
+  title,
+  icon,
+  enabled,
+  onToggle,
+  count,
+  threshold,
+  onThresholdChange,
+  description,
+  color,
+  showThreshold,
+  triggerable,
+  onTrigger,
+  isTriggering
+}: StageCardProps) {
   return (
-    <div className={clsx(
-      'flex-1 border-brutal rounded-brutal p-4 transition-all',
-      enabled ? 'bg-background-card shadow-brutal' : 'bg-background-primary opacity-60'
-    )}>
+    <div
+      className={clsx(
+        'flex-1 border-brutal rounded-brutal p-4 transition-all',
+        enabled ? 'bg-background-card shadow-brutal' : 'bg-background-primary opacity-60'
+      )}
+    >
       {/* Header with toggle */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -44,10 +68,12 @@ function StageCard({ title, icon, enabled, onToggle, count, threshold, onThresho
             enabled ? 'bg-accent' : 'bg-background-primary'
           )}
         >
-          <span className={clsx(
-            'absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white border border-border transition-all',
-            enabled ? 'left-5' : 'left-0.5'
-          )} />
+          <span
+            className={clsx(
+              'absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white border border-border transition-all',
+              enabled ? 'left-5' : 'left-0.5'
+            )}
+          />
         </button>
       </div>
 
@@ -148,23 +174,27 @@ export function PipelineDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-brand font-semibold text-text-primary">Auto-Import Pipeline</h1>
-            <p className="text-sm text-text-secondary mt-1">
-              Watch → Classify → Generate → Train
-            </p>
+            <h1 className="text-2xl font-brand font-semibold text-text-primary">
+              Auto-Import Pipeline
+            </h1>
+            <p className="text-sm text-text-secondary mt-1">Watch → Classify → Generate → Train</p>
           </div>
           <div className="flex items-center gap-3">
             {/* Watcher status indicator */}
-            <div className={clsx(
-              'flex items-center gap-2 px-3 py-1.5 border-brutal rounded-brutal font-mono text-xs uppercase tracking-wider',
-              status.watcher_running
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                : 'bg-background-primary text-text-muted'
-            )}>
-              <span className={clsx(
-                'w-2 h-2 rounded-full',
-                status.watcher_running ? 'bg-emerald-500 animate-pulse' : 'bg-text-muted'
-              )} />
+            <div
+              className={clsx(
+                'flex items-center gap-2 px-3 py-1.5 border-brutal rounded-brutal font-mono text-xs uppercase tracking-wider',
+                status.watcher_running
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                  : 'bg-background-primary text-text-muted'
+              )}
+            >
+              <span
+                className={clsx(
+                  'w-2 h-2 rounded-full',
+                  status.watcher_running ? 'bg-emerald-500 animate-pulse' : 'bg-text-muted'
+                )}
+              />
               {status.watcher_running ? 'Watching' : 'Stopped'}
             </div>
             <button
@@ -359,23 +389,35 @@ export function PipelineDashboard() {
           <div className="border-brutal rounded-brutal p-4 bg-background-card shadow-brutal-sm">
             <div className="flex items-center gap-2 mb-1">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">Gold Traces</span>
+              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
+                Gold Traces
+              </span>
             </div>
-            <span className="font-mono text-3xl font-bold text-text-primary">{status.gold_count}</span>
+            <span className="font-mono text-3xl font-bold text-text-primary">
+              {status.gold_count}
+            </span>
           </div>
           <div className="border-brutal rounded-brutal p-4 bg-background-card shadow-brutal-sm">
             <div className="flex items-center gap-2 mb-1">
               <Clock className="w-4 h-4 text-amber-500" />
-              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">Pending Review</span>
+              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
+                Pending Review
+              </span>
             </div>
-            <span className="font-mono text-3xl font-bold text-text-primary">{status.pending_count}</span>
+            <span className="font-mono text-3xl font-bold text-text-primary">
+              {status.pending_count}
+            </span>
           </div>
           <div className="border-brutal rounded-brutal p-4 bg-background-card shadow-brutal-sm">
             <div className="flex items-center gap-2 mb-1">
               <XCircle className="w-4 h-4 text-red-500" />
-              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">Failed</span>
+              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
+                Failed
+              </span>
             </div>
-            <span className="font-mono text-3xl font-bold text-text-primary">{status.failed_count}</span>
+            <span className="font-mono text-3xl font-bold text-text-primary">
+              {status.failed_count}
+            </span>
           </div>
         </div>
       </div>

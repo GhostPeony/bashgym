@@ -29,7 +29,7 @@ function defaultStorage(): ArchiveStorageLike | null {
 
 export function readArchivedCampaignIds(
   workspaceId: string,
-  storage: ArchiveStorageLike | null = defaultStorage(),
+  storage: ArchiveStorageLike | null = defaultStorage()
 ): string[] {
   if (!storage) return []
   try {
@@ -46,13 +46,13 @@ export function readArchivedCampaignIds(
 export function writeArchivedCampaignIds(
   workspaceId: string,
   campaignIds: readonly string[],
-  storage: ArchiveStorageLike | null = defaultStorage(),
+  storage: ArchiveStorageLike | null = defaultStorage()
 ): void {
   if (!storage) return
   try {
     storage.setItem(
       wsKey(workspaceId, 'campaign_archive'),
-      JSON.stringify([...new Set(campaignIds)].sort()),
+      JSON.stringify([...new Set(campaignIds)].sort())
     )
   } catch {
     // Quota or privacy-mode failures degrade to session-only archiving.
@@ -62,17 +62,17 @@ export function writeArchivedCampaignIds(
 /** Drop archived ids whose campaign is actively running so live work always surfaces. */
 export function pruneArchivedForCampaigns(
   archivedIds: readonly string[],
-  campaigns: readonly ArchiveCampaign[],
+  campaigns: readonly ArchiveCampaign[]
 ): string[] {
   const active = new Set(
-    campaigns.filter((item) => item.status === 'active').map((item) => item.campaign_id),
+    campaigns.filter((item) => item.status === 'active').map((item) => item.campaign_id)
   )
   return archivedIds.filter((campaignId) => !active.has(campaignId))
 }
 
 export function partitionCampaignsByArchive<T extends Pick<CampaignRecord, 'campaign_id'>>(
   campaigns: readonly T[],
-  archivedIds: ReadonlySet<string>,
+  archivedIds: ReadonlySet<string>
 ): { visible: T[]; archived: T[] } {
   const visible: T[] = []
   const archived: T[] = []
@@ -102,7 +102,7 @@ export const useCampaignArchiveStore = create<CampaignArchiveState>((set, get) =
     if (current && sameIds(current, sorted)) return
     writeArchivedCampaignIds(workspaceId, sorted)
     set((state) => ({
-      archivedByWorkspace: { ...state.archivedByWorkspace, [workspaceId]: sorted },
+      archivedByWorkspace: { ...state.archivedByWorkspace, [workspaceId]: sorted }
     }))
   }
 
@@ -113,7 +113,7 @@ export const useCampaignArchiveStore = create<CampaignArchiveState>((set, get) =
       if (get().archivedByWorkspace[workspaceId]) return
       const stored = readArchivedCampaignIds(workspaceId)
       set((state) => ({
-        archivedByWorkspace: { ...state.archivedByWorkspace, [workspaceId]: stored },
+        archivedByWorkspace: { ...state.archivedByWorkspace, [workspaceId]: stored }
       }))
     },
 
@@ -126,7 +126,7 @@ export const useCampaignArchiveStore = create<CampaignArchiveState>((set, get) =
       get().ensureLoaded(workspaceId)
       commit(
         workspaceId,
-        (get().archivedByWorkspace[workspaceId] || []).filter((item) => item !== campaignId),
+        (get().archivedByWorkspace[workspaceId] || []).filter((item) => item !== campaignId)
       )
     },
 
@@ -134,7 +134,7 @@ export const useCampaignArchiveStore = create<CampaignArchiveState>((set, get) =
       get().ensureLoaded(workspaceId)
       const current = get().archivedByWorkspace[workspaceId] || []
       commit(workspaceId, pruneArchivedForCampaigns(current, campaigns))
-    },
+    }
   }
 })
 
@@ -142,7 +142,7 @@ const EMPTY_ARCHIVED: readonly string[] = []
 
 export function selectArchivedIds(
   state: Pick<CampaignArchiveState, 'archivedByWorkspace'>,
-  workspaceId: string,
+  workspaceId: string
 ): readonly string[] {
   return state.archivedByWorkspace[workspaceId] || EMPTY_ARCHIVED
 }

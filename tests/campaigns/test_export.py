@@ -105,9 +105,7 @@ def test_full_run_plus_comparison_enables_quality_findings_and_is_deterministic(
     assert (tmp_path / "first" / "campaign_report.pdf").read_bytes() == (
         tmp_path / "second" / "campaign_report.pdf"
     ).read_bytes()
-    assert (tmp_path / "first" / "training_loss.png").read_bytes().startswith(
-        b"\x89PNG\r\n\x1a\n"
-    )
+    assert (tmp_path / "first" / "training_loss.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     persisted = json.loads((tmp_path / "first" / "export_manifest.json").read_text())
     assert persisted == first
 

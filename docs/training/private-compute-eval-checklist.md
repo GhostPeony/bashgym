@@ -135,15 +135,15 @@ Keep the smoke small until these are true:
 
 Save a short text or JSON note with each private/cloud compute attempt:
 
-| Field | Example |
-|---|---|
-| `run_id` | `dppo-smoke-2026-06-24-001` |
-| `local_commit` | Git SHA that produced the replay and smoke bundle. |
-| `target_commit` | Git SHA checked out on the target, if BashGym code is used there. |
-| `backend_env` | Conda/uv/venv name or module path used for verl/SkyRL/open-instruct. |
-| `command` | Exact one-step smoke command or command template. |
-| `verdict` | `passed`, `backend_missing`, `contract_failed`, or `runtime_failed`. |
-| `next_action` | The smallest fix before another remote attempt. |
+| Field           | Example                                                              |
+| --------------- | -------------------------------------------------------------------- |
+| `run_id`        | `dppo-smoke-2026-06-24-001`                                          |
+| `local_commit`  | Git SHA that produced the replay and smoke bundle.                   |
+| `target_commit` | Git SHA checked out on the target, if BashGym code is used there.    |
+| `backend_env`   | Conda/uv/venv name or module path used for verl/SkyRL/open-instruct. |
+| `command`       | Exact one-step smoke command or command template.                    |
+| `verdict`       | `passed`, `backend_missing`, `contract_failed`, or `runtime_failed`. |
+| `next_action`   | The smallest fix before another remote attempt.                      |
 
 This note keeps the run useful even when it fails. The goal of the first compute
 attempt is to locate the exact runtime boundary, not to produce a strong model.

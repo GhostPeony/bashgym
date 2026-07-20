@@ -1,6 +1,6 @@
 ---
 name: models
-description: "Browse, compare, evaluate, and manage trained models. View leaderboard, trends, lineage, and artifacts. Deploy models to Ollama. Use when asked about models, model comparison, which model is best, model evaluation, deploying a model, or downloading a model."
+description: 'Browse, compare, evaluate, and manage trained models. View leaderboard, trends, lineage, and artifacts. Deploy models to Ollama. Use when asked about models, model comparison, which model is best, model evaluation, deploying a model, or downloading a model.'
 ---
 
 # Models
@@ -16,6 +16,7 @@ bashgym api GET /api/models
 ## Leaderboard
 
 Ranked models by evaluation score:
+
 ```text
 bashgym api GET /api/models/leaderboard
 ```
@@ -23,6 +24,7 @@ bashgym api GET /api/models/leaderboard
 ## Trends
 
 Model performance over time:
+
 ```text
 bashgym api GET /api/models/trends
 ```
@@ -30,6 +32,7 @@ bashgym api GET /api/models/trends
 ## Compare Models
 
 Save `{"model_ids":["model-a","model-b"]}` as `compare-request.json`, then run:
+
 ```text
 bashgym api POST /api/models/compare --data-file compare-request.json
 ```
@@ -43,6 +46,7 @@ bashgym api GET /api/models/{model_id}
 ## Evaluate a Model
 
 Run evaluation benchmarks:
+
 ```text
 bashgym api POST /api/models/{model_id}/evaluate
 ```
@@ -51,6 +55,7 @@ bashgym api POST /api/models/{model_id}/evaluate
 
 Make a model available locally via Ollama:
 Save `{}` as `deploy-request.json`, then run:
+
 ```text
 bashgym api POST /api/models/{model_id}/deploy-ollama --data-file deploy-request.json
 ```
@@ -58,6 +63,7 @@ bashgym api POST /api/models/{model_id}/deploy-ollama --data-file deploy-request
 ## Delete a Model
 
 **Destructive — confirm with user first.**
+
 ```text
 bashgym api DELETE /api/models/{model_id}
 ```
@@ -65,6 +71,7 @@ bashgym api DELETE /api/models/{model_id}
 ## Model Artifacts
 
 View training artifacts (configs, checkpoints):
+
 ```text
 bashgym api GET /api/models/{model_id}/artifacts
 ```

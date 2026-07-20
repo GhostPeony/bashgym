@@ -19,16 +19,16 @@ and diagnostics until they are shown to correlate with heldout outcomes.
 
 ## What is wired today
 
-| Layer | Status |
-|---|---|
-| Training API fields | `TrainingRequest` accepts ECHO/RWML knobs. |
-| Trainer config | `TrainerConfig.world_model_settings()` returns a dedicated settings contract. |
-| Training metadata | Enabled ECHO/RWML settings are recorded in run metadata. |
-| DPPO replay export | Replay records can include optional `world_model` payloads. |
-| Replay summary | Replay metadata reports ECHO/RWML coverage. |
-| DPPO smoke launch | ECHO/RWML settings are exported as `BASHGYM_DPPO_*` env vars. |
+| Layer                   | Status                                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| Training API fields     | `TrainingRequest` accepts ECHO/RWML knobs.                                                    |
+| Trainer config          | `TrainerConfig.world_model_settings()` returns a dedicated settings contract.                 |
+| Training metadata       | Enabled ECHO/RWML settings are recorded in run metadata.                                      |
+| DPPO replay export      | Replay records can include optional `world_model` payloads.                                   |
+| Replay summary          | Replay metadata reports ECHO/RWML coverage.                                                   |
+| DPPO smoke launch       | ECHO/RWML settings are exported as `BASHGYM_DPPO_*` env vars.                                 |
 | Backend trainer adapter | `WorldModelTrainerAdapter` builds ECHO loss hooks and TRL/verl RWML reward hooks from replay. |
-| Real backend loop | Pending: an installed external DPPO/GRPO backend must call the adapter in its trainer. |
+| Real backend loop       | Pending: an installed external DPPO/GRPO backend must call the adapter in its trainer.        |
 
 This means the contract is ready, but a successful GPU/backend training run is
 still separate work.
@@ -149,8 +149,8 @@ DPPO replay records omit world-model data by default. When
     ],
     "echo": {
       "segments": [
-        {"role": "action", "text": "ls"},
-        {"role": "observation", "text": "README.md\n"}
+        { "role": "action", "text": "ls" },
+        { "role": "observation", "text": "README.md\n" }
       ],
       "n_action_chars": 2,
       "n_observation_chars": 10,
@@ -169,18 +169,18 @@ The base schema stays `bashgym.dppo_replay.v1`. Consumers that do not understand
 
 `summarize_world_model_payloads()` reports coverage, not prediction quality:
 
-| Metric | Meaning |
-|---|---|
-| `records` | Replay records that include a `world_model` payload. |
-| `records_missing_world_model` | Replay records without the payload. |
-| `rwml_transitions` | Number of action -> next-state triplets. |
-| `rwml_mean_transitions_per_record` | Average RWML triplets per enriched replay record. |
-| `rwml_mean_prior_pairs` | Average prior history pairs per RWML transition. |
-| `rwml_max_prior_pairs` | Largest history depth seen in the replay. |
-| `echo_segments` | Count of role-tagged action/observation text spans. |
-| `echo_action_chars` | Action-text character coverage. |
-| `echo_observation_chars` | Observation-text character coverage. |
-| `echo_observation_char_fraction` | Observation chars divided by total ECHO chars. |
+| Metric                             | Meaning                                              |
+| ---------------------------------- | ---------------------------------------------------- |
+| `records`                          | Replay records that include a `world_model` payload. |
+| `records_missing_world_model`      | Replay records without the payload.                  |
+| `rwml_transitions`                 | Number of action -> next-state triplets.             |
+| `rwml_mean_transitions_per_record` | Average RWML triplets per enriched replay record.    |
+| `rwml_mean_prior_pairs`            | Average prior history pairs per RWML transition.     |
+| `rwml_max_prior_pairs`             | Largest history depth seen in the replay.            |
+| `echo_segments`                    | Count of role-tagged action/observation text spans.  |
+| `echo_action_chars`                | Action-text character coverage.                      |
+| `echo_observation_chars`           | Observation-text character coverage.                 |
+| `echo_observation_char_fraction`   | Observation chars divided by total ECHO chars.       |
 
 These metrics answer "did the replay carry enough world-model material?" They
 do not answer "did the world model become accurate?"

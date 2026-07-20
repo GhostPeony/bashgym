@@ -50,17 +50,21 @@ const GET_ROUTES = [
   new RegExp(`^/api/campaigns/${IDENTIFIER}/agent-attachment$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/recovery$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/artifacts/${IDENTIFIER}/preview$`),
-  new RegExp(`^/api/campaigns/${IDENTIFIER}/(?:events|artifacts|attempts|comparisons|proposals|studies|evidence|ledger)$`),
+  new RegExp(
+    `^/api/campaigns/${IDENTIFIER}/(?:events|artifacts|attempts|comparisons|proposals|studies|evidence|ledger)$`
+  ),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/manifest/[1-9][0-9]*$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/studies/${IDENTIFIER}$`),
-  new RegExp(`^/api/campaigns/${IDENTIFIER}/attempts/${IDENTIFIER}/metrics$`),
+  new RegExp(`^/api/campaigns/${IDENTIFIER}/attempts/${IDENTIFIER}/metrics$`)
 ]
 const POST_ROUTES = [
   /^\/api\/campaigns$/,
   /^\/api\/campaigns\/from-template$/,
   /^\/api\/campaigns\/live-ticket$/,
   /^\/api\/campaigns\/setup\/(?:session|doctor|validate|create)$/,
-  new RegExp(`^/api/campaigns/${IDENTIFIER}/(?:start|pause|resume|cancel|conclude|advance|protected-lease|protected-result|promotion|export)$`),
+  new RegExp(
+    `^/api/campaigns/${IDENTIFIER}/(?:start|pause|resume|cancel|conclude|advance|protected-lease|protected-result|promotion|export)$`
+  ),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/human-work/${IDENTIFIER}/(?:claim|submit)$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/human-promotion$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/recovery/(?:resume|repair|takeover)$`),
@@ -68,11 +72,13 @@ const POST_ROUTES = [
   new RegExp(`^/api/campaigns/${IDENTIFIER}/proposals$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/autoresearch/(?:baseline|candidates|results)$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/proposals/${IDENTIFIER}/withdraw$`),
-  new RegExp(`^/api/campaigns/${IDENTIFIER}/proposals/${IDENTIFIER}/code-lineage/(?:prepare|capture)$`),
+  new RegExp(
+    `^/api/campaigns/${IDENTIFIER}/proposals/${IDENTIFIER}/code-lineage/(?:prepare|capture)$`
+  ),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/actions/${IDENTIFIER}/(?:retry|force-stop)$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/studies/${IDENTIFIER}/abandon$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/budget/amend$`),
-  new RegExp(`^/api/campaigns/${IDENTIFIER}/sources/${IDENTIFIER}/approve$`),
+  new RegExp(`^/api/campaigns/${IDENTIFIER}/sources/${IDENTIFIER}/approve$`)
 ]
 const MAX_ROUTE_LENGTH = 512
 const MAX_BODY_BYTES = 64 * 1024
@@ -131,10 +137,7 @@ function assertJsonDepth(value: unknown, depth = 0): void {
     })
     return
   }
-  if (
-    value !== null
-    && !['string', 'number', 'boolean'].includes(typeof value)
-  ) {
+  if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) {
     throw new Error('Campaign request body must contain JSON values only')
   }
   if (typeof value === 'number' && !Number.isFinite(value)) {
@@ -148,38 +151,74 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 }
 
 function validSetupDraft(body: CampaignBody): boolean {
-  if (!exactKeys(body, ['workspace_id', 'template_id', 'installation_id', 'bindings'])
-    || typeof body.workspace_id !== 'string' || !PUBLIC_IDENTIFIER.test(body.workspace_id)
-    || typeof body.template_id !== 'string' || !PUBLIC_IDENTIFIER.test(body.template_id)
-    || typeof body.installation_id !== 'string' || !SETUP_INSTALLATION_ID.test(body.installation_id)
-    || !isPlainRecord(body.bindings) || !exactKeys(body.bindings, SETUP_BINDING_KEYS)) return false
+  if (
+    !exactKeys(body, ['workspace_id', 'template_id', 'installation_id', 'bindings']) ||
+    typeof body.workspace_id !== 'string' ||
+    !PUBLIC_IDENTIFIER.test(body.workspace_id) ||
+    typeof body.template_id !== 'string' ||
+    !PUBLIC_IDENTIFIER.test(body.template_id) ||
+    typeof body.installation_id !== 'string' ||
+    !SETUP_INSTALLATION_ID.test(body.installation_id) ||
+    !isPlainRecord(body.bindings) ||
+    !exactKeys(body.bindings, SETUP_BINDING_KEYS)
+  )
+    return false
   const bindings = body.bindings
-  return SETUP_BINDING_KEYS.every((key) => typeof bindings[key] === 'string' && PUBLIC_IDENTIFIER.test(bindings[key] as string))
+  return SETUP_BINDING_KEYS.every(
+    (key) => typeof bindings[key] === 'string' && PUBLIC_IDENTIFIER.test(bindings[key] as string)
+  )
 }
 
-function validateGuidedSetupRequest(method: CampaignMethod, route: string, body?: CampaignBody, query?: CampaignQuery): void {
+function validateGuidedSetupRequest(
+  method: CampaignMethod,
+  route: string,
+  body?: CampaignBody,
+  query?: CampaignQuery
+): void {
   if (!route.startsWith('/api/campaigns/setup/')) return
   let valid = false
   if (method === 'GET' && route === '/api/campaigns/setup/context') {
     const keys = Object.keys(query ?? {})
-    valid = keys.length >= 1 && keys.length <= 2
-      && typeof query?.workspace_id === 'string' && PUBLIC_IDENTIFIER.test(query.workspace_id)
-      && (query.session_id === undefined || (typeof query.session_id === 'string' && SETUP_SESSION_ID.test(query.session_id)))
+    valid =
+      keys.length >= 1 &&
+      keys.length <= 2 &&
+      typeof query?.workspace_id === 'string' &&
+      PUBLIC_IDENTIFIER.test(query.workspace_id) &&
+      (query.session_id === undefined ||
+        (typeof query.session_id === 'string' && SETUP_SESSION_ID.test(query.session_id)))
   } else if (method === 'POST' && route === '/api/campaigns/setup/session' && body) {
-    valid = exactKeys(body, ['workspace_id', 'session_id', 'expected_version', 'step', 'selection_id'])
-      && typeof body.workspace_id === 'string' && PUBLIC_IDENTIFIER.test(body.workspace_id)
-      && typeof body.session_id === 'string' && SETUP_SESSION_ID.test(body.session_id)
-      && Number.isSafeInteger(body.expected_version) && Number(body.expected_version) >= 0 && Number(body.expected_version) <= 6
-      && typeof body.step === 'string' && SETUP_STEPS.has(body.step)
-      && typeof body.selection_id === 'string' && PUBLIC_IDENTIFIER.test(body.selection_id)
-  } else if (method === 'POST' && (route === '/api/campaigns/setup/doctor' || route === '/api/campaigns/setup/validate') && body) {
+    valid =
+      exactKeys(body, ['workspace_id', 'session_id', 'expected_version', 'step', 'selection_id']) &&
+      typeof body.workspace_id === 'string' &&
+      PUBLIC_IDENTIFIER.test(body.workspace_id) &&
+      typeof body.session_id === 'string' &&
+      SETUP_SESSION_ID.test(body.session_id) &&
+      Number.isSafeInteger(body.expected_version) &&
+      Number(body.expected_version) >= 0 &&
+      Number(body.expected_version) <= 6 &&
+      typeof body.step === 'string' &&
+      SETUP_STEPS.has(body.step) &&
+      typeof body.selection_id === 'string' &&
+      PUBLIC_IDENTIFIER.test(body.selection_id)
+  } else if (
+    method === 'POST' &&
+    (route === '/api/campaigns/setup/doctor' || route === '/api/campaigns/setup/validate') &&
+    body
+  ) {
     valid = validSetupDraft(body)
   } else if (method === 'POST' && route === '/api/campaigns/setup/create' && body) {
-    valid = exactKeys(body, ['workspace_id', 'campaign_id', 'title', 'validation_receipt_id'])
-      && typeof body.workspace_id === 'string' && PUBLIC_IDENTIFIER.test(body.workspace_id)
-      && typeof body.campaign_id === 'string' && PUBLIC_IDENTIFIER.test(body.campaign_id)
-      && typeof body.title === 'string' && body.title.length >= 1 && body.title.length <= 240 && !/[\r\n]/.test(body.title)
-      && typeof body.validation_receipt_id === 'string' && SETUP_VALIDATION_RECEIPT_ID.test(body.validation_receipt_id)
+    valid =
+      exactKeys(body, ['workspace_id', 'campaign_id', 'title', 'validation_receipt_id']) &&
+      typeof body.workspace_id === 'string' &&
+      PUBLIC_IDENTIFIER.test(body.workspace_id) &&
+      typeof body.campaign_id === 'string' &&
+      PUBLIC_IDENTIFIER.test(body.campaign_id) &&
+      typeof body.title === 'string' &&
+      body.title.length >= 1 &&
+      body.title.length <= 240 &&
+      !/[\r\n]/.test(body.title) &&
+      typeof body.validation_receipt_id === 'string' &&
+      SETUP_VALIDATION_RECEIPT_ID.test(body.validation_receipt_id)
   }
   if (!valid) throw new Error('Invalid guided setup request contract')
 }
@@ -189,16 +228,16 @@ export function validateCampaignRequest(
   route: string,
   body?: CampaignBody,
   query?: CampaignQuery,
-  authority?: CampaignRequestAuthority,
+  authority?: CampaignRequestAuthority
 ): void {
   if (!['GET', 'POST'].includes(method)) throw new Error('Unsupported campaign method')
   if (
-    !route
-    || route.length > MAX_ROUTE_LENGTH
-    || route.includes('?')
-    || route.includes('#')
-    || route.includes('..')
-    || route.includes('\\')
+    !route ||
+    route.length > MAX_ROUTE_LENGTH ||
+    route.includes('?') ||
+    route.includes('#') ||
+    route.includes('..') ||
+    route.includes('\\')
   ) {
     throw new Error('Invalid campaign route')
   }
@@ -228,24 +267,27 @@ export function validateCampaignRequest(
       throw new Error('Campaign query field is not allowlisted')
     }
     if (
-      !['string', 'number', 'boolean'].includes(typeof value)
-      || (typeof value === 'number' && !Number.isFinite(value))
-      || String(value).length > MAX_QUERY_VALUE_LENGTH
-      || /[\r\n]/.test(String(value))
+      !['string', 'number', 'boolean'].includes(typeof value) ||
+      (typeof value === 'number' && !Number.isFinite(value)) ||
+      String(value).length > MAX_QUERY_VALUE_LENGTH ||
+      /[\r\n]/.test(String(value))
     ) {
       throw new Error('Invalid campaign query value')
     }
   })
   validateGuidedSetupRequest(method, route, body, query)
   if (authority !== undefined) {
-    if (!isPlainRecord(authority) || Object.keys(authority).some((key) => key !== 'idempotencyKey')) {
+    if (
+      !isPlainRecord(authority) ||
+      Object.keys(authority).some((key) => key !== 'idempotencyKey')
+    ) {
       throw new Error('Invalid campaign request authority')
     }
     if (method !== 'POST') throw new Error('Campaign idempotency authority requires POST')
     const idempotencyKey = authority.idempotencyKey
     if (
-      idempotencyKey !== undefined
-      && (typeof idempotencyKey !== 'string' || !/^idem_[A-Za-z0-9_-]{16,120}$/.test(idempotencyKey))
+      idempotencyKey !== undefined &&
+      (typeof idempotencyKey !== 'string' || !/^idem_[A-Za-z0-9_-]{16,120}$/.test(idempotencyKey))
     ) {
       throw new Error('Invalid campaign idempotency key')
     }
@@ -259,14 +301,14 @@ export function createDesktopBootstrapToken(): string {
 
 export function buildBackendChildEnvironment(
   base: NodeJS.ProcessEnv,
-  bootstrapToken: string,
+  bootstrapToken: string
 ): NodeJS.ProcessEnv {
   return {
     ...base,
     BASHGYM_DESKTOP_BOOTSTRAP_SECRET: bootstrapToken,
     BASHGYM_MODE: 'desktop',
     PYTHONUTF8: '1',
-    PYTHONIOENCODING: 'utf-8',
+    PYTHONIOENCODING: 'utf-8'
   }
 }
 
@@ -377,10 +419,11 @@ function safeError(status: number): string {
 
 function structuredErrorMetadata(payload: unknown): Pick<CampaignResponse, 'code' | 'details'> {
   if (!isPlainRecord(payload) || !isPlainRecord(payload.detail)) return {}
-  const code = typeof payload.detail.code === 'string'
-    && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(payload.detail.code)
-    ? payload.detail.code
-    : undefined
+  const code =
+    typeof payload.detail.code === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(payload.detail.code)
+      ? payload.detail.code
+      : undefined
   if (!code) return {}
   if (code !== 'campaign_event_cursor_expired' || !isPlainRecord(payload.detail.details)) {
     return { code }
@@ -399,7 +442,7 @@ export class CampaignBridgeClient {
     private readonly bootstrapToken: string,
     private readonly fetchImpl: FetchLike = fetch,
     private readonly idFactory: () => string = randomUUID,
-    private readonly requestTimeoutMs: number = CAMPAIGN_REQUEST_TIMEOUT_MS,
+    private readonly requestTimeoutMs: number = CAMPAIGN_REQUEST_TIMEOUT_MS
   ) {}
 
   private async exchange(force = false): Promise<string> {
@@ -409,15 +452,15 @@ export class CampaignBridgeClient {
       const response = await this.fetchImpl(`${this.apiOrigin}/api/campaign-auth/exchange`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.bootstrapToken}` },
-        signal: AbortSignal.timeout(this.requestTimeoutMs),
+        signal: AbortSignal.timeout(this.requestTimeoutMs)
       })
       const payload = await responsePayload(response)
       if (
-        !response.ok
-        || !isPlainRecord(payload)
-        || typeof payload.raw_token !== 'string'
-        || !payload.raw_token.startsWith('bgca.')
-        || payload.raw_token.length > 1000
+        !response.ok ||
+        !isPlainRecord(payload) ||
+        typeof payload.raw_token !== 'string' ||
+        !payload.raw_token.startsWith('bgca.') ||
+        payload.raw_token.length > 1000
       ) {
         throw new Error('Campaign desktop authentication is unavailable')
       }
@@ -438,14 +481,14 @@ export class CampaignBridgeClient {
     const execute = async (token: string) => {
       const headers: Record<string, string> = {
         Authorization: `Bearer ${token}`,
-        'X-Correlation-ID': `desktop-agent-${mutationId}`,
+        'X-Correlation-ID': `desktop-agent-${mutationId}`
       }
       if (body !== undefined) headers['Content-Type'] = 'application/json'
       return this.fetchImpl(new URL(route, this.apiOrigin), {
         method: 'POST',
         headers,
         signal: AbortSignal.timeout(5_000),
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {})
       })
     }
     let response = await execute(await this.exchange())
@@ -454,12 +497,16 @@ export class CampaignBridgeClient {
       response = await execute(await this.exchange(true))
     }
     const payload = await responsePayload(response)
-    if (!response.ok) throw new Error(`Campaign agent host request failed with HTTP ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Campaign agent host request failed with HTTP ${response.status}`)
     return payload
   }
 
   registerCampaignAgentHostSession(body: CampaignAgentHostRegistrationBody): Promise<unknown> {
-    return this.mainOnlyCampaignAgentPost('/api/campaign-agent/sessions', body as unknown as CampaignBody)
+    return this.mainOnlyCampaignAgentPost(
+      '/api/campaign-agent/sessions',
+      body as unknown as CampaignBody
+    )
   }
 
   issueCampaignAgentGrant(campaignId: string, body: CampaignBody): Promise<unknown> {
@@ -475,37 +522,42 @@ export class CampaignBridgeClient {
   revokeCampaignAgentAttachment(
     campaignId: string,
     attachmentId: string,
-    body: CampaignBody,
+    body: CampaignBody
   ): Promise<unknown> {
     if (!PUBLIC_IDENTIFIER.test(campaignId) || !PUBLIC_IDENTIFIER.test(attachmentId)) {
       throw new Error('Invalid campaign attachment identity')
     }
     return this.mainOnlyCampaignAgentPost(
       `/api/campaigns/${campaignId}/agent-attachment/${attachmentId}/revoke`,
-      body,
+      body
     )
   }
 
   claimCampaignAgentDelivery(registrationId: string): Promise<unknown> {
-    if (!PUBLIC_IDENTIFIER.test(registrationId)) throw new Error('Invalid campaign agent registration id')
+    if (!PUBLIC_IDENTIFIER.test(registrationId))
+      throw new Error('Invalid campaign agent registration id')
     return this.mainOnlyCampaignAgentPost(
-      `/api/campaign-agent/sessions/${registrationId}/deliveries/claim`,
+      `/api/campaign-agent/sessions/${registrationId}/deliveries/claim`
     )
   }
 
   revokeCampaignAgentHostSession(registrationId: string): Promise<unknown> {
-    if (!PUBLIC_IDENTIFIER.test(registrationId)) throw new Error('Invalid campaign agent registration id')
+    if (!PUBLIC_IDENTIFIER.test(registrationId))
+      throw new Error('Invalid campaign agent registration id')
     return this.mainOnlyCampaignAgentPost(`/api/campaign-agent/sessions/${registrationId}/revoke`)
   }
 
   async heartbeatCampaignAgent(
     credential: Buffer,
-    body: CampaignAgentHeartbeatBody,
+    body: CampaignAgentHeartbeatBody
   ): Promise<unknown> {
     try {
       const token = campaignAgentCredentialToken(credential)
       const encodedBody = JSON.stringify(body)
-      if (encodedBody.includes('bgag.') || Buffer.byteLength(encodedBody, 'utf8') > MAX_BODY_BYTES) {
+      if (
+        encodedBody.includes('bgag.') ||
+        Buffer.byteLength(encodedBody, 'utf8') > MAX_BODY_BYTES
+      ) {
         throw new Error(CAMPAIGN_AGENT_CREDENTIAL_FAILURE)
       }
       const response = await this.fetchImpl(
@@ -514,11 +566,11 @@ export class CampaignBridgeClient {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/json'
           },
           body: encodedBody,
-          signal: AbortSignal.timeout(5_000),
-        },
+          signal: AbortSignal.timeout(5_000)
+        }
       )
       return await campaignAgentCredentialPayload(response)
     } catch (error) {
@@ -534,8 +586,8 @@ export class CampaignBridgeClient {
         {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(5_000),
-        },
+          signal: AbortSignal.timeout(5_000)
+        }
       )
       return await campaignAgentCredentialPayload(response)
     } catch (error) {
@@ -545,13 +597,15 @@ export class CampaignBridgeClient {
 
   async listCampaignArtifactsAsAgent(
     credential: Buffer,
-    query: CampaignAgentArtifactQuery = {},
+    query: CampaignAgentArtifactQuery = {}
   ): Promise<unknown> {
     try {
       const token = campaignAgentCredentialToken(credential)
       if (
-        (query.afterCursor !== undefined && !CAMPAIGN_AGENT_ARTIFACT_CURSOR.test(query.afterCursor))
-        || (query.limit !== undefined && (!Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 50))
+        (query.afterCursor !== undefined &&
+          !CAMPAIGN_AGENT_ARTIFACT_CURSOR.test(query.afterCursor)) ||
+        (query.limit !== undefined &&
+          (!Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 50))
       ) {
         throw new Error(CAMPAIGN_AGENT_CREDENTIAL_FAILURE)
       }
@@ -561,7 +615,7 @@ export class CampaignBridgeClient {
       const response = await this.fetchImpl(url, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.timeout(5_000)
       })
       return await campaignAgentCredentialPayload(response)
     } catch (error) {
@@ -574,7 +628,7 @@ export class CampaignBridgeClient {
     route: string,
     body?: CampaignBody,
     query?: CampaignQuery,
-    authority?: CampaignRequestAuthority,
+    authority?: CampaignRequestAuthority
   ): Promise<CampaignResponse> {
     validateCampaignRequest(method, route, body, query, authority)
     try {
@@ -583,7 +637,8 @@ export class CampaignBridgeClient {
         url.searchParams.set(key, String(value))
       })
       const mutationId = method === 'POST' ? this.idFactory() : null
-      const idempotencyKey = authority?.idempotencyKey || (mutationId ? `desktop-${mutationId}` : null)
+      const idempotencyKey =
+        authority?.idempotencyKey || (mutationId ? `desktop-${mutationId}` : null)
       const execute = async (token: string) => {
         const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
         if (method === 'POST') {
@@ -595,7 +650,7 @@ export class CampaignBridgeClient {
           method,
           headers,
           signal: AbortSignal.timeout(this.requestTimeoutMs),
-          ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
+          ...(method === 'POST' ? { body: JSON.stringify(body) } : {})
         })
       }
 
@@ -611,14 +666,14 @@ export class CampaignBridgeClient {
             ok: false,
             status: response.status,
             error: safeError(response.status),
-            ...structuredErrorMetadata(data),
+            ...structuredErrorMetadata(data)
           }
     } catch {
       return {
         ok: false,
         status: 503,
         code: 'campaign_backend_unavailable',
-        error: 'The campaign service did not respond in time.',
+        error: 'The campaign service did not respond in time.'
       }
     }
   }

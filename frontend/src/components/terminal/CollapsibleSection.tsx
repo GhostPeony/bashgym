@@ -72,14 +72,12 @@ export const CollapsibleSection = memo(function CollapsibleSection({
           )}
         </span>
         {icon && <span className="flex-shrink-0">{icon}</span>}
-        <span className="flex-1 text-left font-semibold uppercase tracking-wider text-[10px]">{title}</span>
+        <span className="flex-1 text-left font-semibold uppercase tracking-wider text-[10px]">
+          {title}
+        </span>
         {badge && <span className="flex-shrink-0">{badge}</span>}
       </button>
-      {isExpanded && (
-        <div className={clsx('px-3 pb-2', contentClassName)}>
-          {children}
-        </div>
-      )}
+      {isExpanded && <div className={clsx('px-3 pb-2', contentClassName)}>{children}</div>}
     </div>
   )
 })

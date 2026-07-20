@@ -2,13 +2,13 @@
 
 ## Sources of truth
 
-| Concern | Authority |
-|---|---|
-| Current canvas, desktop campaigns, reports, allowed actions | Injected canvas context or reachable `GET /api/workspace/context` |
-| Campaign goal, manifest, budget, attempts, durable cursor, evidence | BashGym campaign repository via REST/CLI |
-| Local training-host processes and run artifacts | `bashgym operator context --workspace-id <workspace>` over the configured run observer plus BashGym manifests |
-| Personal/project history, decisions, preferences, follow-ups | GBrain |
-| Raw logs, metric series, datasets, checkpoints, report files | BashGym artifact storage |
+| Concern                                                             | Authority                                                                                                     |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Current canvas, desktop campaigns, reports, allowed actions         | Injected canvas context or reachable `GET /api/workspace/context`                                             |
+| Campaign goal, manifest, budget, attempts, durable cursor, evidence | BashGym campaign repository via REST/CLI                                                                      |
+| Local training-host processes and run artifacts                     | `bashgym operator context --workspace-id <workspace>` over the configured run observer plus BashGym manifests |
+| Personal/project history, decisions, preferences, follow-ups        | GBrain                                                                                                        |
+| Raw logs, metric series, datasets, checkpoints, report files        | BashGym artifact storage                                                                                      |
 
 Never resolve a disagreement by copying live operational state into a new Hermes-only ledger.
 
@@ -139,9 +139,9 @@ Receipt input uses `bashgym.activity.v1`:
   "occurred_at": "2026-07-13T18:20:00Z",
   "objective": "Measure the declared primary metric against the frozen baseline.",
   "summary": "Candidate missed the development gate.",
-  "configuration": {"suite_id": "dev-v1", "candidate_digest": "..."},
-  "metrics": {"primary_metric_delta": -0.012},
-  "artifact_references": [{"kind": "report", "id": "export-...", "digest": "..."}],
+  "configuration": { "suite_id": "dev-v1", "candidate_digest": "..." },
+  "metrics": { "primary_metric_delta": -0.012 },
+  "artifact_references": [{ "kind": "report", "id": "export-...", "digest": "..." }],
   "decision": "Retain the champion.",
   "limitations": ["Protected test remained unopened."],
   "follow_up": ["Revise negative mining and repeat development evaluation."],

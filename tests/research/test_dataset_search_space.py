@@ -1,4 +1,5 @@
 """Unit tests for DatasetSearchSpace. No training, no network — all mocked."""
+
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -19,6 +20,7 @@ class _FakeConfig:
     ``getattr(cfg, '_research_dataset_index', None)`` checks — it always
     returns something truthy.
     """
+
     def __init__(self):
         self.base_model = "test/model"
         self.max_steps = 10

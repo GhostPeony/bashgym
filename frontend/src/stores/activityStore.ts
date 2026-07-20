@@ -11,7 +11,17 @@ export type ActivitySeverity = 'info' | 'success' | 'warning' | 'error'
 
 export interface ActivityDestination {
   label: string
-  view: 'autoresearch' | 'training' | 'traces' | 'guardrails' | 'router' | 'huggingface' | 'factory' | 'pipeline' | 'orchestrator' | 'integration'
+  view:
+    | 'autoresearch'
+    | 'training'
+    | 'traces'
+    | 'guardrails'
+    | 'router'
+    | 'huggingface'
+    | 'factory'
+    | 'pipeline'
+    | 'orchestrator'
+    | 'integration'
   workspaceId?: string
   campaignId?: string
 }
@@ -41,7 +51,7 @@ const COMPACTED_EVENT_TYPES = new Set([
   'router:stats',
   'orchestration:budget:update',
   'cascade:progress',
-  'campaign:training-metrics-appended',
+  'campaign:training-metrics-appended'
 ])
 
 let nextId = 1
@@ -49,13 +59,22 @@ let nextId = 1
 const SEVERITY_RULES: Array<[RegExp, ActivitySeverity]> = [
   [/(:failed|:error|guardrail:blocked)$/, 'error'],
   [/(:retrying|guardrail:warn|:cancelled)$/, 'warning'],
-  [/(:complete|:completed|:ready|trace:promoted|threshold_reached)$/, 'success'],
+  [/(:complete|:completed|:ready|trace:promoted|threshold_reached)$/, 'success']
 ]
 
 export function severityFor(type: string): ActivitySeverity {
   if (type === 'hf-context:stale') return 'warning'
   if (type === 'hf-context:discovery-cancelled') return 'warning'
-  if (['hf-context:discovery-completed', 'hf-context:pinned', 'hf-context:activated', 'hf-context:sent', 'hf-context:eval-prepared'].includes(type)) return 'success'
+  if (
+    [
+      'hf-context:discovery-completed',
+      'hf-context:pinned',
+      'hf-context:activated',
+      'hf-context:sent',
+      'hf-context:eval-prepared'
+    ].includes(type)
+  )
+    return 'success'
   for (const [re, sev] of SEVERITY_RULES) {
     if (re.test(type)) return sev
   }
@@ -148,11 +167,16 @@ export function titleFor(type: string, payload: Record<string, unknown>): string
 }
 
 export function eventKeyFor(type: string, payload: Record<string, unknown>): string | undefined {
-  if (type.startsWith('campaign:')
-    && typeof payload.event_id === 'string'
-    && payload.event_id) return `${type}:${payload.event_id}`
-  const entityId = payload.run_id ?? payload.job_id ?? payload.task_id ?? payload.stage_id
-    ?? payload.attempt_id ?? payload.action_id ?? payload.campaign_id
+  if (type.startsWith('campaign:') && typeof payload.event_id === 'string' && payload.event_id)
+    return `${type}:${payload.event_id}`
+  const entityId =
+    payload.run_id ??
+    payload.job_id ??
+    payload.task_id ??
+    payload.stage_id ??
+    payload.attempt_id ??
+    payload.action_id ??
+    payload.campaign_id
   if (COMPACTED_EVENT_TYPES.has(type)) {
     return `${type}:${typeof entityId === 'string' && entityId ? entityId : 'active'}`
   }
@@ -161,12 +185,12 @@ export function eventKeyFor(type: string, payload: Record<string, unknown>): str
   }
   if (typeof entityId !== 'string' || !entityId) return undefined
   if (
-    type === 'training:queued'
-    || type === 'training:complete'
-    || type === 'training:failed'
-    || type.startsWith('designer:')
-    || type.startsWith('skill-eval:')
-    || type.startsWith('campaign:')
+    type === 'training:queued' ||
+    type === 'training:complete' ||
+    type === 'training:failed' ||
+    type.startsWith('designer:') ||
+    type.startsWith('skill-eval:') ||
+    type.startsWith('campaign:')
   ) {
     return `${type}:${entityId}`
   }
@@ -177,14 +201,18 @@ const PUBLIC_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/
 
 export function destinationFor(
   type: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ): ActivityDestination | undefined {
   const category = type.startsWith('hf-context:') ? 'hf' : type.split(':')[0]
   if (category === 'campaign' || category === 'autoresearch') {
-    const workspaceId = typeof payload.workspace_id === 'string' && PUBLIC_ID.test(payload.workspace_id)
-      ? payload.workspace_id : undefined
-    const campaignId = typeof payload.campaign_id === 'string' && PUBLIC_ID.test(payload.campaign_id)
-      ? payload.campaign_id : undefined
+    const workspaceId =
+      typeof payload.workspace_id === 'string' && PUBLIC_ID.test(payload.workspace_id)
+        ? payload.workspace_id
+        : undefined
+    const campaignId =
+      typeof payload.campaign_id === 'string' && PUBLIC_ID.test(payload.campaign_id)
+        ? payload.campaign_id
+        : undefined
     return { label: 'Open AutoResearch', view: 'autoresearch', workspaceId, campaignId }
   }
   const mapping: Record<string, ActivityDestination> = {
@@ -200,7 +228,7 @@ export function destinationFor(
     pipeline: { label: 'Open Pipeline', view: 'pipeline' },
     orchestration: { label: 'Open Orchestrator', view: 'orchestrator' },
     verification: { label: 'Open Orchestrator', view: 'orchestrator' },
-    integration: { label: 'Open Integrations', view: 'integration' },
+    integration: { label: 'Open Integrations', view: 'integration' }
   }
   return mapping[category]
 }
@@ -220,9 +248,22 @@ interface ActivityState {
 }
 
 const TRACKED_PREFIXES = [
-  'training', 'trace', 'orchestration', 'pipeline', 'guardrail',
-  'cascade', 'hf', 'hf-context', 'autoresearch', 'integration', 'schema-research',
-  'verification', 'designer', 'skill-eval', 'router', 'campaign'
+  'training',
+  'trace',
+  'orchestration',
+  'pipeline',
+  'guardrail',
+  'cascade',
+  'hf',
+  'hf-context',
+  'autoresearch',
+  'integration',
+  'schema-research',
+  'verification',
+  'designer',
+  'skill-eval',
+  'router',
+  'campaign'
 ]
 
 export function isTrackedType(type: string): boolean {
@@ -270,20 +311,22 @@ export const useActivityStore = create<ActivityState>((set) => ({
     })
   },
 
-  removeEvent: (key) => set((state) => {
-    const events = state.events.filter((event) => event.key !== key)
-    const removed = state.events.length - events.length
-    if (removed === 0) return state
-    return {
-      events,
-      unread: state.isOpen ? 0 : Math.max(0, state.unread - removed),
-    }
-  }),
+  removeEvent: (key) =>
+    set((state) => {
+      const events = state.events.filter((event) => event.key !== key)
+      const removed = state.events.length - events.length
+      if (removed === 0) return state
+      return {
+        events,
+        unread: state.isOpen ? 0 : Math.max(0, state.unread - removed)
+      }
+    }),
 
-  dismissEvent: (id) => set((state) => {
-    const events = state.events.filter((event) => event.id !== id)
-    return events.length === state.events.length ? state : { events }
-  }),
+  dismissEvent: (id) =>
+    set((state) => {
+      const events = state.events.filter((event) => event.id !== id)
+      return events.length === state.events.length ? state : { events }
+    }),
 
   setOpen: (open) => set((state) => ({ isOpen: open, unread: open ? 0 : state.unread })),
 

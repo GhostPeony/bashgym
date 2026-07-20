@@ -43,7 +43,9 @@ function MiniChart({
 }) {
   return (
     <div className="card p-4">
-      <p className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">{title}</p>
+      <p className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
+        {title}
+      </p>
       <div className="h-40">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 6, right: 16, left: 0, bottom: 0 }}>
@@ -54,7 +56,12 @@ function MiniChart({
               axisLine={{ stroke: 'var(--border-color)' }}
               tickFormatter={(v) => (v >= 1000 ? `${v / 1000}k` : v)}
             />
-            <YAxis {...AXIS} axisLine={{ stroke: 'var(--border-color)' }} width={54} tickFormatter={format} />
+            <YAxis
+              {...AXIS}
+              axisLine={{ stroke: 'var(--border-color)' }}
+              width={54}
+              tickFormatter={format}
+            />
             <Tooltip
               contentStyle={TOOLTIP_STYLE}
               labelStyle={{ color: 'var(--text-secondary)' }}

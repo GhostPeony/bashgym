@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from bashgym.factory.pattern_extractor import PatternExtractor
-from bashgym.factory.synthetic_generator import SyntheticGenerator, PRESETS
+from bashgym.factory.synthetic_generator import PRESETS, SyntheticGenerator
 
 
 @pytest.mark.asyncio
@@ -25,7 +25,7 @@ async def test_full_synthetic_pipeline():
                 {"tool": "Read", "input": {"file_path": "src/api.py"}},
                 {"tool": "Edit", "input": {"file_path": "src/api.py"}},
                 {"tool": "Bash", "input": {"command": "pytest"}},
-            ]
+            ],
         },
         {
             "metadata": {"repo": "ghostwork"},
@@ -34,7 +34,7 @@ async def test_full_synthetic_pipeline():
                 {"tool": "Glob", "input": {"pattern": "src/*.py"}},
                 {"tool": "Read", "input": {"file_path": "src/auth.py"}},
                 {"tool": "Edit", "input": {"file_path": "src/auth.py"}},
-            ]
+            ],
         },
     ]
 
@@ -51,7 +51,7 @@ async def test_full_synthetic_pipeline():
 
     seed_prompts = [t["summary"]["task_description"] for t in traces]
 
-    with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+    with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
         mock_llm.side_effect = [
             "Add caching to database queries",
             "Implement rate limiting for API",
@@ -61,10 +61,7 @@ async def test_full_synthetic_pipeline():
         ]
 
         tasks = await generator.generate_batch(
-            patterns=patterns,
-            seed_prompts=seed_prompts,
-            count=5,
-            provider="nim"
+            patterns=patterns, seed_prompts=seed_prompts, count=5, provider="nim"
         )
 
         assert len(tasks) == 5
@@ -100,7 +97,7 @@ async def test_pipeline_with_augmented_strategy():
         {"prompt": "Fix authentication timeout", "id": "seed_002", "repo": "myrepo"},
     ]
 
-    with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+    with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
         mock_llm.side_effect = [
             "Add comprehensive logging with log levels",
             "Add logging to the database module",
@@ -109,9 +106,7 @@ async def test_pipeline_with_augmented_strategy():
         ]
 
         tasks = await generator.generate_augmented(
-            seed_examples=seed_examples,
-            variations_per_seed=2,
-            provider="nim"
+            seed_examples=seed_examples, variations_per_seed=2, provider="nim"
         )
 
         assert len(tasks) == 4
@@ -139,10 +134,10 @@ async def test_pipeline_with_schema_driven_strategy():
             "src/": ["main.py", "utils.py", "config.py"],
             "tests/": ["test_main.py", "test_utils.py"],
         },
-        "frameworks": ["fastapi", "pytest"]
+        "frameworks": ["fastapi", "pytest"],
     }
 
-    with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+    with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
         mock_llm.side_effect = [
             "Add configuration validation",
             "Create utility function for date parsing",
@@ -150,9 +145,7 @@ async def test_pipeline_with_schema_driven_strategy():
         ]
 
         tasks = await generator.generate_from_schema(
-            repo_schema=repo_schema,
-            count=3,
-            provider="nim"
+            repo_schema=repo_schema, count=3, provider="nim"
         )
 
         assert len(tasks) == 3
@@ -202,7 +195,7 @@ def test_pattern_extraction_produces_valid_patterns():
                 {"tool": "Read", "input": {"file_path": "src/api/users.ts"}},
                 {"tool": "Edit", "input": {"file_path": "src/api/users.ts"}},
                 {"tool": "Bash", "input": {"command": "npm test"}},
-            ]
+            ],
         },
         {
             "metadata": {"repo": "webapp"},
@@ -211,7 +204,7 @@ def test_pattern_extraction_produces_valid_patterns():
                 {"tool": "Read", "input": {"file_path": "src/components/Profile.tsx"}},
                 {"tool": "Edit", "input": {"file_path": "src/components/Profile.tsx"}},
                 {"tool": "Bash", "input": {"command": "npm run lint"}},
-            ]
+            ],
         },
         {
             "metadata": {"repo": "webapp"},
@@ -222,7 +215,7 @@ def test_pattern_extraction_produces_valid_patterns():
                 {"tool": "Read", "input": {"file_path": "src/auth/session.ts"}},
                 {"tool": "Edit", "input": {"file_path": "src/auth/login.ts"}},
                 {"tool": "Edit", "input": {"file_path": "src/auth/session.ts"}},
-            ]
+            ],
         },
     ]
 
@@ -261,7 +254,7 @@ def test_export_nemo_format_compatibility():
             task_type="feature",
             expected_tools=["Read", "Edit"],
             source_pattern_id="p1",
-            repo="test-repo"
+            repo="test-repo",
         ),
         SyntheticTask(
             task_id="test_002",
@@ -270,7 +263,7 @@ def test_export_nemo_format_compatibility():
             task_type="bugfix",
             expected_tools=["Read", "Edit", "Bash"],
             source_pattern_id="p2",
-            repo="test-repo"
+            repo="test-repo",
         ),
     ]
 

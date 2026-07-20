@@ -15,14 +15,14 @@ import {
   FileText,
   MessageSquare,
   Download,
-  X,
+  X
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { observabilityApi, TraceSummary, TraceDetail } from '../../services/api'
 import {
   profilerMetricsResource,
   profilerToolStatsResource,
-  profilerTracesResource,
+  profilerTracesResource
 } from '../../stores/opsResources'
 import { useSessionResource } from '../../stores/sessionResource'
 import { SpanTimeline } from './SpanTimeline'
@@ -46,7 +46,9 @@ interface Bottleneck {
 
 export function ProfilerDashboard() {
   const [isLive, setIsLive] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'traces' | 'tools' | 'bottlenecks'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'traces' | 'tools' | 'bottlenecks'>(
+    'overview'
+  )
   const [selectedTrace, setSelectedTrace] = useState<TraceDetail | null>(null)
   const [isLoadingDetail, setIsLoadingDetail] = useState(false)
 
@@ -55,13 +57,13 @@ export function ProfilerDashboard() {
     data: metrics,
     loading: metricsLoading,
     refreshing: metricsRefreshing,
-    error: metricsError,
+    error: metricsError
   } = useSessionResource(profilerMetricsResource)
   const {
     data: tracesData,
     loading: tracesLoading,
     refreshing: tracesRefreshing,
-    error: tracesError,
+    error: tracesError
   } = useSessionResource(profilerTracesResource)
   const { data: toolStatsData } = useSessionResource(profilerToolStatsResource)
   const traces = tracesData ?? []
@@ -89,26 +91,42 @@ export function ProfilerDashboard() {
 
     if (profilerData.total_traces !== undefined) {
       newMetrics.push({
-        name: 'Total Traces', value: profilerData.total_traces,
-        unit: '', trend: 'stable', change: 0, accentVar: accents[0],
+        name: 'Total Traces',
+        value: profilerData.total_traces,
+        unit: '',
+        trend: 'stable',
+        change: 0,
+        accentVar: accents[0]
       })
     }
     if (profilerData.avg_duration_ms !== undefined) {
       newMetrics.push({
-        name: 'Avg Duration', value: Math.round(profilerData.avg_duration_ms),
-        unit: 'ms', trend: 'stable', change: 0, accentVar: accents[1],
+        name: 'Avg Duration',
+        value: Math.round(profilerData.avg_duration_ms),
+        unit: 'ms',
+        trend: 'stable',
+        change: 0,
+        accentVar: accents[1]
       })
     }
     if (profilerData.total_tokens !== undefined) {
       newMetrics.push({
-        name: 'Total Tokens', value: profilerData.total_tokens,
-        unit: '', trend: 'stable', change: 0, accentVar: accents[2],
+        name: 'Total Tokens',
+        value: profilerData.total_tokens,
+        unit: '',
+        trend: 'stable',
+        change: 0,
+        accentVar: accents[2]
       })
     }
     if (profilerData.avg_tokens_per_trace !== undefined) {
       newMetrics.push({
-        name: 'Avg Tokens/Trace', value: Math.round(profilerData.avg_tokens_per_trace),
-        unit: '', trend: 'stable', change: 0, accentVar: accents[3],
+        name: 'Avg Tokens/Trace',
+        value: Math.round(profilerData.avg_tokens_per_trace),
+        unit: '',
+        trend: 'stable',
+        change: 0,
+        accentVar: accents[3]
       })
     }
 
@@ -137,11 +155,18 @@ export function ProfilerDashboard() {
 
   const getToolIcon = (tool: string) => {
     switch (tool) {
-      case 'Bash': return Terminal
-      case 'Read': return FileText
-      case 'Edit': case 'Write': return Code
-      case 'Grep': case 'Glob': return FileText
-      default: return Zap
+      case 'Bash':
+        return Terminal
+      case 'Read':
+        return FileText
+      case 'Edit':
+      case 'Write':
+        return Code
+      case 'Grep':
+      case 'Glob':
+        return FileText
+      default:
+        return Zap
     }
   }
 
@@ -151,7 +176,7 @@ export function ProfilerDashboard() {
       metrics,
       traces,
       toolStats,
-      exportedAt: new Date().toISOString(),
+      exportedAt: new Date().toISOString()
     }
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -164,19 +189,21 @@ export function ProfilerDashboard() {
 
   // Compute bottlenecks from traces (now populated by backend)
   const bottlenecks: Bottleneck[] = traces
-    .filter(t => t.bottlenecks && t.bottlenecks.length > 0)
-    .flatMap(t => (t.bottlenecks || []).map((b: any) => ({
-      type: b.type || 'slow_tool',
-      severity: b.severity || 'medium',
-      description: b.suggestion || b.description || `Bottleneck in ${t.name}`,
-      recommendation: b.recommendation || b.suggestion || 'Review trace details',
-      trace_id: b.trace_id || t.trace_id,
-    })))
+    .filter((t) => t.bottlenecks && t.bottlenecks.length > 0)
+    .flatMap((t) =>
+      (t.bottlenecks || []).map((b: any) => ({
+        type: b.type || 'slow_tool',
+        severity: b.severity || 'medium',
+        description: b.suggestion || b.description || `Bottleneck in ${t.name}`,
+        recommendation: b.recommendation || b.suggestion || 'Review trace details',
+        trace_id: b.trace_id || t.trace_id
+      }))
+    )
     .slice(0, 10)
 
   // Navigate to trace from bottleneck
   const viewBottleneckTrace = (traceId: string) => {
-    const trace = traces.find(t => t.trace_id === traceId)
+    const trace = traces.find((t) => t.trace_id === traceId)
     if (trace) {
       setActiveTab('traces')
       selectTrace(trace)
@@ -189,7 +216,9 @@ export function ProfilerDashboard() {
       <div className="p-6 border-b-brutal border-border">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="tag"><span>Observability</span></span>
+            <span className="tag">
+              <span>Observability</span>
+            </span>
             <div>
               <h1 className="font-brand text-3xl text-text-primary">Agent Profiler</h1>
               <p className="text-sm text-text-secondary mt-1">
@@ -200,10 +229,7 @@ export function ProfilerDashboard() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsLive(!isLive)}
-              className={clsx(
-                'flex items-center gap-2',
-                isLive ? 'btn-primary' : 'btn-secondary'
-              )}
+              className={clsx('flex items-center gap-2', isLive ? 'btn-primary' : 'btn-secondary')}
             >
               {isLive ? (
                 <>
@@ -238,8 +264,13 @@ export function ProfilerDashboard() {
             { id: 'overview' as const, label: 'Overview', icon: BarChart3 },
             { id: 'traces' as const, label: 'Traces', icon: Activity, badge: traces.length },
             { id: 'tools' as const, label: 'Tool Analytics', icon: Zap, badge: toolStats.length },
-            { id: 'bottlenecks' as const, label: 'Bottlenecks', icon: AlertTriangle, badge: bottlenecks.length },
-          ].map(tab => (
+            {
+              id: 'bottlenecks' as const,
+              label: 'Bottlenecks',
+              icon: AlertTriangle,
+              badge: bottlenecks.length
+            }
+          ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -253,7 +284,9 @@ export function ProfilerDashboard() {
               <tab.icon className="w-4 h-4" />
               {tab.label}
               {tab.badge !== undefined && tab.badge > 0 && (
-                <span className="tag ml-1"><span>{tab.badge}</span></span>
+                <span className="tag ml-1">
+                  <span>{tab.badge}</span>
+                </span>
               )}
             </button>
           ))}
@@ -277,30 +310,43 @@ export function ProfilerDashboard() {
             {/* Metrics Grid */}
             {displayMetrics.length > 0 ? (
               <div className="grid grid-cols-4 gap-4">
-                {displayMetrics.map(metric => (
+                {displayMetrics.map((metric) => (
                   <div
                     key={metric.name}
                     className="card p-4"
                     style={{ borderLeftWidth: '4px', borderLeftColor: `var(${metric.accentVar})` }}
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono text-xs uppercase tracking-widest text-text-muted">{metric.name}</span>
-                      {metric.trend === 'up' && <TrendingUp className="w-4 h-4 text-status-success" />}
-                      {metric.trend === 'down' && <TrendingDown className="w-4 h-4 text-status-error" />}
-                      {metric.trend === 'stable' && <Activity className="w-4 h-4 text-text-muted" />}
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                        {metric.name}
+                      </span>
+                      {metric.trend === 'up' && (
+                        <TrendingUp className="w-4 h-4 text-status-success" />
+                      )}
+                      {metric.trend === 'down' && (
+                        <TrendingDown className="w-4 h-4 text-status-error" />
+                      )}
+                      {metric.trend === 'stable' && (
+                        <Activity className="w-4 h-4 text-text-muted" />
+                      )}
                     </div>
                     <div className="flex items-baseline gap-2">
                       <span className="font-brand text-3xl text-text-primary">
                         {metric.value.toLocaleString()}
                       </span>
-                      {metric.unit && <span className="font-mono text-xs text-text-muted">{metric.unit}</span>}
+                      {metric.unit && (
+                        <span className="font-mono text-xs text-text-muted">{metric.unit}</span>
+                      )}
                     </div>
                     {metric.change !== 0 && (
-                      <span className={clsx(
-                        'font-mono text-xs',
-                        metric.change > 0 ? 'text-status-success' : 'text-status-error'
-                      )}>
-                        {metric.change > 0 ? '+' : ''}{metric.change}% from last hour
+                      <span
+                        className={clsx(
+                          'font-mono text-xs',
+                          metric.change > 0 ? 'text-status-success' : 'text-status-error'
+                        )}
+                      >
+                        {metric.change > 0 ? '+' : ''}
+                        {metric.change}% from last hour
                       </span>
                     )}
                   </div>
@@ -327,25 +373,33 @@ export function ProfilerDashboard() {
                 <div className="section-divider mb-4" />
                 <div className="grid grid-cols-4 gap-4">
                   <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Total Events</div>
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Total Events
+                    </div>
                     <div className="font-brand text-2xl text-text-primary">
                       {metrics.guardrails.total_events}
                     </div>
                   </div>
                   <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Block Rate</div>
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Block Rate
+                    </div>
                     <div className="font-brand text-2xl text-status-error">
                       {(metrics.guardrails.block_rate * 100).toFixed(1)}%
                     </div>
                   </div>
                   <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Blocked</div>
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Blocked
+                    </div>
                     <div className="font-brand text-2xl text-status-error">
                       {metrics.guardrails.by_action?.block || 0}
                     </div>
                   </div>
                   <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Warnings</div>
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Warnings
+                    </div>
                     <div className="font-brand text-2xl text-status-warning">
                       {metrics.guardrails.by_action?.warn || 0}
                     </div>
@@ -363,10 +417,13 @@ export function ProfilerDashboard() {
                   <h3 className="font-brand text-xl text-text-primary">Recent Traces</h3>
                 </div>
                 <div className="divide-y divide-border">
-                  {traces.slice(0, 5).map(trace => (
+                  {traces.slice(0, 5).map((trace) => (
                     <button
                       key={trace.trace_id}
-                      onClick={() => { setActiveTab('traces'); selectTrace(trace); }}
+                      onClick={() => {
+                        setActiveTab('traces')
+                        selectTrace(trace)
+                      }}
                       className={clsx(
                         'w-full p-4 text-left hover:bg-background-secondary transition-press',
                         selectedTrace?.trace_id === trace.trace_id && 'bg-accent-light'
@@ -374,12 +431,16 @@ export function ProfilerDashboard() {
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className={clsx(
-                            'status-dot',
-                            trace.status === 'error' ? 'status-error' :
-                            trace.status === 'in_progress' ? 'status-warning' :
-                            'status-success'
-                          )} />
+                          <span
+                            className={clsx(
+                              'status-dot',
+                              trace.status === 'error'
+                                ? 'status-error'
+                                : trace.status === 'in_progress'
+                                  ? 'status-warning'
+                                  : 'status-success'
+                            )}
+                          />
                           <span className="font-medium text-text-primary">{trace.name}</span>
                         </div>
                         <span className="font-mono text-xs text-text-muted">
@@ -413,10 +474,12 @@ export function ProfilerDashboard() {
         {activeTab === 'traces' && (
           <div className={clsx('flex gap-4', selectedTrace && 'h-full')}>
             {/* Trace list — shrinks when detail is open */}
-            <div className={clsx(
-              'space-y-4 overflow-auto',
-              selectedTrace ? 'w-1/2 flex-shrink-0' : 'w-full'
-            )}>
+            <div
+              className={clsx(
+                'space-y-4 overflow-auto',
+                selectedTrace ? 'w-1/2 flex-shrink-0' : 'w-full'
+              )}
+            >
               {traces.length === 0 ? (
                 <div className="card p-12 text-center">
                   <Terminal className="w-12 h-12 text-text-muted mx-auto mb-3" />
@@ -427,10 +490,12 @@ export function ProfilerDashboard() {
                 <div className="card">
                   <div className="p-4 border-b-brutal border-border flex items-center justify-between">
                     <h3 className="font-brand text-xl text-text-primary">Execution Traces</h3>
-                    <span className="tag"><span>{traces.length} traces</span></span>
+                    <span className="tag">
+                      <span>{traces.length} traces</span>
+                    </span>
                   </div>
                   <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
-                    {traces.map(trace => (
+                    {traces.map((trace) => (
                       <div
                         key={trace.trace_id}
                         className={clsx(
@@ -440,15 +505,21 @@ export function ProfilerDashboard() {
                         onClick={() => selectTrace(trace)}
                       >
                         <div className="flex items-center gap-3">
-                          <span className={clsx(
-                            'status-dot flex-shrink-0',
-                            trace.status === 'error' ? 'status-error' :
-                            trace.status === 'in_progress' ? 'status-warning' :
-                            'status-success'
-                          )} />
+                          <span
+                            className={clsx(
+                              'status-dot flex-shrink-0',
+                              trace.status === 'error'
+                                ? 'status-error'
+                                : trace.status === 'in_progress'
+                                  ? 'status-warning'
+                                  : 'status-success'
+                            )}
+                          />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className="font-medium text-text-primary truncate">{trace.name}</span>
+                              <span className="font-medium text-text-primary truncate">
+                                {trace.name}
+                              </span>
                               <span className="tag flex-shrink-0">
                                 <span>{trace.total_spans} spans</span>
                               </span>
@@ -489,41 +560,62 @@ export function ProfilerDashboard() {
                     <h3 className="font-brand text-xl text-text-primary truncate">
                       {isLoadingDetail ? 'Loading...' : selectedTrace.name}
                     </h3>
-                    <button
-                      onClick={() => setSelectedTrace(null)}
-                      className="btn-ghost p-1"
-                    >
+                    <button onClick={() => setSelectedTrace(null)} className="btn-ghost p-1">
                       <X className="w-5 h-5" />
                     </button>
                   </div>
                   <div className="section-divider mb-4" />
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Trace ID</div>
-                      <div className="text-sm text-text-primary font-mono truncate">{selectedTrace.trace_id}</div>
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+                        Trace ID
+                      </div>
+                      <div className="text-sm text-text-primary font-mono truncate">
+                        {selectedTrace.trace_id}
+                      </div>
                     </div>
                     <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Duration</div>
-                      <div className="font-brand text-xl text-text-primary">{selectedTrace.duration_ms.toFixed(0)}ms</div>
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+                        Duration
+                      </div>
+                      <div className="font-brand text-xl text-text-primary">
+                        {selectedTrace.duration_ms.toFixed(0)}ms
+                      </div>
                     </div>
                     <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Total Spans</div>
-                      <div className="font-brand text-xl text-text-primary">{selectedTrace.total_spans}</div>
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+                        Total Spans
+                      </div>
+                      <div className="font-brand text-xl text-text-primary">
+                        {selectedTrace.total_spans}
+                      </div>
                     </div>
                     <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">LLM Calls</div>
-                      <div className="font-brand text-xl text-text-primary">{selectedTrace.llm_calls?.count || 0}</div>
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+                        LLM Calls
+                      </div>
+                      <div className="font-brand text-xl text-text-primary">
+                        {selectedTrace.llm_calls?.count || 0}
+                      </div>
                     </div>
                     {selectedTrace.llm_calls?.total_tokens > 0 && (
                       <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Total Tokens</div>
-                        <div className="font-brand text-xl text-text-primary">{selectedTrace.llm_calls.total_tokens.toLocaleString()}</div>
+                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+                          Total Tokens
+                        </div>
+                        <div className="font-brand text-xl text-text-primary">
+                          {selectedTrace.llm_calls.total_tokens.toLocaleString()}
+                        </div>
                       </div>
                     )}
                     {selectedTrace.tool_calls?.count > 0 && (
                       <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Tool Calls</div>
-                        <div className="font-brand text-xl text-text-primary">{selectedTrace.tool_calls.count}</div>
+                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+                          Tool Calls
+                        </div>
+                        <div className="font-brand text-xl text-text-primary">
+                          {selectedTrace.tool_calls.count}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -551,7 +643,9 @@ export function ProfilerDashboard() {
               <div className="card p-12 text-center">
                 <Zap className="w-12 h-12 text-text-muted mx-auto mb-3" />
                 <h3 className="font-brand text-xl text-text-primary mb-2">No tool analytics yet</h3>
-                <p className="text-sm text-text-muted">Run tasks to collect tool performance data</p>
+                <p className="text-sm text-text-muted">
+                  Run tasks to collect tool performance data
+                </p>
               </div>
             ) : (
               <div className="card">
@@ -562,38 +656,60 @@ export function ProfilerDashboard() {
                   <table className="w-full">
                     <thead className="bg-background-secondary border-b-brutal border-border">
                       <tr>
-                        <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Tool</th>
-                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Calls</th>
-                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Avg Duration</th>
-                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Success Rate</th>
-                        <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Performance</th>
+                        <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">
+                          Tool
+                        </th>
+                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">
+                          Calls
+                        </th>
+                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">
+                          Avg Duration
+                        </th>
+                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">
+                          Success Rate
+                        </th>
+                        <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">
+                          Performance
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {toolStats.map(stat => {
+                      {toolStats.map((stat) => {
                         const Icon = getToolIcon(stat.tool)
-                        const barColor = stat.success_rate >= 95
-                          ? 'var(--status-success)'
-                          : stat.success_rate >= 85
-                          ? 'var(--status-warning)'
-                          : 'var(--status-error)'
+                        const barColor =
+                          stat.success_rate >= 95
+                            ? 'var(--status-success)'
+                            : stat.success_rate >= 85
+                              ? 'var(--status-warning)'
+                              : 'var(--status-error)'
                         return (
-                          <tr key={stat.tool} className="hover:bg-background-secondary transition-press">
+                          <tr
+                            key={stat.tool}
+                            className="hover:bg-background-secondary transition-press"
+                          >
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <Icon className="w-4 h-4 text-accent" />
                                 <span className="font-medium text-text-primary">{stat.tool}</span>
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-right font-brand text-lg text-text-primary">{stat.calls}</td>
-                            <td className="px-4 py-3 text-right font-mono text-sm text-text-primary">{stat.avg_duration_ms}ms</td>
+                            <td className="px-4 py-3 text-right font-brand text-lg text-text-primary">
+                              {stat.calls}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono text-sm text-text-primary">
+                              {stat.avg_duration_ms}ms
+                            </td>
                             <td className="px-4 py-3 text-right">
-                              <span className={clsx(
-                                'font-mono text-sm',
-                                stat.success_rate >= 95 ? 'text-status-success' :
-                                stat.success_rate >= 85 ? 'text-status-warning' :
-                                'text-status-error'
-                              )}>
+                              <span
+                                className={clsx(
+                                  'font-mono text-sm',
+                                  stat.success_rate >= 95
+                                    ? 'text-status-success'
+                                    : stat.success_rate >= 85
+                                      ? 'text-status-warning'
+                                      : 'text-status-error'
+                                )}
+                              >
                                 {stat.success_rate}%
                               </span>
                             </td>
@@ -603,7 +719,7 @@ export function ProfilerDashboard() {
                                   className="progress-fill"
                                   style={{
                                     width: `${stat.success_rate}%`,
-                                    background: barColor,
+                                    background: barColor
                                   }}
                                 />
                               </div>
@@ -624,7 +740,9 @@ export function ProfilerDashboard() {
             {bottlenecks.length === 0 ? (
               <div className="card p-12 text-center">
                 <AlertTriangle className="w-12 h-12 text-text-muted mx-auto mb-3" />
-                <h3 className="font-brand text-xl text-text-primary mb-2">No bottlenecks detected</h3>
+                <h3 className="font-brand text-xl text-text-primary mb-2">
+                  No bottlenecks detected
+                </h3>
                 <p className="text-sm text-text-muted">Your agent tasks are running efficiently</p>
               </div>
             ) : (
@@ -633,27 +751,39 @@ export function ProfilerDashboard() {
                   key={idx}
                   className={clsx(
                     'card p-4 border-l-[4px]',
-                    bottleneck.severity === 'high' ? 'border-l-status-error' :
-                    bottleneck.severity === 'medium' ? 'border-l-status-warning' :
-                    'border-l-status-info'
+                    bottleneck.severity === 'high'
+                      ? 'border-l-status-error'
+                      : bottleneck.severity === 'medium'
+                        ? 'border-l-status-warning'
+                        : 'border-l-status-info'
                   )}
                 >
                   <div className="flex items-start gap-4">
-                    <AlertTriangle className={clsx(
-                      'w-5 h-5 mt-0.5',
-                      bottleneck.severity === 'high' ? 'text-status-error' :
-                      bottleneck.severity === 'medium' ? 'text-status-warning' :
-                      'text-status-info'
-                    )} />
+                    <AlertTriangle
+                      className={clsx(
+                        'w-5 h-5 mt-0.5',
+                        bottleneck.severity === 'high'
+                          ? 'text-status-error'
+                          : bottleneck.severity === 'medium'
+                            ? 'text-status-warning'
+                            : 'text-status-info'
+                      )}
+                    />
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-text-primary">{bottleneck.description}</span>
-                        <span className={clsx(
-                          'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
-                          bottleneck.severity === 'high' ? 'bg-status-error/20 text-status-error border-status-error' :
-                          bottleneck.severity === 'medium' ? 'bg-status-warning/20 text-status-warning border-status-warning' :
-                          'bg-status-info/20 text-status-info border-status-info'
-                        )}>
+                        <span className="font-medium text-text-primary">
+                          {bottleneck.description}
+                        </span>
+                        <span
+                          className={clsx(
+                            'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
+                            bottleneck.severity === 'high'
+                              ? 'bg-status-error/20 text-status-error border-status-error'
+                              : bottleneck.severity === 'medium'
+                                ? 'bg-status-warning/20 text-status-warning border-status-warning'
+                                : 'bg-status-info/20 text-status-info border-status-info'
+                          )}
+                        >
                           {bottleneck.severity}
                         </span>
                       </div>

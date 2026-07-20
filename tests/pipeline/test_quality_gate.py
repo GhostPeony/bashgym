@@ -1,10 +1,7 @@
 """Tests for QualityGate classification logic."""
 
-import pytest
-from pathlib import Path
-
 from bashgym.pipeline.config import PipelineConfig
-from bashgym.pipeline.quality_gate import QualityGate, Classification
+from bashgym.pipeline.quality_gate import Classification, QualityGate
 
 
 class TestQualityGate:
@@ -81,5 +78,7 @@ class TestQualityGate:
         trace_file.write_text('{"trace": []}')
 
         gate = QualityGate(PipelineConfig())
-        dest = gate.route_trace(trace_file, Classification.PENDING, tmp_path / "gold", tmp_path / "failed")
+        dest = gate.route_trace(
+            trace_file, Classification.PENDING, tmp_path / "gold", tmp_path / "failed"
+        )
         assert dest == trace_file

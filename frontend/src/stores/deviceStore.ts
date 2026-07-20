@@ -37,8 +37,13 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     const result = await deviceApi.list()
     if (result.ok && result.data) {
       const devices = result.data
-      const defaultDevice = devices.find(d => d.is_default)
-      set({ devices, defaultDeviceId: defaultDevice?.id || null, loading: false, loadedAt: Date.now() })
+      const defaultDevice = devices.find((d) => d.is_default)
+      set({
+        devices,
+        defaultDeviceId: defaultDevice?.id || null,
+        loading: false,
+        loadedAt: Date.now()
+      })
     } else {
       set({ error: result.error || 'Failed to fetch devices', loading: false })
     }
@@ -98,5 +103,5 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     }
     set({ error: result.error || 'Discovery failed' })
     return []
-  },
+  }
 }))

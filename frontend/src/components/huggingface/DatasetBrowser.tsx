@@ -20,10 +20,13 @@ interface DatasetBrowserProps {
 
 export function DatasetBrowser({ className }: DatasetBrowserProps) {
   const [prefix, setPrefix] = useState('bashgym')
-  const { data, loading, refreshing, error: fetchError, refresh } = useKeyedSessionResource(
-    hfDatasetsResource,
-    prefix
-  )
+  const {
+    data,
+    loading,
+    refreshing,
+    error: fetchError,
+    refresh
+  } = useKeyedSessionResource(hfDatasetsResource, prefix)
   const datasets = data ?? []
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const error = deleteError || fetchError
@@ -66,7 +69,9 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-text-secondary uppercase tracking-widest">Filter:</span>
+            <span className="text-xs font-mono text-text-secondary uppercase tracking-widest">
+              Filter:
+            </span>
             <input
               type="text"
               value={prefix}
@@ -75,12 +80,10 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
               className="input w-32 text-sm"
             />
           </div>
-          <button
-            onClick={() => refresh()}
-            className="btn-icon"
-            title="Refresh"
-          >
-            <RefreshCw className={clsx('w-4 h-4 text-text-secondary', refreshing && 'animate-spin')} />
+          <button onClick={() => refresh()} className="btn-icon" title="Refresh">
+            <RefreshCw
+              className={clsx('w-4 h-4 text-text-secondary', refreshing && 'animate-spin')}
+            />
           </button>
         </div>
       </div>
@@ -99,8 +102,9 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
           <div>
             <h3 className="text-sm font-brand text-text-primary">Upload from Training Dashboard</h3>
             <p className="text-sm text-text-secondary mt-1 font-mono">
-              Datasets are uploaded automatically when you export training examples from the Training Dashboard.
-              Use the "Export to HuggingFace" option to push your training data to the Hub.
+              Datasets are uploaded automatically when you export training examples from the
+              Training Dashboard. Use the "Export to HuggingFace" option to push your training data
+              to the Hub.
             </p>
           </div>
         </div>
@@ -112,16 +116,15 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
           <Database className="w-12 h-12 mx-auto mb-3 text-text-muted" />
           <p className="font-brand text-lg">No datasets found</p>
           <p className="text-sm mt-1 font-mono">
-            {prefix ? `No datasets matching "${prefix}"` : 'Export training data to see datasets here'}
+            {prefix
+              ? `No datasets matching "${prefix}"`
+              : 'Export training data to see datasets here'}
           </p>
         </div>
       ) : (
         <div className="space-y-2">
           {datasets.map((datasetId) => (
-            <div
-              key={datasetId}
-              className="card flex items-center justify-between p-3"
-            >
+            <div key={datasetId} className="card flex items-center justify-between p-3">
               <div className="flex items-center gap-3">
                 <FolderOpen className="w-5 h-5 text-accent" />
                 <span className="text-sm text-text-primary font-mono">{datasetId}</span>
@@ -156,7 +159,8 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
           <span className="text-sm font-brand text-text-primary">HuggingFace Pro Storage</span>
         </div>
         <p className="text-xs text-text-secondary mt-2 font-mono">
-          Pro subscribers get 1TB of private dataset storage with Data Studio access for exploring and visualizing your training data.
+          Pro subscribers get 1TB of private dataset storage with Data Studio access for exploring
+          and visualizing your training data.
         </p>
       </div>
     </div>

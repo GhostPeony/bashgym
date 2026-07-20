@@ -898,9 +898,9 @@ def _windows_xml(launch_argv: tuple[str, ...], username: str) -> bytes:
     ET.register_namespace("", namespace)
     task = ET.Element(f"{{{namespace}}}Task", {"version": "1.4"})
     registration = ET.SubElement(task, f"{{{namespace}}}RegistrationInfo")
-    ET.SubElement(
-        registration, f"{{{namespace}}}Description"
-    ).text = "BashGym resident campaign worker"
+    ET.SubElement(registration, f"{{{namespace}}}Description").text = (
+        "BashGym resident campaign worker"
+    )
     triggers = ET.SubElement(task, f"{{{namespace}}}Triggers")
     logon = ET.SubElement(triggers, f"{{{namespace}}}LogonTrigger")
     ET.SubElement(logon, f"{{{namespace}}}Enabled").text = "true"

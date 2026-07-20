@@ -9,12 +9,9 @@ Outputs:
 Both formats are directly uploadable to Unsloth Studio or HuggingFace datasets.
 """
 
-import json
-import re
-import sys
 import argparse
+import json
 from pathlib import Path
-from typing import Any
 
 
 def fix_double_escaped_args(arguments: str) -> str:
@@ -98,16 +95,18 @@ def to_chatml_clean(example: dict) -> dict:
             clean_msg["tool_calls"] = []
             for tc in msg["tool_calls"]:
                 func = tc.get("function", {})
-                clean_msg["tool_calls"].append({
-                    "id": tc.get("id", ""),
-                    "type": "function",
-                    "function": {
-                        "name": func.get("name", ""),
-                        "arguments": json.dumps(
-                            sanitize_arguments(func.get("arguments", "{}"))
-                        )
+                clean_msg["tool_calls"].append(
+                    {
+                        "id": tc.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": func.get("name", ""),
+                            "arguments": json.dumps(
+                                sanitize_arguments(func.get("arguments", "{}"))
+                            ),
+                        },
                     }
-                })
+                )
 
         if msg.get("tool_call_id"):
             clean_msg["tool_call_id"] = msg["tool_call_id"]
@@ -127,8 +126,6 @@ def to_chatml_flattened(example: dict) -> dict:
     function calling — the tool interactions become plain text.
     """
     messages = []
-    skip_next_tool = False
-
     for i, msg in enumerate(example.get("messages", [])):
         role = msg["role"]
         content = msg.get("content") or ""
@@ -148,7 +145,7 @@ def to_chatml_flattened(example: dict) -> dict:
                 parts.append(flatten_tool_call(tc))
 
                 # Find the matching tool response
-                for later_msg in example["messages"][i+1:]:
+                for later_msg in example["messages"][i + 1 :]:
                     if later_msg["role"] == "tool" and later_msg.get("tool_call_id") == tc_id:
                         tool_output = later_msg.get("content", "")
                         if len(tool_output) > 1500:
@@ -190,7 +187,7 @@ def to_sharegpt(example: dict) -> dict:
                 tc_id = tc.get("id", "")
                 parts.append(flatten_tool_call(tc))
 
-                for later_msg in example["messages"][i+1:]:
+                for later_msg in example["messages"][i + 1 :]:
                     if later_msg["role"] == "tool" and later_msg.get("tool_call_id") == tc_id:
                         tool_output = later_msg.get("content", "")
                         if len(tool_output) > 1500:
@@ -245,20 +242,32 @@ def convert_file(input_path: Path, output_dir: Path, formats: list[str]) -> dict
 
 def main():
     parser = argparse.ArgumentParser(description="Export bashgym traces for Unsloth Studio")
-    parser.add_argument("--input-dir", type=Path, default=Path("/home/user/bashgym-training/data"),
-                        help="Directory containing train.jsonl and val.jsonl")
-    parser.add_argument("--output-dir", type=Path, default=None,
-                        help="Output directory (default: input_dir/unsloth)")
-    parser.add_argument("--formats", nargs="+", default=["chatml", "chatml_flat", "sharegpt"],
-                        choices=["chatml", "chatml_flat", "sharegpt"],
-                        help="Output formats to generate")
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=Path("/home/user/bashgym-training/data"),
+        help="Directory containing train.jsonl and val.jsonl",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Output directory (default: input_dir/unsloth)",
+    )
+    parser.add_argument(
+        "--formats",
+        nargs="+",
+        default=["chatml", "chatml_flat", "sharegpt"],
+        choices=["chatml", "chatml_flat", "sharegpt"],
+        help="Output formats to generate",
+    )
     args = parser.parse_args()
 
     if args.output_dir is None:
         args.output_dir = args.input_dir / "unsloth"
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Exporting bashgym traces for Unsloth Studio")
+    print("Exporting bashgym traces for Unsloth Studio")
     print(f"  Input:   {args.input_dir}")
     print(f"  Output:  {args.output_dir}")
     print(f"  Formats: {args.formats}")
@@ -284,9 +293,7 @@ def main():
                 "chatml_flat": "OpenAI ChatML with tool calls flattened to text (universal compatibility)",
                 "sharegpt": "ShareGPT format with tool calls flattened to text",
             }[fmt],
-            "files": {
-                stem: info[fmt] for stem, info in all_results.items() if fmt in info
-            }
+            "files": {stem: info[fmt] for stem, info in all_results.items() if fmt in info},
         }
 
     manifest_path = args.output_dir / "manifest.json"

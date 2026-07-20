@@ -3,7 +3,7 @@ import type {
   SkillLabContract,
   SkillLabKpis,
   SkillLabThresholds,
-  ToolkitSkill,
+  ToolkitSkill
 } from '../../../services/api'
 
 export const DEFAULT_SKILL_THRESHOLDS: SkillLabThresholds = {
@@ -11,7 +11,7 @@ export const DEFAULT_SKILL_THRESHOLDS: SkillLabThresholds = {
   min_forced_pass_rate: 0.8,
   min_routing_precision: 0.9,
   min_routing_recall: 0.85,
-  max_false_activation_rate: 0.05,
+  max_false_activation_rate: 0.05
 }
 
 export type SkillLabDepth = 'quick' | 'thorough'
@@ -23,7 +23,7 @@ const SOURCE_LABELS: Record<string, string> = {
   'codex-system': 'Codex system',
   hermes: 'Hermes',
   peony: 'BashGym',
-  workspace: 'Workspace',
+  workspace: 'Workspace'
 }
 
 export function skillLabPlanScope(depth: SkillLabDepth) {
@@ -31,7 +31,7 @@ export function skillLabPlanScope(depth: SkillLabDepth) {
   return {
     cases,
     evaluationCalls: cases * 3,
-    totalCalls: cases * 3 + 1,
+    totalCalls: cases * 3 + 1
   }
 }
 
@@ -53,20 +53,21 @@ export function buildSkillLabTerminalPrompt({
   skill,
   workspaceId,
   goal,
-  depth,
+  depth
 }: {
   skill: ToolkitSkill
   workspaceId: string
   goal?: string
   depth: SkillLabDepth
 }): string {
-  const focus = goal?.trim() || 'Judge whether the skill activates appropriately and improves task quality.'
+  const focus =
+    goal?.trim() || 'Judge whether the skill activates appropriately and improves task quality.'
   return [
     `Help me test the BashGym skill "${skill.name}" in workspace "${workspaceId}".`,
     `Use the BashGym Skill Lab MCP tools to inspect skill id "${skillIdFor(skill)}" before testing it.`,
     `Prepare a ${depth} evaluation focused on: ${focus}`,
     'Exercise representative target and non-target prompts in this session, explain observed failures, and propose concrete skill changes.',
-    'If a healthy model endpoint is available, preview the model-call count and ask me before launching the recorded paired Skill Lab run.',
+    'If a healthy model endpoint is available, preview the model-call count and ask me before launching the recorded paired Skill Lab run.'
   ].join(' ')
 }
 
@@ -77,21 +78,21 @@ export function emptySkillCase(index = 1): SkillLabCase {
     prompt: '',
     should_invoke: true,
     expected_patterns: [],
-    forbidden_patterns: [],
+    forbidden_patterns: []
   }
 }
 
 export function defaultSkillContract(
   workspaceId: string,
   skillId: string,
-  endpointId = '',
+  endpointId = ''
 ): SkillLabContract {
   return {
     workspace_id: workspaceId,
     skill_id: skillId,
     endpoint_id: endpointId,
     cases: [emptySkillCase(1)],
-    thresholds: { ...DEFAULT_SKILL_THRESHOLDS },
+    thresholds: { ...DEFAULT_SKILL_THRESHOLDS }
   }
 }
 

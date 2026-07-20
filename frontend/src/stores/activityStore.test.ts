@@ -3,19 +3,26 @@ import test from 'node:test'
 import { destinationFor, eventKeyFor, titleFor, useActivityStore } from './activityStore'
 
 test('derives actionable destinations, including exact AutoResearch campaign scope', () => {
-  assert.deepEqual(destinationFor('campaign:action-failed', {
-    workspace_id: 'workspace-a', campaign_id: 'campaign-1', action_id: 'action-1',
-  }), {
-    label: 'Open AutoResearch',
-    view: 'autoresearch',
-    workspaceId: 'workspace-a',
-    campaignId: 'campaign-1',
-  })
+  assert.deepEqual(
+    destinationFor('campaign:action-failed', {
+      workspace_id: 'workspace-a',
+      campaign_id: 'campaign-1',
+      action_id: 'action-1'
+    }),
+    {
+      label: 'Open AutoResearch',
+      view: 'autoresearch',
+      workspaceId: 'workspace-a',
+      campaignId: 'campaign-1'
+    }
+  )
   assert.deepEqual(destinationFor('training:complete', { run_id: 'run-1' }), {
-    label: 'Open Training', view: 'training',
+    label: 'Open Training',
+    view: 'training'
   })
   assert.deepEqual(destinationFor('trace:added', { trace_id: 'trace-1' }), {
-    label: 'Open Traces', view: 'traces',
+    label: 'Open Traces',
+    view: 'traces'
   })
   assert.equal(destinationFor('unknown:message', {}), undefined)
 })
@@ -46,7 +53,7 @@ test('maps Hugging Face context lifecycle into the HF activity category', () => 
   store.clear()
   store.addEvent('hf-context:discovery-completed', {
     evidence_count: 7,
-    idempotency_key: 'hf-context:workspace-a:bundle-1:1',
+    idempotency_key: 'hf-context:workspace-a:bundle-1:1'
   })
 
   const [event] = useActivityStore.getState().events
@@ -60,10 +67,15 @@ test('maps Hugging Face collecting and cancellation lifecycle safely', () => {
   const store = useActivityStore.getState()
   store.clear()
   store.addEvent('hf-context:discovery-started', {
-    bundle_id: 'bundle-2', version: 1, idempotency_key: 'hf-start:bundle-2:1',
+    bundle_id: 'bundle-2',
+    version: 1,
+    idempotency_key: 'hf-start:bundle-2:1'
   })
   store.addEvent('hf-context:discovery-cancelled', {
-    bundle_id: 'bundle-2', version: 1, evidence_count: 2, idempotency_key: 'hf-cancel:bundle-2:1',
+    bundle_id: 'bundle-2',
+    version: 1,
+    evidence_count: 2,
+    idempotency_key: 'hf-cancel:bundle-2:1'
   })
   const events = useActivityStore.getState().events
   assert.equal(events[0].category, 'hf')
@@ -133,7 +145,9 @@ test('stores destination metadata with an activity event', () => {
   const store = useActivityStore.getState()
   store.clear()
   store.addEvent('campaign:action-failed', {
-    workspace_id: 'workspace-a', campaign_id: 'campaign-1', action_id: 'action-1',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-1',
+    action_id: 'action-1'
   })
   assert.equal(useActivityStore.getState().events[0].destination?.label, 'Open AutoResearch')
   assert.equal(useActivityStore.getState().events[0].destination?.campaignId, 'campaign-1')
@@ -143,13 +157,19 @@ test('keeps distinct durable campaign events while deduplicating the same event 
   const store = useActivityStore.getState()
   store.clear()
   store.addEvent('campaign:started', {
-    event_id: 'event-1', workspace_id: 'workspace-a', campaign_id: 'campaign-1',
+    event_id: 'event-1',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-1'
   })
   store.addEvent('campaign:started', {
-    event_id: 'event-2', workspace_id: 'workspace-a', campaign_id: 'campaign-1',
+    event_id: 'event-2',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-1'
   })
   store.addEvent('campaign:started', {
-    event_id: 'event-2', workspace_id: 'workspace-a', campaign_id: 'campaign-1',
+    event_id: 'event-2',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-1'
   })
   assert.equal(useActivityStore.getState().events.length, 2)
 })

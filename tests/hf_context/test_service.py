@@ -68,7 +68,10 @@ def test_partial_source_failure_keeps_usable_results_and_safe_status(tmp_path):
     )
 
     assert current.completion_outcome is CompletionOutcome.PARTIAL
-    assert any(status.source == "datasets" and status.status == "failed" for status in current.source_status)
+    assert any(
+        status.source == "datasets" and status.status == "failed"
+        for status in current.source_status
+    )
     assert "hf_secret_should_not_leak" not in current.model_dump_json()
     assert any(item.kind.value == "model" for item in current.evidence)
 
@@ -145,17 +148,13 @@ def test_cancel_wins_against_worker_and_preserves_model_checkpoint(tmp_path):
     result: list = []
     worker = threading.Thread(
         target=lambda: result.append(
-            current_service.run_discovery(
-                "workspace-a", collecting.bundle_id, collecting.version
-            )
+            current_service.run_discovery("workspace-a", collecting.bundle_id, collecting.version)
         )
     )
     worker.start()
     assert entered_datasets.wait(timeout=5)
 
-    cancelled = current_service.cancel(
-        "workspace-a", collecting.bundle_id, collecting.version
-    )
+    cancelled = current_service.cancel("workspace-a", collecting.bundle_id, collecting.version)
     release_datasets.set()
     worker.join(timeout=5)
 

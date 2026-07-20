@@ -40,10 +40,13 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Ruff check
-        run: uv run ruff check bashgym/
+        run: uv run ruff check bashgym tests scripts run_backend.py conftest.py
 
-      - name: Black ratchet
-        run: uv run python scripts/check_black_baseline.py
+      - name: Black check
+        run: uv run black --check bashgym tests scripts run_backend.py conftest.py
+
+      - name: Validate Markdown links
+        run: uv run python scripts/validate_markdown_links.py
 
   python-compatibility:
     name: Python ${{ matrix.python }} / ${{ matrix.platform }}
@@ -125,6 +128,9 @@ jobs:
 
       - name: ESLint
         run: npm run lint
+
+      - name: Prettier
+        run: npm run format:check
 
       - name: TypeScript check
         run: npm run typecheck

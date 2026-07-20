@@ -7,7 +7,7 @@ import {
   ExternalLink,
   Loader2,
   AlertCircle,
-  KeyRound,
+  KeyRound
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { researchApi, type ResearchNewsItem, type ResearchAdvice } from '../../services/api'
@@ -158,7 +158,9 @@ export function ResearchNewsPanel() {
         <div className="flex items-center gap-2 mb-3">
           <Newspaper className="w-5 h-5 text-accent" />
           <h3 className="font-brand text-lg text-text-primary">Ecosystem News</h3>
-          <span className="tag"><span>RESEARCH</span></span>
+          <span className="tag">
+            <span>RESEARCH</span>
+          </span>
         </div>
         <p className="text-xs text-text-muted mb-3">
           Latest training-method changes across unsloth / TRL / NeMo / vLLM / Liger + recent papers.
@@ -223,7 +225,11 @@ export function ResearchNewsPanel() {
           disabled={advising || !baseModel}
           className={clsx('btn-primary flex items-center gap-2 mt-3', advising && 'opacity-70')}
         >
-          {advising ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lightbulb className="w-4 h-4" />}
+          {advising ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Lightbulb className="w-4 h-4" />
+          )}
           Get advice
         </button>
         {!configured && (

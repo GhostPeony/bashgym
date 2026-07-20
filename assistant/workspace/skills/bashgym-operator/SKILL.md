@@ -134,8 +134,8 @@ An initial natural-language request to start AutoResearch authorizes discovery a
 9. Re-read AutoResearch state after every result. Simulated/fake results prove
    orchestration only and cannot establish the baseline or become the incumbent.
 10. Stop only when the durable state reports a stop rule, or when the user invokes
-   an authorized pause/cancel. Preserve the campaign, ledger, branches, and sealed
-   evidence for restart and review.
+    an authorized pause/cancel. Preserve the campaign, ledger, branches, and sealed
+    evidence for restart and review.
 
 Use `bashgym campaign doctor`, the authenticated campaign API, and the durable
 ledger projection as the executable AutoResearch contract. Do not rely on local

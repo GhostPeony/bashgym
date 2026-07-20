@@ -5,7 +5,7 @@ import { API_BASE } from '../../services/api'
 import {
   trainingLogKey,
   trainingLogResource,
-  trainingRunOptionsResource,
+  trainingRunOptionsResource
 } from '../../stores/opsResources'
 import { useSessionResource } from '../../stores/sessionResource'
 

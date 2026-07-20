@@ -107,7 +107,7 @@ export function createSessionResource<T>(
       setData: (data) => {
         invalidated = false
         set({ data, error: null, loadedAt: Date.now() })
-      },
+      }
     }
   })
 }
@@ -154,7 +154,7 @@ const EMPTY_ENTRY = {
   error: null,
   loading: false,
   refreshing: false,
-  loadedAt: null,
+  loadedAt: null
 }
 
 export function createKeyedSessionResource<T>(
@@ -169,8 +169,8 @@ export function createKeyedSessionResource<T>(
       set((state) => ({
         entries: {
           ...state.entries,
-          [key]: { ...(state.entries[key] || EMPTY_ENTRY), ...patch },
-        },
+          [key]: { ...(state.entries[key] || EMPTY_ENTRY), ...patch }
+        }
       }))
     }
 
@@ -229,7 +229,7 @@ export function createKeyedSessionResource<T>(
       setData: (key, data) => {
         invalidatedKeys.delete(key)
         patchEntry(key, { data, error: null, loadedAt: Date.now() })
-      },
+      }
     }
   })
 }

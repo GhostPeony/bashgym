@@ -4,26 +4,17 @@ Tests the flow: spec → DAG decomposition → execution → synthesis
 using real git repos and mocked LLM/CLI backends.
 """
 
-import asyncio
-import json
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from bashgym.orchestrator.agent import OrchestrationAgent
 from bashgym.orchestrator.models import (
-    LLMConfig,
-    LLMProvider,
-    OrchestratorSpec,
-    TaskNode,
-    TaskPriority,
     TaskStatus,
-    WorkerResult,
 )
-from bashgym.orchestrator.synthesizer import ResultSynthesizer, SynthesisReport
+from bashgym.orchestrator.synthesizer import ResultSynthesizer
 from bashgym.orchestrator.task_dag import TaskDAG
-
+from bashgym.orchestrator.worktree import WorktreeManager
 from tests.orchestrator.conftest import make_result, make_task
 
 # E2E pipeline tests drive the orchestrator end-to-end and can block on real
@@ -70,7 +61,7 @@ class TestSpecDecomposition:
     @pytest.mark.asyncio
     async def test_submit_creates_context_builder(self, sample_spec, mock_llm_decomposition):
         agent = OrchestrationAgent()
-        dag = await agent.submit_spec(sample_spec)
+        await agent.submit_spec(sample_spec)
 
         assert agent.context_builder is not None
         assert agent._spec_title == sample_spec.title
@@ -104,11 +95,17 @@ class TestExecution:
         agent.dag = dag
 
         # Mock the pool to return our result
-        with patch.object(agent.pool, "spawn_worker", new_callable=AsyncMock), \
-             patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=result), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock), \
-             patch.object(type(agent.pool), "active_count", new_callable=lambda: property(lambda self: 1)), \
-             patch.object(type(agent.pool), "available_slots", new_callable=lambda: property(lambda self: 4)):
+        with (
+            patch.object(agent.pool, "spawn_worker", new_callable=AsyncMock),
+            patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=result),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+            patch.object(
+                type(agent.pool), "active_count", new_callable=lambda: property(lambda self: 1)
+            ),
+            patch.object(
+                type(agent.pool), "available_slots", new_callable=lambda: property(lambda self: 4)
+            ),
+        ):
 
             # After one result, DAG should be complete
             def side_effect_complete(*args, **kwargs):
@@ -127,7 +124,6 @@ class TestExecution:
         """A→B→C — each completes in order."""
         dag = linear_dag
         call_count = 0
-        task_order = ["A", "B", "C"]
 
         agent = OrchestrationAgent(use_worktrees=False)
 
@@ -147,16 +143,14 @@ class TestExecution:
             task.status = TaskStatus.RUNNING
             dag.nodes[task.id].status = TaskStatus.RUNNING
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
             # Simulate active_count based on call state
-            type(agent.pool).active_count = property(
-                lambda self: 1 if call_count < 3 else 0
-            )
-            type(agent.pool).available_slots = property(
-                lambda self: 4
-            )
+            type(agent.pool).active_count = property(lambda self: 1 if call_count < 3 else 0)
+            type(agent.pool).available_slots = property(lambda self: 4)
 
             results = await agent.execute(dag)
 
@@ -178,13 +172,19 @@ class TestExecution:
             task.status = TaskStatus.RUNNING
             dag.nodes[task.id].status = TaskStatus.RUNNING
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=fail_result), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock), \
-             patch.object(
-                 agent, "_rewrite_prompt_for_retry", new_callable=AsyncMock,
-                 return_value="retry prompt",
-             ):
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(
+                agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=fail_result
+            ),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+            patch.object(
+                agent,
+                "_rewrite_prompt_for_retry",
+                new_callable=AsyncMock,
+                return_value="retry prompt",
+            ),
+        ):
             type(agent.pool).active_count = property(lambda self: 1)
             type(agent.pool).available_slots = property(lambda self: 4)
 
@@ -192,7 +192,7 @@ class TestExecution:
             # Set max_retries to 0 so it fails immediately
             dag.nodes["task_1"].max_retries = 0
 
-            results = await agent.execute(dag)
+            await agent.execute(dag)
 
         assert dag.nodes["task_1"].status == TaskStatus.FAILED
         assert dag.nodes["task_2"].status == TaskStatus.BLOCKED
@@ -223,15 +223,13 @@ class TestExecution:
             call_count += 1
             return r
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
-            type(agent.pool).active_count = property(
-                lambda self: max(0, 2 - call_count)
-            )
-            type(agent.pool).available_slots = property(
-                lambda self: 5 - max(0, 2 - call_count)
-            )
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
+            type(agent.pool).active_count = property(lambda self: max(0, 2 - call_count))
+            type(agent.pool).available_slots = property(lambda self: 5 - max(0, 2 - call_count))
 
             results = await agent.execute(dag)
 
@@ -266,9 +264,11 @@ class TestExecution:
             call_count += 1
             return r
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
             type(agent.pool).active_count = property(lambda self: 1)
             type(agent.pool).available_slots = property(lambda self: 4)
 
@@ -316,15 +316,15 @@ class TestBudgetTracking:
             call_count += 1
             return r
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
-            type(agent.pool).active_count = property(
-                lambda self: 1 if call_count < 3 else 0
-            )
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
+            type(agent.pool).active_count = property(lambda self: 1 if call_count < 3 else 0)
             type(agent.pool).available_slots = property(lambda self: 4)
 
-            results = await agent.execute(dag, budget_usd=10.0)
+            await agent.execute(dag, budget_usd=10.0)
 
         assert agent._total_spent_usd == pytest.approx(1.50)
         status = agent.budget_status
@@ -360,15 +360,15 @@ class TestBudgetTracking:
             call_count += 1
             return r
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
-            type(agent.pool).active_count = property(
-                lambda self: 1 if call_count < 2 else 0
-            )
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
+            type(agent.pool).active_count = property(lambda self: 1 if call_count < 2 else 0)
             type(agent.pool).available_slots = property(lambda self: 4)
 
-            results = await agent.execute(dag, budget_usd=1.0)
+            await agent.execute(dag, budget_usd=1.0)
 
         assert agent._budget_exceeded is True
         assert agent.budget_status["exceeded"] is True
@@ -514,9 +514,11 @@ class TestCallbacks:
             task.status = TaskStatus.RUNNING
             dag.nodes[task.id].status = TaskStatus.RUNNING
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=result), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=result),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
             type(agent.pool).active_count = property(lambda self: 1)
             type(agent.pool).available_slots = property(lambda self: 4)
 
@@ -546,9 +548,11 @@ class TestCallbacks:
             task.status = TaskStatus.RUNNING
             dag.nodes[task.id].status = TaskStatus.RUNNING
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=result), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=result),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
             type(agent.pool).active_count = property(lambda self: 1)
             type(agent.pool).available_slots = property(lambda self: 4)
 
@@ -580,9 +584,11 @@ class TestCallbacks:
             task.status = TaskStatus.RUNNING
             dag.nodes[task.id].status = TaskStatus.RUNNING
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=result), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", new_callable=AsyncMock, return_value=result),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
             type(agent.pool).active_count = property(lambda self: 1)
             type(agent.pool).available_slots = property(lambda self: 4)
 
@@ -603,7 +609,9 @@ class TestFullPipeline:
 
     @pytest.mark.asyncio
     async def test_full_pipeline_with_mock_llm_and_workers(
-        self, sample_spec, mock_llm_decomposition,
+        self,
+        sample_spec,
+        mock_llm_decomposition,
     ):
         """Full flow: submit_spec → execute → results."""
         agent = OrchestrationAgent(use_worktrees=False)
@@ -630,12 +638,12 @@ class TestFullPipeline:
             call_count += 1
             return r
 
-        with patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn), \
-             patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any), \
-             patch.object(agent.pool, "cancel_all", new_callable=AsyncMock):
-            type(agent.pool).active_count = property(
-                lambda self: 1 if call_count < 3 else 0
-            )
+        with (
+            patch.object(agent.pool, "spawn_worker", side_effect=mock_spawn),
+            patch.object(agent.pool, "wait_for_any", side_effect=mock_wait_any),
+            patch.object(agent.pool, "cancel_all", new_callable=AsyncMock),
+        ):
+            type(agent.pool).active_count = property(lambda self: 1 if call_count < 3 else 0)
             type(agent.pool).available_slots = property(lambda self: 4)
 
             results = await agent.execute(dag, budget_usd=5.0)

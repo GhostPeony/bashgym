@@ -15,8 +15,14 @@ interface WorkspaceSwitcherProps {
  * feed down or bury the header no matter how many workspaces exist.
  */
 export function WorkspaceSwitcher({ groups }: WorkspaceSwitcherProps) {
-  const { workspaces, activeWorkspaceId, switchWorkspace, createWorkspace, renameWorkspace, deleteWorkspace } =
-    useWorkspaceStore()
+  const {
+    workspaces,
+    activeWorkspaceId,
+    switchWorkspace,
+    createWorkspace,
+    renameWorkspace,
+    deleteWorkspace
+  } = useWorkspaceStore()
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
@@ -76,7 +82,10 @@ export function WorkspaceSwitcher({ groups }: WorkspaceSwitcherProps) {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className={clsx('node-btn node-btn-wide w-full !justify-start min-w-0', open ? 'node-btn-accent' : null)}
+        className={clsx(
+          'node-btn node-btn-wide w-full !justify-start min-w-0',
+          open ? 'node-btn-accent' : null
+        )}
         aria-haspopup="menu"
         aria-expanded={open}
         title="Switch or manage workspaces"
@@ -91,14 +100,24 @@ export function WorkspaceSwitcher({ groups }: WorkspaceSwitcherProps) {
         <span className="text-[9px] opacity-70 flex-shrink-0">
           {activeLive > 0 ? `${activeLive} live` : `${activeTotal} saved`}
         </span>
-        <ChevronDown className={clsx('w-3 h-3 flex-shrink-0 transition-transform', open ? 'rotate-180' : null)} />
+        <ChevronDown
+          className={clsx('w-3 h-3 flex-shrink-0 transition-transform', open ? 'rotate-180' : null)}
+        />
       </button>
 
       {open ? (
         <div className="absolute left-0 right-0 top-full z-40 mt-1 bg-background-card border-brutal border-border shadow-brutal rounded-brutal overflow-hidden">
           <div className="flex items-center gap-2 px-2.5 py-1.5 bg-background-secondary border-b border-brutal border-border">
-            <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-text-muted flex-1">Workspaces</span>
-            <button type="button" onClick={startCreate} className="node-btn" title="New workspace" aria-label="New workspace">
+            <span className="font-mono text-[9px] font-bold uppercase tracking-widest text-text-muted flex-1">
+              Workspaces
+            </span>
+            <button
+              type="button"
+              onClick={startCreate}
+              className="node-btn"
+              title="New workspace"
+              aria-label="New workspace"
+            >
               <Plus className="w-3 h-3" />
             </button>
           </div>
@@ -126,7 +145,13 @@ export function WorkspaceSwitcher({ groups }: WorkspaceSwitcherProps) {
                       className="input !py-1 !px-2 !text-[10px] font-mono flex-1 min-w-0"
                       aria-label={`Rename ${workspace.name}`}
                     />
-                    <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitName} className="node-btn" aria-label="Save workspace name">
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={commitName}
+                      className="node-btn"
+                      aria-label="Save workspace name"
+                    >
                       <Check className="w-3 h-3" />
                     </button>
                   </div>
@@ -138,13 +163,23 @@ export function WorkspaceSwitcher({ groups }: WorkspaceSwitcherProps) {
                   <button
                     type="button"
                     onClick={() => handleSwitch(workspace.id)}
-                    className={clsx('node-btn node-btn-wide flex-1 !justify-start min-w-0', isActive ? 'node-btn-accent' : null)}
+                    className={clsx(
+                      'node-btn node-btn-wide flex-1 !justify-start min-w-0',
+                      isActive ? 'node-btn-accent' : null
+                    )}
                     aria-current={isActive ? 'page' : undefined}
                     title={isActive ? `${workspace.name} is active` : `Switch to ${workspace.name}`}
                   >
-                    <span className={clsx('status-dot flex-shrink-0', live > 0 ? 'status-success' : waiting > 0 ? 'status-warning' : '')} />
+                    <span
+                      className={clsx(
+                        'status-dot flex-shrink-0',
+                        live > 0 ? 'status-success' : waiting > 0 ? 'status-warning' : ''
+                      )}
+                    />
                     <span className="truncate flex-1 text-left">{workspace.name}</span>
-                    <span className="text-[9px] opacity-70 flex-shrink-0">{live > 0 ? `${live} live` : `${total} saved`}</span>
+                    <span className="text-[9px] opacity-70 flex-shrink-0">
+                      {live > 0 ? `${live} live` : `${total} saved`}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -189,7 +224,13 @@ export function WorkspaceSwitcher({ groups }: WorkspaceSwitcherProps) {
                   placeholder="Workspace name"
                   aria-label="New workspace name"
                 />
-                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitName} className="node-btn" aria-label="Create workspace">
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={commitName}
+                  className="node-btn"
+                  aria-label="Create workspace"
+                >
                   <Check className="w-3 h-3" />
                 </button>
               </div>

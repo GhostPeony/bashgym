@@ -21,7 +21,6 @@ Usage:
 import argparse
 import logging
 import os
-import sys
 from pathlib import Path
 
 # DGX Spark sm_121 fix — set BEFORE any torch/triton imports
@@ -29,7 +28,9 @@ if Path("/usr/local/cuda/bin/ptxas").exists():
     os.environ.setdefault("TRITON_PTXAS_PATH", "/usr/local/cuda/bin/ptxas")
 os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "12.1a")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -48,7 +49,9 @@ def main():
     parser.add_argument("--num-epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=4)
-    parser.add_argument("--learning-rate", type=float, default=5e-6, help="DPO uses lower LR than SFT")
+    parser.add_argument(
+        "--learning-rate", type=float, default=5e-6, help="DPO uses lower LR than SFT"
+    )
     parser.add_argument("--beta", type=float, default=0.1, help="DPO KL coefficient")
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=16)
@@ -85,10 +88,10 @@ def main():
     except ImportError:
         logger.info("Not a Gemma 4 model — patch skipped")
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    from peft import LoraConfig, get_peft_model
     from datasets import load_dataset
-    from trl import DPOTrainer, DPOConfig
+    from peft import LoraConfig, get_peft_model
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from trl import DPOConfig, DPOTrainer
 
     logger.info("=" * 60)
     logger.info("DPO TRAINING")
@@ -121,7 +124,15 @@ def main():
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=0.05,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules=[
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ],
         exclude_modules=["vision_tower", "multi_modal_projector", "audio_tower"],
         bias="none",
         task_type="CAUSAL_LM",

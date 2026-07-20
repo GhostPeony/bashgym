@@ -20,7 +20,7 @@ function normalizedPath(value: unknown): string | undefined {
 export function selectDesignerPanelForJob(
   panels: readonly DesignerPanelCandidate[],
   job: { job_id: string; output_dir?: string | null },
-  originPanelId?: string,
+  originPanelId?: string
 ): DesignerPanelCandidate | undefined {
   const designers = panels.filter((panel) => panel.type === 'designer')
   const exact = designers.find((panel) => {
@@ -31,9 +31,9 @@ export function selectDesignerPanelForJob(
 
   const outputDir = normalizedPath(job.output_dir)
   if (outputDir) {
-    const sameOutput = designers.find((panel) => (
-      normalizedPath(panel.adapterConfig?.outputDir) === outputDir
-    ))
+    const sameOutput = designers.find(
+      (panel) => normalizedPath(panel.adapterConfig?.outputDir) === outputDir
+    )
     if (sameOutput) return sameOutput
   }
 

@@ -71,7 +71,7 @@ const EVENT_FIELDS = new Set([
   'summary',
   'actor_id',
   'credential_kind',
-  'created_at',
+  'created_at'
 ])
 const SUMMARY_FIELDS = new Set([
   'schema_version',
@@ -88,7 +88,7 @@ const SUMMARY_FIELDS = new Set([
   'claim_generation',
   'cursor_end',
   'alert_count',
-  'study_completed',
+  'study_completed'
 ])
 const ARTIFACT_FIELDS = new Set([
   'schema_version',
@@ -101,22 +101,16 @@ const ARTIFACT_FIELDS = new Set([
   'schema_name',
   'sealed',
   'valid',
-  'created_at',
+  'created_at'
 ])
-const ID_FIELDS = new Set([
-  'action_id',
-  'attempt_id',
-  'study_id',
-  'proposal_id',
-  'entry_id',
-])
+const ID_FIELDS = new Set(['action_id', 'attempt_id', 'study_id', 'proposal_id', 'entry_id'])
 const INTEGER_FIELDS = new Set([
   'manifest_revision',
   'stage_index',
   'next_stage_index',
   'claim_generation',
   'cursor_end',
-  'alert_count',
+  'alert_count'
 ])
 const STAGES = new Set([
   'data_build',
@@ -127,7 +121,7 @@ const STAGES = new Set([
   'comparison',
   'recipe_lock',
   'protected_evaluation',
-  'promotion',
+  'promotion'
 ])
 const BLOCKER_CODES = new Set([
   'campaign_controller_action_blocked',
@@ -144,7 +138,7 @@ const BLOCKER_CODES = new Set([
   'campaign_remote_target_model_mismatch',
   'campaign_remote_profile_material_invalid',
   'campaign_executor_kind_not_registered',
-  'campaign_budget_unit_not_approved',
+  'campaign_budget_unit_not_approved'
 ])
 const ARTIFACT_SCHEMA_NAMES = new Set([
   'campaign_development_comparison.v1',
@@ -164,7 +158,7 @@ const ARTIFACT_SCHEMA_NAMES = new Set([
   'query_format_ablation_manifest.v2',
   'training_manifest.v1',
   'training_metrics_jsonl.v1',
-  'unclassified_artifact.v1',
+  'unclassified_artifact.v1'
 ])
 const CREDENTIAL_KINDS = new Set(['desktop_bootstrap', 'refresh', 'access', 'controller'])
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/
@@ -172,7 +166,7 @@ const SHA256 = /^[0-9a-f]{64}$/
 
 function recordOf(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null
 }
 
@@ -198,7 +192,7 @@ function publicSummary(value: unknown): CampaignPublicEventSummary | null {
   if (summary.schema_version !== 'public_campaign_event_summary.v1') return null
 
   const safe: Record<string, unknown> = {
-    schema_version: 'public_campaign_event_summary.v1',
+    schema_version: 'public_campaign_event_summary.v1'
   }
   for (const [key, field] of Object.entries(summary)) {
     if (key === 'schema_version') continue
@@ -225,22 +219,25 @@ export function toCampaignActivityFields(value: unknown): Record<string, unknown
   const event = recordOf(value)
   if (!event || !hasOnlyKeys(event, EVENT_FIELDS)) return null
   if (event.schema_version !== 'public_campaign_event.v1') return null
-  if (!identifier(event.event_id)
-    || !identifier(event.workspace_id)
-    || !identifier(event.campaign_id)
-    || !finiteInteger(event.sequence, 1)
-    || !finiteInteger(event.aggregate_version, 1)
-    || !identifier(event.event_type)
-    || !identifier(event.actor_id)
-    || typeof event.credential_kind !== 'string'
-    || !CREDENTIAL_KINDS.has(event.credential_kind)
-    || !isoTimestamp(event.created_at)) return null
+  if (
+    !identifier(event.event_id) ||
+    !identifier(event.workspace_id) ||
+    !identifier(event.campaign_id) ||
+    !finiteInteger(event.sequence, 1) ||
+    !finiteInteger(event.aggregate_version, 1) ||
+    !identifier(event.event_type) ||
+    !identifier(event.actor_id) ||
+    typeof event.credential_kind !== 'string' ||
+    !CREDENTIAL_KINDS.has(event.credential_kind) ||
+    !isoTimestamp(event.created_at)
+  )
+    return null
 
   const fields: Record<string, unknown> = {
     event_id: event.event_id,
     workspace_id: event.workspace_id,
     campaign_id: event.campaign_id,
-    aggregate_version: event.aggregate_version,
+    aggregate_version: event.aggregate_version
   }
   if (event.summary !== undefined && event.summary !== null) {
     const summary = publicSummary(event.summary)
@@ -252,7 +249,8 @@ export function toCampaignActivityFields(value: unknown): Record<string, unknown
     if (summary.entry_id !== undefined) fields.entry_id = summary.entry_id
     if (summary.stage !== undefined) fields.stage = summary.stage
     if (summary.code !== undefined) fields.code = summary.code
-    if (summary.manifest_revision !== undefined) fields.manifest_revision = summary.manifest_revision
+    if (summary.manifest_revision !== undefined)
+      fields.manifest_revision = summary.manifest_revision
     if (summary.stage_index !== undefined) fields.stage_index = summary.stage_index
     if (summary.next_stage_index !== undefined) fields.next_stage_index = summary.next_stage_index
     if (summary.claim_generation !== undefined) fields.claim_generation = summary.claim_generation
@@ -266,20 +264,30 @@ export function toCampaignActivityFields(value: unknown): Record<string, unknown
 export function toCampaignArtifactPreview(value: unknown): CampaignArtifactPreview | null {
   const preview = recordOf(value)
   const fields = new Set([
-    'schema_version', 'artifact_id', 'preview_kind', 'content', 'truncated',
-    'redaction_count', 'integrity_verified', 'unavailable_reason',
+    'schema_version',
+    'artifact_id',
+    'preview_kind',
+    'content',
+    'truncated',
+    'redaction_count',
+    'integrity_verified',
+    'unavailable_reason'
   ])
   if (!preview || !hasOnlyKeys(preview, fields)) return null
-  if (preview.schema_version !== 'public_campaign_artifact_preview.v1'
-    || !identifier(preview.artifact_id)
-    || typeof preview.preview_kind !== 'string'
-    || !['json', 'jsonl', 'text', 'unavailable'].includes(preview.preview_kind)
-    || (preview.content !== null && (typeof preview.content !== 'string' || preview.content.length > 65_536))
-    || typeof preview.truncated !== 'boolean'
-    || !finiteInteger(preview.redaction_count, 0)
-    || preview.integrity_verified !== true
-    || (preview.unavailable_reason !== null
-      && (typeof preview.unavailable_reason !== 'string' || preview.unavailable_reason.length > 500))) return null
+  if (
+    preview.schema_version !== 'public_campaign_artifact_preview.v1' ||
+    !identifier(preview.artifact_id) ||
+    typeof preview.preview_kind !== 'string' ||
+    !['json', 'jsonl', 'text', 'unavailable'].includes(preview.preview_kind) ||
+    (preview.content !== null &&
+      (typeof preview.content !== 'string' || preview.content.length > 65_536)) ||
+    typeof preview.truncated !== 'boolean' ||
+    !finiteInteger(preview.redaction_count, 0) ||
+    preview.integrity_verified !== true ||
+    (preview.unavailable_reason !== null &&
+      (typeof preview.unavailable_reason !== 'string' || preview.unavailable_reason.length > 500))
+  )
+    return null
   if (preview.preview_kind === 'unavailable') {
     if (preview.content !== null || !preview.unavailable_reason) return null
   } else if (typeof preview.content !== 'string' || preview.unavailable_reason !== null) return null
@@ -289,21 +297,24 @@ export function toCampaignArtifactPreview(value: unknown): CampaignArtifactPrevi
 export function toCampaignPublicArtifact(value: unknown): CampaignArtifact | null {
   const artifact = recordOf(value)
   if (!artifact || !hasOnlyKeys(artifact, ARTIFACT_FIELDS)) return null
-  if (artifact.schema_version !== 'public_campaign_artifact.v1'
-    || !identifier(artifact.workspace_id)
-    || !identifier(artifact.campaign_id)
-    || !identifier(artifact.artifact_id)
-    || (artifact.producer_action_id !== undefined
-      && artifact.producer_action_id !== null
-      && !identifier(artifact.producer_action_id))
-    || typeof artifact.sha256 !== 'string'
-    || !SHA256.test(artifact.sha256)
-    || !finiteInteger(artifact.size_bytes, 0)
-    || typeof artifact.schema_name !== 'string'
-    || !ARTIFACT_SCHEMA_NAMES.has(artifact.schema_name)
-    || typeof artifact.sealed !== 'boolean'
-    || typeof artifact.valid !== 'boolean'
-    || !isoTimestamp(artifact.created_at)) return null
+  if (
+    artifact.schema_version !== 'public_campaign_artifact.v1' ||
+    !identifier(artifact.workspace_id) ||
+    !identifier(artifact.campaign_id) ||
+    !identifier(artifact.artifact_id) ||
+    (artifact.producer_action_id !== undefined &&
+      artifact.producer_action_id !== null &&
+      !identifier(artifact.producer_action_id)) ||
+    typeof artifact.sha256 !== 'string' ||
+    !SHA256.test(artifact.sha256) ||
+    !finiteInteger(artifact.size_bytes, 0) ||
+    typeof artifact.schema_name !== 'string' ||
+    !ARTIFACT_SCHEMA_NAMES.has(artifact.schema_name) ||
+    typeof artifact.sealed !== 'boolean' ||
+    typeof artifact.valid !== 'boolean' ||
+    !isoTimestamp(artifact.created_at)
+  )
+    return null
 
   return {
     schema_version: 'public_campaign_artifact.v1',
@@ -316,6 +327,6 @@ export function toCampaignPublicArtifact(value: unknown): CampaignArtifact | nul
     schema_name: artifact.schema_name,
     sealed: artifact.sealed,
     valid: artifact.valid,
-    created_at: artifact.created_at,
+    created_at: artifact.created_at
   }
 }

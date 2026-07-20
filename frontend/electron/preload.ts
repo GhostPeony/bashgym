@@ -4,13 +4,13 @@ import type {
   CampaignMethod,
   CampaignQuery,
   CampaignRequestAuthority,
-  CampaignResponse,
+  CampaignResponse
 } from './campaignBridge'
 import type {
   CampaignAgentHostAttachRequest,
   CampaignAgentHostAuthorizeRequest,
   CampaignAgentHostEligibleSession,
-  CampaignAgentHostPublicStatus,
+  CampaignAgentHostPublicStatus
 } from './campaignAgentHost'
 
 export type CampaignRoute =
@@ -108,7 +108,10 @@ export type ApiStreamEvent =
   | { type: 'error'; error: string }
 
 export interface ApiProxy {
-  fetch: (url: string, options?: RequestInit) => Promise<{
+  fetch: (
+    url: string,
+    options?: RequestInit
+  ) => Promise<{
     ok: boolean
     status?: number
     data?: any
@@ -154,7 +157,11 @@ export interface FilesAPI {
     }
     error?: string
   }>
-  writeTempFile: (dataUrl: string, ext: string, basename?: string) => Promise<{
+  writeTempFile: (
+    dataUrl: string,
+    ext: string,
+    basename?: string
+  ) => Promise<{
     success: boolean
     path?: string
     error?: string
@@ -186,7 +193,11 @@ export interface SessionsAPI {
     codex?: SessionFileInfo[]
     error?: string
   }>
-  readTail: (filePath: string, fromOffset: number, maxBytes?: number) => Promise<{
+  readTail: (
+    filePath: string,
+    fromOffset: number,
+    maxBytes?: number
+  ) => Promise<{
     success: boolean
     data?: string
     newOffset?: number
@@ -194,7 +205,10 @@ export interface SessionsAPI {
     reset?: boolean
     error?: string
   }>
-  readHead: (filePath: string, maxBytes?: number) => Promise<{
+  readHead: (
+    filePath: string,
+    maxBytes?: number
+  ) => Promise<{
     success: boolean
     data?: string
     error?: string
@@ -211,11 +225,16 @@ export interface WindowAPI {
   maximize: () => Promise<void>
   close: () => Promise<void>
   isMaximized: () => Promise<boolean>
-  onAppKeydown: (callback: (data: { key: string; ctrlKey: boolean; shiftKey: boolean }) => void) => () => void
+  onAppKeydown: (
+    callback: (data: { key: string; ctrlKey: boolean; shiftKey: boolean }) => void
+  ) => () => void
 }
 
 export interface BrowserAPI {
-  screenshot: (webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) => Promise<{
+  screenshot: (
+    webContentsId: number,
+    rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }
+  ) => Promise<{
     success: boolean
     dataUrl?: string
     error?: string
@@ -244,8 +263,7 @@ export interface AgentBridgeAPI {
 }
 
 export type CampaignAgentHostResult<T extends Record<string, unknown> = Record<string, never>> =
-  | ({ success: true } & T)
-  | { success: false; error: string }
+  ({ success: true } & T) | { success: false; error: string }
 
 export interface CampaignAgentHostLaunchRequest {
   workspaceId: string
@@ -263,11 +281,21 @@ export interface CampaignAgentHostTerminalScopeRequest extends CampaignAgentHost
 }
 
 export interface CampaignAgentHostAPI {
-  launch: (request: CampaignAgentHostLaunchRequest) => Promise<CampaignAgentHostResult<{ terminalId: string; cwd: string }>>
-  eligible: (request: CampaignAgentHostScopeRequest) => Promise<CampaignAgentHostResult<{ sessions: CampaignAgentHostEligibleSession[] }>>
-  attach: (request: CampaignAgentHostAttachRequest) => Promise<CampaignAgentHostResult<{ status: CampaignAgentHostPublicStatus }>>
-  authorize: (request: CampaignAgentHostAuthorizeRequest) => Promise<CampaignAgentHostResult<{ status: CampaignAgentHostPublicStatus }>>
-  activate: (request: CampaignAgentHostTerminalScopeRequest) => Promise<CampaignAgentHostResult<{ status: CampaignAgentHostPublicStatus }>>
+  launch: (
+    request: CampaignAgentHostLaunchRequest
+  ) => Promise<CampaignAgentHostResult<{ terminalId: string; cwd: string }>>
+  eligible: (
+    request: CampaignAgentHostScopeRequest
+  ) => Promise<CampaignAgentHostResult<{ sessions: CampaignAgentHostEligibleSession[] }>>
+  attach: (
+    request: CampaignAgentHostAttachRequest
+  ) => Promise<CampaignAgentHostResult<{ status: CampaignAgentHostPublicStatus }>>
+  authorize: (
+    request: CampaignAgentHostAuthorizeRequest
+  ) => Promise<CampaignAgentHostResult<{ status: CampaignAgentHostPublicStatus }>>
+  activate: (
+    request: CampaignAgentHostTerminalScopeRequest
+  ) => Promise<CampaignAgentHostResult<{ status: CampaignAgentHostPublicStatus }>>
   revoke: (request: CampaignAgentHostTerminalScopeRequest) => Promise<CampaignAgentHostResult>
 }
 
@@ -290,14 +318,15 @@ export interface BashGymAPI {
     route: CampaignRoute,
     body?: CampaignBody,
     query?: CampaignQuery,
-    authority?: CampaignRequestAuthority,
+    authority?: CampaignRequestAuthority
   ) => Promise<CampaignResponse>
 }
 
 function runtimeArgument(name: string, fallback: string): string {
   const prefix = `--${name}=`
-  return process.argv.find((argument) => argument.startsWith(prefix))?.slice(prefix.length)
-    || fallback
+  return (
+    process.argv.find((argument) => argument.startsWith(prefix))?.slice(prefix.length) || fallback
+  )
 }
 
 // Expose protected methods to renderer
@@ -308,10 +337,12 @@ contextBridge.exposeInMainWorld('bashgym', {
       ipcRenderer.send('terminal:write', id, data)
       return Promise.resolve(true)
     },
-    resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
+    resize: (id: string, cols: number, rows: number) =>
+      ipcRenderer.invoke('terminal:resize', id, cols, rows),
     kill: (id: string) => ipcRenderer.invoke('terminal:kill', id),
     list: () => ipcRenderer.invoke('terminal:list'),
-    snapshot: (id: string, maxBytes?: number) => ipcRenderer.invoke('terminal:snapshot', id, maxBytes),
+    snapshot: (id: string, maxBytes?: number) =>
+      ipcRenderer.invoke('terminal:snapshot', id, maxBytes),
     setOutputFlowControl: (id: string, owner: string, enabled: boolean) => {
       ipcRenderer.send('terminal:output-flow', id, owner, enabled)
     },
@@ -340,7 +371,7 @@ contextBridge.exposeInMainWorld('bashgym', {
   },
   runtime: {
     apiBase: runtimeArgument('bashgym-api-base', 'http://127.0.0.1:8003/api'),
-    webSocketUrl: runtimeArgument('bashgym-websocket-url', 'ws://127.0.0.1:8003/ws'),
+    webSocketUrl: runtimeArgument('bashgym-websocket-url', 'ws://127.0.0.1:8003/ws')
   },
   api: {
     fetch: (url: string, options?: RequestInit) => ipcRenderer.invoke('api:fetch', url, options),
@@ -376,17 +407,22 @@ contextBridge.exposeInMainWorld('bashgym', {
     readFile: (path: string) => ipcRenderer.invoke('files:readFile', path),
     exists: (path: string) => ipcRenderer.invoke('files:exists', path),
     stat: (path: string) => ipcRenderer.invoke('files:stat', path),
-    writeTempFile: (dataUrl: string, ext: string, basename?: string) => ipcRenderer.invoke('files:writeTempFile', dataUrl, ext, basename)
+    writeTempFile: (dataUrl: string, ext: string, basename?: string) =>
+      ipcRenderer.invoke('files:writeTempFile', dataUrl, ext, basename)
   },
   sessions: {
     scan: (lookbackDays?: number) => ipcRenderer.invoke('sessions:scan', lookbackDays),
-    readTail: (filePath: string, fromOffset: number, maxBytes?: number) => ipcRenderer.invoke('sessions:readTail', filePath, fromOffset, maxBytes),
-    readHead: (filePath: string, maxBytes?: number) => ipcRenderer.invoke('sessions:readHead', filePath, maxBytes),
+    readTail: (filePath: string, fromOffset: number, maxBytes?: number) =>
+      ipcRenderer.invoke('sessions:readTail', filePath, fromOffset, maxBytes),
+    readHead: (filePath: string, maxBytes?: number) =>
+      ipcRenderer.invoke('sessions:readHead', filePath, maxBytes),
     readAccount: () => ipcRenderer.invoke('sessions:readAccount')
   },
   browser: {
-    screenshot: (webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) =>
-      ipcRenderer.invoke('browser:screenshot', webContentsId, rect)
+    screenshot: (
+      webContentsId: number,
+      rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }
+    ) => ipcRenderer.invoke('browser:screenshot', webContentsId, rect)
   },
   clipboard: {
     writeImage: (dataUrl: string) => ipcRenderer.invoke('clipboard:writeImage', dataUrl),
@@ -395,10 +431,10 @@ contextBridge.exposeInMainWorld('bashgym', {
   credentials: {
     store: (key: string, value: string) => ipcRenderer.invoke('credentials:store', key, value),
     read: (key: string) => ipcRenderer.invoke('credentials:read', key),
-    delete: (key: string) => ipcRenderer.invoke('credentials:delete', key),
+    delete: (key: string) => ipcRenderer.invoke('credentials:delete', key)
   },
   agentBridge: {
-    prepareLaunch: (request) => ipcRenderer.invoke('agent-bridge:prepare-launch', request),
+    prepareLaunch: (request) => ipcRenderer.invoke('agent-bridge:prepare-launch', request)
   },
   campaignAgentHost: {
     launch: (request) => ipcRenderer.invoke('campaign-agent-host:launch', request),
@@ -406,18 +442,20 @@ contextBridge.exposeInMainWorld('bashgym', {
     attach: (request) => ipcRenderer.invoke('campaign-agent-host:attach', request),
     authorize: (request) => ipcRenderer.invoke('campaign-agent-host:authorize', request),
     activate: (request) => ipcRenderer.invoke('campaign-agent-host:activate', request),
-    revoke: (request) => ipcRenderer.invoke('campaign-agent-host:revoke', request),
+    revoke: (request) => ipcRenderer.invoke('campaign-agent-host:revoke', request)
   },
-  campaignRequest: (method, route, body, query, authority) => (
-    ipcRenderer.invoke('campaign:request', method, route, body, query, authority)
-  ),
+  campaignRequest: (method, route, body, query, authority) =>
+    ipcRenderer.invoke('campaign:request', method, route, body, query, authority),
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close'),
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
-    onAppKeydown: (callback: (data: { key: string; ctrlKey: boolean; shiftKey: boolean }) => void) => {
-      const listener = (_: any, data: { key: string; ctrlKey: boolean; shiftKey: boolean }) => callback(data)
+    onAppKeydown: (
+      callback: (data: { key: string; ctrlKey: boolean; shiftKey: boolean }) => void
+    ) => {
+      const listener = (_: any, data: { key: string; ctrlKey: boolean; shiftKey: boolean }) =>
+        callback(data)
       ipcRenderer.on('app-keydown', listener)
       return () => ipcRenderer.removeListener('app-keydown', listener)
     }

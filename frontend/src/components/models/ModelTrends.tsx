@@ -26,17 +26,37 @@ interface MetricOption {
 }
 
 const METRIC_OPTIONS: MetricOption[] = [
-  { value: 'benchmark_avg_score', label: 'Benchmark Score', description: 'Average across all benchmarks', higherIsBetter: true },
-  { value: 'custom_eval_pass_rate', label: 'Custom Eval', description: 'Custom evaluation pass rate', higherIsBetter: true },
-  { value: 'final_loss', label: 'Training Loss', description: 'Final training loss', higherIsBetter: false },
-  { value: 'model_size_bytes', label: 'Model Size', description: 'Size of model artifacts', higherIsBetter: false },
+  {
+    value: 'benchmark_avg_score',
+    label: 'Benchmark Score',
+    description: 'Average across all benchmarks',
+    higherIsBetter: true
+  },
+  {
+    value: 'custom_eval_pass_rate',
+    label: 'Custom Eval',
+    description: 'Custom evaluation pass rate',
+    higherIsBetter: true
+  },
+  {
+    value: 'final_loss',
+    label: 'Training Loss',
+    description: 'Final training loss',
+    higherIsBetter: false
+  },
+  {
+    value: 'model_size_bytes',
+    label: 'Model Size',
+    description: 'Size of model artifacts',
+    higherIsBetter: false
+  }
 ]
 
 const TIME_RANGE_OPTIONS = [
   { value: 7, label: '7 days' },
   { value: 14, label: '14 days' },
   { value: 30, label: '30 days' },
-  { value: 90, label: '90 days' },
+  { value: 90, label: '90 days' }
 ]
 
 function formatMetricValue(value: number, metric: string): string {
@@ -56,7 +76,11 @@ function formatMetricValue(value: number, metric: string): string {
   }
 }
 
-function SimpleLineChart({ data, metric, onSelectModel }: {
+function SimpleLineChart({
+  data,
+  metric,
+  onSelectModel
+}: {
   data: TrendDataPoint[]
   metric: MetricOption
   onSelectModel: (modelId: string) => void
@@ -70,26 +94,35 @@ function SimpleLineChart({ data, metric, onSelectModel }: {
   }
 
   // Group by date for visualization
-  const dateGroups = data.reduce((acc, point) => {
-    const date = point.timestamp.split('T')[0]
-    if (!acc[date]) acc[date] = []
-    acc[date].push(point)
-    return acc
-  }, {} as Record<string, TrendDataPoint[]>)
+  const dateGroups = data.reduce(
+    (acc, point) => {
+      const date = point.timestamp.split('T')[0]
+      if (!acc[date]) acc[date] = []
+      acc[date].push(point)
+      return acc
+    },
+    {} as Record<string, TrendDataPoint[]>
+  )
 
   const dates = Object.keys(dateGroups).sort()
-  const values = data.map(d => d.value)
+  const values = data.map((d) => d.value)
   const minVal = Math.min(...values)
   const maxVal = Math.max(...values)
   const range = maxVal - minVal || 1
 
   // Get unique models with their latest values
-  const modelLatest = data.reduce((acc, point) => {
-    if (!acc[point.model_id] || new Date(point.timestamp) > new Date(acc[point.model_id].timestamp)) {
-      acc[point.model_id] = point
-    }
-    return acc
-  }, {} as Record<string, TrendDataPoint>)
+  const modelLatest = data.reduce(
+    (acc, point) => {
+      if (
+        !acc[point.model_id] ||
+        new Date(point.timestamp) > new Date(acc[point.model_id].timestamp)
+      ) {
+        acc[point.model_id] = point
+      }
+      return acc
+    },
+    {} as Record<string, TrendDataPoint>
+  )
 
   const sortedModels = Object.values(modelLatest).sort((a, b) => {
     return metric.higherIsBetter ? b.value - a.value : a.value - b.value
@@ -104,7 +137,7 @@ function SimpleLineChart({ data, metric, onSelectModel }: {
     'bg-accent-dark',
     'bg-status-error',
     'bg-accent-light',
-    'bg-text-secondary',
+    'bg-text-secondary'
   ]
 
   const getModelColor = (index: number) => modelColors[index % modelColors.length]
@@ -119,10 +152,7 @@ function SimpleLineChart({ data, metric, onSelectModel }: {
           const height = ((avgValue - minVal) / range) * 100 || 5
 
           return (
-            <div
-              key={date}
-              className="flex-1 flex flex-col items-center justify-end"
-            >
+            <div key={date} className="flex-1 flex flex-col items-center justify-end">
               <div
                 className="w-full bg-accent hover:bg-accent-dark transition-colors cursor-pointer"
                 style={{ height: `${height}%` }}
@@ -149,7 +179,9 @@ function SimpleLineChart({ data, metric, onSelectModel }: {
             <div className={clsx('w-3 h-3 border-brutal border-border', getModelColor(i))} />
             <div className="flex-1 min-w-0">
               <div className="font-brand text-text-primary truncate">{model.display_name}</div>
-              <div className="font-mono text-xs text-text-muted">{formatMetricValue(model.value, metric.value)}</div>
+              <div className="font-mono text-xs text-text-muted">
+                {formatMetricValue(model.value, metric.value)}
+              </div>
             </div>
             {i === 0 && (
               <div className="flex items-center gap-1 text-status-success font-mono text-xs uppercase tracking-widest">
@@ -164,25 +196,37 @@ function SimpleLineChart({ data, metric, onSelectModel }: {
       {/* Stats summary */}
       <div className="grid grid-cols-4 gap-4">
         <div className="p-4 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Latest Best</div>
+          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+            Latest Best
+          </div>
           <div className="font-brand text-2xl text-status-success">
             {sortedModels[0] ? formatMetricValue(sortedModels[0].value, metric.value) : '\u2014'}
           </div>
-          <div className="font-mono text-xs text-text-muted truncate">{sortedModels[0]?.display_name}</div>
+          <div className="font-mono text-xs text-text-muted truncate">
+            {sortedModels[0]?.display_name}
+          </div>
         </div>
         <div className="p-4 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Average</div>
+          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+            Average
+          </div>
           <div className="font-brand text-2xl text-text-primary">
             {formatMetricValue(values.reduce((a, b) => a + b, 0) / values.length, metric.value)}
           </div>
         </div>
         <div className="p-4 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Data Points</div>
+          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+            Data Points
+          </div>
           <div className="font-brand text-2xl text-text-primary">{data.length}</div>
         </div>
         <div className="p-4 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Unique Models</div>
-          <div className="font-brand text-2xl text-text-primary">{Object.keys(modelLatest).length}</div>
+          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+            Unique Models
+          </div>
+          <div className="font-brand text-2xl text-text-primary">
+            {Object.keys(modelLatest).length}
+          </div>
         </div>
       </div>
     </div>
@@ -222,7 +266,9 @@ export function ModelTrends({ onBack, onSelectModel }: ModelTrendsProps) {
             disabled={isLoading || refreshing}
             className="btn-secondary"
           >
-            <RefreshCw className={clsx('w-4 h-4 mr-2', (isLoading || refreshing) && 'animate-spin')} />
+            <RefreshCw
+              className={clsx('w-4 h-4 mr-2', (isLoading || refreshing) && 'animate-spin')}
+            />
             Refresh
           </button>
         </div>
@@ -234,11 +280,17 @@ export function ModelTrends({ onBack, onSelectModel }: ModelTrendsProps) {
             <Activity className="w-4 h-4 text-text-muted" />
             <select
               value={selectedMetric.value}
-              onChange={(e) => setSelectedMetric(METRIC_OPTIONS.find(m => m.value === e.target.value) || METRIC_OPTIONS[0])}
+              onChange={(e) =>
+                setSelectedMetric(
+                  METRIC_OPTIONS.find((m) => m.value === e.target.value) || METRIC_OPTIONS[0]
+                )
+              }
               className="input font-mono text-sm"
             >
-              {METRIC_OPTIONS.map(metric => (
-                <option key={metric.value} value={metric.value}>{metric.label}</option>
+              {METRIC_OPTIONS.map((metric) => (
+                <option key={metric.value} value={metric.value}>
+                  {metric.label}
+                </option>
               ))}
             </select>
           </div>
@@ -247,7 +299,7 @@ export function ModelTrends({ onBack, onSelectModel }: ModelTrendsProps) {
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-text-muted" />
             <div className="flex items-center border-brutal border-border rounded-brutal overflow-hidden">
-              {TIME_RANGE_OPTIONS.map(option => (
+              {TIME_RANGE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   onClick={() => setTimeRange(option.value)}
@@ -292,11 +344,7 @@ export function ModelTrends({ onBack, onSelectModel }: ModelTrendsProps) {
             </p>
           </div>
         ) : (
-          <SimpleLineChart
-            data={trendData}
-            metric={selectedMetric}
-            onSelectModel={onSelectModel}
-          />
+          <SimpleLineChart data={trendData} metric={selectedMetric} onSelectModel={onSelectModel} />
         )}
       </div>
     </div>

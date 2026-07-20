@@ -12,20 +12,20 @@ Covers:
 """
 
 import json
-import pytest
-import tempfile
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from pathlib import Path
-from typing import Optional
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from bashgym.api.routes import app
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def client():
@@ -35,13 +35,14 @@ def client():
 @dataclass
 class FakeImportResult:
     """Mimics Claude's ImportResult dataclass."""
+
     session_id: str
     source_file: Path
     steps_imported: int
-    destination_file: Optional[Path] = None
-    error: Optional[str] = None
+    destination_file: Path | None = None
+    error: str | None = None
     skipped: bool = False
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
 
 
 def _make_claude_results():
@@ -146,12 +147,15 @@ def _validate_response_shape(data: dict):
 # 1. POST /api/traces/import/{source} -- per-source
 # ---------------------------------------------------------------------------
 
+
 class TestImportBySource:
     """Tests for the /api/traces/import/{source} endpoint."""
 
     def test_import_claude(self, client):
         with patch(CLAUDE_PATCH, return_value=_make_claude_results()) as mock_fn:
-            resp = client.post("/api/traces/import/claude", json={"days": 30, "limit": 50, "force": True})
+            resp = client.post(
+                "/api/traces/import/claude", json={"days": 30, "limit": 50, "force": True}
+            )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -223,7 +227,7 @@ class TestImportBySource:
 
     def test_default_request_body(self, client):
         """Omitting the request body should use defaults."""
-        with patch(GEMINI_PATCH, return_value=[]) as mock_fn:
+        with patch(GEMINI_PATCH, return_value=[]):
             resp = client.post("/api/traces/import/gemini")
 
         assert resp.status_code == 200
@@ -256,17 +260,20 @@ class TestImportBySource:
 # 2. POST /api/traces/import/all
 # ---------------------------------------------------------------------------
 
+
 class TestImportAll:
     """Tests for the /api/traces/import/all endpoint."""
 
     def test_import_all_basic(self, client):
-        with patch(CLAUDE_PATCH, return_value=_make_claude_results()), \
-             patch(GEMINI_PATCH, return_value=_make_dict_results("gemini_cli")), \
-             patch(COPILOT_PATCH, return_value=_make_dict_results("copilot_cli")), \
-             patch(OPENCODE_PATCH, return_value=_make_dict_results("opencode")), \
-             patch(CODEX_PATCH, return_value=_make_codex_results()), \
-             patch(CHATGPT_PATCH, return_value=[]), \
-             patch(MCP_PATCH, return_value=[]):
+        with (
+            patch(CLAUDE_PATCH, return_value=_make_claude_results()),
+            patch(GEMINI_PATCH, return_value=_make_dict_results("gemini_cli")),
+            patch(COPILOT_PATCH, return_value=_make_dict_results("copilot_cli")),
+            patch(OPENCODE_PATCH, return_value=_make_dict_results("opencode")),
+            patch(CODEX_PATCH, return_value=_make_codex_results()),
+            patch(CHATGPT_PATCH, return_value=[]),
+            patch(MCP_PATCH, return_value=[]),
+        ):
             resp = client.post("/api/traces/import/all", json={"days": 7})
 
         assert resp.status_code == 200
@@ -292,13 +299,15 @@ class TestImportAll:
 
     def test_import_all_partial_failure(self, client):
         """If one source fails, others should still succeed."""
-        with patch(CLAUDE_PATCH, return_value=_make_claude_results()), \
-             patch(GEMINI_PATCH, side_effect=RuntimeError("Gemini dir missing")), \
-             patch(COPILOT_PATCH, return_value=[]), \
-             patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]), \
-             patch(CHATGPT_PATCH, return_value=[]), \
-             patch(MCP_PATCH, return_value=[]):
+        with (
+            patch(CLAUDE_PATCH, return_value=_make_claude_results()),
+            patch(GEMINI_PATCH, side_effect=RuntimeError("Gemini dir missing")),
+            patch(COPILOT_PATCH, return_value=[]),
+            patch(OPENCODE_PATCH, return_value=[]),
+            patch(CODEX_PATCH, return_value=[]),
+            patch(CHATGPT_PATCH, return_value=[]),
+            patch(MCP_PATCH, return_value=[]),
+        ):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -315,13 +324,15 @@ class TestImportAll:
 
     def test_import_all_default_request(self, client):
         """Omitting body should use default TraceImportRequest."""
-        with patch(CLAUDE_PATCH, return_value=[]), \
-             patch(GEMINI_PATCH, return_value=[]), \
-             patch(COPILOT_PATCH, return_value=[]), \
-             patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]), \
-             patch(CHATGPT_PATCH, return_value=[]), \
-             patch(MCP_PATCH, return_value=[]):
+        with (
+            patch(CLAUDE_PATCH, return_value=[]),
+            patch(GEMINI_PATCH, return_value=[]),
+            patch(COPILOT_PATCH, return_value=[]),
+            patch(OPENCODE_PATCH, return_value=[]),
+            patch(CODEX_PATCH, return_value=[]),
+            patch(CHATGPT_PATCH, return_value=[]),
+            patch(MCP_PATCH, return_value=[]),
+        ):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -331,13 +342,15 @@ class TestImportAll:
 
     def test_import_all_every_source_fails(self, client):
         """All sources fail -- we still get 200 with error details."""
-        with patch(CLAUDE_PATCH, side_effect=RuntimeError("fail")), \
-             patch(GEMINI_PATCH, side_effect=RuntimeError("fail")), \
-             patch(COPILOT_PATCH, side_effect=RuntimeError("fail")), \
-             patch(OPENCODE_PATCH, side_effect=RuntimeError("fail")), \
-             patch(CODEX_PATCH, side_effect=RuntimeError("fail")), \
-             patch(CHATGPT_PATCH, side_effect=RuntimeError("fail")), \
-             patch(MCP_PATCH, side_effect=RuntimeError("fail")):
+        with (
+            patch(CLAUDE_PATCH, side_effect=RuntimeError("fail")),
+            patch(GEMINI_PATCH, side_effect=RuntimeError("fail")),
+            patch(COPILOT_PATCH, side_effect=RuntimeError("fail")),
+            patch(OPENCODE_PATCH, side_effect=RuntimeError("fail")),
+            patch(CODEX_PATCH, side_effect=RuntimeError("fail")),
+            patch(CHATGPT_PATCH, side_effect=RuntimeError("fail")),
+            patch(MCP_PATCH, side_effect=RuntimeError("fail")),
+        ):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -352,19 +365,22 @@ class TestImportAll:
 # 3. Route ordering: "all" must not be captured by {source}
 # ---------------------------------------------------------------------------
 
+
 class TestRouteOrdering:
     """Verify that /import/all is matched before /import/{source}."""
 
     def test_all_is_not_treated_as_source(self, client):
         """POST /api/traces/import/all should hit import_traces_all,
         not import_traces_by_source with source='all'."""
-        with patch(CLAUDE_PATCH, return_value=[]), \
-             patch(GEMINI_PATCH, return_value=[]), \
-             patch(COPILOT_PATCH, return_value=[]), \
-             patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]), \
-             patch(CHATGPT_PATCH, return_value=[]), \
-             patch(MCP_PATCH, return_value=[]):
+        with (
+            patch(CLAUDE_PATCH, return_value=[]),
+            patch(GEMINI_PATCH, return_value=[]),
+            patch(COPILOT_PATCH, return_value=[]),
+            patch(OPENCODE_PATCH, return_value=[]),
+            patch(CODEX_PATCH, return_value=[]),
+            patch(CHATGPT_PATCH, return_value=[]),
+            patch(MCP_PATCH, return_value=[]),
+        ):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -379,19 +395,27 @@ class TestRouteOrdering:
 # Helpers for trace file creation (used by source_tool and analytics tests)
 # ---------------------------------------------------------------------------
 
-def _make_trace_dict(source_tool: str, steps: int = 5, cost: float = 0.0,
-                     total_score: float = 0.0, repo_name: str = "test-repo"):
+
+def _make_trace_dict(
+    source_tool: str,
+    steps: int = 5,
+    cost: float = 0.0,
+    total_score: float = 0.0,
+    repo_name: str = "test-repo",
+):
     """Create a realistic imported TraceSession dict."""
     trace_steps = []
     for i in range(steps):
-        trace_steps.append({
-            "tool_name": "bash" if i % 2 == 0 else "read",
-            "success": True,
-            "exit_code": 0,
-            "input_tokens": 100,
-            "output_tokens": 50,
-            "timestamp": f"2026-01-01T00:0{i}:00Z",
-        })
+        trace_steps.append(
+            {
+                "tool_name": "bash" if i % 2 == 0 else "read",
+                "success": True,
+                "exit_code": 0,
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "timestamp": f"2026-01-01T00:0{i}:00Z",
+            }
+        )
     return {
         "session_id": f"test_{source_tool}_{id(trace_steps)}",
         "source_tool": source_tool,
@@ -430,9 +454,11 @@ def _make_raw_trace_list(steps: int = 3):
 @dataclass
 class _FakeSettings:
     """Minimal settings mock for trace endpoints."""
+
     @dataclass
     class _Data:
         data_dir: str = ""
+
     data: _Data = dc_field(default_factory=_Data)
 
 
@@ -458,31 +484,30 @@ def trace_dirs(tmp_path):
     # Gold trace from claude_code
     (gold_dir / "gold_claude_001.json").write_text(
         json.dumps(_make_trace_dict("claude_code", steps=4, cost=1.50, total_score=0.85)),
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
     # Gold trace from gemini_cli
     (gold_dir / "gold_gemini_001.json").write_text(
         json.dumps(_make_trace_dict("gemini_cli", steps=6, cost=0.80, total_score=0.78)),
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
     # Failed trace from copilot_cli
     (failed_dir / "failed_copilot_001.json").write_text(
         json.dumps(_make_trace_dict("copilot_cli", steps=3, cost=0.25, total_score=0.30)),
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
     # Pending imported trace from opencode
     (pending_dir / "imported_opencode_001.json").write_text(
         json.dumps(_make_trace_dict("opencode", steps=5, cost=0.0, total_score=0.60)),
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
     # Pending raw trace (claude_code by default)
     (pending_dir / "session_raw_001.json").write_text(
-        json.dumps(_make_raw_trace_list(steps=3)),
-        encoding="utf-8"
+        json.dumps(_make_raw_trace_list(steps=3)), encoding="utf-8"
     )
 
     return data_dir, bashgym_dir
@@ -498,6 +523,7 @@ def patched_client(trace_dirs):
     data_dir, bashgym_dir = trace_dirs
 
     from bashgym.config import get_settings
+
     real_settings = get_settings()
     original_data_dir = real_settings.data.data_dir
 
@@ -506,6 +532,7 @@ def patched_client(trace_dirs):
 
     with patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir):
         from bashgym.api.routes import create_app
+
         test_app = create_app()
         with TestClient(test_app, raise_server_exceptions=False) as client:
             yield client
@@ -517,6 +544,7 @@ def patched_client(trace_dirs):
 # ---------------------------------------------------------------------------
 # 4. GET /api/traces -- source_tool filter
 # ---------------------------------------------------------------------------
+
 
 class TestSourceToolFilter:
     """Tests for the source_tool query parameter on GET /api/traces."""
@@ -586,6 +614,7 @@ class TestSourceToolFilter:
 # 5. GET /api/traces/analytics -- source_breakdown, cost, avg_quality
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyticsEnhanced:
     """Tests for the enhanced analytics endpoint."""
 
@@ -644,8 +673,10 @@ class TestAnalyticsEnhanced:
         fake = _FakeSettings()
         fake.data.data_dir = str(data_dir)
 
-        with patch("bashgym.config.get_settings", return_value=fake), \
-             patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir):
+        with (
+            patch("bashgym.config.get_settings", return_value=fake),
+            patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir),
+        ):
             c = TestClient(app)
             resp = c.get("/api/traces/analytics")
 

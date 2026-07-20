@@ -14,7 +14,7 @@ export function CustomNodeSummary({
   graph,
   selected,
   onFocus,
-  onClose,
+  onClose
 }: {
   panel: Panel
   graph: CanvasGraphIndex
@@ -27,7 +27,7 @@ export function CustomNodeSummary({
   const Renderer = customNodeTypes[panel.type] as unknown as ComponentType<NodeProps<SummaryNode>>
   const props = {
     data: buildCustomNodeData(panel, graph, onFocus, onClose),
-    selected,
+    selected
   } as NodeProps<SummaryNode>
 
   return (

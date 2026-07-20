@@ -11,7 +11,7 @@ const toneClasses: Record<PresentationTone, string> = {
   warning: 'border-status-warning/60 bg-status-warning/10 text-status-warning',
   error: 'border-status-error/60 bg-status-error/10 text-status-error',
   info: 'border-accent/60 bg-accent/10 text-accent-dark',
-  neutral: 'border-border-subtle bg-background-secondary text-text-secondary',
+  neutral: 'border-border-subtle bg-background-secondary text-text-secondary'
 }
 
 function readable(value: string): string {
@@ -34,8 +34,11 @@ export interface CampaignLibraryProps {
 export function CampaignLibrary({ campaigns, onUnarchive, onOpen }: CampaignLibraryProps) {
   const [open, setOpen] = useState(false)
   if (campaigns.length === 0) return null
-  const ordered = [...campaigns].sort((left, right) =>
-    right.updated_at.localeCompare(left.updated_at) || left.campaign_id.localeCompare(right.campaign_id))
+  const ordered = [...campaigns].sort(
+    (left, right) =>
+      right.updated_at.localeCompare(left.updated_at) ||
+      left.campaign_id.localeCompare(right.campaign_id)
+  )
   return (
     <>
       <Button
@@ -57,12 +60,18 @@ export function CampaignLibrary({ campaigns, onUnarchive, onOpen }: CampaignLibr
       >
         <ul className="divide-y divide-border-subtle">
           {ordered.map((campaign) => (
-            <li key={campaign.campaign_id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0">
+            <li
+              key={campaign.campaign_id}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0"
+            >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm text-text-primary" title={campaign.title}>
                   {campaign.title}
                 </p>
-                <p className="truncate font-mono text-[10px] text-text-muted" title={campaign.campaign_id}>
+                <p
+                  className="truncate font-mono text-[10px] text-text-muted"
+                  title={campaign.campaign_id}
+                >
                   {campaign.campaign_id} · updated {campaign.updated_at.slice(0, 10)}
                 </p>
               </div>

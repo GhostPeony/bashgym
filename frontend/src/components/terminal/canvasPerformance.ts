@@ -35,9 +35,8 @@ export function buildCanvasGraphIndex(panels: Panel[], edges: CanvasEdge[]): Can
     link(source.id, target.id)
     link(target.id, source.id)
 
-    const isMonitor = source.type === 'terminal'
-      && target.type === 'terminal'
-      && source.id !== target.id
+    const isMonitor =
+      source.type === 'terminal' && target.type === 'terminal' && source.id !== target.id
     if (isMonitor) {
       watchedPanelIds.add(source.id)
       const titles = watchedTitlesByWatcher.get(target.id) ?? []
@@ -56,9 +55,9 @@ export function buildCanvasGraphIndex(panels: Panel[], edges: CanvasEdge[]): Can
   for (const [panelId, linkedIds] of linkedIdsByPanel) {
     linkedPanelsById.set(
       panelId,
-      Array.from(linkedIds, (linkedId) => panelById.get(linkedId)).filter(
-        (panel): panel is Panel => Boolean(panel),
-      ),
+      Array.from(linkedIds, (linkedId) => panelById.get(linkedId)).filter((panel): panel is Panel =>
+        Boolean(panel)
+      )
     )
   }
 
@@ -67,11 +66,12 @@ export function buildCanvasGraphIndex(panels: Panel[], edges: CanvasEdge[]): Can
     const titles = watchedTitlesByWatcher.get(panel.id) ?? []
     monitorByPanelId.set(panel.id, {
       isWatched: watchedPanelIds.has(panel.id),
-      watchingTitle: titles.length === 0
-        ? undefined
-        : titles.length === 1
-          ? titles[0]
-          : `${titles.length} terminals`,
+      watchingTitle:
+        titles.length === 0
+          ? undefined
+          : titles.length === 1
+            ? titles[0]
+            : `${titles.length} terminals`
     })
   }
 
@@ -80,7 +80,7 @@ export function buildCanvasGraphIndex(panels: Panel[], edges: CanvasEdge[]): Can
     dataConnectedPanelIds,
     terminalConnectedPanelIds,
     linkedPanelsById,
-    monitorByPanelId,
+    monitorByPanelId
   }
 }
 
@@ -93,12 +93,17 @@ function shallowValueEqual(left: unknown, right: unknown): boolean {
     if (!value || !other || typeof value !== 'object' || typeof other !== 'object') return false
     const leftEntries = Object.entries(value as Record<string, unknown>)
     const rightRecord = other as Record<string, unknown>
-    return leftEntries.length === Object.keys(rightRecord).length
-      && leftEntries.every(([key, entry]) => Object.is(entry, rightRecord[key]))
+    return (
+      leftEntries.length === Object.keys(rightRecord).length &&
+      leftEntries.every(([key, entry]) => Object.is(entry, rightRecord[key]))
+    )
   })
 }
 
-function shallowRecordEqual(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+function shallowRecordEqual(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+): boolean {
   if (left === right) return true
   const leftKeys = Object.keys(left)
   if (leftKeys.length !== Object.keys(right).length) return false
@@ -115,14 +120,15 @@ export function reconcileCanvasNodes<T extends Node>(previous: T[], candidates: 
       changed = true
       return candidate
     }
-    const unchanged = current.type === candidate.type
-      && current.position.x === candidate.position.x
-      && current.position.y === candidate.position.y
-      && current.selected === candidate.selected
-      && current.className === candidate.className
-      && shallowRecordEqual(
+    const unchanged =
+      current.type === candidate.type &&
+      current.position.x === candidate.position.x &&
+      current.position.y === candidate.position.y &&
+      current.selected === candidate.selected &&
+      current.className === candidate.className &&
+      shallowRecordEqual(
         current.data as Record<string, unknown>,
-        candidate.data as Record<string, unknown>,
+        candidate.data as Record<string, unknown>
       )
     if (unchanged) {
       if (previous[index] !== current) changed = true

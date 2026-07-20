@@ -37,9 +37,7 @@ def bundle(
         workspace_id=workspace_id,
         lifecycle=lifecycle,
         freshness=Freshness.FRESH,
-        completion_outcome=(
-            CompletionOutcome.COMPLETE if lifecycle is Lifecycle.READY else None
-        ),
+        completion_outcome=(CompletionOutcome.COMPLETE if lifecycle is Lifecycle.READY else None),
         intent=intent,
         created_at=NOW,
         ready_at=NOW if lifecycle is Lifecycle.READY else None,
@@ -117,12 +115,8 @@ def test_tombstone_clears_active_pointer_and_history_is_workspace_scoped(reposit
 def test_eval_preview_is_idempotent_per_exact_bundle_version(repository):
     repository.create_lineage(bundle(lifecycle=Lifecycle.READY))
     preview = {"model_id": "org/model", "tasks": ["humaneval"]}
-    first = repository.put_eval_preview(
-        "workspace-a", "hfctx_fixture", 1, "a" * 64, preview
-    )
-    second = repository.put_eval_preview(
-        "workspace-a", "hfctx_fixture", 1, "a" * 64, preview
-    )
+    first = repository.put_eval_preview("workspace-a", "hfctx_fixture", 1, "a" * 64, preview)
+    second = repository.put_eval_preview("workspace-a", "hfctx_fixture", 1, "a" * 64, preview)
     assert first == second == preview
 
 
@@ -152,7 +146,9 @@ def test_collecting_refresh_uses_optimistic_head(repository):
             bundle(version=2, lifecycle=Lifecycle.COLLECTING, intent="Concurrent"),
             expected_head=1,
         )
-    assert repository.get_version("workspace-a", "hfctx_fixture", 2).lifecycle is Lifecycle.COLLECTING
+    assert (
+        repository.get_version("workspace-a", "hfctx_fixture", 2).lifecycle is Lifecycle.COLLECTING
+    )
 
 
 def test_retention_keeps_active_and_collecting_versions(repository):
@@ -170,7 +166,10 @@ def test_retention_keeps_active_and_collecting_versions(repository):
 
     assert len(repository.list_versions("workspace-a", limit=100)) == 20
     assert repository.get_active("workspace-a").bundle_id == "hfctx_00"
-    assert repository.get_version("workspace-a", "hfctx_collecting", 1).lifecycle is Lifecycle.COLLECTING
+    assert (
+        repository.get_version("workspace-a", "hfctx_collecting", 1).lifecycle
+        is Lifecycle.COLLECTING
+    )
     with pytest.raises(BundleNotFoundError):
         repository.get_version("workspace-a", "hfctx_01", 1)
     with pytest.raises(BundleNotFoundError):

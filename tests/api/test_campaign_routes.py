@@ -2088,8 +2088,14 @@ def test_artifact_preview_is_scoped_verified_bounded_and_redacted(tmp_path):
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
             """,
             (
-                "workspace-a", "campaign-1", "artifact-training-log", "action-1",
-                str(artifact_path), digest, len(content), "campaign_training_log.v1",
+                "workspace-a",
+                "campaign-1",
+                "artifact-training-log",
+                "action-1",
+                str(artifact_path),
+                digest,
+                len(content),
+                "campaign_training_log.v1",
                 json.dumps({"private_path": "C:/must-not-cross", "host": "private-host-canary"}),
                 campaign().created_at.isoformat(),
             ),
@@ -2104,8 +2110,14 @@ def test_artifact_preview_is_scoped_verified_bounded_and_redacted(tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert set(payload) == {
-        "schema_version", "artifact_id", "preview_kind", "content", "truncated",
-        "redaction_count", "integrity_verified", "unavailable_reason",
+        "schema_version",
+        "artifact_id",
+        "preview_kind",
+        "content",
+        "truncated",
+        "redaction_count",
+        "integrity_verified",
+        "unavailable_reason",
     }
     assert payload["schema_version"] == "public_campaign_artifact_preview.v1"
     assert payload["artifact_id"] == "artifact-training-log"
@@ -2117,8 +2129,15 @@ def test_artifact_preview_is_scoped_verified_bounded_and_redacted(tmp_path):
     assert len(payload["content"].splitlines()) <= 500
     serialized = json.dumps(payload)
     for canary in (
-        str(config.artifact_root), "C:\\private", "/srv/private", "user@10.42.0.7",
-        "10.42.0.7", "private-token-canary", "private-host-canary", "uri", "metadata",
+        str(config.artifact_root),
+        "C:\\private",
+        "/srv/private",
+        "user@10.42.0.7",
+        "10.42.0.7",
+        "private-token-canary",
+        "private-host-canary",
+        "uri",
+        "metadata",
     ):
         assert canary not in serialized
     assert payload["redaction_count"] >= 4
@@ -2145,14 +2164,21 @@ def test_artifact_preview_fails_closed_for_tampering_and_binary_content(tmp_path
             ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1, 1, '{}', ?)
             """,
             (
-                "workspace-a", "campaign-1", "artifact-model", str(artifact_path), digest,
-                len(content), "huggingface_model_file.v1", campaign().created_at.isoformat(),
+                "workspace-a",
+                "campaign-1",
+                "artifact-model",
+                str(artifact_path),
+                digest,
+                len(content),
+                "huggingface_model_file.v1",
+                campaign().created_at.isoformat(),
             ),
         )
 
     unavailable = http.get(
         "/api/campaigns/campaign-1/artifacts/artifact-model/preview",
-        headers=bearer(access), params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
     )
     assert unavailable.status_code == 200
     assert unavailable.json()["preview_kind"] == "unavailable"
@@ -2163,7 +2189,8 @@ def test_artifact_preview_fails_closed_for_tampering_and_binary_content(tmp_path
     artifact_path.write_bytes(b"tampered")
     tampered = http.get(
         "/api/campaigns/campaign-1/artifacts/artifact-model/preview",
-        headers=bearer(access), params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
     )
     assert tampered.status_code == 409
     assert str(config.artifact_root) not in tampered.text
@@ -2189,15 +2216,21 @@ def test_artifact_preview_rejects_registered_files_outside_the_worker_root(tmp_p
             ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1, 1, '{}', ?)
             """,
             (
-                "workspace-a", "campaign-1", "artifact-outside", str(outside),
-                hashlib.sha256(content).hexdigest(), len(content), "campaign_training_log.v1",
+                "workspace-a",
+                "campaign-1",
+                "artifact-outside",
+                str(outside),
+                hashlib.sha256(content).hexdigest(),
+                len(content),
+                "campaign_training_log.v1",
                 campaign().created_at.isoformat(),
             ),
         )
 
     response = http.get(
         "/api/campaigns/campaign-1/artifacts/artifact-outside/preview",
-        headers=bearer(access), params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
     )
     assert response.status_code == 409
     assert str(outside) not in response.text

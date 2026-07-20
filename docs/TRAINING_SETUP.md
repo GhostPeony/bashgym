@@ -20,6 +20,7 @@ executes. Hosted backends are optional and never a fallback for a registered
 local/private campaign.
 
 ### Local — consumer GPU
+
 - Register the actual GPU inventory and available memory instead of selecting a
   repository-owned device profile.
 - Use small LoRA/QLoRA runs, bounded smoke tests, and short contexts when memory
@@ -27,6 +28,7 @@ local/private campaign.
   selected artifact, runtime, and hardware.
 
 ### Private compute target
+
 - Larger GPU memory or unified-memory systems for dense models, MoE variants,
   longer-context runs, and installed-backend smokes.
 - The target can train, export GGUF, and optionally serve the student locally if
@@ -35,6 +37,7 @@ local/private campaign.
   to justify the run.
 
 ### Runtime requirements
+
 - Training requires a Python, CUDA, PyTorch, and trainer combination supported
   by the explicitly selected backend. Keep this runtime isolated from the
   lightweight BashGym control-plane environment.
@@ -65,15 +68,15 @@ Training strategies are integrated, selected per run. Each maps to a trainer pat
 `bashgym/gym/trainer.py` (`TrainingStrategy` enum) and a generated training
 script.
 
-| Strategy | What it does | When to use |
-|----------|--------------|-------------|
-| **SFT** | Supervised fine-tuning on gold trajectories formatted as tool-call chat messages with cognitive tags. | The baseline. Teach the student the patterns in your verified sessions. |
-| **DPO** | Direct preference optimization on chosen/rejected pairs, mined from decision points in traces (a failed approach vs the successful one). | Sharpen behavior where the trace shows a clear better/worse choice. |
-| **GRPO** | Group relative policy optimization — on-policy RL against a reward signal (syntax validity, execution success, or test verification). | Optimize for verifiable outcomes, not just imitation. |
-| **RLVR** | RL from verifiable rewards — the verification result is the reward. | Tasks with a hard pass/fail gate. |
-| **Distillation** | Knowledge distillation from a teacher (Claude) into the student base model. | Transfer teacher capability into a deployable open-weight model. |
-| **Session Distillation** | Hint-injected self-distillation over failed trace spans with masked KL/CE on the same target tokens. | Repair local mistakes, retry loops, and recovery pivots without replacing the trajectory. |
-| **Cascade RL** | Sequential domain-specialist training with multi-objective policy distillation (see §5). | Build a generalist by composing specialists. |
+| Strategy                 | What it does                                                                                                                             | When to use                                                                               |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **SFT**                  | Supervised fine-tuning on gold trajectories formatted as tool-call chat messages with cognitive tags.                                    | The baseline. Teach the student the patterns in your verified sessions.                   |
+| **DPO**                  | Direct preference optimization on chosen/rejected pairs, mined from decision points in traces (a failed approach vs the successful one). | Sharpen behavior where the trace shows a clear better/worse choice.                       |
+| **GRPO**                 | Group relative policy optimization — on-policy RL against a reward signal (syntax validity, execution success, or test verification).    | Optimize for verifiable outcomes, not just imitation.                                     |
+| **RLVR**                 | RL from verifiable rewards — the verification result is the reward.                                                                      | Tasks with a hard pass/fail gate.                                                         |
+| **Distillation**         | Knowledge distillation from a teacher (Claude) into the student base model.                                                              | Transfer teacher capability into a deployable open-weight model.                          |
+| **Session Distillation** | Hint-injected self-distillation over failed trace spans with masked KL/CE on the same target tokens.                                     | Repair local mistakes, retry loops, and recovery pivots without replacing the trajectory. |
+| **Cascade RL**           | Sequential domain-specialist training with multi-objective policy distillation (see §5).                                                 | Build a generalist by composing specialists.                                              |
 
 Fine-tuning can use **LoRA / QLoRA** adapters when the selected model/backend
 supports them. The retention policy decides whether to keep an adapter, merged
@@ -89,6 +92,7 @@ Training data is produced by the Factory layer, then optionally amplified by
 synthetic generation.
 
 ### 4.1 Trace → examples
+
 1. **Import** existing agent history (`~/.claude/projects/` for Claude Code, plus
    Codex / Gemini / Copilot stores) via `bashgym/trace_capture/importers/`.
 2. **Classify** each session by a multi-dimension quality score (success rate,
@@ -102,23 +106,25 @@ synthetic generation.
    split, optionally filtered to specific repositories for repo-aware specialists.
 
 ### 4.2 Synthetic data — NVIDIA NeMo Data Designer
+
 The factory generates synthetic training data with **NVIDIA NeMo Data Designer**
 (≥ 0.6.1), modeled as a column DAG:
 
-| Column type | Role |
-|-------------|------|
-| `SamplerColumnConfig` | Seed distributions / categorical inputs |
-| `LLMTextColumnConfig` | Free-text generation |
-| `LLMStructuredColumnConfig` | Pydantic-enforced structured output (e.g. `AgentSolution`, `ToolUseConversation`) |
-| `LLMJudgeColumnConfig` | LLM-as-judge scoring on named dimensions (correctness, tool_usage, completeness) |
-| `ExpressionColumnConfig` | Jinja2 templating — flatten structured objects into training text, compute DPO chosen/rejected from dual judge scores |
-| Processor columns | Filtering, dedup, post-processing |
+| Column type                 | Role                                                                                                                  |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `SamplerColumnConfig`       | Seed distributions / categorical inputs                                                                               |
+| `LLMTextColumnConfig`       | Free-text generation                                                                                                  |
+| `LLMStructuredColumnConfig` | Pydantic-enforced structured output (e.g. `AgentSolution`, `ToolUseConversation`)                                     |
+| `LLMJudgeColumnConfig`      | LLM-as-judge scoring on named dimensions (correctness, tool_usage, completeness)                                      |
+| `ExpressionColumnConfig`    | Jinja2 templating — flatten structured objects into training text, compute DPO chosen/rejected from dual judge scores |
+| Processor columns           | Filtering, dedup, post-processing                                                                                     |
 
 Five pipeline presets cover SFT, DPO, tool-use, external, and unstructured data.
 Per-column model assignment lets a fast code model generate solutions while a
 stronger model judges them.
 
 ### 4.3 The AutoCurriculum Compiler (SchemaResearcher)
+
 Rather than hand-tuning generation prompts, the **SchemaResearcher** treats a Data
 Designer pipeline config as an evolvable genome and searches for recipes that
 produce measurably better models:
@@ -207,11 +213,11 @@ Inference is pluggable behind one `InferenceProvider` interface
 (`bashgym/providers/`), with a `ProviderRegistry` mapping models to providers and
 monitoring health.
 
-| Provider | Local? | Role | Notes |
-|----------|--------|------|-------|
-| **Anthropic (Claude)** | No | Teacher | Frontier model for distillation and router fallback. |
-| **NVIDIA NIM** | No | Cloud student inference | OpenAI-compatible; 100+ served models. |
-| **Ollama** | Yes | Local student inference | Serves GGUF on a local or private compute target; warm-up + VRAM tracking. |
+| Provider               | Local? | Role                    | Notes                                                                      |
+| ---------------------- | ------ | ----------------------- | -------------------------------------------------------------------------- |
+| **Anthropic (Claude)** | No     | Teacher                 | Frontier model for distillation and router fallback.                       |
+| **NVIDIA NIM**         | No     | Cloud student inference | OpenAI-compatible; 100+ served models.                                     |
+| **Ollama**             | Yes    | Local student inference | Serves GGUF on a local or private compute target; warm-up + VRAM tracking. |
 
 **Live model discovery:** both the Anthropic and NIM providers query their
 `/v1/models` endpoints at runtime so the catalog reflects what is actually served,

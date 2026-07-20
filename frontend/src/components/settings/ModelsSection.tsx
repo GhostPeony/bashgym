@@ -27,21 +27,29 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) {
   const isLocal = provider.type === 'ollama' || provider.type === 'lm_studio'
 
   return (
-    <div className={clsx(
-      'flex items-center gap-2 p-2 border-brutal border-border rounded-brutal transition-press',
-      provider.available
-        ? 'bg-background-card shadow-brutal-sm'
-        : 'bg-background-secondary border-border-subtle'
-    )}>
-      <div className={clsx(
-        'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center flex-shrink-0',
-        provider.available ? 'bg-accent-light text-accent-dark' : 'bg-background-secondary text-text-muted'
-      )}>
+    <div
+      className={clsx(
+        'flex items-center gap-2 p-2 border-brutal border-border rounded-brutal transition-press',
+        provider.available
+          ? 'bg-background-card shadow-brutal-sm'
+          : 'bg-background-secondary border-border-subtle'
+      )}
+    >
+      <div
+        className={clsx(
+          'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center flex-shrink-0',
+          provider.available
+            ? 'bg-accent-light text-accent-dark'
+            : 'bg-background-secondary text-text-muted'
+        )}
+      >
         {isLocal ? <HardDrive className="w-3.5 h-3.5" /> : <Cloud className="w-3.5 h-3.5" />}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-xs font-mono font-semibold text-text-primary truncate">{provider.name}</span>
+          <span className="text-xs font-mono font-semibold text-text-primary truncate">
+            {provider.name}
+          </span>
           {provider.available ? (
             <CheckCircle className="w-3 h-3 text-status-success flex-shrink-0" />
           ) : (
@@ -49,7 +57,9 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) {
           )}
         </div>
         {provider.model_count !== undefined && provider.model_count > 0 && (
-          <p className="text-[10px] text-text-muted font-mono">{provider.model_count} model{provider.model_count > 1 ? 's' : ''}</p>
+          <p className="text-[10px] text-text-muted font-mono">
+            {provider.model_count} model{provider.model_count > 1 ? 's' : ''}
+          </p>
         )}
       </div>
     </div>
@@ -67,17 +77,25 @@ function OllamaModelCard({
 }) {
   return (
     <div className="flex items-center gap-2 p-2.5 border-brutal border-border rounded-brutal bg-background-card shadow-brutal-sm">
-      <div className={clsx(
-        'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center flex-shrink-0',
-        model.is_code_model ? 'bg-accent-light text-accent-dark' : 'bg-background-secondary text-text-muted'
-      )}>
+      <div
+        className={clsx(
+          'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center flex-shrink-0',
+          model.is_code_model
+            ? 'bg-accent-light text-accent-dark'
+            : 'bg-background-secondary text-text-muted'
+        )}
+      >
         {model.is_code_model ? <Code className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-mono font-semibold text-text-primary truncate">{model.name}</span>
+          <span className="text-sm font-mono font-semibold text-text-primary truncate">
+            {model.name}
+          </span>
           {model.is_code_model && (
-            <span className="tag text-[10px] py-0 px-1.5"><span>code</span></span>
+            <span className="tag text-[10px] py-0 px-1.5">
+              <span>code</span>
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2 text-[11px] text-text-muted font-mono">
@@ -106,7 +124,11 @@ function OllamaModelCard({
 
 export function ModelsSection() {
   const { data: providersData, loading: providersLoading } = useSessionResource(providersResource)
-  const { data: ollamaStatus, loading: ollamaLoading, error: ollamaFetchError } = useSessionResource(ollamaStatusResource)
+  const {
+    data: ollamaStatus,
+    loading: ollamaLoading,
+    error: ollamaFetchError
+  } = useSessionResource(ollamaStatusResource)
   const providers = providersData?.providers ?? []
   const ollamaModels = ollamaStatus?.models ?? []
   const ollamaAvailable = ollamaStatus?.available ?? false
@@ -148,8 +170,16 @@ export function ModelsSection() {
     try {
       const body =
         connectPlatform === '__custom__'
-          ? { base_url: connectBaseUrl, api_key: connectKey || undefined, default_model: connectModel || undefined }
-          : { platform: connectPlatform, api_key: connectKey || undefined, default_model: connectModel || undefined }
+          ? {
+              base_url: connectBaseUrl,
+              api_key: connectKey || undefined,
+              default_model: connectModel || undefined
+            }
+          : {
+              platform: connectPlatform,
+              api_key: connectKey || undefined,
+              default_model: connectModel || undefined
+            }
       const result = await providersApi.connect(body)
       if (result.ok && result.data?.ok) {
         const n = result.data.models?.length ?? 0
@@ -173,7 +203,7 @@ export function ModelsSection() {
       if (result.ok) {
         const { data: current, setData } = ollamaStatusResource.getState()
         if (current) {
-          setData({ ...current, models: current.models.filter(m => m.name !== modelName) })
+          setData({ ...current, models: current.models.filter((m) => m.name !== modelName) })
         }
       }
     } finally {
@@ -200,18 +230,14 @@ export function ModelsSection() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="font-brand text-lg text-text-primary">Model Providers</h3>
-        <button
-          onClick={fetchData}
-          className="btn-icon w-8 h-8 text-text-muted"
-          title="Refresh"
-        >
+        <button onClick={fetchData} className="btn-icon w-8 h-8 text-text-muted" title="Refresh">
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
 
       {/* Providers Grid */}
       <div className="grid grid-cols-3 gap-1.5">
-        {providers.map(provider => (
+        {providers.map((provider) => (
           <ProviderCard key={provider.type} provider={provider} />
         ))}
       </div>
@@ -229,7 +255,9 @@ export function ModelsSection() {
           <div className="mt-2 p-3 border-brutal border-border rounded-brutal bg-background-card space-y-2.5">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">Platform</label>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">
+                  Platform
+                </label>
                 <select
                   value={connectPlatform}
                   onChange={(e) => setConnectPlatform(e.target.value)}
@@ -246,7 +274,9 @@ export function ModelsSection() {
                 </select>
               </div>
               <div>
-                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">Default Model</label>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">
+                  Default Model
+                </label>
                 <ModelSelect
                   value={connectModel}
                   onChange={setConnectModel}
@@ -258,7 +288,9 @@ export function ModelsSection() {
             </div>
             {connectPlatform === '__custom__' && (
               <div>
-                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">Base URL</label>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">
+                  Base URL
+                </label>
                 <input
                   value={connectBaseUrl}
                   onChange={(e) => setConnectBaseUrl(e.target.value)}
@@ -269,7 +301,9 @@ export function ModelsSection() {
             )}
             {connectPlatform !== 'vllm' && (
               <div>
-                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">API Key</label>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">
+                  API Key
+                </label>
                 <input
                   type="password"
                   value={connectKey}
@@ -280,10 +314,16 @@ export function ModelsSection() {
               </div>
             )}
             <div className="flex items-center gap-2">
-              <button onClick={handleConnect} disabled={connecting} className="btn-primary text-xs px-3 py-1.5">
+              <button
+                onClick={handleConnect}
+                disabled={connecting}
+                className="btn-primary text-xs px-3 py-1.5"
+              >
                 {connecting ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Connect'}
               </button>
-              {connectMsg && <span className="text-[11px] font-mono text-text-secondary">{connectMsg}</span>}
+              {connectMsg && (
+                <span className="text-[11px] font-mono text-text-secondary">{connectMsg}</span>
+              )}
             </div>
           </div>
         )}
@@ -321,7 +361,7 @@ export function ModelsSection() {
             {/* Installed Models */}
             {ollamaModels.length > 0 ? (
               <div className="space-y-2">
-                {ollamaModels.map(model => (
+                {ollamaModels.map((model) => (
                   <OllamaModelCard
                     key={model.name}
                     model={model}
@@ -376,8 +416,8 @@ export function ModelsSection() {
 
       {/* Info */}
       <div className="text-[11px] text-text-secondary p-3 border-brutal border-border rounded-brutal bg-background-card">
-        <strong className="font-mono text-text-primary">Local models</strong> run on your machine for privacy and zero API costs.
-        BashGym can fine-tune these using collected traces.
+        <strong className="font-mono text-text-primary">Local models</strong> run on your machine
+        for privacy and zero API costs. BashGym can fine-tune these using collected traces.
       </div>
     </div>
   )

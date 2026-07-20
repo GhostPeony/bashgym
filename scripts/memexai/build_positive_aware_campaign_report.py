@@ -18,9 +18,7 @@ def report_facts(manifest: dict[str, Any]) -> dict[str, Any]:
     rows = int(stats["rows"])
     ready = int(stats["ready_rows"])
     grouped = sum(
-        int(count)
-        for size, count in stats.get("positive_group_sizes", {}).items()
-        if int(size) > 1
+        int(count) for size, count in stats.get("positive_group_sizes", {}).items() if int(size) > 1
     )
     return {
         "rows": rows,
@@ -42,9 +40,7 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
 
 
@@ -105,10 +101,7 @@ def summarize_training_metrics(
 
 def load_resource_samples(path: Path) -> list[dict[str, float]]:
     with path.open("r", encoding="utf-8", newline="") as handle:
-        rows = [
-            {key: float(value) for key, value in row.items()}
-            for row in csv.DictReader(handle)
-        ]
+        rows = [{key: float(value) for key, value in row.items()} for row in csv.DictReader(handle)]
     if not rows:
         raise ValueError("resource sample CSV is empty")
     return rows
@@ -157,8 +150,7 @@ def paired_bootstrap_mrr_deltas(
         )
     ):
         per_query = [
-            (1.0 / float(candidate[eval_id][rank_key]))
-            - (1.0 / float(base[eval_id][rank_key]))
+            (1.0 / float(candidate[eval_id][rank_key])) - (1.0 / float(base[eval_id][rank_key]))
             for eval_id in ids
         ]
         rng = random.Random(seed + offset)
@@ -192,7 +184,9 @@ def add_run_facts(
     facts.update(summarize_training_metrics(manifest, load_jsonl(training_metrics_path)))
     facts.update(summarize_resources(load_resource_samples(resource_samples_path)))
     base_dev = load_json(base_dev_manifest_path)["runs"]["memexai_youtube"]["metrics"]["overall"]
-    candidate_dev = load_json(candidate_dev_manifest_path)["runs"]["memexai_youtube"]["metrics"]["overall"]
+    candidate_dev = load_json(candidate_dev_manifest_path)["runs"]["memexai_youtube"]["metrics"][
+        "overall"
+    ]
     facts["base_dev"] = base_dev
     facts["candidate_dev"] = candidate_dev
     facts["dev_bootstrap"] = paired_bootstrap_mrr_deltas(
@@ -253,13 +247,19 @@ def build_charts(output_dir: Path, facts: dict[str, Any]) -> dict[str, Path]:
         x0 = 110 + panel_index * 740
         draw.text((x0, 230), title, fill=rgb(COLORS["ink"]), font=font(31, True))
         total = max(sum(map(int, values.values())), 1)
-        for row_index, (label, value) in enumerate(sorted(values.items(), key=lambda item: -int(item[1]))):
+        for row_index, (label, value) in enumerate(
+            sorted(values.items(), key=lambda item: -int(item[1]))
+        ):
             if row_index >= 4:
                 break
             y = 315 + row_index * 112
             width = int(520 * int(value) / total)
-            draw.text((x0, y), label.replace("_", " "), fill=rgb(COLORS["ink"]), font=font(21, True))
-            draw.rounded_rectangle((x0, y + 35, x0 + 520, y + 75), radius=8, fill=rgb(COLORS["grid"]))
+            draw.text(
+                (x0, y), label.replace("_", " "), fill=rgb(COLORS["ink"]), font=font(21, True)
+            )
+            draw.rounded_rectangle(
+                (x0, y + 35, x0 + 520, y + 75), radius=8, fill=rgb(COLORS["grid"])
+            )
             draw.rounded_rectangle((x0, y + 35, x0 + width, y + 75), radius=8, fill=rgb(color))
             draw.text((x0 + 535, y + 41), str(value), fill=rgb(COLORS["ink"]), font=font(19, True))
     image.save(source_path, dpi=(180, 180))
@@ -407,7 +407,9 @@ def build_charts(output_dir: Path, facts: dict[str, Any]) -> dict[str, Path]:
             x2 = x1 + 70
             y = bottom - int(value * (bottom - top))
             draw.rounded_rectangle((x1, y, x2, bottom), radius=8, fill=rgb(color))
-            draw.text((x1 + 3, y - 27), f"{value:.3f}", fill=rgb(COLORS["ink"]), font=font(17, True))
+            draw.text(
+                (x1 + 3, y - 27), f"{value:.3f}", fill=rgb(COLORS["ink"]), font=font(17, True)
+            )
         bbox = draw.textbbox((0, 0), label, font=font(19, True))
         draw.text(
             (center - (bbox[2] - bbox[0]) / 2, bottom + 22),
@@ -487,9 +489,7 @@ def write_training_csv(path: Path, facts: dict[str, Any]) -> None:
             facts["learning_rates"],
             strict=True,
         ):
-            writer.writerow(
-                [step, float(step) / batches_per_epoch, loss, rolling, learning_rate]
-            )
+            writer.writerow([step, float(step) / batches_per_epoch, loss, rolling, learning_rate])
 
 
 def write_dev_comparison_csv(path: Path, facts: dict[str, Any]) -> None:
@@ -693,15 +693,31 @@ def extend_docx(
         "The 348-step BF16 run completed successfully, but Candidate A regressed exact, local-window, and same-video MRR on the 18-query held-out development set. The frozen 36-query test remains unopened. Base Qwen stays champion.",
         fill=COLORS["amber_light"],
     )
-    add_figure(doc, charts["coverage"], "Figure 7. Positive-aware explicit-negative coverage across Real702.")
+    add_figure(
+        doc,
+        charts["coverage"],
+        "Figure 7. Positive-aware explicit-negative coverage across Real702.",
+    )
     add_table(
         doc,
         ["Measure", "Value", "Meaning"],
         [
             ["Ready rows", str(facts["ready_rows"]), "At least 3 safe negatives"],
-            ["Insufficient rows", str(facts["insufficient_rows"]), "Excluded from explicit-negative training"],
-            ["Selected negatives", f"{facts['selected_negatives']:,}", "Labeled plus BM25 candidates"],
-            ["Grouped-positive rows", str(facts["grouped_positive_rows"]), "More than one labeled positive"],
+            [
+                "Insufficient rows",
+                str(facts["insufficient_rows"]),
+                "Excluded from explicit-negative training",
+            ],
+            [
+                "Selected negatives",
+                f"{facts['selected_negatives']:,}",
+                "Labeled plus BM25 candidates",
+            ],
+            [
+                "Grouped-positive rows",
+                str(facts["grouped_positive_rows"]),
+                "More than one labeled positive",
+            ],
         ],
         [2600, 1500, 5260],
     )
@@ -718,7 +734,11 @@ def extend_docx(
         "BashGym owns model development and reporting. MemexAI may separately implement a benchmark-supported reranker or fusion change, consuming only released model and integration artifacts.",
         fill=COLORS["purple_light"],
     )
-    add_figure(doc, charts["memory"], "Figure 9. Expanded-sequence memory guard derived from the Ponyo batch probe.")
+    add_figure(
+        doc,
+        charts["memory"],
+        "Figure 9. Expanded-sequence memory guard derived from the Ponyo batch probe.",
+    )
     doc.add_page_break()
     add_heading(doc, "Full Candidate A training run", 1)
     add_body(
@@ -734,10 +754,26 @@ def extend_docx(
         doc,
         ["Loss summary", "Epoch 1", "Epoch 2"],
         [
-            ["Mean", f"{facts['loss_epoch_1']['mean']:.4f}", f"{facts['loss_epoch_2']['mean']:.4f}"],
-            ["Median", f"{facts['loss_epoch_1']['median']:.4f}", f"{facts['loss_epoch_2']['median']:.4f}"],
-            ["90th percentile", f"{facts['loss_epoch_1']['p90']:.4f}", f"{facts['loss_epoch_2']['p90']:.4f}"],
-            ["Batches above 1.0", str(facts['loss_epoch_1']['above_1_count']), str(facts['loss_epoch_2']['above_1_count'])],
+            [
+                "Mean",
+                f"{facts['loss_epoch_1']['mean']:.4f}",
+                f"{facts['loss_epoch_2']['mean']:.4f}",
+            ],
+            [
+                "Median",
+                f"{facts['loss_epoch_1']['median']:.4f}",
+                f"{facts['loss_epoch_2']['median']:.4f}",
+            ],
+            [
+                "90th percentile",
+                f"{facts['loss_epoch_1']['p90']:.4f}",
+                f"{facts['loss_epoch_2']['p90']:.4f}",
+            ],
+            [
+                "Batches above 1.0",
+                str(facts["loss_epoch_1"]["above_1_count"]),
+                str(facts["loss_epoch_2"]["above_1_count"]),
+            ],
         ],
         [3100, 3130, 3130],
     )
@@ -752,9 +788,24 @@ def extend_docx(
         doc,
         ["Metric", "Base", "Candidate A", "Delta"],
         [
-            ["Exact MRR", f"{facts['base_dev']['exact_chunk_mrr']:.4f}", f"{facts['candidate_dev']['exact_chunk_mrr']:.4f}", f"{facts['dev_bootstrap']['exact_mrr']['delta']:+.4f}"],
-            ["Local-window MRR", f"{facts['base_dev']['local_window_mrr']:.4f}", f"{facts['candidate_dev']['local_window_mrr']:.4f}", f"{facts['dev_bootstrap']['local_window_mrr']['delta']:+.4f}"],
-            ["Same-video MRR", f"{facts['base_dev']['same_video_mrr']:.4f}", f"{facts['candidate_dev']['same_video_mrr']:.4f}", f"{facts['dev_bootstrap']['same_video_mrr']['delta']:+.4f}"],
+            [
+                "Exact MRR",
+                f"{facts['base_dev']['exact_chunk_mrr']:.4f}",
+                f"{facts['candidate_dev']['exact_chunk_mrr']:.4f}",
+                f"{facts['dev_bootstrap']['exact_mrr']['delta']:+.4f}",
+            ],
+            [
+                "Local-window MRR",
+                f"{facts['base_dev']['local_window_mrr']:.4f}",
+                f"{facts['candidate_dev']['local_window_mrr']:.4f}",
+                f"{facts['dev_bootstrap']['local_window_mrr']['delta']:+.4f}",
+            ],
+            [
+                "Same-video MRR",
+                f"{facts['base_dev']['same_video_mrr']:.4f}",
+                f"{facts['candidate_dev']['same_video_mrr']:.4f}",
+                f"{facts['dev_bootstrap']['same_video_mrr']['delta']:+.4f}",
+            ],
         ],
         [3100, 2000, 2200, 2060],
     )
@@ -894,8 +945,16 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
         ["Measure", "Value", "Interpretation"],
         ["Ready rows", str(facts["ready_rows"]), "At least three safe negatives"],
         ["Selected negatives", f"{facts['selected_negatives']:,}", "Labeled plus BM25-mined"],
-        ["Excluded candidates", f"{facts['excluded_candidates']:,}", "Potential false negatives removed"],
-        ["Grouped-positive rows", str(facts["grouped_positive_rows"]), "Multiple labeled positives"],
+        [
+            "Excluded candidates",
+            f"{facts['excluded_candidates']:,}",
+            "Potential false negatives removed",
+        ],
+        [
+            "Grouped-positive rows",
+            str(facts["grouped_positive_rows"]),
+            "Multiple labeled positives",
+        ],
     ]
     table = Table(data, colWidths=[1.55 * inch, 1.05 * inch, 3.9 * inch], repeatRows=1)
     table.setStyle(
@@ -919,7 +978,10 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
     story.extend(
         [
             Image(str(charts["sources"]), width=6.5 * inch, height=3.66 * inch),
-            Paragraph("Figure 2. Selected negative lanes and exclusion reasons.", styles["CampaignCaption"]),
+            Paragraph(
+                "Figure 2. Selected negative lanes and exclusion reasons.",
+                styles["CampaignCaption"],
+            ),
             Paragraph(
                 "The builder excludes exact/equivalent positives, adjacent or overlapping same-video windows, near-duplicate text, and every unreviewed same-video candidate. This conservative policy directly addresses the false-negative failure mode inferred from Real702.",
                 styles["BodyText"],
@@ -931,7 +993,10 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
                 styles["BodyText"],
             ),
             Image(str(charts["memory"]), width=6.5 * inch, height=3.66 * inch),
-            Paragraph("Figure 3. The memory guard converts the failed Ponyo probe into a launch invariant.", styles["CampaignCaption"]),
+            Paragraph(
+                "Figure 3. The memory guard converts the failed Ponyo probe into a launch invariant.",
+                styles["CampaignCaption"],
+            ),
             Spacer(1, 0.15 * inch),
             Paragraph(
                 "BashGym owns data design, training, evaluation, visualization, and packaging. MemexAI consumes only a released model plus immutable integration manifest. Any fusion or reranker change is implemented independently in the MemexAI repository with no BashGym runtime dependency and no repository merge.",
@@ -939,16 +1004,36 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
             ),
             Spacer(1, 0.2 * inch),
             Paragraph("Next evidence", styles["Heading2"]),
-            Paragraph("1. Keep base Qwen as champion.<br/>2. Add base-Qwen dense top-50 mining and RRF fusion.<br/>3. Run the 30-query double-label pilot.<br/>4. Test a lower-pressure one-epoch/checkpoint ablation on development only.<br/>5. Keep the frozen test closed until a future candidate passes development.", styles["BodyText"]),
+            Paragraph(
+                "1. Keep base Qwen as champion.<br/>2. Add base-Qwen dense top-50 mining and RRF fusion.<br/>3. Run the 30-query double-label pilot.<br/>4. Test a lower-pressure one-epoch/checkpoint ablation on development only.<br/>5. Keep the frozen test closed until a future candidate passes development.",
+                styles["BodyText"],
+            ),
         ]
     )
     dev_data = [
         ["Metric", "Base", "Candidate A", "Delta"],
-        ["Exact MRR", f"{facts['base_dev']['exact_chunk_mrr']:.4f}", f"{facts['candidate_dev']['exact_chunk_mrr']:.4f}", f"{facts['dev_bootstrap']['exact_mrr']['delta']:+.4f}"],
-        ["Local-window MRR", f"{facts['base_dev']['local_window_mrr']:.4f}", f"{facts['candidate_dev']['local_window_mrr']:.4f}", f"{facts['dev_bootstrap']['local_window_mrr']['delta']:+.4f}"],
-        ["Same-video MRR", f"{facts['base_dev']['same_video_mrr']:.4f}", f"{facts['candidate_dev']['same_video_mrr']:.4f}", f"{facts['dev_bootstrap']['same_video_mrr']['delta']:+.4f}"],
+        [
+            "Exact MRR",
+            f"{facts['base_dev']['exact_chunk_mrr']:.4f}",
+            f"{facts['candidate_dev']['exact_chunk_mrr']:.4f}",
+            f"{facts['dev_bootstrap']['exact_mrr']['delta']:+.4f}",
+        ],
+        [
+            "Local-window MRR",
+            f"{facts['base_dev']['local_window_mrr']:.4f}",
+            f"{facts['candidate_dev']['local_window_mrr']:.4f}",
+            f"{facts['dev_bootstrap']['local_window_mrr']['delta']:+.4f}",
+        ],
+        [
+            "Same-video MRR",
+            f"{facts['base_dev']['same_video_mrr']:.4f}",
+            f"{facts['candidate_dev']['same_video_mrr']:.4f}",
+            f"{facts['dev_bootstrap']['same_video_mrr']['delta']:+.4f}",
+        ],
     ]
-    dev_table = Table(dev_data, colWidths=[2.3 * inch, 1.2 * inch, 1.4 * inch, 1.1 * inch], repeatRows=1)
+    dev_table = Table(
+        dev_data, colWidths=[2.3 * inch, 1.2 * inch, 1.4 * inch, 1.1 * inch], repeatRows=1
+    )
     dev_table.setStyle(
         TableStyle(
             [
@@ -973,7 +1058,10 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
                 styles["BodyText"],
             ),
             Image(str(charts["loss"]), width=6.5 * inch, height=3.66 * inch),
-            Paragraph("Figure 4. Raw full-run loss and 15-step rolling mean; smoke steps are excluded.", styles["CampaignCaption"]),
+            Paragraph(
+                "Figure 4. Raw full-run loss and 15-step rolling mean; smoke steps are excluded.",
+                styles["CampaignCaption"],
+            ),
             Paragraph(
                 "The rapid loss reduction shows the selected training objective was learned. It does not establish retrieval improvement; the held-out comparison below is the promotion evidence.",
                 styles["BodyText"],
@@ -981,7 +1069,10 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
             PageBreak(),
             Paragraph("Held-out development gate", styles["Heading1"]),
             Image(str(charts["dev"]), width=6.5 * inch, height=3.66 * inch),
-            Paragraph("Figure 5. Base Qwen versus Candidate A on 18 held-out development queries.", styles["CampaignCaption"]),
+            Paragraph(
+                "Figure 5. Base Qwen versus Candidate A on 18 held-out development queries.",
+                styles["CampaignCaption"],
+            ),
             dev_table,
             Spacer(1, 0.18 * inch),
             Paragraph(
@@ -995,7 +1086,10 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
             PageBreak(),
             Paragraph("Ponyo resource envelope", styles["Heading1"]),
             Image(str(charts["resources"]), width=6.5 * inch, height=3.66 * inch),
-            Paragraph("Figure 6. Unified-memory availability and GPU utilization across the full run.", styles["CampaignCaption"]),
+            Paragraph(
+                "Figure 6. Unified-memory availability and GPU utilization across the full run.",
+                styles["CampaignCaption"],
+            ),
             Paragraph(
                 f"Available unified memory reached {facts['available_memory_floor_gib']:.2f} GiB, swap grew {facts['swap_growth_gib']:.2f} GiB, mean GPU utilization was {facts['gpu_utilization_mean_pct']:.1f}%, and peak temperature was {facts['temperature_peak_c']:.0f} C. Batch 4 remains the safe explicit-negative envelope with resident services active.",
                 styles["BodyText"],

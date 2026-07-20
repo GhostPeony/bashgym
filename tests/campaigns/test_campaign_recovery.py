@@ -541,8 +541,7 @@ def test_legacy_receipt_schema_migrates_without_trusting_colocated_key(tmp_path)
     campaigns.initialize()
     _create_campaign(campaigns, _campaign())
     with sqlite3.connect(campaigns.db_path) as connection:
-        connection.executescript(
-            """
+        connection.executescript("""
             CREATE TABLE campaign_recovery_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             INSERT INTO campaign_recovery_meta(key, value) VALUES ('seal_key', '00');
             CREATE TABLE campaign_recovery_receipts (
@@ -563,8 +562,7 @@ def test_legacy_receipt_schema_migrates_without_trusting_colocated_key(tmp_path)
                 '{}', 'sha256_0000000000000000000000000000000000000000000000000000000000000000',
                 '2026-07-16T20:30:00Z', NULL
             );
-            """
-        )
+            """)
     recovery = CampaignRecoveryRepository(campaigns.db_path, sealer=_recovery_sealer())
     recovery.initialize()
 
@@ -717,9 +715,7 @@ def test_projection_proves_recovery_consumer_readiness_from_live_controller_leas
         now=NOW,
     )
 
-    snapshot = recovery.project(
-        "workspace-a", "campaign-1", now=NOW + timedelta(seconds=1)
-    )
+    snapshot = recovery.project("workspace-a", "campaign-1", now=NOW + timedelta(seconds=1))
 
     assert snapshot["execution_consumer"] == {
         "supported": True,
@@ -747,9 +743,7 @@ def _pause_campaign(campaigns):
         )
 
 
-def test_accepted_resume_is_not_execution_and_resident_worker_completes_it(
-    repositories, tmp_path
-):
+def test_accepted_resume_is_not_execution_and_resident_worker_completes_it(repositories, tmp_path):
     campaigns, recovery = repositories
     worker = _resident_worker(campaigns, recovery, tmp_path)
     _pause_campaign(campaigns)
@@ -763,9 +757,7 @@ def test_accepted_resume_is_not_execution_and_resident_worker_completes_it(
     assert replayed is False
     assert accepted["outcome"] == "accepted"
     assert campaigns.get_campaign("workspace-a", "campaign-1").status == CampaignStatus.PAUSED
-    assert recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    ) == {
+    assert recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key) == {
         "schema_version": "campaign_recovery_execution.v1",
         "workspace_id": "workspace-a",
         "campaign_id": "campaign-1",
@@ -777,9 +769,7 @@ def test_accepted_resume_is_not_execution_and_resident_worker_completes_it(
 
     assert worker.run_once(now=NOW + timedelta(seconds=2)) == "recovery_resumed"
     assert campaigns.get_campaign("workspace-a", "campaign-1").status == CampaignStatus.ACTIVE
-    completed = recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )
+    completed = recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)
     assert completed["status"] == "completed"
     assert completed["outcome_code"] == "campaign_resumed"
     assert "resident-worker" not in json.dumps(completed)
@@ -813,7 +803,10 @@ def test_recovery_claim_is_single_owner_restart_safe_and_idempotent(repositories
     request = _request(snapshot)
     recovery.request(request, actor_id="human-operator", now=NOW + timedelta(seconds=1))
     leader = campaigns.acquire_lease(
-        worker.leader_key, worker.worker_id, ttl=timedelta(seconds=5), now=NOW + timedelta(seconds=2)
+        worker.leader_key,
+        worker.worker_id,
+        ttl=timedelta(seconds=5),
+        now=NOW + timedelta(seconds=2),
     )
 
     claim = recovery.claim_next(
@@ -824,21 +817,27 @@ def test_recovery_claim_is_single_owner_restart_safe_and_idempotent(repositories
     )
     assert claim is not None
     assert claim.status == "executing"
-    assert recovery.claim_next(
-        leader=leader,
-        worker_id="not-the-lease-owner",
-        ttl=timedelta(seconds=5),
-        now=NOW + timedelta(seconds=3),
-    ) is None
+    assert (
+        recovery.claim_next(
+            leader=leader,
+            worker_id="not-the-lease-owner",
+            ttl=timedelta(seconds=5),
+            now=NOW + timedelta(seconds=3),
+        )
+        is None
+    )
 
     reopened = CampaignRecoveryRepository(campaigns.db_path, sealer=_recovery_sealer())
     reopened.initialize()
-    assert reopened.claim_next(
-        leader=leader,
-        worker_id=worker.worker_id,
-        ttl=timedelta(seconds=5),
-        now=NOW + timedelta(seconds=4),
-    ) is None
+    assert (
+        reopened.claim_next(
+            leader=leader,
+            worker_id=worker.worker_id,
+            ttl=timedelta(seconds=5),
+            now=NOW + timedelta(seconds=4),
+        )
+        is None
+    )
     successor_leader = campaigns.acquire_lease(
         worker.leader_key,
         worker.worker_id,
@@ -860,9 +859,7 @@ def test_expired_unbound_repair_rechecks_authority_before_retry(repositories, tm
     campaigns, recovery = repositories
     worker = _resident_worker(campaigns, recovery, tmp_path)
     snapshot = recovery.project("workspace-a", "campaign-1", now=NOW)
-    request = _request(
-        snapshot, action=RecoveryAction.REPAIR, key="idem_" + "3" * 32
-    )
+    request = _request(snapshot, action=RecoveryAction.REPAIR, key="idem_" + "3" * 32)
     recovery.request(request, actor_id="human-operator", now=NOW + timedelta(seconds=1))
     leader = campaigns.acquire_lease(
         worker.leader_key,
@@ -896,9 +893,12 @@ def test_expired_unbound_repair_rechecks_authority_before_retry(repositories, tm
         now=NOW + timedelta(seconds=8),
     )
     assert blocked is not None and blocked.status == "blocked"
-    assert recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )["outcome_code"] == "authority_changed"
+    assert (
+        recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)[
+            "outcome_code"
+        ]
+        == "authority_changed"
+    )
 
 
 def test_stale_recovery_authority_blocks_without_execution(repositories, tmp_path):
@@ -920,9 +920,7 @@ def test_stale_recovery_authority_blocks_without_execution(repositories, tmp_pat
     )
 
     assert worker.run_once(now=NOW + timedelta(seconds=2)) == "recovery_blocked"
-    outcome = recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )
+    outcome = recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)
     assert outcome["status"] == "blocked"
     assert outcome["outcome_code"] == "authority_changed"
 
@@ -944,24 +942,23 @@ def test_changed_lineage_after_acceptance_fails_closed(repositories, tmp_path):
         )
 
     assert worker.run_once(now=NOW + timedelta(seconds=2)) == "recovery_blocked"
-    assert recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )["outcome_code"] == "authority_changed"
+    assert (
+        recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)[
+            "outcome_code"
+        ]
+        == "authority_changed"
+    )
 
 
 def test_generic_repair_without_exact_sealed_attempt_needs_operator(repositories, tmp_path):
     campaigns, recovery = repositories
     worker = _resident_worker(campaigns, recovery, tmp_path)
     snapshot = recovery.project("workspace-a", "campaign-1", now=NOW)
-    request = _request(
-        snapshot, action=RecoveryAction.REPAIR, key="idem_" + "5" * 32
-    )
+    request = _request(snapshot, action=RecoveryAction.REPAIR, key="idem_" + "5" * 32)
     recovery.request(request, actor_id="human-operator", now=NOW + timedelta(seconds=1))
 
     assert worker.run_once(now=NOW + timedelta(seconds=2)) == "recovery_blocked"
-    outcome = recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )
+    outcome = recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)
     assert outcome == {
         "schema_version": "campaign_recovery_execution.v1",
         "workspace_id": "workspace-a",
@@ -1005,20 +1002,22 @@ def test_resume_reopens_after_crash_and_replays_transition_idempotently(reposito
         idempotency_key=f"recovery-resume-{claim.request_id}",
         payload={"recovery_request_id": claim.request_id},
     )
-    assert recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )["status"] == "executing"
+    assert (
+        recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)["status"]
+        == "executing"
+    )
 
     reopened = CampaignRecoveryRepository(campaigns.db_path, sealer=_recovery_sealer())
     reopened.initialize()
-    successor = _resident_worker(
-        campaigns, reopened, tmp_path, worker_id=worker.worker_id
-    )
+    successor = _resident_worker(campaigns, reopened, tmp_path, worker_id=worker.worker_id)
     assert successor.run_once(now=NOW + timedelta(seconds=8)) == "recovery_resumed"
     assert campaigns.get_campaign("workspace-a", "campaign-1").version == 6
-    assert successor.recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )["status"] == "completed"
+    assert (
+        successor.recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)[
+            "status"
+        ]
+        == "completed"
+    )
 
 
 def test_repair_reconciles_only_the_exact_existing_sealed_attempt(repositories, tmp_path):
@@ -1047,15 +1046,11 @@ def test_repair_reconciles_only_the_exact_existing_sealed_attempt(repositories, 
     assert len(unfinished) == 1
 
     snapshot = recovery.project("workspace-a", "campaign-1", now=NOW + timedelta(seconds=1))
-    request = _request(
-        snapshot, action=RecoveryAction.REPAIR, key="idem_" + "4" * 32
-    )
+    request = _request(snapshot, action=RecoveryAction.REPAIR, key="idem_" + "4" * 32)
     recovery.request(request, actor_id="human-operator", now=NOW + timedelta(seconds=2))
 
     assert worker.run_once(now=NOW + timedelta(seconds=3)) == "recovery_repaired"
-    outcome = recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )
+    outcome = recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)
     assert outcome["status"] == "completed"
     assert outcome["outcome_code"] == "attempt_reconciled"
     assert outcome["attempt_id"] == unfinished[0].attempt_id
@@ -1104,15 +1099,11 @@ def test_repair_with_multiple_sealed_local_attempts_needs_operator(repositories,
     worker.sealed_path(second).mkdir(parents=True)
 
     snapshot = recovery.project("workspace-a", "campaign-1", now=NOW + timedelta(seconds=1))
-    request = _request(
-        snapshot, action=RecoveryAction.REPAIR, key="idem_" + "6" * 32
-    )
+    request = _request(snapshot, action=RecoveryAction.REPAIR, key="idem_" + "6" * 32)
     recovery.request(request, actor_id="human-operator", now=NOW + timedelta(seconds=2))
 
     assert worker.run_once(now=NOW + timedelta(seconds=3)) == "recovery_blocked"
-    outcome = recovery.execution_status(
-        "workspace-a", "campaign-1", request.idempotency_key
-    )
+    outcome = recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)
     assert outcome["status"] == "blocked"
     assert outcome["outcome_code"] == "needs_operator"
     assert outcome["attempt_id"] is None

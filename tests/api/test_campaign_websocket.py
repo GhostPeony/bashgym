@@ -32,9 +32,7 @@ def test_campaign_hint_is_exact_low_entropy_projection_at_send_time() -> None:
         event_type="campaign:created",
         correlation_id="correlation-safe",
     )
-    hint = build_campaign_hint(
-        source, emitted_at=datetime(2026, 7, 16, 18, 0, tzinfo=UTC)
-    )
+    hint = build_campaign_hint(source, emitted_at=datetime(2026, 7, 16, 18, 0, tzinfo=UTC))
 
     assert isinstance(hint, CampaignHintV1)
     assert hint.model_dump(mode="json") == {
@@ -99,9 +97,10 @@ def test_workspace_hint_source_query_is_payload_free_and_cursor_bounded(tmp_path
     assert sources[-1].correlation_id == "correlation-worker"
     assert not hasattr(sources[-1], "payload")
     assert repository.latest_workspace_campaign_event_cursor("workspace-a") == sources[-1].cursor
-    assert repository.list_workspace_campaign_hint_sources(
-        "workspace-b", after_cursor=0, limit=10
-    ) == ()
+    assert (
+        repository.list_workspace_campaign_hint_sources("workspace-b", after_cursor=0, limit=10)
+        == ()
+    )
 
 
 def test_live_ticket_requires_workspace_read_and_is_single_use(tmp_path) -> None:
@@ -458,10 +457,14 @@ async def test_ticket_subscription_observes_direct_worker_commit_and_reconnects(
         socket = _InteractiveSocket()
         task = asyncio.create_task(handle_websocket(socket))
         assert (await asyncio.wait_for(socket.outgoing.get(), timeout=1))["type"] == "connected"
-        await socket.incoming.put(json.dumps({
-            "type": "campaign:subscribe",
-            "payload": {"ticket": ticket_response.json()["ticket"]},
-        }))
+        await socket.incoming.put(
+            json.dumps(
+                {
+                    "type": "campaign:subscribe",
+                    "payload": {"ticket": ticket_response.json()["ticket"]},
+                }
+            )
+        )
         subscribed = await asyncio.wait_for(socket.outgoing.get(), timeout=1)
         assert subscribed["type"] == "campaign:subscribed"
         assert set(subscribed["payload"]) == {"workspace_id", "accepted_cursor"}

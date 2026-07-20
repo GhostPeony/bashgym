@@ -271,7 +271,10 @@ CORE_TOOLS: list[dict] = [
                         "dataset_split_manifest": {"type": "object"},
                         "dataset_row_counts": {"type": "object"},
                         "environment_id": {"type": "string"},
-                        "environment_runtime_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "environment_runtime_digest": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                        },
                         "environment_hardware": {"type": "object"},
                         "campaign_id": {"type": "string"},
                         "study_id": {"type": "string"},

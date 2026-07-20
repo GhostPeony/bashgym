@@ -4,13 +4,13 @@ import {
   type HFJob,
   type HFMyModel,
   type HFSpace,
-  type HFStatus,
+  type HFStatus
 } from '../services/api'
 import {
   createKeyedSessionResource,
   createSessionResource,
   type ResourceResult,
-  type SessionResourceStore,
+  type SessionResourceStore
 } from './sessionResource'
 
 /**
@@ -99,16 +99,18 @@ export const hfResearchResource: SessionResourceStore<ResearchOverview> =
     const [reportRes, empiricalRes, cacheRes] = await Promise.all([
       researchGet<{ content: string }>('/research/report'),
       researchGet<{ content: string }>('/research/empirical'),
-      researchGet<{ cached_datasets: number }>('/research/cache/stats'),
+      researchGet<{ cached_datasets: number }>('/research/cache/stats')
     ])
     const prev = hfResearchResource.getState().data
     return {
       ok: true,
       data: {
-        report: reportRes.ok && reportRes.data ? reportRes.data.content : prev?.report ?? null,
+        report: reportRes.ok && reportRes.data ? reportRes.data.content : (prev?.report ?? null),
         empirical:
-          empiricalRes.ok && empiricalRes.data ? empiricalRes.data.content : prev?.empirical ?? null,
-        cacheStats: cacheRes.ok && cacheRes.data ? cacheRes.data : prev?.cacheStats ?? null,
-      },
+          empiricalRes.ok && empiricalRes.data
+            ? empiricalRes.data.content
+            : (prev?.empirical ?? null),
+        cacheStats: cacheRes.ok && cacheRes.data ? cacheRes.data : (prev?.cacheStats ?? null)
+      }
     }
   })

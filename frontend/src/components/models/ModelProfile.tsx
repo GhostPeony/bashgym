@@ -35,14 +35,16 @@ const STATUS_CLASSES: Record<string, string> = {
   needs_eval: 'quality-pending text-status-warning',
   training: 'text-status-info',
   archived: 'text-text-muted',
-  regression_detected: 'quality-failed text-status-error',
+  regression_detected: 'quality-failed text-status-error'
 }
 
 export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePageProps) {
-  const { data: profile, loading, error, refresh } = useKeyedSessionResource(
-    modelProfileResource,
-    modelId
-  )
+  const {
+    data: profile,
+    loading,
+    error,
+    refresh
+  } = useKeyedSessionResource(modelProfileResource, modelId)
   const isLoading = loading || (profile === null && error === null)
 
   // Expanded sections
@@ -73,7 +75,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
   }, [profile])
 
   const toggleSection = (section: string) => {
-    setExpandedSections(prev => {
+    setExpandedSections((prev) => {
       const next = new Set(prev)
       if (next.has(section)) {
         next.delete(section)
@@ -100,7 +102,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         private: pushPrivate,
         artifact: pushArtifact,
         push_gguf: pushGguf,
-        generate_card: true,
+        generate_card: true
       })
       if (response.ok && response.data) {
         // Refresh profile to get hf_repo_id
@@ -120,7 +122,10 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
     const result = await modelsApi.update(modelId, {
       display_name: editName,
       description: editDescription,
-      tags: editTags.split(',').map(t => t.trim()).filter(Boolean)
+      tags: editTags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
     })
     if (result.ok) {
       modelProfileResource.getState().setData(modelId, result.data!)
@@ -132,7 +137,10 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
   // Action states
   const [isExporting, setIsExporting] = useState(false)
   const [isDeploying, setIsDeploying] = useState(false)
-  const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [actionMessage, setActionMessage] = useState<{
+    type: 'success' | 'error'
+    text: string
+  } | null>(null)
 
   const handleEvaluate = async () => {
     const result = await modelsApi.evaluate(modelId)
@@ -256,12 +264,12 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
           <div className="flex items-center gap-2">
             {isEditing ? (
               <>
-                <button
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="btn-primary"
-                >
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+                <button onClick={handleSave} disabled={isSaving} className="btn-primary">
+                  {isSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <Save className="w-4 h-4 mr-2" />
+                  )}
                   Save
                 </button>
                 <button onClick={() => setIsEditing(false)} className="btn-secondary">
@@ -276,7 +284,12 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                   Edit
                 </button>
                 <button onClick={handleStar} className="btn-secondary">
-                  <Star className={clsx('w-4 h-4 mr-2', profile.starred && 'fill-current text-status-warning')} />
+                  <Star
+                    className={clsx(
+                      'w-4 h-4 mr-2',
+                      profile.starred && 'fill-current text-status-warning'
+                    )}
+                  />
                   {profile.starred ? 'Starred' : 'Star'}
                 </button>
                 <button onClick={() => onCompare([modelId])} className="btn-secondary">
@@ -288,7 +301,11 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                   disabled={isExporting}
                   className="btn-secondary"
                 >
-                  {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                  {isExporting ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4 mr-2" />
+                  )}
                   Export
                 </button>
                 {profile.hf_repo_id ? (
@@ -318,7 +335,9 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         {/* Description (editable) */}
         {isEditing ? (
           <div className="mb-4">
-            <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Description</label>
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+              Description
+            </label>
             <textarea
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
@@ -326,14 +345,16 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
               className="input w-full"
             />
           </div>
-        ) : profile.description && (
-          <p className="text-text-secondary mb-4">{profile.description}</p>
+        ) : (
+          profile.description && <p className="text-text-secondary mb-4">{profile.description}</p>
         )}
 
         {/* Tags (editable) */}
         {isEditing ? (
           <div className="mb-4">
-            <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Tags (comma-separated)</label>
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+              Tags (comma-separated)
+            </label>
             <input
               type="text"
               value={editTags}
@@ -342,49 +363,73 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
               placeholder="production, v3, experimental"
             />
           </div>
-        ) : profile.tags.length > 0 && (
-          <div className="flex items-center gap-2 mb-4">
-            {profile.tags.map(tag => (
-              <span key={tag} className="tag">
-                <span>{tag}</span>
-              </span>
-            ))}
-          </div>
+        ) : (
+          profile.tags.length > 0 && (
+            <div className="flex items-center gap-2 mb-4">
+              {profile.tags.map((tag) => (
+                <span key={tag} className="tag">
+                  <span>{tag}</span>
+                </span>
+              ))}
+            </div>
+          )
         )}
 
         {/* Quick Stats */}
         <div className="grid grid-cols-6 gap-4">
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Custom Eval</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+              Custom Eval
+            </div>
             <div className="font-brand text-2xl text-text-primary">
-              {profile.custom_eval_pass_rate !== null ? `${profile.custom_eval_pass_rate.toFixed(1)}%` : '\u2014'}
+              {profile.custom_eval_pass_rate !== null
+                ? `${profile.custom_eval_pass_rate.toFixed(1)}%`
+                : '\u2014'}
             </div>
           </div>
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Benchmark Avg</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+              Benchmark Avg
+            </div>
             <div className="font-brand text-2xl text-text-primary">
-              {profile.benchmark_avg_score !== null ? `${profile.benchmark_avg_score.toFixed(1)}%` : '\u2014'}
+              {profile.benchmark_avg_score !== null
+                ? `${profile.benchmark_avg_score.toFixed(1)}%`
+                : '\u2014'}
             </div>
           </div>
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Model Size</div>
-            <div className="font-brand text-2xl text-text-primary">{profile.model_size_display}</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+              Model Size
+            </div>
+            <div className="font-brand text-2xl text-text-primary">
+              {profile.model_size_display}
+            </div>
             {profile.model_size_params && (
               <div className="font-mono text-xs text-text-muted">{profile.model_size_params}</div>
             )}
           </div>
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Latency</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+              Latency
+            </div>
             <div className="font-brand text-2xl text-text-primary">
-              {profile.inference_latency_ms ? `${profile.inference_latency_ms.toFixed(0)}ms` : '\u2014'}
+              {profile.inference_latency_ms
+                ? `${profile.inference_latency_ms.toFixed(0)}ms`
+                : '\u2014'}
             </div>
           </div>
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Training Time</div>
-            <div className="font-brand text-2xl text-text-primary">{profile.training_duration_display}</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+              Training Time
+            </div>
+            <div className="font-brand text-2xl text-text-primary">
+              {profile.training_duration_display}
+            </div>
           </div>
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Final Loss</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+              Final Loss
+            </div>
             <div className="font-brand text-2xl text-text-primary">
               {profile.final_metrics.final_loss?.toFixed(4) || '\u2014'}
             </div>
@@ -393,11 +438,19 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
 
         {/* Action Message */}
         {actionMessage && (
-          <div className={clsx(
-            'mt-4 p-3 border-brutal rounded-brutal font-mono text-sm flex items-center gap-2',
-            actionMessage.type === 'success' ? 'border-status-success text-status-success bg-background-card' : 'border-status-error text-status-error bg-background-card'
-          )}>
-            {actionMessage.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          <div
+            className={clsx(
+              'mt-4 p-3 border-brutal rounded-brutal font-mono text-sm flex items-center gap-2',
+              actionMessage.type === 'success'
+                ? 'border-status-success text-status-success bg-background-card'
+                : 'border-status-error text-status-error bg-background-card'
+            )}
+          >
+            {actionMessage.type === 'success' ? (
+              <CheckCircle className="w-4 h-4" />
+            ) : (
+              <AlertCircle className="w-4 h-4" />
+            )}
             {actionMessage.text}
           </div>
         )}
@@ -415,27 +468,36 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
           <div className="grid grid-cols-2 gap-6">
             {/* Config */}
             <div>
-              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Configuration</h4>
+              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">
+                Configuration
+              </h4>
               <div className="space-y-2 text-sm">
-                {Object.entries(profile.config).slice(0, 10).map(([key, value]) => (
-                  <div key={key} className="flex justify-between border-b border-border-subtle pb-1">
-                    <span className="text-text-muted">{key.replace(/_/g, ' ')}</span>
-                    <span className="text-text-primary font-mono">
-                      {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                    </span>
-                  </div>
-                ))}
+                {Object.entries(profile.config)
+                  .slice(0, 10)
+                  .map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="flex justify-between border-b border-border-subtle pb-1"
+                    >
+                      <span className="text-text-muted">{key.replace(/_/g, ' ')}</span>
+                      <span className="text-text-primary font-mono">
+                        {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                      </span>
+                    </div>
+                  ))}
               </div>
             </div>
 
             {/* Loss Curve */}
             <div>
-              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Loss Curve</h4>
+              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">
+                Loss Curve
+              </h4>
               {profile.loss_curve.length > 0 ? (
                 <div className="h-48 border-brutal border-border-subtle rounded-brutal bg-background-secondary p-4">
                   <div className="h-full flex items-end gap-1">
                     {profile.loss_curve.slice(-50).map((point, i) => {
-                      const maxLoss = Math.max(...profile.loss_curve.map(p => p.loss))
+                      const maxLoss = Math.max(...profile.loss_curve.map((p) => p.loss))
                       const height = (point.loss / maxLoss) * 100
                       return (
                         <div
@@ -458,11 +520,18 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
 
           {/* Training Metrics */}
           <div className="mt-4">
-            <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Final Metrics</h4>
+            <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">
+              Final Metrics
+            </h4>
             <div className="grid grid-cols-4 gap-4">
               {Object.entries(profile.final_metrics).map(([key, value]) => (
-                <div key={key} className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted">{key.replace(/_/g, ' ')}</div>
+                <div
+                  key={key}
+                  className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary"
+                >
+                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                    {key.replace(/_/g, ' ')}
+                  </div>
                   <div className="font-brand text-xl text-text-primary">
                     {typeof value === 'number' ? value.toFixed(4) : value}
                   </div>
@@ -485,22 +554,38 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
               <table className="w-full">
                 <thead>
                   <tr className="bg-background-secondary border-b border-border">
-                    <th className="px-4 py-2 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Benchmark</th>
-                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Score</th>
-                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Passed</th>
-                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Total</th>
-                    <th className="px-4 py-2 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Evaluated</th>
+                    <th className="px-4 py-2 text-left font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Benchmark
+                    </th>
+                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Score
+                    </th>
+                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Passed
+                    </th>
+                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Total
+                    </th>
+                    <th className="px-4 py-2 text-left font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Evaluated
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-subtle">
-                  {Object.values(profile.benchmarks).map(bench => (
+                  {Object.values(profile.benchmarks).map((bench) => (
                     <tr key={bench.benchmark_name}>
-                      <td className="px-4 py-3 font-brand text-text-primary">{bench.benchmark_name}</td>
+                      <td className="px-4 py-3 font-brand text-text-primary">
+                        {bench.benchmark_name}
+                      </td>
                       <td className="px-4 py-3 text-right font-brand text-xl text-text-primary">
                         {bench.score.toFixed(1)}%
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-status-success">{bench.passed}</td>
-                      <td className="px-4 py-3 text-right font-mono text-text-muted">{bench.total}</td>
+                      <td className="px-4 py-3 text-right font-mono text-status-success">
+                        {bench.passed}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-text-muted">
+                        {bench.total}
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-text-muted">
                         {new Date(bench.evaluated_at).toLocaleDateString()}
                       </td>
@@ -531,11 +616,16 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         >
           {Object.keys(profile.custom_evals).length > 0 ? (
             <div className="space-y-4">
-              {Object.values(profile.custom_evals).map(evalResult => (
-                <div key={evalResult.eval_set_id} className="p-4 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+              {Object.values(profile.custom_evals).map((evalResult) => (
+                <div
+                  key={evalResult.eval_set_id}
+                  className="p-4 border-brutal border-border-subtle rounded-brutal bg-background-secondary"
+                >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-brand text-lg text-text-primary">{evalResult.eval_set_id}</span>
+                      <span className="font-brand text-lg text-text-primary">
+                        {evalResult.eval_set_id}
+                      </span>
                       <span className="tag">
                         <span>{evalResult.eval_type}</span>
                       </span>
@@ -545,7 +635,9 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                     </span>
                   </div>
                   <div className="flex items-center gap-4 font-mono text-xs text-text-muted">
-                    <span>{evalResult.passed}/{evalResult.total} passed</span>
+                    <span>
+                      {evalResult.passed}/{evalResult.total} passed
+                    </span>
                     <span>Evaluated {new Date(evalResult.evaluated_at).toLocaleDateString()}</span>
                   </div>
                 </div>
@@ -568,7 +660,9 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         >
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Model Lineage</h4>
+              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">
+                Model Lineage
+              </h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between border-b border-border-subtle pb-1">
                   <span className="text-text-muted">Base Model</span>
@@ -590,17 +684,21 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
             </div>
 
             <div>
-              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Training Data</h4>
+              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">
+                Training Data
+              </h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between border-b border-border-subtle pb-1">
                   <span className="text-text-muted">Traces Used</span>
-                  <span className="text-text-primary font-mono">{profile.training_traces.length}</span>
+                  <span className="text-text-primary font-mono">
+                    {profile.training_traces.length}
+                  </span>
                 </div>
                 {profile.training_repos.length > 0 && (
                   <div>
                     <span className="text-text-muted block mb-1">From Repos</span>
                     <div className="flex flex-wrap gap-1">
-                      {profile.training_repos.map(repo => (
+                      {profile.training_repos.map((repo) => (
                         <span key={repo} className="tag">
                           <span>{repo}</span>
                         </span>
@@ -622,15 +720,20 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         >
           <div className="space-y-4">
             <div className="font-mono text-xs text-text-muted mb-2">
-              Model directory: <code className="bg-background-secondary border-brutal border-border-subtle px-2 py-0.5 rounded-brutal">{profile.model_dir}</code>
+              Model directory:{' '}
+              <code className="bg-background-secondary border-brutal border-border-subtle px-2 py-0.5 rounded-brutal">
+                {profile.model_dir}
+              </code>
             </div>
 
             {/* Checkpoints */}
             {profile.artifacts.checkpoints.length > 0 && (
               <div>
-                <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-2">Checkpoints</h4>
+                <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-2">
+                  Checkpoints
+                </h4>
                 <div className="flex flex-wrap gap-2">
-                  {profile.artifacts.checkpoints.map(cp => (
+                  {profile.artifacts.checkpoints.map((cp) => (
                     <span key={cp.path} className="tag">
                       <span>Step {cp.step}</span>
                     </span>
@@ -643,14 +746,22 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
             <div className="grid grid-cols-2 gap-4">
               {profile.artifacts.final_adapter_path && (
                 <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Final Adapter</div>
-                  <div className="text-sm text-text-primary font-mono truncate">{profile.artifacts.final_adapter_path}</div>
+                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+                    Final Adapter
+                  </div>
+                  <div className="text-sm text-text-primary font-mono truncate">
+                    {profile.artifacts.final_adapter_path}
+                  </div>
                 </div>
               )}
               {profile.artifacts.merged_path && (
                 <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Merged Model</div>
-                  <div className="text-sm text-text-primary font-mono truncate">{profile.artifacts.merged_path}</div>
+                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
+                    Merged Model
+                  </div>
+                  <div className="text-sm text-text-primary font-mono truncate">
+                    {profile.artifacts.merged_path}
+                  </div>
                 </div>
               )}
             </div>
@@ -658,12 +769,19 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
             {/* GGUF Exports */}
             {profile.artifacts.gguf_exports.length > 0 && (
               <div>
-                <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-2">GGUF Exports</h4>
+                <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-2">
+                  GGUF Exports
+                </h4>
                 <div className="space-y-2">
-                  {profile.artifacts.gguf_exports.map(gguf => (
-                    <div key={gguf.path} className="flex items-center justify-between p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+                  {profile.artifacts.gguf_exports.map((gguf) => (
+                    <div
+                      key={gguf.path}
+                      className="flex items-center justify-between p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary"
+                    >
                       <div>
-                        <span className="font-mono text-sm text-text-primary">{gguf.quantization}</span>
+                        <span className="font-mono text-sm text-text-primary">
+                          {gguf.quantization}
+                        </span>
                         <span className="font-mono text-xs text-text-muted ml-2">
                           {(gguf.size_bytes / (1024 * 1024 * 1024)).toFixed(2)} GB
                         </span>
@@ -689,7 +807,11 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                 disabled={isExporting}
                 className="btn-secondary"
               >
-                {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                {isExporting ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4 mr-2" />
+                )}
                 Export GGUF Q4
               </button>
               <button
@@ -697,16 +819,28 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                 disabled={isExporting}
                 className="btn-secondary"
               >
-                {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                {isExporting ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4 mr-2" />
+                )}
                 Export GGUF Q8
               </button>
               <button
                 onClick={handleDeployToOllama}
                 disabled={isDeploying || profile.artifacts.gguf_exports.length === 0}
                 className="btn-primary"
-                title={profile.artifacts.gguf_exports.length === 0 ? 'Export a GGUF first' : 'Deploy to Ollama'}
+                title={
+                  profile.artifacts.gguf_exports.length === 0
+                    ? 'Export a GGUF first'
+                    : 'Deploy to Ollama'
+                }
               >
-                {isDeploying ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+                {isDeploying ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4 mr-2" />
+                )}
                 Deploy to Ollama
               </button>
             </div>
@@ -716,12 +850,17 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
 
       {/* Push to HuggingFace Dialog */}
       {showPushDialog && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(27, 32, 64, 0.5)' }}>
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ backgroundColor: 'rgba(27, 32, 64, 0.5)' }}
+        >
           <div className="card p-6 w-full max-w-md shadow-brutal">
             <h3 className="font-serif text-lg mb-4">Push to HuggingFace Hub</h3>
             <div className="space-y-3">
               <div>
-                <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">Repository Name</label>
+                <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">
+                  Repository Name
+                </label>
                 <input
                   type="text"
                   value={pushRepoName}
@@ -731,11 +870,18 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                 />
               </div>
               <div className="flex items-center gap-2">
-                <input type="checkbox" checked={pushPrivate} onChange={(e) => setPushPrivate(e.target.checked)} className="accent-primary" />
+                <input
+                  type="checkbox"
+                  checked={pushPrivate}
+                  onChange={(e) => setPushPrivate(e.target.checked)}
+                  className="accent-primary"
+                />
                 <span className="text-sm text-text-secondary">Private repository</span>
               </div>
               <div>
-                <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">Artifact</label>
+                <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">
+                  Artifact
+                </label>
                 <select
                   value={pushArtifact}
                   onChange={(e) => setPushArtifact(e.target.value as 'auto' | 'adapter' | 'merged')}
@@ -747,17 +893,25 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                 </select>
               </div>
               <div className="flex items-center gap-2">
-                <input type="checkbox" checked={pushGguf} onChange={(e) => setPushGguf(e.target.checked)} className="accent-primary" />
+                <input
+                  type="checkbox"
+                  checked={pushGguf}
+                  onChange={(e) => setPushGguf(e.target.checked)}
+                  className="accent-primary"
+                />
                 <span className="text-sm text-text-secondary">Include GGUF exports</span>
               </div>
               {!pushPrivate && (
                 <p className="font-mono text-xs text-status-warning">
-                  Public release: verify the base-model license, dataset provenance, and model card before publishing.
+                  Public release: verify the base-model license, dataset provenance, and model card
+                  before publishing.
                 </p>
               )}
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowPushDialog(false)} className="btn-secondary">Cancel</button>
+              <button onClick={() => setShowPushDialog(false)} className="btn-secondary">
+                Cancel
+              </button>
               <button onClick={handlePushToHub} disabled={isPushing} className="btn-primary">
                 {isPushing ? 'Pushing...' : 'Push to Hub'}
               </button>
@@ -779,7 +933,14 @@ interface CollapsibleSectionProps {
   children: React.ReactNode
 }
 
-function CollapsibleSection({ title, icon: Icon, expanded, onToggle, badge, children }: CollapsibleSectionProps) {
+function CollapsibleSection({
+  title,
+  icon: Icon,
+  expanded,
+  onToggle,
+  badge,
+  children
+}: CollapsibleSectionProps) {
   return (
     <div className="card card-elevated overflow-hidden">
       <button
@@ -801,11 +962,7 @@ function CollapsibleSection({ title, icon: Icon, expanded, onToggle, badge, chil
           <ChevronRight className="w-5 h-5 text-text-muted" />
         )}
       </button>
-      {expanded && (
-        <div className="p-4 pt-0 border-t border-border">
-          {children}
-        </div>
-      )}
+      {expanded && <div className="p-4 pt-0 border-t border-border">{children}</div>}
     </div>
   )
 }

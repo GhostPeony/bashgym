@@ -19,17 +19,17 @@ compute with the same job.
 
 ## Flywheel Map
 
-| Flywheel | Role | Starts from | Produces | Primary user question |
-|---|---|---|---|---|
-| Core trace-to-training | Main BashGym product loop. | Real coding sessions. | Gold traces, datasets, trained adapters, routing evidence. | How do my coding sessions become a better local/open model? |
-| Data quality and Data Designer | Turns raw traces or sources into better artifacts. | Traces, source cards, external files, synthetic gaps. | SFT examples, DPO pairs, reward examples, dataset cards. | Is this data good enough to train on? |
-| Preference and reward | Learns or validates what "better" means. | Chosen/rejected traces, reward examples, verifier outcomes. | DPO pairs, reward models, reward evals, selection scores. | Can we rank or score behavior safely? |
-| Terminal RL and environments | Optimizes behavior inside executable tasks. | Environment specs and rollout attempts. | Pass@k, verifier rewards, DPPO replay, backend evidence. | Can the model improve by acting in a real shell? |
-| JEPA/ECHO/RWML diagnostics | Learns predictive terminal state signals. | Action/observation spans and transitions. | World-model metrics, curriculum signals, diagnostic evidence. | Does the model understand terminal dynamics better? |
-| Source and domain library | Finds public or internal data/eval sources safely. | Curated source cards. | Source manifests, converted artifacts, eval manifests. | What data or benchmark should I use, and is it training-safe? |
-| AutoResearch recipes | Searches for better data mixes and curricula. | Candidate sources, domains, quality thresholds, eval targets. | Ranked recipes, cost/improvement evidence, Data Designer handoff. | Which data mix improves the model most? |
-| Compute and RunCards | Makes runs reproducible and auditable. | Training plan, compute target, artifacts, metrics. | Launch plan, logs, synced artifacts, promotion verdict. | Can we prove what ran and what it changed? |
-| Education and recipes | Keeps operators oriented. | Method docs, defaults, failure examples. | Guided paths, setting help, failure labs. | What should I run next, and what do these knobs mean? |
+| Flywheel                       | Role                                               | Starts from                                                   | Produces                                                          | Primary user question                                         |
+| ------------------------------ | -------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------- |
+| Core trace-to-training         | Main BashGym product loop.                         | Real coding sessions.                                         | Gold traces, datasets, trained adapters, routing evidence.        | How do my coding sessions become a better local/open model?   |
+| Data quality and Data Designer | Turns raw traces or sources into better artifacts. | Traces, source cards, external files, synthetic gaps.         | SFT examples, DPO pairs, reward examples, dataset cards.          | Is this data good enough to train on?                         |
+| Preference and reward          | Learns or validates what "better" means.           | Chosen/rejected traces, reward examples, verifier outcomes.   | DPO pairs, reward models, reward evals, selection scores.         | Can we rank or score behavior safely?                         |
+| Terminal RL and environments   | Optimizes behavior inside executable tasks.        | Environment specs and rollout attempts.                       | Pass@k, verifier rewards, DPPO replay, backend evidence.          | Can the model improve by acting in a real shell?              |
+| JEPA/ECHO/RWML diagnostics     | Learns predictive terminal state signals.          | Action/observation spans and transitions.                     | World-model metrics, curriculum signals, diagnostic evidence.     | Does the model understand terminal dynamics better?           |
+| Source and domain library      | Finds public or internal data/eval sources safely. | Curated source cards.                                         | Source manifests, converted artifacts, eval manifests.            | What data or benchmark should I use, and is it training-safe? |
+| AutoResearch recipes           | Searches for better data mixes and curricula.      | Candidate sources, domains, quality thresholds, eval targets. | Ranked recipes, cost/improvement evidence, Data Designer handoff. | Which data mix improves the model most?                       |
+| Compute and RunCards           | Makes runs reproducible and auditable.             | Training plan, compute target, artifacts, metrics.            | Launch plan, logs, synced artifacts, promotion verdict.           | Can we prove what ran and what it changed?                    |
+| Education and recipes          | Keeps operators oriented.                          | Method docs, defaults, failure examples.                      | Guided paths, setting help, failure labs.                         | What should I run next, and what do these knobs mean?         |
 
 ## 1. Core Trace-To-Training Flywheel
 

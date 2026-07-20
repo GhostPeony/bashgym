@@ -42,7 +42,9 @@ def test_fetch_source_records_writes_capped_hf_jsonl_with_metadata(tmp_path):
 
     records = [
         json.loads(line)
-        for line in tmp_path.joinpath("source_records.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in tmp_path.joinpath("source_records.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
     assert records[0]["metadata"]["quality_score"] == 0.9
     assert records[0]["metadata"]["source_fetch"]["huggingface_id"] == (

@@ -55,14 +55,14 @@ export function isTrainingRunActive(status: string | null | undefined): boolean 
 
 function originForPanel(
   panel: TrainingOriginState['panels'][number],
-  state: TrainingOriginState,
+  state: TrainingOriginState
 ): TrainingOrigin {
   const session = panel.terminalId ? state.sessions.get(panel.terminalId) : undefined
   return {
     kind: panel.type === 'terminal' ? 'terminal' : 'panel',
     panel_id: panel.id,
     ...(panel.terminalId ? { terminal_id: panel.terminalId } : {}),
-    ...(session?.agentKind ? { agent: session.agentKind } : {}),
+    ...(session?.agentKind ? { agent: session.agentKind } : {})
   }
 }
 
@@ -72,7 +72,7 @@ export function resolveTrainingOrigin(state: TrainingOriginState): TrainingOrigi
   if (activePanel) return originForPanel(activePanel, state)
 
   const activeTerminalPanel = state.panels.find(
-    (panel) => panel.terminalId === state.activeSessionId,
+    (panel) => panel.terminalId === state.activeSessionId
   )
   if (activeTerminalPanel) return originForPanel(activeTerminalPanel, state)
 
@@ -88,11 +88,15 @@ export function inferTrainingComputeTarget(config: TrainingLaunchConfiguration):
 }
 
 export function createTrainingCorrelationId(now = Date.now(), random = Math.random): string {
-  const entropy = Math.floor(random() * 0x1000000).toString(36).padStart(4, '0')
+  const entropy = Math.floor(random() * 0x1000000)
+    .toString(36)
+    .padStart(4, '0')
   return `training-${now.toString(36)}-${entropy}`
 }
 
-function trainingOriginFromResponse(value: Record<string, unknown> | undefined): TrainingOrigin | undefined {
+function trainingOriginFromResponse(
+  value: Record<string, unknown> | undefined
+): TrainingOrigin | undefined {
   if (!value) return undefined
   const kind = typeof value.kind === 'string' ? value.kind : undefined
   const terminalId = typeof value.terminal_id === 'string' ? value.terminal_id : undefined
@@ -103,7 +107,7 @@ function trainingOriginFromResponse(value: Record<string, unknown> | undefined):
     ...(kind ? { kind } : {}),
     ...(terminalId ? { terminal_id: terminalId } : {}),
     ...(panelId ? { panel_id: panelId } : {}),
-    ...(agent ? { agent } : {}),
+    ...(agent ? { agent } : {})
   }
 }
 
@@ -117,7 +121,7 @@ export function trainingQueuedPayloadFromResponse(
     correlation_id?: string
     compute_target?: string
   },
-  fallback?: TrainingQueuedFallback,
+  fallback?: TrainingQueuedFallback
 ): TrainingQueuedPayload {
   return {
     run_id: response.run_id,
@@ -127,6 +131,6 @@ export function trainingQueuedPayloadFromResponse(
     dataset_path: fallback?.datasetPath,
     origin: trainingOriginFromResponse(response.origin) ?? fallback?.origin,
     correlation_id: response.correlation_id ?? fallback?.correlationId,
-    compute_target: response.compute_target ?? fallback?.computeTarget,
+    compute_target: response.compute_target ?? fallback?.computeTarget
   }
 }

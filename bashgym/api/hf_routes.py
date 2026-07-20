@@ -1004,9 +1004,7 @@ async def upload_dataset(request: DatasetUploadRequest):
         else:
             val_count = 0
         repo_id = (
-            f"{client.namespace}/{request.repo_name}"
-            if client.namespace
-            else request.repo_name
+            f"{client.namespace}/{request.repo_name}" if client.namespace else request.repo_name
         )
 
         return DatasetResponse(

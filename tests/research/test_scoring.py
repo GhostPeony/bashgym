@@ -1,7 +1,6 @@
 """Unit tests for bashgym.research.scoring. No network, all inputs mocked."""
-from datetime import datetime, timedelta
 
-import pytest
+from datetime import datetime, timedelta
 
 from bashgym.research.scoring import DatasetMetadata, score_dataset
 
@@ -43,13 +42,17 @@ class TestHardFilters:
         meta = _fresh_meta(num_rows=5)
         result = score_dataset(meta)
         assert result.rejected is True
-        assert "small" in result.rejection_reason.lower() or "size" in result.rejection_reason.lower()
+        assert (
+            "small" in result.rejection_reason.lower() or "size" in result.rejection_reason.lower()
+        )
 
     def test_rejects_too_large(self):
         meta = _fresh_meta(num_rows=5_000_000)
         result = score_dataset(meta)
         assert result.rejected is True
-        assert "large" in result.rejection_reason.lower() or "size" in result.rejection_reason.lower()
+        assert (
+            "large" in result.rejection_reason.lower() or "size" in result.rejection_reason.lower()
+        )
 
 
 class TestTaskMatchDimension:
@@ -62,7 +65,9 @@ class TestTaskMatchDimension:
         assert any("+" in r for r in task_lines)
 
     def test_low_score_for_no_code_tags(self):
-        meta = _fresh_meta(tags=["translation", "multilingual"], description="A translation corpus.")
+        meta = _fresh_meta(
+            tags=["translation", "multilingual"], description="A translation corpus."
+        )
         result = score_dataset(meta)
         assert result.rejected is False
         task_lines = [r for r in result.reasons if "task" in r.lower()]
@@ -141,7 +146,9 @@ class TestHeuristicFormatInference:
 
     def test_mbpp_text_plus_code_maps_to_grpo(self):
         """mbpp has text (prompt) + code (response) + test_list → GRPO-compatible."""
-        meta = _fresh_meta(features={"task_id": "string", "text": "string", "code": "string", "test_list": "list"})
+        meta = _fresh_meta(
+            features={"task_id": "string", "text": "string", "code": "string", "test_list": "list"}
+        )
         result = score_dataset(meta)
         assert result.bashgym_format == "grpo"
         # Heuristic matches get lower schema credit than exact matches.
@@ -155,31 +162,42 @@ class TestHeuristicFormatInference:
         assert any("heuristic" in r.lower() for r in result.reasons)
 
     def test_swe_bench_problem_statement_plus_patch_maps_to_sft(self):
-        meta = _fresh_meta(features={
-            "instance_id": "string",
-            "problem_statement": "string",
-            "patch": "string",
-            "FAIL_TO_PASS": "list",
-        })
+        meta = _fresh_meta(
+            features={
+                "instance_id": "string",
+                "problem_statement": "string",
+                "patch": "string",
+                "FAIL_TO_PASS": "list",
+            }
+        )
         result = score_dataset(meta)
         # problem_statement (prompt-like) + patch (response-like) + FAIL_TO_PASS (test-like)
         # → GRPO takes priority over SFT via the has_test_like branch
         assert result.bashgym_format == "grpo"
 
     def test_humaneval_pro_raw_problem_raw_solution(self):
-        meta = _fresh_meta(features={
-            "id": "string",
-            "raw_problem": "string",
-            "raw_solution": "string",
-            "test_code": "string",
-        })
+        meta = _fresh_meta(
+            features={
+                "id": "string",
+                "raw_problem": "string",
+                "raw_solution": "string",
+                "test_code": "string",
+            }
+        )
         result = score_dataset(meta)
         # raw_problem + test_code → grpo
         assert result.bashgym_format == "grpo"
 
     def test_exact_schema_beats_heuristic(self):
         """When exact and heuristic patterns both match, exact wins."""
-        meta = _fresh_meta(features={"prompt": "string", "completion": "string", "text": "string", "code": "string"})
+        meta = _fresh_meta(
+            features={
+                "prompt": "string",
+                "completion": "string",
+                "text": "string",
+                "code": "string",
+            }
+        )
         result = score_dataset(meta)
         assert result.bashgym_format == "sft"
         # Should be exact match (full schema credit), not heuristic.
@@ -219,11 +237,12 @@ class TestDownloadCommand:
 
     def test_command_is_valid_python_expression(self):
         import ast
+
         meta = _fresh_meta()
         result = score_dataset(meta)
         ast.parse(result.download_command, mode="exec")
 
-    def test_command_references_DataDesignerPipeline(self):
+    def test_command_references_data_designer_pipeline(self):
         meta = _fresh_meta()
         result = score_dataset(meta)
         assert "DataDesignerPipeline" in result.download_command

@@ -68,7 +68,7 @@ CASES = [
 
 
 def evaluate_response(case: dict[str, str], response: dict[str, Any]) -> bool:
-    message = ((response.get("choices") or [{}])[0].get("message") or {})
+    message = (response.get("choices") or [{}])[0].get("message") or {}
     if expected := case.get("expected_text"):
         return str(message.get("content") or "").strip() == expected
     if expected_tool := case.get("expected_tool"):
@@ -130,7 +130,7 @@ def call_model(endpoint: str, model: str, case: dict[str, str], timeout: float) 
             "error": str(exc),
         }
 
-    message = ((body.get("choices") or [{}])[0].get("message") or {})
+    message = (body.get("choices") or [{}])[0].get("message") or {}
     return {
         "model": model,
         "case_id": case["id"],

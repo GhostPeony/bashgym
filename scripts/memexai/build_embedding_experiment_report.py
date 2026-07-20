@@ -198,10 +198,17 @@ def training_cost_chart(output: Path) -> None:
         for row_index, (label, value, color) in enumerate(zip(labels, values, colors, strict=True)):
             y = 340 + row_index * 190
             draw.text((x0, y), label, fill=rgb(COLORS["ink"]), font=font(24, True))
-            draw.rounded_rectangle((x0, y + 45, x0 + 590, y + 115), radius=10, fill=rgb(COLORS["grid"]))
+            draw.rounded_rectangle(
+                (x0, y + 45, x0 + 590, y + 115), radius=10, fill=rgb(COLORS["grid"])
+            )
             width = int(590 * value / max_value)
             draw.rounded_rectangle((x0, y + 45, x0 + width, y + 115), radius=10, fill=rgb(color))
-            draw.text((x0 + width + 14, y + 63), f"{value} {unit}", fill=rgb(COLORS["ink"]), font=font(21, True))
+            draw.text(
+                (x0 + width + 14, y + 63),
+                f"{value} {unit}",
+                fill=rgb(COLORS["ink"]),
+                font=font(21, True),
+            )
     draw.rounded_rectangle((120, 742, 1480, 806), radius=12, fill=rgb(COLORS["purple_light"]))
     draw.text(
         (150, 760),
@@ -221,14 +228,37 @@ def retrieval_layers_diagram(output: Path) -> None:
     boxes = [
         (105, 300, 375, 525, "Query + passage\ntraining examples", COLORS["purple_light"], "DATA"),
         (435, 300, 725, 525, "Qwen embedding\nencoder weights", COLORS["sage_light"], "LEARNED"),
-        (785, 300, 1065, 525, "Normalized vectors\n+ exact dot product", COLORS["soft"], "FIXED MATH"),
-        (1125, 300, 1495, 525, "Ranked candidates\n+ optional reranker", COLORS["amber_light"], "SYSTEM"),
+        (
+            785,
+            300,
+            1065,
+            525,
+            "Normalized vectors\n+ exact dot product",
+            COLORS["soft"],
+            "FIXED MATH",
+        ),
+        (
+            1125,
+            300,
+            1495,
+            525,
+            "Ranked candidates\n+ optional reranker",
+            COLORS["amber_light"],
+            "SYSTEM",
+        ),
     ]
     for x1, y1, x2, y2, body, fill, kicker in boxes:
-        draw.rounded_rectangle((x1, y1, x2, y2), radius=18, fill=rgb(fill), outline=rgb(COLORS["grid"]), width=3)
+        draw.rounded_rectangle(
+            (x1, y1, x2, y2), radius=18, fill=rgb(fill), outline=rgb(COLORS["grid"]), width=3
+        )
         draw.text((x1 + 24, y1 + 22), kicker, fill=rgb(COLORS["purple"]), font=font(19, True))
         for line_index, line in enumerate(body.splitlines()):
-            draw.text((x1 + 24, y1 + 78 + line_index * 39), line, fill=rgb(COLORS["ink"]), font=font(26, True))
+            draw.text(
+                (x1 + 24, y1 + 78 + line_index * 39),
+                line,
+                fill=rgb(COLORS["ink"]),
+                font=font(26, True),
+            )
     for x in (375, 725, 1065):
         draw.line((x + 10, 412, x + 50, 412), fill=rgb(COLORS["muted"]), width=5)
         draw.polygon([(x + 50, 412), (x + 35, 402), (x + 35, 422)], fill=rgb(COLORS["muted"]))
@@ -252,7 +282,9 @@ def set_cell_shading(cell, fill: str) -> None:
     shd.set(qn("w:fill"), fill)
 
 
-def set_cell_margins(cell, top: int = 80, start: int = 120, bottom: int = 80, end: int = 120) -> None:
+def set_cell_margins(
+    cell, top: int = 80, start: int = 120, bottom: int = 80, end: int = 120
+) -> None:
     tc = cell._tc
     tc_pr = tc.get_or_add_tcPr()
     tc_mar = tc_pr.first_child_found_in("w:tcMar")
@@ -311,7 +343,14 @@ def set_table_geometry(table, widths_dxa: list[int], indent_dxa: int = 120) -> N
             tr_pr.append(tbl_header)
 
 
-def set_run_font(run, *, size: float | None = None, bold: bool | None = None, color: str | None = None, italic: bool | None = None) -> None:
+def set_run_font(
+    run,
+    *,
+    size: float | None = None,
+    bold: bool | None = None,
+    color: str | None = None,
+    italic: bool | None = None,
+) -> None:
     run.font.name = "Calibri"
     run._element.get_or_add_rPr().rFonts.set(qn("w:ascii"), "Calibri")
     run._element.get_or_add_rPr().rFonts.set(qn("w:hAnsi"), "Calibri")
@@ -451,7 +490,9 @@ def configure_document(doc: Document) -> None:
         style.font.name = "Calibri"
         style.font.size = Pt(size)
         style.font.bold = True
-        style.font.color.rgb = RGBColor.from_string(COLORS["purple"] if level < 3 else COLORS["ink"])
+        style.font.color.rgb = RGBColor.from_string(
+            COLORS["purple"] if level < 3 else COLORS["ink"]
+        )
         style.paragraph_format.space_before = Pt(before)
         style.paragraph_format.space_after = Pt(after)
         style.paragraph_format.keep_with_next = True
@@ -549,7 +590,11 @@ def build_docx(
         "What did not change: production models, embedding tables, indexes, and serving pointers were not modified by this campaign.",
         bold_lead="What did not change:",
     )
-    add_figure(doc, charts["retrieval"], "Figure 1. Exact held-out retrieval metrics across the three candidates.")
+    add_figure(
+        doc,
+        charts["retrieval"],
+        "Figure 1. Exact held-out retrieval metrics across the three candidates.",
+    )
 
     doc.add_page_break()
     add_heading(doc, "Training data and experiment design", 1)
@@ -557,7 +602,9 @@ def build_docx(
         doc,
         "Both fine-tune arms start with 114 template queries. The real arm adds all 588 judged, real-grounded Data Designer queries. The mixed arm adds a capped 196-query synthetic slice selected deterministically across all 130 synthetic positives.",
     )
-    add_figure(doc, charts["dataset"], "Figure 2. Training-row composition for the real and mixed arms.")
+    add_figure(
+        doc, charts["dataset"], "Figure 2. Training-row composition for the real and mixed arms."
+    )
     dataset_rows = [
         ["Template base", "114", "38", "19", "Original training split"],
         ["Real Data Designer", "588", "199", "19", "98% judge keep rate"],
@@ -636,7 +683,11 @@ def build_docx(
 
     doc.add_page_break()
     add_heading(doc, "Encoder training versus retrieval math", 1)
-    add_figure(doc, charts["layers"], "Figure 6. Learned encoder components versus fixed and system-level retrieval components.")
+    add_figure(
+        doc,
+        charts["layers"],
+        "Figure 6. Learned encoder components versus fixed and system-level retrieval components.",
+    )
     add_heading(doc, "What these runs train", 2)
     add_body(
         doc,
@@ -900,7 +951,15 @@ def main() -> int:
     stats = bundle["statistics"]
     write_csv(
         tables_dir / "dataset_summary.csv",
-        ["component", "rows", "positive_chunks", "videos", "keyword", "natural_question", "semantic_paraphrase"],
+        [
+            "component",
+            "rows",
+            "positive_chunks",
+            "videos",
+            "keyword",
+            "natural_question",
+            "semantic_paraphrase",
+        ],
         [
             [
                 label,
@@ -923,7 +982,14 @@ def main() -> int:
     )
     write_csv(
         tables_dir / "query_type_metrics.csv",
-        ["candidate", "query_type", "exact_mrr", "exact_recall_at_1", "exact_recall_at_10", "local_window_mrr"],
+        [
+            "candidate",
+            "query_type",
+            "exact_mrr",
+            "exact_recall_at_1",
+            "exact_recall_at_10",
+            "local_window_mrr",
+        ],
         [
             [
                 model,
@@ -939,7 +1005,15 @@ def main() -> int:
     )
     write_csv(
         tables_dir / "training_runs.csv",
-        ["candidate", "training_rows", "positive_chunks", "optimizer_steps", "duration_seconds", "exact_mrr", "exact_recall_at_10"],
+        [
+            "candidate",
+            "training_rows",
+            "positive_chunks",
+            "optimizer_steps",
+            "duration_seconds",
+            "exact_mrr",
+            "exact_recall_at_10",
+        ],
         [
             ["Real 702", 702, 237, 88, 133, 0.442565, 0.861111],
             ["Mixed 898", 898, 367, 114, 316, 0.427717, 0.861111],

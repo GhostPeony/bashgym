@@ -25,7 +25,7 @@ import {
   type SystemStats,
   type ToolStat,
   type TraceSummary,
-  type TrainingRunSummary,
+  type TrainingRunSummary
 } from '../services/api'
 import { createKeyedSessionResource, createSessionResource } from './sessionResource'
 
@@ -52,7 +52,7 @@ export interface PipelineOverview {
 export const pipelineOverviewResource = createSessionResource<PipelineOverview>(async () => {
   const [statusRes, configRes] = await Promise.all([
     pipelineApi.getStatus(),
-    pipelineApi.getConfig(),
+    pipelineApi.getConfig()
   ])
   if (statusRes.ok && statusRes.data && configRes.ok && configRes.data) {
     return { ok: true, data: { status: statusRes.data, config: configRes.data } }
@@ -73,7 +73,7 @@ export const integrationOverviewResource = createSessionResource<IntegrationOver
     integrationApi.getStatus(),
     integrationApi.getSettings(),
     integrationApi.listModelVersions(),
-    integrationApi.listPendingTraces(),
+    integrationApi.listPendingTraces()
   ])
   if (!statusRes.ok && !settingsRes.ok && !modelsRes.ok && !tracesRes.ok) {
     return { ok: false, error: statusRes.error || 'Failed to load integration data' }
@@ -81,11 +81,11 @@ export const integrationOverviewResource = createSessionResource<IntegrationOver
   return {
     ok: true,
     data: {
-      status: statusRes.ok ? statusRes.data ?? null : null,
-      settings: settingsRes.ok ? settingsRes.data ?? null : null,
-      modelVersions: modelsRes.ok ? modelsRes.data ?? [] : [],
-      pendingTraces: tracesRes.ok ? tracesRes.data ?? [] : [],
-    },
+      status: statusRes.ok ? (statusRes.data ?? null) : null,
+      settings: settingsRes.ok ? (settingsRes.data ?? null) : null,
+      modelVersions: modelsRes.ok ? (modelsRes.data ?? []) : [],
+      pendingTraces: tracesRes.ok ? (tracesRes.data ?? []) : []
+    }
   }
 })
 
@@ -157,7 +157,7 @@ export const trainingRunOptionsResource = createSessionResource<TrainingRunOptio
       .map((r) => ({
         id: String(r.run_id ?? r.id ?? ''),
         status: r.status as string | undefined,
-        strategy: r.strategy as string | undefined,
+        strategy: r.strategy as string | undefined
       }))
       .filter((r) => r.id)
     return { ok: true, data: list }
@@ -210,7 +210,7 @@ export const runMetricsResource = createKeyedSessionResource<RunMetricPoint[]>(a
       ok: true,
       data: result.data.metrics.filter(
         (m) => typeof m.loss === 'number' && typeof m.step === 'number'
-      ),
+      )
     }
   }
   return { ok: false, error: result.error || 'Failed to load metrics' }

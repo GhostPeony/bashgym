@@ -10,7 +10,7 @@ import {
   Copy,
   TrendingDown,
   AlertCircle,
-  FileJson,
+  FileJson
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
@@ -19,7 +19,7 @@ import {
   type HeldoutEnvironmentEvidence,
   type HeldoutJobResponse,
   type HeldoutReport,
-  type NormalizedBenchmarkResult,
+  type NormalizedBenchmarkResult
 } from '../../services/api'
 import { useSessionResource } from '../../stores/sessionResource'
 import { registeredModelsResource } from '../../stores/factoryResources'
@@ -29,7 +29,7 @@ const METRICS = [
   { id: 'exact_match', name: 'Exact match', hint: 'Tool name + every argument identical' },
   { id: 'name_match', name: 'Tool name', hint: 'Right tool, arguments ignored' },
   { id: 'arg_f1', name: 'Argument F1', hint: 'Per-argument overlap' },
-  { id: 'soft', name: 'Soft (SERA)', hint: 'Graded partial credit for near-misses' },
+  { id: 'soft', name: 'Soft (SERA)', hint: 'Graded partial credit for near-misses' }
 ]
 
 interface EndpointForm {
@@ -53,38 +53,38 @@ const EVIDENCE_FIELDS: Array<{ id: EvidenceFieldId; label: string; placeholder: 
   {
     id: 'holdout_gate',
     label: 'Holdout gate',
-    placeholder: '{"result":{"gate":{"ship":true,"reasons":[]}}}',
+    placeholder: '{"result":{"gate":{"ship":true,"reasons":[]}}}'
   },
   {
     id: 'holdout_comparison',
     label: 'Holdout comparison',
-    placeholder: '{"result":{"gate":{"ship":true,"reasons":[]}}}',
+    placeholder: '{"result":{"gate":{"ship":true,"reasons":[]}}}'
   },
   {
     id: 'spurious_reward_control',
     label: 'Spurious reward control',
-    placeholder: '{"result":{"gate":{"ship":true,"reasons":[]}}}',
+    placeholder: '{"result":{"gate":{"ship":true,"reasons":[]}}}'
   },
   {
     id: 'passk',
     label: 'Pass@k report',
-    placeholder: '{"pass_at_k":{"pass@1":0.5}}',
+    placeholder: '{"pass_at_k":{"pass@1":0.5}}'
   },
   {
     id: 'external_benchmarks',
     label: 'External benchmarks',
-    placeholder: '{"report":{"scores":{"harbor_terminal_bench":0.67},"failures":[]}}',
+    placeholder: '{"report":{"scores":{"harbor_terminal_bench":0.67},"failures":[]}}'
   },
   {
     id: 'world_model_quality',
     label: 'World-model quality',
-    placeholder: '{"metrics":{"echo_loss":{"first":1.2,"last":0.8},"rwml_pass_rate":0.72}}',
+    placeholder: '{"metrics":{"echo_loss":{"first":1.2,"last":0.8},"rwml_pass_rate":0.72}}'
   },
   {
     id: 'learned_reward_evidence',
     label: 'Learned reward',
-    placeholder: '{"metrics":{"heldout_pair_accuracy":0.82,"calibration_error":0.08},"findings":[]}',
-  },
+    placeholder: '{"metrics":{"heldout_pair_accuracy":0.82,"calibration_error":0.08},"findings":[]}'
+  }
 ]
 
 const EMPTY_EVIDENCE_JSON: Record<EvidenceFieldId, string> = {
@@ -94,7 +94,7 @@ const EMPTY_EVIDENCE_JSON: Record<EvidenceFieldId, string> = {
   spurious_reward_control: '',
   external_benchmarks: '',
   world_model_quality: '',
-  learned_reward_evidence: '',
+  learned_reward_evidence: ''
 }
 
 interface ParsedEvidence {
@@ -107,12 +107,7 @@ function pct(x: number | undefined): string {
   return x === undefined ? '—' : `${(x * 100).toFixed(1)}%`
 }
 
-const BENCHMARK_METRIC_SKIP = new Set([
-  'score',
-  'accuracy',
-  'overall_accuracy',
-  'resolution_rate',
-])
+const BENCHMARK_METRIC_SKIP = new Set(['score', 'accuracy', 'overall_accuracy', 'resolution_rate'])
 
 function metricValue(value: number): string {
   if (!Number.isFinite(value)) return 'n/a'
@@ -144,7 +139,7 @@ function parseEvidenceObject(label: string, text: string): ParsedEvidence {
 function EndpointFields({
   label,
   value,
-  onChange,
+  onChange
 }: {
   label: string
   value: EndpointForm
@@ -183,7 +178,7 @@ function EnvironmentEvidencePanel({
   sectionCount,
   onEnabledChange,
   onRequiredChange,
-  onValueChange,
+  onValueChange
 }: {
   enabled: boolean
   required: boolean
@@ -262,8 +257,7 @@ function EnvironmentEvidencePanel({
 
           {missingRequired ? (
             <p className="font-mono text-xs text-status-error flex items-center gap-1.5">
-              <AlertCircle className="w-3.5 h-3.5" /> Attach at least one release evidence
-              object.
+              <AlertCircle className="w-3.5 h-3.5" /> Attach at least one release evidence object.
             </p>
           ) : null}
           {errors.length > 0 ? (
@@ -287,7 +281,9 @@ function VerdictBanner({ report }: { report: HeldoutReport }) {
     <div
       className={clsx(
         'p-4 border-brutal rounded-brutal flex items-center gap-3',
-        ship ? 'border-status-success bg-accent-light' : 'border-status-error bg-background-secondary'
+        ship
+          ? 'border-status-success bg-accent-light'
+          : 'border-status-error bg-background-secondary'
       )}
     >
       {ship ? (
@@ -322,7 +318,7 @@ function ReleaseGateSummary({ report }: { report: HeldoutReport }) {
       ...gate.environment_sections,
       ...(gate.external_benchmark_sections || []),
       ...(gate.world_model_quality_sections || []),
-      ...(gate.learned_reward_evidence_sections || []),
+      ...(gate.learned_reward_evidence_sections || [])
     ]
     return allSections.length > 0 ? allSections.join(', ') : 'none'
   }, [gate])
@@ -375,10 +371,10 @@ function ReleaseGateSummary({ report }: { report: HeldoutReport }) {
           <p
             className={clsx(
               'font-mono text-sm',
-              gate.external_benchmark_ship ?? true ? 'text-status-success' : 'text-status-error'
+              (gate.external_benchmark_ship ?? true) ? 'text-status-success' : 'text-status-error'
             )}
           >
-            {gate.external_benchmark_ship ?? true ? 'PASS' : 'HOLD'}
+            {(gate.external_benchmark_ship ?? true) ? 'PASS' : 'HOLD'}
           </p>
         </div>
         <div>
@@ -399,9 +395,7 @@ function ReleaseGateSummary({ report }: { report: HeldoutReport }) {
           </p>
         </div>
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
-            Reward
-          </p>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">Reward</p>
           <p
             className={clsx(
               'font-mono text-sm',
@@ -562,7 +556,7 @@ function BenchmarkCommands({ endpoint, modelId }: { endpoint: EndpointForm; mode
     setLoading(true)
     const r = await evalAdvancedApi.benchmarkCommands({
       base_url: endpoint.base_url,
-      model: endpoint.model,
+      model: endpoint.model
     })
     if (r.ok && r.data) setCommands(r.data.commands)
     setLoading(false)
@@ -582,7 +576,7 @@ function BenchmarkCommands({ endpoint, modelId }: { endpoint: EndpointForm; mode
     const r = await evalAdvancedApi.ingestExternalBenchmarks({
       model_id: modelId,
       benchmark_name: benchmarkName || undefined,
-      results: parsed,
+      results: parsed
     })
     setIngesting(false)
     if (r.ok && r.data) {
@@ -599,7 +593,11 @@ function BenchmarkCommands({ endpoint, modelId }: { endpoint: EndpointForm; mode
           <Terminal className="w-5 h-5 text-accent" />
           <h3 className="font-brand text-lg text-text-primary">External benchmark suite</h3>
         </div>
-        <button onClick={load} disabled={loading || !endpoint.base_url || !endpoint.model} className="btn-ghost font-mono text-xs uppercase tracking-widest">
+        <button
+          onClick={load}
+          disabled={loading || !endpoint.base_url || !endpoint.model}
+          className="btn-ghost font-mono text-xs uppercase tracking-widest"
+        >
           {loading ? 'Loading…' : 'Show commands'}
         </button>
       </div>
@@ -609,9 +607,14 @@ function BenchmarkCommands({ endpoint, modelId }: { endpoint: EndpointForm; mode
       </p>
       {commands &&
         Object.entries(commands).map(([name, argv]) => (
-          <div key={name} className="p-2 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+          <div
+            key={name}
+            className="p-2 border-brutal border-border-subtle rounded-brutal bg-background-secondary"
+          >
             <div className="flex items-center justify-between mb-1">
-              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">{name}</span>
+              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+                {name}
+              </span>
               <button
                 onClick={() => navigator.clipboard?.writeText(argv.join(' '))}
                 className="btn-icon flex items-center justify-center w-6 h-6"
@@ -716,7 +719,7 @@ export function HeldoutGatePanel() {
   const endpointSpec = (f: EndpointForm) => ({
     provider: f.provider || undefined,
     base_url: f.base_url || undefined,
-    model: f.model || undefined,
+    model: f.model || undefined
   })
 
   const parsedPasskEvidence = useMemo(
@@ -732,8 +735,7 @@ export function HeldoutGatePanel() {
     [evidenceJson.holdout_comparison]
   )
   const parsedSpuriousRewardEvidence = useMemo(
-    () =>
-      parseEvidenceObject('Spurious reward control', evidenceJson.spurious_reward_control),
+    () => parseEvidenceObject('Spurious reward control', evidenceJson.spurious_reward_control),
     [evidenceJson.spurious_reward_control]
   )
   const parsedExternalBenchmarkEvidence = useMemo(
@@ -756,7 +758,7 @@ export function HeldoutGatePanel() {
       spurious_reward_control: parsedSpuriousRewardEvidence,
       external_benchmarks: parsedExternalBenchmarkEvidence,
       world_model_quality: parsedWorldModelQualityEvidence,
-      learned_reward_evidence: parsedLearnedRewardEvidence,
+      learned_reward_evidence: parsedLearnedRewardEvidence
     }),
     [
       parsedExternalBenchmarkEvidence,
@@ -765,7 +767,7 @@ export function HeldoutGatePanel() {
       parsedLearnedRewardEvidence,
       parsedPasskEvidence,
       parsedSpuriousRewardEvidence,
-      parsedWorldModelQualityEvidence,
+      parsedWorldModelQualityEvidence
     ]
   )
   const evidenceErrors = useMemo(
@@ -814,7 +816,7 @@ export function HeldoutGatePanel() {
     parsedLearnedRewardEvidence,
     parsedPasskEvidence,
     parsedSpuriousRewardEvidence,
-    parsedWorldModelQualityEvidence,
+    parsedWorldModelQualityEvidence
   ])
   const setEvidenceField = useCallback((field: EvidenceFieldId, value: string) => {
     setEvidenceJson((current) => ({ ...current, [field]: value }))
@@ -862,7 +864,7 @@ export function HeldoutGatePanel() {
       base: endpointSpec(base),
       metric,
       limit: limit === '' ? undefined : limit,
-      environment_evidence: releaseEvidence,
+      environment_evidence: releaseEvidence
     })
     if (r.ok && r.data) {
       setJob(r.data)
@@ -961,7 +963,11 @@ export function HeldoutGatePanel() {
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <EndpointFields label="Candidate (fine-tune)" value={candidate} onChange={setCandidate} />
+            <EndpointFields
+              label="Candidate (fine-tune)"
+              value={candidate}
+              onChange={setCandidate}
+            />
             <EndpointFields label="Base (comparison)" value={base} onChange={setBase} />
           </div>
 

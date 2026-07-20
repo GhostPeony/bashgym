@@ -23,10 +23,13 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
 
   if (loading) {
     return (
-      <div className={clsx(
-        'flex items-center gap-2 text-text-secondary',
-        onClick && 'cursor-pointer hover:text-text-primary'
-      )} onClick={onClick}>
+      <div
+        className={clsx(
+          'flex items-center gap-2 text-text-secondary',
+          onClick && 'cursor-pointer hover:text-text-primary'
+        )}
+        onClick={onClick}
+      >
         <Loader2 className="w-4 h-4 animate-spin" />
         {!compact && <span className="text-sm font-mono">Loading...</span>}
       </div>
@@ -35,10 +38,13 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
 
   if (error || !status) {
     return (
-      <div className={clsx(
-        'flex items-center gap-2 text-text-secondary',
-        onClick && 'cursor-pointer hover:text-text-primary'
-      )} onClick={onClick}>
+      <div
+        className={clsx(
+          'flex items-center gap-2 text-text-secondary',
+          onClick && 'cursor-pointer hover:text-text-primary'
+        )}
+        onClick={onClick}
+      >
         <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" muted />
         {!compact && <span className="text-sm font-mono">HF Offline</span>}
       </div>
@@ -47,10 +53,13 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
 
   if (!status.enabled) {
     return (
-      <div className={clsx(
-        'flex items-center gap-2 text-text-secondary',
-        onClick && 'cursor-pointer hover:text-text-primary'
-      )} onClick={onClick}>
+      <div
+        className={clsx(
+          'flex items-center gap-2 text-text-secondary',
+          onClick && 'cursor-pointer hover:text-text-primary'
+        )}
+        onClick={onClick}
+      >
         <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" muted />
         {!compact && <span className="text-sm font-mono">HF Not Configured</span>}
       </div>
@@ -58,10 +67,10 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
   }
 
   return (
-    <div className={clsx(
-      'flex items-center gap-2',
-      onClick && 'cursor-pointer hover-press'
-    )} onClick={onClick}>
+    <div
+      className={clsx('flex items-center gap-2', onClick && 'cursor-pointer hover-press')}
+      onClick={onClick}
+    >
       <GhostPeonyIcon
         name="huggingface"
         size="xs"
@@ -71,7 +80,9 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
       />
       {!compact && (
         <>
-          <span className="text-sm text-text-primary font-mono">{status.username || 'Connected'}</span>
+          <span className="text-sm text-text-primary font-mono">
+            {status.username || 'Connected'}
+          </span>
           {status.pro_enabled && (
             <span className="tag">
               <span className="flex items-center gap-1">

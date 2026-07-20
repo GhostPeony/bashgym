@@ -105,7 +105,11 @@ def _bounded_text_preview(path: Path, *, from_tail: bool) -> tuple[str, bool]:
     lines = text.splitlines()
     if len(lines) > _ARTIFACT_PREVIEW_MAX_LINES:
         truncated = True
-        lines = lines[-_ARTIFACT_PREVIEW_MAX_LINES:] if from_tail else lines[:_ARTIFACT_PREVIEW_MAX_LINES]
+        lines = (
+            lines[-_ARTIFACT_PREVIEW_MAX_LINES:]
+            if from_tail
+            else lines[:_ARTIFACT_PREVIEW_MAX_LINES]
+        )
     return "\n".join(lines), truncated
 
 
@@ -271,10 +275,13 @@ class CampaignService:
             raise ArtifactPreviewIntegrityError(ArtifactPreviewIntegrityError.code)
 
         kind = (
-            "json" if artifact.schema_name in _JSON_PREVIEW_SCHEMAS
-            else "jsonl" if artifact.schema_name in _JSONL_PREVIEW_SCHEMAS
-            else "text" if artifact.schema_name in _TEXT_PREVIEW_SCHEMAS
-            else "unavailable"
+            "json"
+            if artifact.schema_name in _JSON_PREVIEW_SCHEMAS
+            else (
+                "jsonl"
+                if artifact.schema_name in _JSONL_PREVIEW_SCHEMAS
+                else "text" if artifact.schema_name in _TEXT_PREVIEW_SCHEMAS else "unavailable"
+            )
         )
         if kind == "unavailable":
             return {

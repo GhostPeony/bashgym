@@ -95,8 +95,7 @@ def test_operator_health_and_workspace_reads_refuse_api_redirects(tmp_path):
         f"http://127.0.0.1:{target.server_port}/not-api?token=redirect-secret"
     )
     threads = [
-        threading.Thread(target=server.serve_forever, daemon=True)
-        for server in (target, source)
+        threading.Thread(target=server.serve_forever, daemon=True) for server in (target, source)
     ]
     for thread in threads:
         thread.start()
@@ -429,9 +428,7 @@ def test_public_operator_bundle_has_no_private_project_or_machine_residue():
     bundle_root = SCRIPT.parents[1]
     lock = json.loads((bundle_root / "bundle.lock.json").read_text(encoding="utf-8"))
     public_files = [
-        bundle_root / relative
-        for relative in lock["files"]
-        if not relative.startswith("..")
+        bundle_root / relative for relative in lock["files"] if not relative.startswith("..")
     ]
     public_files.append(bundle_root / "bundle.lock.json")
 

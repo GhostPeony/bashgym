@@ -12,24 +12,20 @@ import { mergeModelOptions, selectBaseModelGroups } from '../common/modelSelectO
 import { FALLBACK_MODEL_OPTIONS } from '../common/modelOptions'
 
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8')
-const exactPattern = (value: string) =>
-  new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+const exactPattern = (value: string) => new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
 test('catalog-only inference options keep mocked catalog entries and suppress every static fallback', () => {
   const catalog = [{ value: 'registered/example', label: 'Registered example' }]
   assert.deepEqual(mergeModelOptions(catalog, true), catalog)
-  assert.deepEqual(
-    mergeModelOptions(catalog, false),
-    [...FALLBACK_MODEL_OPTIONS, ...catalog]
-  )
+  assert.deepEqual(mergeModelOptions(catalog, false), [...FALLBACK_MODEL_OPTIONS, ...catalog])
 })
 
 test('catalog-only base-model groups keep a mocked catalog and suppress every static group', () => {
   const catalog = [
     {
       label: 'Registered catalog',
-      models: [{ value: 'registered/base', label: 'Registered base' }],
-    },
+      models: [{ value: 'registered/base', label: 'Registered base' }]
+    }
   ]
   assert.deepEqual(selectBaseModelGroups(catalog, true), catalog)
   assert.deepEqual(selectBaseModelGroups(catalog, false), [...BASE_MODEL_GROUPS, ...catalog])
@@ -37,13 +33,9 @@ test('catalog-only base-model groups keep a mocked catalog and suppress every st
 
 test('rendered model selectors toggle static fallbacks while retaining custom selection', () => {
   const renderInference = (catalogOnly: boolean) =>
-    renderToStaticMarkup(
-      createElement(ModelSelect, { value: '', onChange() {}, catalogOnly })
-    )
+    renderToStaticMarkup(createElement(ModelSelect, { value: '', onChange() {}, catalogOnly }))
   const renderBase = (catalogOnly: boolean) =>
-    renderToStaticMarkup(
-      createElement(BaseModelSelect, { value: '', onChange() {}, catalogOnly })
-    )
+    renderToStaticMarkup(createElement(BaseModelSelect, { value: '', onChange() {}, catalogOnly }))
 
   const inferenceWithFallbacks = renderInference(false)
   const inferenceCatalogOnly = renderInference(true)
@@ -66,7 +58,7 @@ test('active settings and environment surfaces bind selectors to catalog-only mo
   const activeSurfaces = [
     'src/components/factory/EnvironmentLab.tsx',
     'src/components/settings/ModelsSection.tsx',
-    'src/components/settings/HooksSection.tsx',
+    'src/components/settings/HooksSection.tsx'
   ]
 
   for (const surface of activeSurfaces) {

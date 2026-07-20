@@ -156,26 +156,36 @@ class DataSource(str, Enum):
 class TrainingTrackingContext(BaseModel):
     """Exact project and lineage identity for an official tracked training run."""
 
-    workspace_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    workspace_id: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    )
     project_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
     project_display_name: str = Field(min_length=1, max_length=240)
     project_description: str = Field(default="", max_length=4000)
-    experiment_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    experiment_id: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    )
     experiment_name: str = Field(min_length=1, max_length=240)
     objective: str = Field(min_length=1, max_length=8000)
     task_type: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
     model_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
-    model_version_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    model_version_id: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    )
     model_source_uri: str = Field(min_length=1, max_length=2000)
     model_source_revision: str = Field(default="", max_length=500)
     model_config_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     dataset_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
-    dataset_version_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    dataset_version_id: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    )
     dataset_source_uri: str = Field(min_length=1, max_length=2000)
     dataset_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     dataset_split_manifest: dict[str, Any] = Field(default_factory=dict)
     dataset_row_counts: dict[str, int] = Field(default_factory=dict)
-    environment_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    environment_id: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    )
     environment_runtime_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     environment_hardware: dict[str, Any] = Field(default_factory=dict)
     campaign_id: str | None = Field(default=None, max_length=160)

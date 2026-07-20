@@ -5,15 +5,19 @@ import {
   clearGuidedSetupIdempotencyKey,
   getOrCreateGuidedSetupIdempotencyKey,
   getOrCreateGuidedSetupSessionId,
-  readGuidedSetupSessionId,
+  readGuidedSetupSessionId
 } from './guidedSetupSessionStorage'
 
 function memoryStorage() {
   const values = new Map<string, string>()
   return {
     getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => { values.set(key, value) },
-    removeItem: (key: string) => { values.delete(key) },
+    setItem: (key: string, value: string) => {
+      values.set(key, value)
+    },
+    removeItem: (key: string) => {
+      values.delete(key)
+    }
   }
 }
 
@@ -32,15 +36,24 @@ test('persists a valid setup session only inside its exact workspace scope', () 
 test('replaces malformed persisted state and keeps one mutation key stable until success', () => {
   const storage = memoryStorage()
   storage.setItem('bashgym.autoresearch.setup-session.v1:workspace-a', 'private/path')
-  assert.equal(getOrCreateGuidedSetupSessionId(storage, 'workspace-a', () => 'd'.repeat(32)), `setupsess_${'d'.repeat(32)}`)
+  assert.equal(
+    getOrCreateGuidedSetupSessionId(storage, 'workspace-a', () => 'd'.repeat(32)),
+    `setupsess_${'d'.repeat(32)}`
+  )
   const request = {
-    workspaceId: 'workspace-a', sessionId: `setupsess_${'d'.repeat(32)}`,
-    version: 0, step: 'template' as const, selectionId: 'template-modern',
+    workspaceId: 'workspace-a',
+    sessionId: `setupsess_${'d'.repeat(32)}`,
+    version: 0,
+    step: 'template' as const,
+    selectionId: 'template-modern'
   }
   const first = getOrCreateGuidedSetupIdempotencyKey(storage, request, () => 'e'.repeat(32))
   const replay = getOrCreateGuidedSetupIdempotencyKey(storage, request, () => 'f'.repeat(32))
   assert.equal(first, `idem_${'e'.repeat(32)}`)
   assert.equal(replay, first)
   clearGuidedSetupIdempotencyKey(storage, request)
-  assert.equal(getOrCreateGuidedSetupIdempotencyKey(storage, request, () => '1'.repeat(32)), `idem_${'1'.repeat(32)}`)
+  assert.equal(
+    getOrCreateGuidedSetupIdempotencyKey(storage, request, () => '1'.repeat(32)),
+    `idem_${'1'.repeat(32)}`
+  )
 })

@@ -1,12 +1,10 @@
 """Tests for OllamaProvider implementing InferenceProvider."""
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 
-from bashgym.providers.base import InferenceProvider, ProviderResponse, HealthStatus, ProviderModel
-from bashgym.providers.ollama import OllamaProvider, OllamaModel
-
+from bashgym.providers.base import HealthStatus, InferenceProvider, ProviderModel, ProviderResponse
+from bashgym.providers.ollama import OllamaModel, OllamaProvider
 
 # ── Interface conformance ──────────────────────────────────────────
 
@@ -79,10 +77,12 @@ class TestOllamaGenerate:
 
     def test_generate_returns_provider_response_on_success(self):
         provider = OllamaProvider()
-        provider.chat = AsyncMock(return_value={
-            "message": {"role": "assistant", "content": "Hello there!"},
-            "eval_count": 5,
-        })
+        provider.chat = AsyncMock(
+            return_value={
+                "message": {"role": "assistant", "content": "Hello there!"},
+                "eval_count": 5,
+            }
+        )
 
         messages = [{"role": "user", "content": "Hi"}]
         result = asyncio.run(provider.generate(messages, model="llama3"))
@@ -120,15 +120,15 @@ class TestOllamaGenerate:
 
     def test_generate_inserts_system_prompt(self):
         provider = OllamaProvider()
-        provider.chat = AsyncMock(return_value={
-            "message": {"role": "assistant", "content": "ok"},
-            "eval_count": 1,
-        })
+        provider.chat = AsyncMock(
+            return_value={
+                "message": {"role": "assistant", "content": "ok"},
+                "eval_count": 1,
+            }
+        )
 
         messages = [{"role": "user", "content": "Hi"}]
-        asyncio.run(provider.generate(
-            messages, model="llama3", system_prompt="You are helpful."
-        ))
+        asyncio.run(provider.generate(messages, model="llama3", system_prompt="You are helpful."))
 
         call_args = provider.chat.call_args
         sent_messages = call_args[0][1]
@@ -137,18 +137,18 @@ class TestOllamaGenerate:
 
     def test_generate_does_not_duplicate_system_prompt(self):
         provider = OllamaProvider()
-        provider.chat = AsyncMock(return_value={
-            "message": {"role": "assistant", "content": "ok"},
-            "eval_count": 1,
-        })
+        provider.chat = AsyncMock(
+            return_value={
+                "message": {"role": "assistant", "content": "ok"},
+                "eval_count": 1,
+            }
+        )
 
         messages = [
             {"role": "system", "content": "Existing system"},
             {"role": "user", "content": "Hi"},
         ]
-        asyncio.run(provider.generate(
-            messages, model="llama3", system_prompt="New system"
-        ))
+        asyncio.run(provider.generate(messages, model="llama3", system_prompt="New system"))
 
         call_args = provider.chat.call_args
         sent_messages = call_args[0][1]
@@ -178,7 +178,6 @@ class TestOllamaHealthCheck:
                 {"name": "codellama:7b"},
             ]
         }
-        original_client = provider.client
         provider._client = MagicMock()
         provider._client.get = AsyncMock(return_value=mock_response)
 
@@ -219,9 +218,11 @@ class TestOllamaWarmUp:
 
     def test_warm_up_calls_chat(self):
         provider = OllamaProvider()
-        provider.chat = AsyncMock(return_value={
-            "message": {"role": "assistant", "content": "hi"},
-        })
+        provider.chat = AsyncMock(
+            return_value={
+                "message": {"role": "assistant", "content": "hi"},
+            }
+        )
 
         result = asyncio.run(provider.warm_up("llama3"))
 
@@ -255,22 +256,24 @@ class TestOllamaListModels:
 
     def test_list_models_returns_provider_models(self):
         provider = OllamaProvider()
-        provider.list_ollama_models = AsyncMock(return_value=[
-            OllamaModel(
-                name="qwen2.5-coder:7b",
-                size=int(4.5 * 1024**3),
-                modified_at="2025-01-01",
-                digest="abc123",
-                details={"parameter_size": "7B", "family": "qwen"},
-            ),
-            OllamaModel(
-                name="llama3:8b",
-                size=int(5.0 * 1024**3),
-                modified_at="2025-01-02",
-                digest="def456",
-                details={"parameter_size": "8B", "family": "llama"},
-            ),
-        ])
+        provider.list_ollama_models = AsyncMock(
+            return_value=[
+                OllamaModel(
+                    name="qwen2.5-coder:7b",
+                    size=int(4.5 * 1024**3),
+                    modified_at="2025-01-01",
+                    digest="abc123",
+                    details={"parameter_size": "7B", "family": "qwen"},
+                ),
+                OllamaModel(
+                    name="llama3:8b",
+                    size=int(5.0 * 1024**3),
+                    modified_at="2025-01-02",
+                    digest="def456",
+                    details={"parameter_size": "8B", "family": "llama"},
+                ),
+            ]
+        )
 
         result = asyncio.run(provider.list_models())
 

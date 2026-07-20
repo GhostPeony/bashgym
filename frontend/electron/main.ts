@@ -1,4 +1,14 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, webContents, clipboard, nativeImage, safeStorage } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  Menu,
+  webContents,
+  clipboard,
+  nativeImage,
+  safeStorage
+} from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -15,22 +25,22 @@ import {
   type CampaignQuery,
   type CampaignRequestAuthority,
   createDesktopBootstrapToken,
-  resolveCampaignApiOrigin,
+  resolveCampaignApiOrigin
 } from './campaignBridge'
 import {
   CampaignAgentHostController,
-  type MainOwnedCampaignAgentIdentity,
+  type MainOwnedCampaignAgentIdentity
 } from './campaignAgentHost'
 import { buildCodexCampaignAgentLaunch } from './campaignAgentLaunch'
 import { CampaignAgentMcpHost } from './campaignAgentMcpHost'
 import {
   createRetryableInitializer,
   managedBackendStartAction,
-  resolveBackendRoot,
+  resolveBackendRoot
 } from './backendLifecycle'
 import {
   DEFAULT_DESKTOP_RUNTIME_ENDPOINTS,
-  resolveDesktopRuntimeEndpoints,
+  resolveDesktopRuntimeEndpoints
 } from './runtimeEndpoints'
 import {
   buildPowerShellArgs,
@@ -38,7 +48,7 @@ import {
   TerminalOutputFlowController,
   TerminalOutputFlowOwnership,
   TerminalScrollbackBuffer,
-  TerminalSizeTracker,
+  TerminalSizeTracker
 } from './terminalTransport'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling
@@ -82,7 +92,8 @@ interface PtySession {
 const MAX_BUFFER_BYTES = 400_000 // ~400KB of scrollback per session
 const ptySessions: Map<string, PtySession> = new Map()
 const campaignAgentMcpHosts: Map<string, CampaignAgentMcpHost> = new Map()
-const campaignAgentLaunchScopes: Map<string, { workspaceId: string; campaignId: string }> = new Map()
+const campaignAgentLaunchScopes: Map<string, { workspaceId: string; campaignId: string }> =
+  new Map()
 const agentBridgeArtifacts: Map<string, Set<string>> = new Map()
 
 function registerAgentBridgeArtifact(terminalId: string, artifactPath: string) {
@@ -95,16 +106,21 @@ function cleanupAgentBridgeArtifacts(terminalId: string) {
   const artifacts = agentBridgeArtifacts.get(terminalId)
   if (!artifacts) return
   artifacts.forEach((artifactPath) => {
-    try { fs.unlinkSync(artifactPath) } catch { /* already removed */ }
+    try {
+      fs.unlinkSync(artifactPath)
+    } catch {
+      /* already removed */
+    }
   })
   agentBridgeArtifacts.delete(terminalId)
 }
 
 function revokeCampaignAgentTerminal(
   terminalId: string,
-  reason: 'pty_exit' | 'pty_replacement' | 'renderer_reload' | 'app_shutdown' | 'explicit_revoke',
+  reason: 'pty_exit' | 'pty_replacement' | 'renderer_reload' | 'app_shutdown' | 'explicit_revoke'
 ): Promise<void> {
-  return campaignAgentHostController.teardownTerminal(terminalId, reason)
+  return campaignAgentHostController
+    .teardownTerminal(terminalId, reason)
     .finally(() => closeCampaignAgentMcpHost(terminalId))
 }
 
@@ -118,7 +134,7 @@ function closeCampaignAgentMcpHost(terminalId: string): Promise<void> {
 }
 
 async function teardownAllCampaignAgents(
-  reason: 'renderer_reload' | 'app_shutdown',
+  reason: 'renderer_reload' | 'app_shutdown'
 ): Promise<void> {
   try {
     await campaignAgentHostController.teardownAll(reason)
@@ -131,7 +147,11 @@ function killAllPtys() {
   ptySessions.forEach((s, id) => {
     s.outputBatcher.dispose()
     s.outputFlow.dispose()
-    try { s.pty.kill() } catch { /* already dead */ }
+    try {
+      s.pty.kill()
+    } catch {
+      /* already dead */
+    }
     cleanupAgentBridgeArtifacts(id)
   })
   ptySessions.clear()
@@ -155,10 +175,7 @@ try {
 }
 const campaignApiOrigin = resolveCampaignApiOrigin(desktopRuntimeEndpoints.apiOrigin)
 const desktopBootstrapToken = createDesktopBootstrapToken()
-const campaignBridgeClient = new CampaignBridgeClient(
-  campaignApiOrigin,
-  desktopBootstrapToken,
-)
+const campaignBridgeClient = new CampaignBridgeClient(campaignApiOrigin, desktopBootstrapToken)
 const campaignAgentHostInstanceId = `desktop_${randomUUID().replaceAll('-', '')}`
 const campaignAgentHostController = new CampaignAgentHostController({
   transport: {
@@ -167,19 +184,19 @@ const campaignAgentHostController = new CampaignAgentHostController({
     revoke: (registrationId) => campaignBridgeClient.revokeCampaignAgentHostSession(registrationId),
     grant: (campaignId, body) => campaignBridgeClient.issueCampaignAgentGrant(campaignId, body),
     attach: (campaignId, body) => campaignBridgeClient.attachCampaignAgent(campaignId, body),
-    revokeAttachment: (campaignId, attachmentId, body) => (
-      campaignBridgeClient.revokeCampaignAgentAttachment(campaignId, attachmentId, body)
-    ),
+    revokeAttachment: (campaignId, attachmentId, body) =>
+      campaignBridgeClient.revokeCampaignAgentAttachment(campaignId, attachmentId, body),
     heartbeat: (credential, body) => campaignBridgeClient.heartbeatCampaignAgent(credential, body),
     observe: (credential) => campaignBridgeClient.observeCampaignAsAgent(credential),
-    artifacts: (credential, query) => campaignBridgeClient.listCampaignArtifactsAsAgent(credential, query),
+    artifacts: (credential, query) =>
+      campaignBridgeClient.listCampaignArtifactsAsAgent(credential, query)
   },
   resolveIdentity: (terminalId) => {
     const session = ptySessions.get(terminalId)
     if (!session?.campaignAgentIdentity) return null
     return {
       ...session.campaignAgentIdentity,
-      live: !session.exited,
+      live: !session.exited
     }
   },
   onLifecycle: (event) => {
@@ -195,7 +212,7 @@ const campaignAgentHostController = new CampaignAgentHostController({
     campaignAgentMcpHosts.delete(event.terminalId)
     host.lock()
     void host.close()
-  },
+  }
 })
 let backendProcess: ChildProcess | null = null
 let lastCampaignBackendError: Error | null = runtimeEndpointConfigurationError
@@ -207,7 +224,7 @@ function asError(value: unknown): Error {
 async function backendIsReachable(): Promise<boolean> {
   try {
     const response = await fetch(`${campaignApiOrigin}/api/health`, {
-      signal: AbortSignal.timeout(500),
+      signal: AbortSignal.timeout(500)
     })
     return response.ok
   } catch {
@@ -218,7 +235,7 @@ async function backendIsReachable(): Promise<boolean> {
 async function startManagedBackend(): Promise<void> {
   const startAction = managedBackendStartAction(
     await backendIsReachable(),
-    backendProcess !== null && backendProcess.exitCode === null,
+    backendProcess !== null && backendProcess.exitCode === null
   )
   if (startAction === 'reuse') return
   const root = resolveBackendRoot({
@@ -227,7 +244,7 @@ async function startManagedBackend(): Promise<void> {
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     executablePath: process.execPath,
-    markerExists: fs.existsSync,
+    markerExists: fs.existsSync
   })
   const url = new URL(campaignApiOrigin)
   const pythonCommand = process.env.BASHGYM_PYTHON || 'python'
@@ -242,7 +259,7 @@ async function startManagedBackend(): Promise<void> {
       '--host',
       url.hostname === 'localhost' ? '127.0.0.1' : url.hostname,
       '--port',
-      url.port || '8003',
+      url.port || '8003'
     ],
     {
       cwd: root,
@@ -250,13 +267,13 @@ async function startManagedBackend(): Promise<void> {
         {
           ...process.env,
           BASHGYM_API_BASE: desktopRuntimeEndpoints.apiBase,
-          BASHGYM_API_URL: desktopRuntimeEndpoints.apiOrigin,
+          BASHGYM_API_URL: desktopRuntimeEndpoints.apiOrigin
         },
-        desktopBootstrapToken,
+        desktopBootstrapToken
       ),
       stdio: 'ignore',
-      windowsHide: true,
-    },
+      windowsHide: true
+    }
   )
   backendProcess.once('error', () => {
     spawnFailed = true
@@ -300,7 +317,11 @@ function stopManagedBackend(): void {
   campaignBridgeClient.dispose()
   campaignBackendReadiness.invalidate()
   if (!backendProcess) return
-  try { backendProcess.kill() } catch { /* already stopped */ }
+  try {
+    backendProcess.kill()
+  } catch {
+    /* already stopped */
+  }
   backendProcess = null
 }
 
@@ -332,7 +353,7 @@ function setupMenu() {
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
-        { role: 'selectAll' },
+        { role: 'selectAll' }
       ]
     },
     {
@@ -344,7 +365,7 @@ function setupMenu() {
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
-        { role: 'togglefullscreen' },
+        { role: 'togglefullscreen' }
       ]
     }
   ]
@@ -370,7 +391,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       additionalArguments: [
         `--bashgym-api-base=${desktopRuntimeEndpoints.apiBase}`,
-        `--bashgym-websocket-url=${desktopRuntimeEndpoints.webSocketUrl}`,
+        `--bashgym-websocket-url=${desktopRuntimeEndpoints.webSocketUrl}`
       ],
       nodeIntegration: false,
       contextIsolation: true,
@@ -385,7 +406,9 @@ function createWindow() {
   })
 
   // Content Security Policy
-  const devSources = isDev ? " 'unsafe-inline' 'unsafe-eval' http://localhost:*" : " 'unsafe-inline'"
+  const devSources = isDev
+    ? " 'unsafe-inline' 'unsafe-eval' http://localhost:*"
+    : " 'unsafe-inline'"
   const csp = [
     `default-src 'self'`,
     `script-src 'self'${devSources}`,
@@ -395,7 +418,7 @@ function createWindow() {
     `connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* https://api.vercel.com https://api.neon.tech https://fonts.googleapis.com https://fonts.gstatic.com`,
     `worker-src 'self' blob:`,
     `child-src 'self'`,
-    `frame-src 'self' https:`,
+    `frame-src 'self' https:`
   ].join('; ')
 
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
@@ -489,7 +512,10 @@ if (gotTheLock) {
     createWindow()
     void initializeManagedCampaignBackend().catch((error) => {
       // The app remains usable for non-campaign work; campaign IPC fails closed.
-      console.error('BashGym managed campaign backend failed to initialize:', asError(error).message)
+      console.error(
+        'BashGym managed campaign backend failed to initialize:',
+        asError(error).message
+      )
     })
 
     app.on('activate', () => {
@@ -524,9 +550,16 @@ if (gotTheLock) {
   })
 
   // Unclean-exit guards: ensure no orphaned PTY processes
-  process.on('exit', () => { stopManagedBackend(); killAllPtys() })
-  process.on('SIGTERM', () => { app.quit() })
-  process.on('SIGINT', () => { app.quit() })
+  process.on('exit', () => {
+    stopManagedBackend()
+    killAllPtys()
+  })
+  process.on('SIGTERM', () => {
+    app.quit()
+  })
+  process.on('SIGINT', () => {
+    app.quit()
+  })
 }
 
 // IPC Handlers
@@ -539,7 +572,7 @@ ipcMain.handle(
     route: string,
     body?: CampaignBody,
     query?: CampaignQuery,
-    authority?: CampaignRequestAuthority,
+    authority?: CampaignRequestAuthority
   ) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       return { ok: false, status: 403, error: 'Campaign request sender is not permitted' }
@@ -547,7 +580,8 @@ ipcMain.handle(
     try {
       await initializeManagedCampaignBackend()
     } catch {
-      const sourceRootInvalid = lastCampaignBackendError?.message === 'The configured BashGym backend root is invalid'
+      const sourceRootInvalid =
+        lastCampaignBackendError?.message === 'The configured BashGym backend root is invalid'
       const configurationInvalid = sourceRootInvalid || runtimeEndpointConfigurationError !== null
       return {
         ok: false,
@@ -559,7 +593,7 @@ ipcMain.handle(
           ? 'The configured BashGym source checkout is invalid. Remove BASHGYM_PROJECT_ROOT to use the package installed in BASHGYM_PYTHON, or point it at a valid checkout.'
           : configurationInvalid
             ? 'The configured BashGym API or development-server endpoint is invalid. Use a credential-free loopback URL and set BASHGYM_API_BASE to an /api URL.'
-          : 'The authenticated campaign service could not start or reconnect.',
+            : 'The authenticated campaign service could not start or reconnect.'
       }
     }
     try {
@@ -567,7 +601,7 @@ ipcMain.handle(
     } catch {
       return { ok: false, status: 400, error: 'Campaign request was rejected' }
     }
-  },
+  }
 )
 
 function campaignAgentHostSenderPermitted(event: Electron.IpcMainInvokeEvent): boolean {
@@ -600,12 +634,14 @@ function assertCampaignAgentScopeRequest(value: unknown): CampaignAgentScopeRequ
   const prototype = Object.getPrototypeOf(value)
   const record = value as Record<string, unknown>
   const keys = Object.keys(record)
-  if ((prototype !== Object.prototype && prototype !== null)
-    || keys.length !== 2
-    || !Object.hasOwn(record, 'workspaceId')
-    || !Object.hasOwn(record, 'campaignId')
-    || typeof record.workspaceId !== 'string'
-    || typeof record.campaignId !== 'string') {
+  if (
+    (prototype !== Object.prototype && prototype !== null) ||
+    keys.length !== 2 ||
+    !Object.hasOwn(record, 'workspaceId') ||
+    !Object.hasOwn(record, 'campaignId') ||
+    typeof record.workspaceId !== 'string' ||
+    typeof record.campaignId !== 'string'
+  ) {
     throw new Error('Invalid campaign agent scope request')
   }
   return { workspaceId: record.workspaceId, campaignId: record.campaignId }
@@ -621,44 +657,52 @@ function assertCampaignAgentLaunchRequest(value: unknown): CampaignAgentLaunchRe
   }
   const record = value as Record<string, unknown>
   const keys = Object.keys(record)
-  if (!Object.hasOwn(record, 'workspaceId')
-    || !Object.hasOwn(record, 'campaignId')
-    || keys.some((key) => !['workspaceId', 'campaignId', 'cwd'].includes(key))) {
+  if (
+    !Object.hasOwn(record, 'workspaceId') ||
+    !Object.hasOwn(record, 'campaignId') ||
+    keys.some((key) => !['workspaceId', 'campaignId', 'cwd'].includes(key))
+  ) {
     throw new Error('Invalid campaign agent launch request')
   }
-  if (typeof record.workspaceId !== 'string'
-    || typeof record.campaignId !== 'string'
-    || (record.cwd !== undefined && typeof record.cwd !== 'string')) {
+  if (
+    typeof record.workspaceId !== 'string' ||
+    typeof record.campaignId !== 'string' ||
+    (record.cwd !== undefined && typeof record.cwd !== 'string')
+  ) {
     throw new Error('Invalid campaign agent launch request')
   }
   return {
     workspaceId: record.workspaceId,
     campaignId: record.campaignId,
-    ...(record.cwd !== undefined ? { cwd: record.cwd } : {}),
+    ...(record.cwd !== undefined ? { cwd: record.cwd } : {})
   }
 }
 
-function assertCampaignAgentTerminalScopeRequest(value: unknown): CampaignAgentTerminalScopeRequest {
+function assertCampaignAgentTerminalScopeRequest(
+  value: unknown
+): CampaignAgentTerminalScopeRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Invalid campaign agent terminal request')
   }
   const prototype = Object.getPrototypeOf(value)
   const record = value as Record<string, unknown>
   const keys = Object.keys(record)
-  if ((prototype !== Object.prototype && prototype !== null)
-    || keys.length !== 3
-    || !Object.hasOwn(record, 'terminalId')
-    || !Object.hasOwn(record, 'workspaceId')
-    || !Object.hasOwn(record, 'campaignId')
-    || typeof record.terminalId !== 'string'
-    || typeof record.workspaceId !== 'string'
-    || typeof record.campaignId !== 'string') {
+  if (
+    (prototype !== Object.prototype && prototype !== null) ||
+    keys.length !== 3 ||
+    !Object.hasOwn(record, 'terminalId') ||
+    !Object.hasOwn(record, 'workspaceId') ||
+    !Object.hasOwn(record, 'campaignId') ||
+    typeof record.terminalId !== 'string' ||
+    typeof record.workspaceId !== 'string' ||
+    typeof record.campaignId !== 'string'
+  ) {
     throw new Error('Invalid campaign agent terminal request')
   }
   return {
     terminalId: record.terminalId,
     workspaceId: record.workspaceId,
-    campaignId: record.campaignId,
+    campaignId: record.campaignId
   }
 }
 
@@ -673,16 +717,20 @@ function assertActiveCampaignAgentRequest(value: unknown): void {
     throw new Error('Invalid campaign agent request')
   }
   const record = value as Record<string, unknown>
-  if (typeof record.terminalId !== 'string'
-    || typeof record.workspaceId !== 'string'
-    || typeof record.campaignId !== 'string') {
+  if (
+    typeof record.terminalId !== 'string' ||
+    typeof record.workspaceId !== 'string' ||
+    typeof record.campaignId !== 'string'
+  ) {
     throw new Error('Invalid campaign agent request')
   }
   assertActiveCampaignAgentTerminal(record.terminalId)
   const scope = campaignAgentLaunchScopes.get(record.terminalId)
-  if (!scope
-    || scope.workspaceId !== record.workspaceId
-    || scope.campaignId !== record.campaignId) {
+  if (
+    !scope ||
+    scope.workspaceId !== record.workspaceId ||
+    scope.campaignId !== record.campaignId
+  ) {
     throw new Error('Campaign agent request scope changed')
   }
 }
@@ -699,9 +747,11 @@ function resolveCodexExecutable(): string {
   const executableName = process.platform === 'win32' ? 'codex.exe' : 'codex'
   const configured = process.env.BASHGYM_CODEX_EXECUTABLE?.trim()
   if (configured) {
-    if (!path.isAbsolute(configured)
-      || path.basename(configured).toLowerCase() !== executableName
-      || !executableFile(configured)) {
+    if (
+      !path.isAbsolute(configured) ||
+      path.basename(configured).toLowerCase() !== executableName ||
+      !executableFile(configured)
+    ) {
       throw new Error('Configured Codex CLI executable is unavailable')
     }
     return configured
@@ -735,44 +785,45 @@ ipcMain.handle('campaign-agent-host:launch', async (event, request: unknown) => 
       generation,
       scope: { workspaceId: intent.workspaceId, campaignId: intent.campaignId },
       observe: () => campaignAgentHostController.observe(terminalId),
-      artifacts: (args) => campaignAgentHostController.artifacts(terminalId, args),
+      artifacts: (args) => campaignAgentHostController.artifacts(terminalId, args)
     })
     const mcpLaunch = await host.start()
-    const launch = buildCodexCampaignAgentLaunch({
-      intent: { ...intent, cwd: resolvedCwd },
-      terminalId,
-      generation,
-      hostInstanceId: campaignAgentHostInstanceId,
-      mcpLaunch,
-    }, {
-      resolveCodexExecutable,
-      pathExists: fs.existsSync,
-      defaultCwd: os.homedir(),
-      sourceEnv: process.env,
-    })
+    const launch = buildCodexCampaignAgentLaunch(
+      {
+        intent: { ...intent, cwd: resolvedCwd },
+        terminalId,
+        generation,
+        hostInstanceId: campaignAgentHostInstanceId,
+        mcpLaunch
+      },
+      {
+        resolveCodexExecutable,
+        pathExists: fs.existsSync,
+        defaultCwd: os.homedir(),
+        sourceEnv: process.env
+      }
+    )
     const pty = await import('node-pty')
     ptyProcess = pty.spawn(launch.executable, [...launch.args], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: launch.cwd,
-      env: { ...launch.env },
+      env: { ...launch.env }
     })
     campaignAgentMcpHosts.set(terminalId, host)
     campaignAgentLaunchScopes.set(terminalId, {
       workspaceId: intent.workspaceId,
-      campaignId: intent.campaignId,
+      campaignId: intent.campaignId
     })
-    registerPtySession(
-      terminalId,
-      ptyProcess,
-      launch.cwd,
-      generation,
-      launch.identity,
-    )
+    registerPtySession(terminalId, ptyProcess, launch.cwd, generation, launch.identity)
     return { success: true, terminalId, cwd: launch.cwd }
   } catch {
-    try { ptyProcess?.kill() } catch { /* launch did not produce a live PTY */ }
+    try {
+      ptyProcess?.kill()
+    } catch {
+      /* launch did not produce a live PTY */
+    }
     if (launchedTerminalId && campaignAgentMcpHosts.has(launchedTerminalId)) {
       await closeCampaignAgentMcpHost(launchedTerminalId).catch(() => undefined)
     } else {
@@ -780,25 +831,30 @@ ipcMain.handle('campaign-agent-host:launch', async (event, request: unknown) => 
       await host?.close().catch(() => undefined)
     }
     return campaignAgentHostFailure(
-      'Codex campaign agent could not start. Ensure the Codex CLI is installed and the workspace is accessible.',
+      'Codex campaign agent could not start. Ensure the Codex CLI is installed and the workspace is accessible.'
     )
   }
 })
 
 ipcMain.handle('campaign-agent-host:eligible', (event, request: unknown) => {
-  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  if (!campaignAgentHostSenderPermitted(event))
+    return campaignAgentHostFailure('Campaign agent host sender is not permitted')
   try {
     const selectedScope = assertCampaignAgentScopeRequest(request)
     const identities = [...ptySessions.values()]
-      .map((session) => session.campaignAgentIdentity
-        ? { ...session.campaignAgentIdentity, live: !session.exited }
-        : null)
+      .map((session) =>
+        session.campaignAgentIdentity
+          ? { ...session.campaignAgentIdentity, live: !session.exited }
+          : null
+      )
       .filter((identity): identity is MainOwnedCampaignAgentIdentity => identity !== null)
       .filter((identity) => {
         const scope = campaignAgentLaunchScopes.get(identity.terminalId)
-        return Boolean(scope
-          && scope.workspaceId === selectedScope.workspaceId
-          && scope.campaignId === selectedScope.campaignId)
+        return Boolean(
+          scope &&
+          scope.workspaceId === selectedScope.workspaceId &&
+          scope.campaignId === selectedScope.campaignId
+        )
       })
     return { success: true, sessions: campaignAgentHostController.eligibleSessions(identities) }
   } catch {
@@ -807,7 +863,8 @@ ipcMain.handle('campaign-agent-host:eligible', (event, request: unknown) => {
 })
 
 ipcMain.handle('campaign-agent-host:attach', async (event, request: unknown) => {
-  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  if (!campaignAgentHostSenderPermitted(event))
+    return campaignAgentHostFailure('Campaign agent host sender is not permitted')
   try {
     assertActiveCampaignAgentRequest(request)
     await initializeManagedCampaignBackend()
@@ -819,7 +876,8 @@ ipcMain.handle('campaign-agent-host:attach', async (event, request: unknown) => 
 })
 
 ipcMain.handle('campaign-agent-host:activate', async (event, request: unknown) => {
-  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  if (!campaignAgentHostSenderPermitted(event))
+    return campaignAgentHostFailure('Campaign agent host sender is not permitted')
   try {
     const { terminalId, workspaceId, campaignId } = assertCampaignAgentTerminalScopeRequest(request)
     assertActiveCampaignAgentRequest({ terminalId, workspaceId, campaignId })
@@ -836,7 +894,8 @@ ipcMain.handle('campaign-agent-host:activate', async (event, request: unknown) =
 })
 
 ipcMain.handle('campaign-agent-host:authorize', async (event, request: unknown) => {
-  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  if (!campaignAgentHostSenderPermitted(event))
+    return campaignAgentHostFailure('Campaign agent host sender is not permitted')
   try {
     assertActiveCampaignAgentRequest(request)
     await initializeManagedCampaignBackend()
@@ -848,7 +907,8 @@ ipcMain.handle('campaign-agent-host:authorize', async (event, request: unknown) 
 })
 
 ipcMain.handle('campaign-agent-host:revoke', async (event, request: unknown) => {
-  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  if (!campaignAgentHostSenderPermitted(event))
+    return campaignAgentHostFailure('Campaign agent host sender is not permitted')
   try {
     const { terminalId, workspaceId, campaignId } = assertCampaignAgentTerminalScopeRequest(request)
     assertActiveCampaignAgentRequest({ terminalId, workspaceId, campaignId })
@@ -879,7 +939,7 @@ function writeAgentBridgeWrapper(request: AgentBridgeLaunchRequest): string {
     '--origin-terminal-id',
     safeBridgeArgument(request.terminalId, 'terminal id'),
     '--agent',
-    request.kind,
+    request.kind
   ]
   if (request.panelId) {
     args.push('--origin-panel-id', safeBridgeArgument(request.panelId, 'panel id'))
@@ -890,15 +950,20 @@ function writeAgentBridgeWrapper(request: AgentBridgeLaunchRequest): string {
   const bridgeDir = path.join(os.homedir(), '.bashgym', 'agent_bridge')
   fs.mkdirSync(bridgeDir, { recursive: true })
   const basename = request.terminalId.replace(/[^A-Za-z0-9._-]/g, '_')
-  const wrapperPath = path.join(bridgeDir, `${basename}.${process.platform === 'win32' ? 'cmd' : 'sh'}`)
-  const quote = process.platform === 'win32'
-    ? (value: string) => `"${value}"`
-    : (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
+  const wrapperPath = path.join(
+    bridgeDir,
+    `${basename}.${process.platform === 'win32' ? 'cmd' : 'sh'}`
+  )
+  const quote =
+    process.platform === 'win32'
+      ? (value: string) => `"${value}"`
+      : (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
   const quotedPython = quote(pythonCommand)
   const quotedArgs = args.map(quote).join(' ')
-  const body = process.platform === 'win32'
-    ? `@echo off\r\n${quotedPython} ${quotedArgs}\r\n`
-    : `#!/bin/sh\nexec ${quotedPython} ${quotedArgs}\n`
+  const body =
+    process.platform === 'win32'
+      ? `@echo off\r\n${quotedPython} ${quotedArgs}\r\n`
+      : `#!/bin/sh\nexec ${quotedPython} ${quotedArgs}\n`
   fs.writeFileSync(wrapperPath, body, { encoding: 'utf-8', mode: 0o700 })
   registerAgentBridgeArtifact(request.terminalId, wrapperPath)
   return wrapperPath
@@ -906,19 +971,27 @@ function writeAgentBridgeWrapper(request: AgentBridgeLaunchRequest): string {
 
 function writeClaudeAgentBridgeConfig(
   request: AgentBridgeLaunchRequest,
-  wrapperPath: string,
+  wrapperPath: string
 ): string {
   const bridgeDir = path.dirname(wrapperPath)
   const basename = request.terminalId.replace(/[^A-Za-z0-9._-]/g, '_')
   const configPath = path.join(bridgeDir, `${basename}.claude-mcp.json`)
-  fs.writeFileSync(configPath, JSON.stringify({
-    mcpServers: {
-      bashgym: {
-        command: wrapperPath,
-        args: [],
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        mcpServers: {
+          bashgym: {
+            command: wrapperPath,
+            args: []
+          }
+        }
       },
-    },
-  }, null, 2), 'utf-8')
+      null,
+      2
+    ),
+    'utf-8'
+  )
   registerAgentBridgeArtifact(request.terminalId, configPath)
   return configPath
 }
@@ -936,21 +1009,22 @@ ipcMain.handle('agent-bridge:prepare-launch', (event, request: AgentBridgeLaunch
       ...request,
       workspaceId: request.workspaceId?.trim() || 'default',
       apiBase: request.apiBase || desktopRuntimeEndpoints.apiOrigin,
-      pythonCommand: request.pythonCommand || process.env.BASHGYM_PYTHON || 'python',
+      pythonCommand: request.pythonCommand || process.env.BASHGYM_PYTHON || 'python'
     }
     const wrapperPath = writeAgentBridgeWrapper(scopedRequest)
-    const claudeConfigPath = scopedRequest.kind === 'claude'
-      ? writeClaudeAgentBridgeConfig(scopedRequest, wrapperPath)
-      : undefined
+    const claudeConfigPath =
+      scopedRequest.kind === 'claude'
+        ? writeClaudeAgentBridgeConfig(scopedRequest, wrapperPath)
+        : undefined
     const command = buildAgentBridgeLaunchCommand({
       ...scopedRequest,
       serverCommand: wrapperPath,
       serverArgs: [],
-      claudeConfigPath,
+      claudeConfigPath
     })
     return {
       success: true,
-      command,
+      command
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -974,8 +1048,8 @@ function getFreshEnv(): Record<string, string> {
       `${localAppData}\\Programs\\Ollama`,
       `${localAppData}\\Programs\\OpenCode`,
       `${userProfile}\\.local\\bin`,
-      `${userProfile}\\scoop\\shims`,
-    ].filter(p => p)
+      `${userProfile}\\scoop\\shims`
+    ].filter((p) => p)
 
     // Prepend to PATH so new tools are found first
     const currentPath = env.PATH || env.Path || ''
@@ -1000,13 +1074,14 @@ function registerPtySession(
   ptyProcess: IPty,
   resolvedCwd: string,
   generation: string,
-  campaignAgentIdentity?: MainOwnedCampaignAgentIdentity,
+  campaignAgentIdentity?: MainOwnedCampaignAgentIdentity
 ): PtySession {
   const outputFlow = new TerminalOutputFlowController(
-    (data, frameId) => mainWindow?.webContents.send(
-      `terminal:data:${id}`,
-      frameId === undefined ? data : { data, frameId },
-    ),
+    (data, frameId) =>
+      mainWindow?.webContents.send(
+        `terminal:data:${id}`,
+        frameId === undefined ? data : { data, frameId }
+      ),
     (paused) => {
       try {
         if (paused) ptyProcess.pause()
@@ -1014,7 +1089,7 @@ function registerPtySession(
       } catch {
         // The PTY may exit while a renderer acknowledgement is in flight.
       }
-    },
+    }
   )
   const session: PtySession = {
     pty: ptyProcess,
@@ -1028,7 +1103,7 @@ function registerPtySession(
     exited: false,
     exitCode: null,
     generation,
-    ...(campaignAgentIdentity ? { campaignAgentIdentity } : {}),
+    ...(campaignAgentIdentity ? { campaignAgentIdentity } : {})
   }
   ptySessions.set(id, session)
 
@@ -1091,15 +1166,14 @@ async function createOrAttachTerminal(id: string, cwd?: string) {
     // Dynamic import for node-pty (native module)
     const pty = await import('node-pty')
 
-    const shell = process.platform === 'win32'
-      ? 'powershell.exe'
-      : process.env.SHELL || '/bin/bash'
+    const shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/bash'
 
     // The embedded terminal favors immediate echo. Set
     // BASHGYM_ENABLE_PSREADLINE=1 to restore PowerShell's advanced line editor.
-    const shellArgs = process.platform === 'win32'
-      ? buildPowerShellArgs(process.env.BASHGYM_ENABLE_PSREADLINE === '1')
-      : []
+    const shellArgs =
+      process.platform === 'win32'
+        ? buildPowerShellArgs(process.env.BASHGYM_ENABLE_PSREADLINE === '1')
+        : []
 
     const resolvedCwd = resolveTerminalCwd(cwd)
 
@@ -1116,12 +1190,7 @@ async function createOrAttachTerminal(id: string, cwd?: string) {
       env
     })
 
-    registerPtySession(
-      id,
-      ptyProcess,
-      resolvedCwd,
-      `ptygen_${randomUUID().replaceAll('-', '')}`,
-    )
+    registerPtySession(id, ptyProcess, resolvedCwd, `ptygen_${randomUUID().replaceAll('-', '')}`)
 
     return { success: true, id, attached: false, cwd: resolvedCwd }
   } catch (error) {
@@ -1179,7 +1248,11 @@ ipcMain.handle('terminal:kill', async (_, id: string) => {
     await revokeCampaignAgentTerminal(id, 'pty_exit').catch(() => undefined)
     session.outputBatcher.dispose()
     session.outputFlow.dispose()
-    try { session.pty.kill() } catch { /* already dead */ }
+    try {
+      session.pty.kill()
+    } catch {
+      /* already dead */
+    }
     ptySessions.delete(id)
     cleanupAgentBridgeArtifacts(id)
     return true
@@ -1429,42 +1502,52 @@ ipcMain.handle('files:exists', async (_, filePath: string) => {
 })
 
 // Browser screenshot via webContentsId — reliable alternative to webview.capturePage() in renderer
-ipcMain.handle('browser:screenshot', async (_, webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) => {
-  try {
-    const wc = webContents.fromId(webContentsId)
-    if (!wc) return { success: false, error: 'WebContents not found' }
-    const fullImage = await wc.capturePage()
-    if (rect) {
-      // Scale CSS pixel bounds to device pixels using viewport size
-      const { width: imgW, height: imgH } = fullImage.getSize()
-      const scaleX = imgW / rect.vpW
-      const scaleY = imgH / rect.vpH
-      const cropped = fullImage.crop({
-        x: Math.round(rect.x * scaleX),
-        y: Math.round(rect.y * scaleY),
-        width: Math.max(1, Math.round(rect.width * scaleX)),
-        height: Math.max(1, Math.round(rect.height * scaleY))
-      })
-      return { success: true, dataUrl: cropped.toDataURL() }
+ipcMain.handle(
+  'browser:screenshot',
+  async (
+    _,
+    webContentsId: number,
+    rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }
+  ) => {
+    try {
+      const wc = webContents.fromId(webContentsId)
+      if (!wc) return { success: false, error: 'WebContents not found' }
+      const fullImage = await wc.capturePage()
+      if (rect) {
+        // Scale CSS pixel bounds to device pixels using viewport size
+        const { width: imgW, height: imgH } = fullImage.getSize()
+        const scaleX = imgW / rect.vpW
+        const scaleY = imgH / rect.vpH
+        const cropped = fullImage.crop({
+          x: Math.round(rect.x * scaleX),
+          y: Math.round(rect.y * scaleY),
+          width: Math.max(1, Math.round(rect.width * scaleX)),
+          height: Math.max(1, Math.round(rect.height * scaleY))
+        })
+        return { success: true, dataUrl: cropped.toDataURL() }
+      }
+      return { success: true, dataUrl: fullImage.toDataURL() }
+    } catch (error) {
+      return { success: false, error: String(error) }
     }
-    return { success: true, dataUrl: fullImage.toDataURL() }
-  } catch (error) {
-    return { success: false, error: String(error) }
   }
-})
+)
 
-ipcMain.handle('files:writeTempFile', async (_, dataUrl: string, ext: string, basename?: string) => {
-  try {
-    const safeBase = (basename || 'bashgym_file').replace(/[^a-zA-Z0-9_-]/g, '_')
-    const filename = `${safeBase}_${Date.now()}.${ext}`
-    const filePath = path.join(os.tmpdir(), filename)
-    const base64Data = dataUrl.replace(/^data:[^;]+;base64,/, '')
-    await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'))
-    return { success: true, path: filePath }
-  } catch (error) {
-    return { success: false, error: String(error) }
+ipcMain.handle(
+  'files:writeTempFile',
+  async (_, dataUrl: string, ext: string, basename?: string) => {
+    try {
+      const safeBase = (basename || 'bashgym_file').replace(/[^a-zA-Z0-9_-]/g, '_')
+      const filename = `${safeBase}_${Date.now()}.${ext}`
+      const filePath = path.join(os.tmpdir(), filename)
+      const base64Data = dataUrl.replace(/^data:[^;]+;base64,/, '')
+      await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'))
+      return { success: true, path: filePath }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
   }
-})
+)
 
 ipcMain.handle('files:stat', async (_, filePath: string) => {
   try {
@@ -1555,7 +1638,7 @@ ipcMain.handle('sessions:scan', async (_, lookbackDays = 14) => {
     }
     for (const entry of projectDirs) {
       if (!entry.isDirectory()) continue
-      claude.push(...await listJsonlFiles(path.join(claudeRoot, entry.name)))
+      claude.push(...(await listJsonlFiles(path.join(claudeRoot, entry.name))))
     }
 
     // Codex: rollout-*.jsonl under date dirs for the last N days
@@ -1569,7 +1652,9 @@ ipcMain.handle('sessions:scan', async (_, lookbackDays = 14) => {
         String(d.getMonth() + 1).padStart(2, '0'),
         String(d.getDate()).padStart(2, '0')
       )
-      codex.push(...(await listJsonlFiles(dir)).filter((f) => path.basename(f.path).startsWith('rollout-')))
+      codex.push(
+        ...(await listJsonlFiles(dir)).filter((f) => path.basename(f.path).startsWith('rollout-'))
+      )
     }
 
     return { success: true, claude: byRecency(claude), codex: byRecency(codex) }
@@ -1580,50 +1665,53 @@ ipcMain.handle('sessions:scan', async (_, lookbackDays = 14) => {
 
 const SESSION_TAIL_HARD_CAP = 262_144 // 256KB per read
 
-ipcMain.handle('sessions:readTail', async (_, filePath: string, fromOffset: number, maxBytes = 131_072) => {
-  let fd: fs.promises.FileHandle | null = null
-  try {
-    const resolved = safeSessionFilePath(filePath)
-    const cap = Math.min(Math.max(Number(maxBytes) || 131_072, 4_096), SESSION_TAIL_HARD_CAP)
-    const stats = await fs.promises.stat(resolved)
+ipcMain.handle(
+  'sessions:readTail',
+  async (_, filePath: string, fromOffset: number, maxBytes = 131_072) => {
+    let fd: fs.promises.FileHandle | null = null
+    try {
+      const resolved = safeSessionFilePath(filePath)
+      const cap = Math.min(Math.max(Number(maxBytes) || 131_072, 4_096), SESSION_TAIL_HARD_CAP)
+      const stats = await fs.promises.stat(resolved)
 
-    // File truncated or rotated since last read: restart near the end
-    let offset = Math.max(Number(fromOffset) || 0, 0)
-    let reset = false
-    if (stats.size < offset) {
-      offset = Math.max(0, stats.size - cap)
-      reset = true
-    }
-
-    const toRead = Math.min(cap, stats.size - offset)
-    if (toRead <= 0) {
-      return { success: true, data: '', newOffset: offset, size: stats.size, reset }
-    }
-
-    fd = await fs.promises.open(resolved, 'r')
-    const buf = Buffer.alloc(toRead)
-    const { bytesRead } = await fd.read(buf, 0, toRead, offset)
-
-    // Trim at the last newline so the renderer never sees split lines or
-    // split multibyte characters
-    const lastNewline = buf.lastIndexOf(0x0a, bytesRead - 1)
-    if (lastNewline === -1) {
-      if (bytesRead >= cap) {
-        // Single line longer than the cap: skip it to guarantee forward progress
-        return { success: true, data: '', newOffset: offset + bytesRead, size: stats.size, reset }
+      // File truncated or rotated since last read: restart near the end
+      let offset = Math.max(Number(fromOffset) || 0, 0)
+      let reset = false
+      if (stats.size < offset) {
+        offset = Math.max(0, stats.size - cap)
+        reset = true
       }
-      // Partial final line still being written: wait for the next poll
-      return { success: true, data: '', newOffset: offset, size: stats.size, reset }
-    }
 
-    const data = buf.toString('utf-8', 0, lastNewline + 1)
-    return { success: true, data, newOffset: offset + lastNewline + 1, size: stats.size, reset }
-  } catch (error) {
-    return { success: false, error: String(error) }
-  } finally {
-    await fd?.close().catch(() => {})
+      const toRead = Math.min(cap, stats.size - offset)
+      if (toRead <= 0) {
+        return { success: true, data: '', newOffset: offset, size: stats.size, reset }
+      }
+
+      fd = await fs.promises.open(resolved, 'r')
+      const buf = Buffer.alloc(toRead)
+      const { bytesRead } = await fd.read(buf, 0, toRead, offset)
+
+      // Trim at the last newline so the renderer never sees split lines or
+      // split multibyte characters
+      const lastNewline = buf.lastIndexOf(0x0a, bytesRead - 1)
+      if (lastNewline === -1) {
+        if (bytesRead >= cap) {
+          // Single line longer than the cap: skip it to guarantee forward progress
+          return { success: true, data: '', newOffset: offset + bytesRead, size: stats.size, reset }
+        }
+        // Partial final line still being written: wait for the next poll
+        return { success: true, data: '', newOffset: offset, size: stats.size, reset }
+      }
+
+      const data = buf.toString('utf-8', 0, lastNewline + 1)
+      return { success: true, data, newOffset: offset + lastNewline + 1, size: stats.size, reset }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    } finally {
+      await fd?.close().catch(() => {})
+    }
   }
-})
+)
 
 ipcMain.handle('sessions:readHead', async (_, filePath: string, maxBytes = 16_384) => {
   let fd: fs.promises.FileHandle | null = null

@@ -20,7 +20,7 @@ test('AutoResearch is a first-class sidebar destination directly below Training'
   assert.doesNotMatch(
     sidebar.slice(trainingItem, autoResearchItem),
     /<MenuItem[\s\S]*?<MenuItem/,
-    'no other menu item should appear between Training and AutoResearch',
+    'no other menu item should appear between Training and AutoResearch'
   )
   assert.match(sidebar.slice(autoResearchItem), /openTraining\(['"]autoresearch['"]\)/)
   assert.doesNotMatch(layout, /AutoResearchDashboard/)
@@ -40,7 +40,10 @@ test('layout chooses the destination while Training keeps only its existing moni
 
 test('top navigation names AutoResearch as its own destination', () => {
   assert.match(navigationBar, /trainingSubview/)
-  assert.match(navigationBar, /trainingSubview\s*===\s*['"]autoresearch['"]\s*\?\s*['"]AutoResearch['"]/)
+  assert.match(
+    navigationBar,
+    /trainingSubview\s*===\s*['"]autoresearch['"]\s*\?\s*['"]AutoResearch['"]/
+  )
 })
 
 test('legacy URLs remain redirect-only compatibility', () => {

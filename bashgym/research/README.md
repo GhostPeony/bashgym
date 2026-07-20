@@ -73,24 +73,24 @@ Two phases: hard filters (pass/fail) then weighted scoring.
 
 **Hard filters** — immediate rejection if any trip:
 
-| Filter | Threshold | Source |
-|---|---|---|
-| `gated=True` | any | `info.gated` |
-| Non-commercial license | prefix in `BLOCKED_LICENSE_PREFIXES` | `contracts.py` |
-| Unknown license | `license is None` | (both card_data and tags failed) |
-| Too small | `num_rows < SIZE_MIN_HARD` (10) | `contracts.py` |
-| Too large | `num_rows > SIZE_MAX_HARD` (1,000,000) | `contracts.py` |
+| Filter                 | Threshold                              | Source                           |
+| ---------------------- | -------------------------------------- | -------------------------------- |
+| `gated=True`           | any                                    | `info.gated`                     |
+| Non-commercial license | prefix in `BLOCKED_LICENSE_PREFIXES`   | `contracts.py`                   |
+| Unknown license        | `license is None`                      | (both card_data and tags failed) |
+| Too small              | `num_rows < SIZE_MIN_HARD` (10)        | `contracts.py`                   |
+| Too large              | `num_rows > SIZE_MAX_HARD` (1,000,000) | `contracts.py`                   |
 
 **Weighted dimensions** — each returns a 0-1 subscore; the final score is `sum(subscore[i] * WEIGHTS[i]) * 10`:
 
-| Dimension | Weight | What it rewards |
-|---|---|---|
-| `task_match` | 30% | `code-generation`, `agentic`, `tool-use`, `bash`, `swe`, `software-engineering` tags (direct) or description (half-credit). See `TASK_TAGS` in `contracts.py`. |
-| `schema` | 20% | Features map to a bashgym format (`SFT`/`DPO`/`GRPO`). Exact matches (`SCHEMA_PATTERNS`) score 1.0, heuristic matches score 0.6. |
-| `license` | 15% | `PERMISSIVE_LICENSES` (apache-2.0, mit, bsd, cc-by-4.0, cc0-1.0) score 1.0. `WARN_LICENSES` (share-alike) score 0.6 and emit a warning. |
-| `size` | 15% | `SIZE_IDEAL_MIN`-`SIZE_IDEAL_MAX` (100-50k rows) scores 1.0. Linear decay toward the hard cap. |
-| `freshness` | 10% | Updated within `FRESHNESS_FULL_DAYS` (365d) scores 1.0. Linear decay to `FRESHNESS_STALE_DAYS` (730d). |
-| `popularity` | 10% | `downloads / POPULARITY_SATURATION_DOWNLOADS` (10k), clamped to 1.0. Weak signal. |
+| Dimension    | Weight | What it rewards                                                                                                                                                |
+| ------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_match` | 30%    | `code-generation`, `agentic`, `tool-use`, `bash`, `swe`, `software-engineering` tags (direct) or description (half-credit). See `TASK_TAGS` in `contracts.py`. |
+| `schema`     | 20%    | Features map to a bashgym format (`SFT`/`DPO`/`GRPO`). Exact matches (`SCHEMA_PATTERNS`) score 1.0, heuristic matches score 0.6.                               |
+| `license`    | 15%    | `PERMISSIVE_LICENSES` (apache-2.0, mit, bsd, cc-by-4.0, cc0-1.0) score 1.0. `WARN_LICENSES` (share-alike) score 0.6 and emit a warning.                        |
+| `size`       | 15%    | `SIZE_IDEAL_MIN`-`SIZE_IDEAL_MAX` (100-50k rows) scores 1.0. Linear decay toward the hard cap.                                                                 |
+| `freshness`  | 10%    | Updated within `FRESHNESS_FULL_DAYS` (365d) scores 1.0. Linear decay to `FRESHNESS_STALE_DAYS` (730d).                                                         |
+| `popularity` | 10%    | `downloads / POPULARITY_SATURATION_DOWNLOADS` (10k), clamped to 1.0. Weak signal.                                                                              |
 
 **Schema detection** — two layers, in order:
 
@@ -121,13 +121,13 @@ Pure function: takes `(accepted, rejected)` lists and returns a markdown string.
 
 ## Module layout
 
-| File | Role |
-|---|---|
-| `contracts.py` | Scoring weights, thresholds, license policy, schema patterns, column-mapping hints. **All tuning knobs live here** — no logic. |
-| `scoring.py` | Pure `score_dataset(DatasetMetadata) -> ScoredDataset`. Hard filters + weighted dimensions + format inference + download-command builder. Fully unit-tested with no network calls. |
-| `hf_client.py` | `HFResearchClient` wraps `huggingface_hub.HfApi` for discovery and enrichment. Includes the datasets-server fallback. **The only module that makes network calls.** |
-| `report.py` | Pure markdown renderer. Input: `list[ScoredDataset]`. Output: `str`. |
-| `hf_dataset_scanner.py` | CLI entrypoint. Ties discover → cache-check → enrich → score → render → write. Handles argparse and JSON cache I/O. |
+| File                    | Role                                                                                                                                                                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contracts.py`          | Scoring weights, thresholds, license policy, schema patterns, column-mapping hints. **All tuning knobs live here** — no logic.                                                     |
+| `scoring.py`            | Pure `score_dataset(DatasetMetadata) -> ScoredDataset`. Hard filters + weighted dimensions + format inference + download-command builder. Fully unit-tested with no network calls. |
+| `hf_client.py`          | `HFResearchClient` wraps `huggingface_hub.HfApi` for discovery and enrichment. Includes the datasets-server fallback. **The only module that makes network calls.**                |
+| `report.py`             | Pure markdown renderer. Input: `list[ScoredDataset]`. Output: `str`.                                                                                                               |
+| `hf_dataset_scanner.py` | CLI entrypoint. Ties discover → cache-check → enrich → score → render → write. Handles argparse and JSON cache I/O.                                                                |
 
 ## Tuning
 
@@ -207,6 +207,7 @@ DataDesignerPipeline(
 ```
 
 The `pipeline` slot is picked from:
+
 - `sft` → `coding_agent_sft`
 - `dpo` → `coding_agent_dpo`
 - `grpo` → `coding_agent_sft` (GRPO-compatible seed ingestion via the SFT pipeline)
@@ -217,7 +218,7 @@ The `column_mapping` is built from `COLUMN_MAP_HINTS` — any dataset column who
 
 ## Empirical dataset ranking (optional, GPU required for real mode)
 
-The rule-based scanner produces a static ranking. If you want to know which datasets *actually* help your model — not just which ones look good on paper — there's a second tool that runs short SFT training experiments per top-N candidate and ranks them by measured eval loss.
+The rule-based scanner produces a static ranking. If you want to know which datasets _actually_ help your model — not just which ones look good on paper — there's a second tool that runs short SFT training experiments per top-N candidate and ranks them by measured eval loss.
 
 ```bash
 # Fast dev loop — no training, just verifies the pipeline works
@@ -255,10 +256,10 @@ The runner injects a custom `DatasetSearchSpace` (a concrete impl of the existin
 
 **Module layout:**
 
-| File | Role |
-|---|---|
-| `dataset_search_space.py` | `DatasetSearchSpace(SearchSpace)` — cursor-based dataset enumeration with simulate/real evaluate modes |
-| `dataset_research_runner.py` | CLI entrypoint — loads candidates, wires AutoResearcher, writes ranking report |
+| File                         | Role                                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `dataset_search_space.py`    | `DatasetSearchSpace(SearchSpace)` — cursor-based dataset enumeration with simulate/real evaluate modes |
+| `dataset_research_runner.py` | CLI entrypoint — loads candidates, wires AutoResearcher, writes ranking report                         |
 
 ## Extending the scanner
 

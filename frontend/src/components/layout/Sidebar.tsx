@@ -35,9 +35,7 @@ import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
 
 // Agent Sessions feed is Electron-only (reads local CLI session journals);
 // lazy + gated so it tree-shakes out of the web build
-const AgentSessionsRail = isElectron
-  ? lazy(() => import('../sessions/AgentSessionsRail'))
-  : null
+const AgentSessionsRail = isElectron ? lazy(() => import('../sessions/AgentSessionsRail')) : null
 
 interface MenuItemProps {
   icon: React.ReactNode
@@ -84,11 +82,28 @@ function MenuSection({ title, children }: { title?: string; children: React.Reac
   )
 }
 
-type SecondaryViewId = 'traces' | 'models' | 'evaluator' | 'router' | 'guardrails' | 'profiler' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline'
+type SecondaryViewId =
+  | 'traces'
+  | 'models'
+  | 'evaluator'
+  | 'router'
+  | 'guardrails'
+  | 'profiler'
+  | 'huggingface'
+  | 'integration'
+  | 'achievements'
+  | 'orchestrator'
+  | 'pipeline'
 
 interface CollapsibleSectionProps {
   title: string
-  items: Array<{ id: SecondaryViewId; icon: React.ReactNode; label: string; disabled?: boolean; disabledTitle?: string }>
+  items: Array<{
+    id: SecondaryViewId
+    icon: React.ReactNode
+    label: string
+    disabled?: boolean
+    disabledTitle?: string
+  }>
   defaultExpanded?: boolean
 }
 
@@ -102,7 +117,7 @@ function CollapsibleSection({ title, items, defaultExpanded = false }: Collapsib
     if (overlayView !== id) openOverlay(id)
   }
 
-  const hasActiveItem = items.some(item => overlayView === item.id)
+  const hasActiveItem = items.some((item) => overlayView === item.id)
 
   return (
     <div className="mb-2">
@@ -127,7 +142,9 @@ function CollapsibleSection({ title, items, defaultExpanded = false }: Collapsib
               >
                 <span className="flex-shrink-0">{item.icon}</span>
                 <span className="flex-1 text-sm text-text-muted">{item.label}</span>
-                <span className="font-mono text-[9px] uppercase tracking-widest text-text-muted border border-border px-1 py-0.5 rounded-brutal">off</span>
+                <span className="font-mono text-[9px] uppercase tracking-widest text-text-muted border border-border px-1 py-0.5 rounded-brutal">
+                  off
+                </span>
               </div>
             ) : (
               <MenuItem
@@ -157,18 +174,38 @@ function SecondarySections() {
     { id: 'guardrails', icon: <Shield className="w-4 h-4" />, label: 'Guardrails' },
     { id: 'profiler', icon: <Activity className="w-4 h-4" />, label: 'Profiler' },
     // Experimental: Electron-only
-    ...(isElectron ? [
-      { id: 'orchestrator' as SecondaryViewId, icon: <Network className="w-4 h-4" />, label: 'Orchestrator' },
-      { id: 'pipeline' as SecondaryViewId, icon: <Workflow className="w-4 h-4" />, label: 'Pipeline' },
-    ] : [])
+    ...(isElectron
+      ? [
+          {
+            id: 'orchestrator' as SecondaryViewId,
+            icon: <Network className="w-4 h-4" />,
+            label: 'Orchestrator'
+          },
+          {
+            id: 'pipeline' as SecondaryViewId,
+            icon: <Workflow className="w-4 h-4" />,
+            label: 'Pipeline'
+          }
+        ]
+      : [])
   ]
 
   const connectionsItems: CollapsibleSectionProps['items'] = [
-    { id: 'huggingface', icon: <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" />, label: 'HuggingFace' },
+    {
+      id: 'huggingface',
+      icon: <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" />,
+      label: 'HuggingFace'
+    },
     // Experimental: Electron-only
-    ...(isElectron ? [
-      { id: 'integration' as SecondaryViewId, icon: <Link2 className="w-4 h-4" />, label: 'Integration' },
-    ] : [])
+    ...(isElectron
+      ? [
+          {
+            id: 'integration' as SecondaryViewId,
+            icon: <Link2 className="w-4 h-4" />,
+            label: 'Integration'
+          }
+        ]
+      : [])
   ]
 
   const progressItems: CollapsibleSectionProps['items'] = [
@@ -186,7 +223,18 @@ function SecondarySections() {
 }
 
 export function Sidebar() {
-  const { isSidebarOpen, setSidebarOpen, overlayView, openOverlay, openTraining, trainingSubview, closeOverlay, setSettingsOpen, sidebarMode, setSidebarMode } = useUIStore()
+  const {
+    isSidebarOpen,
+    setSidebarOpen,
+    overlayView,
+    openOverlay,
+    openTraining,
+    trainingSubview,
+    closeOverlay,
+    setSettingsOpen,
+    sidebarMode,
+    setSidebarMode
+  } = useUIStore()
   const { currentRun } = useTrainingStore()
   const hasLiveTrainingRun = isTrainingRunActive(currentRun?.status)
   const { dismissTooltip } = useTutorialStore()
@@ -233,181 +281,198 @@ export function Sidebar() {
     <div className="relative z-30 flex flex-shrink-0 min-w-0">
       <aside className="relative z-30 w-64 min-w-[16rem] bg-background-card border-r border-border overflow-y-auto flex-shrink-0">
         {showSessions && AgentSessionsRail ? (
-          <Suspense fallback={(
-            <div className="p-3 space-y-3" aria-label="Loading Agent Sessions">
-              <div className="h-8 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal" />
-              <div className="h-16 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal" />
-              {[0, 1, 2, 3].map((item) => (
-                <div key={item} className="h-12 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal" />
-              ))}
-            </div>
-          )}>
+          <Suspense
+            fallback={
+              <div className="p-3 space-y-3" aria-label="Loading Agent Sessions">
+                <div className="h-8 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal" />
+                <div className="h-16 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal" />
+                {[0, 1, 2, 3].map((item) => (
+                  <div
+                    key={item}
+                    className="h-12 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal"
+                  />
+                ))}
+              </div>
+            }
+          >
             <AgentSessionsRail />
           </Suspense>
         ) : (
-        <div className="p-4">
-          {/* Header - Clickable to go home */}
-          <button
-            onClick={() => handleNavClick('home')}
-            className="flex items-center gap-3 mb-7 w-full text-left hover-press transition-press"
-          >
-            <img src="./bashgym-peony.png" alt="BashGym" className="w-14 h-14 -ml-1 object-contain" />
-            <h2 className="font-brand text-2xl font-semibold leading-none text-text-primary">
-              <span className="text-accent">/</span>BashGym
-            </h2>
-          </button>
-
-          {/* Primary Navigation */}
-          <MenuSection>
-            <MenuItem
-              icon={<Home className="w-4 h-4" />}
-              label="Home"
+          <div className="p-4">
+            {/* Header - Clickable to go home */}
+            <button
               onClick={() => handleNavClick('home')}
-              active={overlayView === 'home'}
-              primary
-            />
-            {isElectron && (
+              className="flex items-center gap-3 mb-7 w-full text-left hover-press transition-press"
+            >
+              <img
+                src="./bashgym-peony.png"
+                alt="BashGym"
+                className="w-14 h-14 -ml-1 object-contain"
+              />
+              <h2 className="font-brand text-2xl font-semibold leading-none text-text-primary">
+                <span className="text-accent">/</span>BashGym
+              </h2>
+            </button>
+
+            {/* Primary Navigation */}
+            <MenuSection>
               <MenuItem
-                icon={<Terminal className="w-4 h-4" />}
-                label="Workspace"
-                onClick={() => handleNavClick(null)}
-                active={overlayView === null}
+                icon={<Home className="w-4 h-4" />}
+                label="Home"
+                onClick={() => handleNavClick('home')}
+                active={overlayView === 'home'}
                 primary
               />
-            )}
-            {isElectron && (
+              {isElectron && (
+                <MenuItem
+                  icon={<Terminal className="w-4 h-4" />}
+                  label="Workspace"
+                  onClick={() => handleNavClick(null)}
+                  active={overlayView === null}
+                  primary
+                />
+              )}
+              {isElectron && (
+                <MenuItem
+                  icon={<ListTree className="w-4 h-4" />}
+                  label="Agent Sessions"
+                  onClick={() => {
+                    dismissTooltip()
+                    setSidebarMode(sidebarMode === 'sessions' ? 'nav' : 'sessions')
+                    closeOverlay()
+                  }}
+                  active={showSessions}
+                  primary
+                />
+              )}
               <MenuItem
-                icon={<ListTree className="w-4 h-4" />}
-                label="Agent Sessions"
+                icon={<Sparkles className="w-4 h-4" />}
+                label="Data Factory"
+                onClick={() => handleNavClick('factory')}
+                active={overlayView === 'factory'}
+                primary
+              />
+              <MenuItem
+                icon={<BarChart3 className="w-4 h-4" />}
+                label="Training"
                 onClick={() => {
                   dismissTooltip()
-                  setSidebarMode(sidebarMode === 'sessions' ? 'nav' : 'sessions')
-                  closeOverlay()
+                  openTraining('runs')
                 }}
-                active={showSessions}
+                active={overlayView === 'training' && trainingSubview === 'runs'}
+                badge={hasLiveTrainingRun ? 'Live' : undefined}
                 primary
               />
-            )}
-            <MenuItem
-              icon={<Sparkles className="w-4 h-4" />}
-              label="Data Factory"
-              onClick={() => handleNavClick('factory')}
-              active={overlayView === 'factory'}
-              primary
-            />
-            <MenuItem
-              icon={<BarChart3 className="w-4 h-4" />}
-              label="Training"
-              onClick={() => {
-                dismissTooltip()
-                openTraining('runs')
-              }}
-              active={overlayView === 'training' && trainingSubview === 'runs'}
-              badge={hasLiveTrainingRun ? 'Live' : undefined}
-              primary
-            />
-            <MenuItem
-              icon={<Zap className="w-4 h-4" />}
-              label="AutoResearch"
-              onClick={() => {
-                dismissTooltip()
-                openTraining('autoresearch')
-              }}
-              active={overlayView === 'training' && trainingSubview === 'autoresearch'}
-              primary
-            />
-            {isWeb && (
               <MenuItem
-                icon={<Download className="w-4 h-4" />}
-                label="Download App"
-                onClick={() => openOverlay('download')}
-                active={overlayView === 'download'}
+                icon={<Zap className="w-4 h-4" />}
+                label="AutoResearch"
+                onClick={() => {
+                  dismissTooltip()
+                  openTraining('autoresearch')
+                }}
+                active={overlayView === 'training' && trainingSubview === 'autoresearch'}
                 primary
               />
-            )}
-          </MenuSection>
-
-          {/* Secondary Sections */}
-          <SecondarySections />
-
-          {/* Status Section */}
-          <MenuSection title="Status">
-            <div className="px-3 py-2 space-y-2">
-              {/* API Connection */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {apiConnected ? (
-                    <Wifi className="w-3.5 h-3.5 text-status-success" />
-                  ) : (
-                    <WifiOff className="w-3.5 h-3.5 text-status-error" />
-                  )}
-                  <span className="font-mono text-xs text-text-secondary">API</span>
-                </div>
-                <span className={clsx(
-                  'font-mono text-xs border rounded-brutal px-2 py-0.5',
-                  apiConnected
-                    ? 'border-status-success text-status-success'
-                    : 'border-status-error text-status-error'
-                )}>
-                  {apiConnected === null ? '...' : apiConnected ? 'Connected' : 'Offline'}
-                </span>
-              </div>
-
-              {/* Hooks Status */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {hooksInstalled ? (
-                    <CheckCircle className="w-3.5 h-3.5 text-status-success" />
-                  ) : (
-                    <XCircle className="w-3.5 h-3.5 text-status-warning" />
-                  )}
-                  <span className="font-mono text-xs text-text-secondary">Hooks</span>
-                </div>
-                <span className={clsx(
-                  'font-mono text-xs border rounded-brutal px-2 py-0.5',
-                  hooksInstalled
-                    ? 'border-status-success text-status-success'
-                    : 'border-status-warning text-status-warning'
-                )}>
-                  {hooksInstalled === null ? '...' : hooksInstalled ? 'Installed' : 'Not installed'}
-                </span>
-              </div>
-
-              {/* Setup prompt if hooks not installed */}
-              {hooksInstalled === false && (
-                <button
-                  onClick={() => {
-                    setSettingsOpen(true)
-                    setSidebarOpen(false)
-                  }}
-                  className="btn-secondary mt-2 w-full font-mono text-xs text-center py-1.5"
-                >
-                  {isWeb ? 'Connect Traces →' : 'Setup Hooks →'}
-                </button>
+              {isWeb && (
+                <MenuItem
+                  icon={<Download className="w-4 h-4" />}
+                  label="Download App"
+                  onClick={() => openOverlay('download')}
+                  active={overlayView === 'download'}
+                  primary
+                />
               )}
-            </div>
-          </MenuSection>
+            </MenuSection>
 
-          {/* Settings & Getting Started */}
-          <div className="pt-2 border-t border-accent/15">
-            <MenuItem
-              icon={<Rocket className="w-4 h-4" />}
-              label="Getting Started"
-              onClick={() => {
-                useUIStore.getState().setOnboardingOpen(true)
-                setSidebarOpen(false)
-              }}
-            />
-            <MenuItem
-              icon={<Settings className="w-4 h-4" />}
-              label="Settings"
-              onClick={() => {
-                setSettingsOpen(true)
-                setSidebarOpen(false)
-              }}
-            />
+            {/* Secondary Sections */}
+            <SecondarySections />
+
+            {/* Status Section */}
+            <MenuSection title="Status">
+              <div className="px-3 py-2 space-y-2">
+                {/* API Connection */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {apiConnected ? (
+                      <Wifi className="w-3.5 h-3.5 text-status-success" />
+                    ) : (
+                      <WifiOff className="w-3.5 h-3.5 text-status-error" />
+                    )}
+                    <span className="font-mono text-xs text-text-secondary">API</span>
+                  </div>
+                  <span
+                    className={clsx(
+                      'font-mono text-xs border rounded-brutal px-2 py-0.5',
+                      apiConnected
+                        ? 'border-status-success text-status-success'
+                        : 'border-status-error text-status-error'
+                    )}
+                  >
+                    {apiConnected === null ? '...' : apiConnected ? 'Connected' : 'Offline'}
+                  </span>
+                </div>
+
+                {/* Hooks Status */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {hooksInstalled ? (
+                      <CheckCircle className="w-3.5 h-3.5 text-status-success" />
+                    ) : (
+                      <XCircle className="w-3.5 h-3.5 text-status-warning" />
+                    )}
+                    <span className="font-mono text-xs text-text-secondary">Hooks</span>
+                  </div>
+                  <span
+                    className={clsx(
+                      'font-mono text-xs border rounded-brutal px-2 py-0.5',
+                      hooksInstalled
+                        ? 'border-status-success text-status-success'
+                        : 'border-status-warning text-status-warning'
+                    )}
+                  >
+                    {hooksInstalled === null
+                      ? '...'
+                      : hooksInstalled
+                        ? 'Installed'
+                        : 'Not installed'}
+                  </span>
+                </div>
+
+                {/* Setup prompt if hooks not installed */}
+                {hooksInstalled === false && (
+                  <button
+                    onClick={() => {
+                      setSettingsOpen(true)
+                      setSidebarOpen(false)
+                    }}
+                    className="btn-secondary mt-2 w-full font-mono text-xs text-center py-1.5"
+                  >
+                    {isWeb ? 'Connect Traces →' : 'Setup Hooks →'}
+                  </button>
+                )}
+              </div>
+            </MenuSection>
+
+            {/* Settings & Getting Started */}
+            <div className="pt-2 border-t border-accent/15">
+              <MenuItem
+                icon={<Rocket className="w-4 h-4" />}
+                label="Getting Started"
+                onClick={() => {
+                  useUIStore.getState().setOnboardingOpen(true)
+                  setSidebarOpen(false)
+                }}
+              />
+              <MenuItem
+                icon={<Settings className="w-4 h-4" />}
+                label="Settings"
+                onClick={() => {
+                  setSettingsOpen(true)
+                  setSidebarOpen(false)
+                }}
+              />
+            </div>
           </div>
-        </div>
         )}
       </aside>
     </div>

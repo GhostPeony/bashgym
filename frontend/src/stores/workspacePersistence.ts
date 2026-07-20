@@ -64,7 +64,8 @@ export interface WorkspaceSnapshotV1 {
 const REGISTRY_KEY = 'bashgym_workspaces'
 export const DEFAULT_WORKSPACE_ID = 'default'
 
-type WsKeySuffix = 'panels' | 'positions' | 'edges' | 'viewport' | 'active_panel' | 'campaign_archive'
+type WsKeySuffix =
+  'panels' | 'positions' | 'edges' | 'viewport' | 'active_panel' | 'campaign_archive'
 
 export const wsKey = (id: string, suffix: WsKeySuffix) => `bashgym_ws_${id}_${suffix}`
 
@@ -129,7 +130,12 @@ let registryCache: WorkspaceRegistry | null = null
 export function loadRegistry(): WorkspaceRegistry {
   if (registryCache) return registryCache
   const stored = readJson<WorkspaceRegistry>(REGISTRY_KEY)
-  if (stored && stored.version === 1 && Array.isArray(stored.workspaces) && stored.workspaces.length > 0) {
+  if (
+    stored &&
+    stored.version === 1 &&
+    Array.isArray(stored.workspaces) &&
+    stored.workspaces.length > 0
+  ) {
     if (!stored.workspaces.some((w) => w.id === stored.activeWorkspaceId)) {
       stored.activeWorkspaceId = stored.workspaces[0].id
     }
@@ -165,11 +171,16 @@ export function setActiveWorkspaceId(id: string): void {
   saveRegistry({
     ...registry,
     activeWorkspaceId: id,
-    workspaces: registry.workspaces.map((w) => (w.id === id ? { ...w, lastActiveAt: Date.now() } : w))
+    workspaces: registry.workspaces.map((w) =>
+      w.id === id ? { ...w, lastActiveAt: Date.now() } : w
+    )
   })
 }
 
-export function toPersistedPanel(panel: Panel, sessions: Map<string, TerminalSession>): WsPersistedPanel {
+export function toPersistedPanel(
+  panel: Panel,
+  sessions: Map<string, TerminalSession>
+): WsPersistedPanel {
   const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
   return {
     id: panel.id,
@@ -178,17 +189,19 @@ export function toPersistedPanel(panel: Panel, sessions: Map<string, TerminalSes
     terminalId: panel.terminalId,
     cwd: session?.cwd,
     agentKind: session?.agentKind,
-    sessionState: session ? {
-      status: session.status,
-      attention: session.attention,
-      lastActivity: session.lastActivity,
-      currentTool: session.currentTool,
-      taskSummary: session.taskSummary,
-      gitBranch: session.gitBranch,
-      model: session.model,
-      errorMessage: session.errorMessage,
-      isPaused: session.isPaused
-    } : undefined,
+    sessionState: session
+      ? {
+          status: session.status,
+          attention: session.attention,
+          lastActivity: session.lastActivity,
+          currentTool: session.currentTool,
+          taskSummary: session.taskSummary,
+          gitBranch: session.gitBranch,
+          model: session.model,
+          errorMessage: session.errorMessage,
+          isPaused: session.isPaused
+        }
+      : undefined,
     url: panel.url,
     filePath: panel.filePath,
     adapterConfig: panel.adapterConfig
@@ -220,8 +233,15 @@ export function terminalSessionFromPersistedPanel(
   }
 }
 
-export function savePanelsFor(id: string, panels: Panel[], sessions: Map<string, TerminalSession>): void {
-  writeJson(wsKey(id, 'panels'), panels.map((p) => toPersistedPanel(p, sessions)))
+export function savePanelsFor(
+  id: string,
+  panels: Panel[],
+  sessions: Map<string, TerminalSession>
+): void {
+  writeJson(
+    wsKey(id, 'panels'),
+    panels.map((p) => toPersistedPanel(p, sessions))
+  )
 }
 
 export function savePositionsFor(id: string, nodes: Map<string, CanvasNode>): void {
@@ -242,7 +262,9 @@ export function loadWorkspaceSnapshot(id: string): WorkspaceSnapshotV1 {
   const panelIds = new Set(panels.map((p) => p.id))
 
   const rawPositions = readJson<Record<string, CanvasNode>>(wsKey(id, 'positions')) ?? {}
-  const positions = Object.fromEntries(Object.entries(rawPositions).filter(([key]) => panelIds.has(key)))
+  const positions = Object.fromEntries(
+    Object.entries(rawPositions).filter(([key]) => panelIds.has(key))
+  )
 
   const rawEdges = readJson<CanvasEdge[]>(wsKey(id, 'edges')) ?? []
   const edges = rawEdges.filter((e) => panelIds.has(e.source) && panelIds.has(e.target))
@@ -254,7 +276,14 @@ export function loadWorkspaceSnapshot(id: string): WorkspaceSnapshotV1 {
 }
 
 export function deleteWorkspaceKeys(id: string): void {
-  for (const suffix of ['panels', 'positions', 'edges', 'viewport', 'active_panel', 'campaign_archive'] as WsKeySuffix[]) {
+  for (const suffix of [
+    'panels',
+    'positions',
+    'edges',
+    'viewport',
+    'active_panel',
+    'campaign_archive'
+  ] as WsKeySuffix[]) {
     try {
       localStorage.removeItem(wsKey(id, suffix))
     } catch {
@@ -290,8 +319,10 @@ export function appendPanelToWorkspace(
   const previousPositions = localStorage.getItem(positionsKey)
 
   try {
-    const panels = previousPanels ? JSON.parse(previousPanels) as WsPersistedPanel[] : []
-    const positions = previousPositions ? JSON.parse(previousPositions) as Record<string, CanvasNode> : {}
+    const panels = previousPanels ? (JSON.parse(previousPanels) as WsPersistedPanel[]) : []
+    const positions = previousPositions
+      ? (JSON.parse(previousPositions) as Record<string, CanvasNode>)
+      : {}
     const nextPanels = [...panels.filter((candidate) => candidate.id !== panel.id), panel]
     const nextPositions = position ? { ...positions, [panel.id]: position } : positions
     localStorage.setItem(panelsKey, JSON.stringify(nextPanels))
@@ -312,7 +343,10 @@ export function appendPanelToWorkspace(
 
 export function removePanelFromWorkspaceSnapshot(id: string, panelId: string): void {
   const snapshot = loadWorkspaceSnapshot(id)
-  writeJson(wsKey(id, 'panels'), snapshot.panels.filter((panel) => panel.id !== panelId))
+  writeJson(
+    wsKey(id, 'panels'),
+    snapshot.panels.filter((panel) => panel.id !== panelId)
+  )
   const positions = { ...snapshot.positions }
   delete positions[panelId]
   writeJson(wsKey(id, 'positions'), positions)

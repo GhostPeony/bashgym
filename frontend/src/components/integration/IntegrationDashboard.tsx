@@ -37,7 +37,7 @@ function StatusCard({ title, value, icon, status = 'neutral' }: StatusCardProps)
     success: 'text-status-success',
     warning: 'text-status-warning',
     error: 'text-status-error',
-    neutral: 'text-text-secondary',
+    neutral: 'text-text-secondary'
   }
 
   return (
@@ -47,7 +47,12 @@ function StatusCard({ title, value, icon, status = 'neutral' }: StatusCardProps)
           <p className="font-mono text-xs text-text-muted uppercase tracking-widest">{title}</p>
           <p className={clsx('text-2xl font-brand mt-1', statusColors[status])}>{value}</p>
         </div>
-        <div className={clsx('p-2 border-2 border-border rounded-brutal bg-background-secondary', statusColors[status])}>
+        <div
+          className={clsx(
+            'p-2 border-2 border-border rounded-brutal bg-background-secondary',
+            statusColors[status]
+          )}
+        >
           {icon}
         </div>
       </div>
@@ -84,7 +89,12 @@ export function IntegrationDashboard() {
   }
 
   const handleUnlink = async () => {
-    if (!confirm('Unlink bashbros integration? Traces will stop flowing and model sync will be disabled.')) return
+    if (
+      !confirm(
+        'Unlink bashbros integration? Traces will stop flowing and model sync will be disabled.'
+      )
+    )
+      return
     setLinking(true)
     const result = await integrationApi.unlink()
     if (result.ok) {
@@ -125,7 +135,8 @@ export function IntegrationDashboard() {
   }
 
   const handleRollback = async (version: string) => {
-    if (!confirm(`Rollback to model version ${version}? This will update the sidekick model.`)) return
+    if (!confirm(`Rollback to model version ${version}? This will update the sidekick model.`))
+      return
     const result = await integrationApi.rollbackModel(version)
     if (result.ok) {
       await refresh()
@@ -148,10 +159,14 @@ export function IntegrationDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className={clsx(
-              'p-3 border-2 rounded-brutal',
-              isLinked ? 'border-status-success bg-background-card' : 'border-border bg-background-secondary'
-            )}>
+            <div
+              className={clsx(
+                'p-3 border-2 rounded-brutal',
+                isLinked
+                  ? 'border-status-success bg-background-card'
+                  : 'border-border bg-background-secondary'
+              )}
+            >
               {isLinked ? (
                 <Link2 className="w-6 h-6 text-status-success" />
               ) : (
@@ -161,17 +176,15 @@ export function IntegrationDashboard() {
             <div>
               <h1 className="text-2xl font-brand text-text-primary">Bashbros Integration</h1>
               <p className="text-text-secondary font-mono text-sm">
-                {isLinked ? 'Connected - traces flowing, model sync enabled' : 'Not linked - standalone mode'}
+                {isLinked
+                  ? 'Connected - traces flowing, model sync enabled'
+                  : 'Not linked - standalone mode'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => void refresh()}
-              className="btn-icon"
-              title="Refresh"
-            >
+            <button onClick={() => void refresh()} className="btn-icon" title="Refresh">
               <RefreshCw className="w-4 h-4" />
             </button>
             {isLinked ? (
@@ -249,7 +262,9 @@ export function IntegrationDashboard() {
                 <Loader2 className="w-5 h-5 animate-spin text-status-warning" />
                 <div>
                   <p className="font-brand text-status-warning">Training in Progress</p>
-                  <p className="text-sm text-text-secondary font-mono">A new model is being trained...</p>
+                  <p className="text-sm text-text-secondary font-mono">
+                    A new model is being trained...
+                  </p>
                 </div>
               </div>
             )}
@@ -286,7 +301,11 @@ export function IntegrationDashboard() {
                     disabled={processing}
                     className="btn-secondary flex items-center gap-2 text-accent border-accent text-sm disabled:opacity-50"
                   >
-                    {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    {processing ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
                     Process Now
                   </button>
                 </div>
@@ -320,7 +339,9 @@ export function IntegrationDashboard() {
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">Capture Mode</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">
+                    Capture Mode
+                  </label>
                   <select
                     value={settings.capture_mode}
                     onChange={(e) => handleUpdateSetting('capture', 'mode', e.target.value)}
@@ -328,7 +349,9 @@ export function IntegrationDashboard() {
                   >
                     <option value="everything">Everything - Capture all sessions</option>
                     <option value="successful_only">Successful Only - Only verified traces</option>
-                    <option value="sidekick_curated">Sidekick Curated - AI picks teachable moments</option>
+                    <option value="sidekick_curated">
+                      Sidekick Curated - AI picks teachable moments
+                    </option>
                   </select>
                 </div>
 
@@ -336,7 +359,9 @@ export function IntegrationDashboard() {
                   <input
                     type="checkbox"
                     checked={settings.auto_stream}
-                    onChange={(e) => handleUpdateSetting('capture', 'auto_stream', e.target.checked)}
+                    onChange={(e) =>
+                      handleUpdateSetting('capture', 'auto_stream', e.target.checked)
+                    }
                     className="w-4 h-4 border-brutal rounded-brutal"
                   />
                   <span className="text-text-primary font-mono text-sm">Auto-stream traces</span>
@@ -356,7 +381,9 @@ export function IntegrationDashboard() {
                   <input
                     type="checkbox"
                     checked={settings.auto_training_enabled}
-                    onChange={(e) => handleUpdateSetting('training', 'auto_enabled', e.target.checked)}
+                    onChange={(e) =>
+                      handleUpdateSetting('training', 'auto_enabled', e.target.checked)
+                    }
                     className="w-4 h-4 border-brutal rounded-brutal"
                   />
                   <span className="text-text-primary font-mono text-sm">Enable auto-training</span>
@@ -369,7 +396,9 @@ export function IntegrationDashboard() {
                   <input
                     type="number"
                     value={settings.quality_threshold}
-                    onChange={(e) => handleUpdateSetting('training', 'quality_threshold', parseInt(e.target.value))}
+                    onChange={(e) =>
+                      handleUpdateSetting('training', 'quality_threshold', parseInt(e.target.value))
+                    }
                     min={10}
                     max={500}
                     className="input w-32 text-sm"
@@ -377,7 +406,9 @@ export function IntegrationDashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">Training Trigger</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">
+                    Training Trigger
+                  </label>
                   <select
                     value={settings.trigger}
                     onChange={(e) => handleUpdateSetting('training', 'trigger', e.target.value)}
@@ -403,18 +434,24 @@ export function IntegrationDashboard() {
                   <input
                     type="checkbox"
                     checked={settings.auto_export_ollama}
-                    onChange={(e) => handleUpdateSetting('model_sync', 'auto_export_ollama', e.target.checked)}
+                    onChange={(e) =>
+                      handleUpdateSetting('model_sync', 'auto_export_ollama', e.target.checked)
+                    }
                     className="w-4 h-4 border-brutal rounded-brutal"
                   />
                   <span className="text-text-primary font-mono text-sm">Auto-export to Ollama</span>
                 </label>
 
                 <div>
-                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">Ollama Model Name</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">
+                    Ollama Model Name
+                  </label>
                   <input
                     type="text"
                     value={settings.ollama_model_name}
-                    onChange={(e) => handleUpdateSetting('model_sync', 'ollama_model_name', e.target.value)}
+                    onChange={(e) =>
+                      handleUpdateSetting('model_sync', 'ollama_model_name', e.target.value)
+                    }
                     className="input w-64 text-sm font-mono"
                   />
                 </div>
@@ -423,10 +460,14 @@ export function IntegrationDashboard() {
                   <input
                     type="checkbox"
                     checked={settings.notify_on_update}
-                    onChange={(e) => handleUpdateSetting('model_sync', 'notify_on_update', e.target.checked)}
+                    onChange={(e) =>
+                      handleUpdateSetting('model_sync', 'notify_on_update', e.target.checked)
+                    }
                     className="w-4 h-4 border-brutal rounded-brutal"
                   />
-                  <span className="text-text-primary font-mono text-sm">Notify on model update</span>
+                  <span className="text-text-primary font-mono text-sm">
+                    Notify on model update
+                  </span>
                 </label>
               </div>
             </div>
@@ -443,11 +484,15 @@ export function IntegrationDashboard() {
                   <input
                     type="checkbox"
                     checked={settings.bashbros_primary}
-                    onChange={(e) => handleUpdateSetting('security', 'bashbros_primary', e.target.checked)}
+                    onChange={(e) =>
+                      handleUpdateSetting('security', 'bashbros_primary', e.target.checked)
+                    }
                     className="w-4 h-4 border-brutal rounded-brutal"
                   />
                   <div>
-                    <span className="text-text-primary font-mono text-sm">Bashbros as primary security</span>
+                    <span className="text-text-primary font-mono text-sm">
+                      Bashbros as primary security
+                    </span>
                     <p className="text-sm text-text-secondary font-mono">
                       Defer security checks to bashbros when linked
                     </p>
@@ -478,14 +523,20 @@ export function IntegrationDashboard() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className={clsx(
-                        'p-2 border-2 rounded-brutal',
-                        model.is_latest ? 'border-status-success bg-background-card' : 'border-border bg-background-secondary'
-                      )}>
-                        <Package className={clsx(
-                          'w-5 h-5',
-                          model.is_latest ? 'text-status-success' : 'text-text-secondary'
-                        )} />
+                      <div
+                        className={clsx(
+                          'p-2 border-2 rounded-brutal',
+                          model.is_latest
+                            ? 'border-status-success bg-background-card'
+                            : 'border-border bg-background-secondary'
+                        )}
+                      >
+                        <Package
+                          className={clsx(
+                            'w-5 h-5',
+                            model.is_latest ? 'text-status-success' : 'text-text-secondary'
+                          )}
+                        />
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
@@ -547,7 +598,11 @@ export function IntegrationDashboard() {
                 disabled={processing || pendingTraces.length === 0}
                 className="btn-secondary flex items-center gap-2 text-accent border-accent text-sm disabled:opacity-50"
               >
-                {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {processing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
                 Process All
               </button>
             </div>
@@ -561,10 +616,7 @@ export function IntegrationDashboard() {
             ) : (
               <div className="space-y-2">
                 {pendingTraces.map((trace, index) => (
-                  <div
-                    key={`${trace.filename}-${index}`}
-                    className="card p-3"
-                  >
+                  <div key={`${trace.filename}-${index}`} className="card p-3">
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <p className="font-mono text-text-primary truncate">{trace.task}</p>

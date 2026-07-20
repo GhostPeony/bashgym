@@ -46,13 +46,13 @@ student is good enough to route traffic to.
 
 ## What BashGym trains from
 
-| Source | What it contains | Best first use |
-|---|---|---|
-| Gold traces | Successful AI coding sessions captured from Claude Code, Codex, Gemini, Copilot, OpenCode, and similar tools. | SFT baseline and DPO chosen examples. |
-| Failed or lower-tier traces | Attempts with bad choices, failed commands, weak verification, or low quality scores. | DPO rejected examples and failure analysis. |
-| Custom JSONL | Prebuilt NeMo/TRL-style `messages` datasets. | Importing curated external or hand-authored data. |
-| Security datasets | Malware, phishing, or other labeled security corpora converted into examples. | Security-specialist behavior or classification tasks. |
-| Terminal environments | Executable tasks with a prompt, workspace, verifier, rollout attempts, and pass/fail reward. | GRPO/RLVR, DPPO replay, pass@k, holdout gates, and world-model replay data. |
+| Source                      | What it contains                                                                                              | Best first use                                                              |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Gold traces                 | Successful AI coding sessions captured from Claude Code, Codex, Gemini, Copilot, OpenCode, and similar tools. | SFT baseline and DPO chosen examples.                                       |
+| Failed or lower-tier traces | Attempts with bad choices, failed commands, weak verification, or low quality scores.                         | DPO rejected examples and failure analysis.                                 |
+| Custom JSONL                | Prebuilt NeMo/TRL-style `messages` datasets.                                                                  | Importing curated external or hand-authored data.                           |
+| Security datasets           | Malware, phishing, or other labeled security corpora converted into examples.                                 | Security-specialist behavior or classification tasks.                       |
+| Terminal environments       | Executable tasks with a prompt, workspace, verifier, rollout attempts, and pass/fail reward.                  | GRPO/RLVR, DPPO replay, pass@k, holdout gates, and world-model replay data. |
 
 Gold traces teach the model what good behavior looks like. Terminal
 environments prove whether the behavior survives interaction with a real shell,
@@ -66,15 +66,15 @@ intake, baseline-first hypotheses, budgets, attempts, leases, cancellation,
 restart recovery, artifact sealing, heldout evaluation, experiment ledger,
 keep/discard decision, promotion gates, and workspace canvas.
 
-| Layer | All registered BashGym models | Optional NeMo RL/Gym extension |
-|---|---|---|
-| Research controller and operator skills | Shared | Reused unchanged |
-| Local/private-SSH execution authority | Shared | Reused unchanged |
-| Evaluation, evidence, ledger, and promotion | Shared | Reused unchanged |
-| Model loader and training recipe | Selected per registered model/backend | NeMo RL recipe adapter |
-| Distributed rollout/generation topology | Backend-dependent | Ray plus async vLLM |
-| Multi-turn environment isolation | Backend-dependent | NeMo Gym servers/sessions |
-| Training-to-generation refit | Backend-dependent | NeMo RL refit contract |
+| Layer                                       | All registered BashGym models         | Optional NeMo RL/Gym extension |
+| ------------------------------------------- | ------------------------------------- | ------------------------------ |
+| Research controller and operator skills     | Shared                                | Reused unchanged               |
+| Local/private-SSH execution authority       | Shared                                | Reused unchanged               |
+| Evaluation, evidence, ledger, and promotion | Shared                                | Reused unchanged               |
+| Model loader and training recipe            | Selected per registered model/backend | NeMo RL recipe adapter         |
+| Distributed rollout/generation topology     | Backend-dependent                     | Ray plus async vLLM            |
+| Multi-turn environment isolation            | Backend-dependent                     | NeMo Gym servers/sessions      |
+| Training-to-generation refit                | Backend-dependent                     | NeMo RL refit contract         |
 
 A model appearing in a local cache is not enough to activate training. Each new
 trainable base must resolve an immutable model revision, compatible installed
@@ -252,15 +252,15 @@ and [NeMo RL integration flow](https://docs.nvidia.com/nemo/rl/nightly/design-do
 
 ## What the training strategies teach
 
-| Strategy | Teaches | Needs | Proves itself with |
-|---|---|---|---|
-| SFT | Imitation: reproduce successful trace format, tool use, and problem-solving style. | Gold examples. | Eval loss plus heldout pass@k. |
-| DPO | Preference: choose the better response for the same prompt. | Chosen/rejected pairs. | Preference accuracy, reward margin, heldout behavior. |
-| GRPO/RLVR | Outcome optimization: improve completions using verifier rewards. | Reward variation across sampled attempts. | Reward, reward_std, pass@1/pass@k, verifier status. |
-| Distillation | Compression: move teacher behavior into a smaller student. | Teacher outputs or teacher-on-policy budget. | Student pass@k and quality against teacher baseline. |
-| Session Distillation | Local repair: train the original context toward the same action rescored under a targeted hint. | `session_distillation_records.jsonl` with failed spans and target masks. | Masked KL/CE plus heldout decision and terminal-task behavior. |
-| Cascade RL | Curriculum: train domain specialists in stages, then merge or distill. | Enough examples per domain. | Per-domain gates and final generalist holdout. |
-| DPPO replay | Terminal rollout optimization with behavior/train logprob replay and trust-region masks. | Served-model rollouts with logprobs and a backend such as verl/SkyRL/open-instruct. | Mask telemetry, reward, pass@k, backend smoke artifacts. |
+| Strategy             | Teaches                                                                                         | Needs                                                                               | Proves itself with                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| SFT                  | Imitation: reproduce successful trace format, tool use, and problem-solving style.              | Gold examples.                                                                      | Eval loss plus heldout pass@k.                                 |
+| DPO                  | Preference: choose the better response for the same prompt.                                     | Chosen/rejected pairs.                                                              | Preference accuracy, reward margin, heldout behavior.          |
+| GRPO/RLVR            | Outcome optimization: improve completions using verifier rewards.                               | Reward variation across sampled attempts.                                           | Reward, reward_std, pass@1/pass@k, verifier status.            |
+| Distillation         | Compression: move teacher behavior into a smaller student.                                      | Teacher outputs or teacher-on-policy budget.                                        | Student pass@k and quality against teacher baseline.           |
+| Session Distillation | Local repair: train the original context toward the same action rescored under a targeted hint. | `session_distillation_records.jsonl` with failed spans and target masks.            | Masked KL/CE plus heldout decision and terminal-task behavior. |
+| Cascade RL           | Curriculum: train domain specialists in stages, then merge or distill.                          | Enough examples per domain.                                                         | Per-domain gates and final generalist holdout.                 |
+| DPPO replay          | Terminal rollout optimization with behavior/train logprob replay and trust-region masks.        | Served-model rollouts with logprobs and a backend such as verl/SkyRL/open-instruct. | Mask telemetry, reward, pass@k, backend smoke artifacts.       |
 
 Start with SFT unless you already have a verifier-rich terminal environment and
 reward variation. SFT teaches the student the language and shape of the task.
@@ -366,10 +366,10 @@ task + command/history -> next observation, diff, test state, verifier state
 
 Two objectives are wired today:
 
-| Objective | Adds | Current status |
-|---|---|---|
-| ECHO | Auxiliary observation-token prediction loss for terminal outputs. | Config and replay contract are wired; trainer backend integration is the next step. |
-| RWML | Embedding-space reward for predicting next terminal state. | Pure reward/transition layer and replay contract are wired; real backend loop is pending. |
+| Objective | Adds                                                              | Current status                                                                            |
+| --------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| ECHO      | Auxiliary observation-token prediction loss for terminal outputs. | Config and replay contract are wired; trainer backend integration is the next step.       |
+| RWML      | Embedding-space reward for predicting next terminal state.        | Pure reward/transition layer and replay contract are wired; real backend loop is pending. |
 
 Treat ECHO/RWML metrics as diagnostics and auxiliary learning signals until they
 correlate with heldout pass@k and safety metrics. Do not use them as release

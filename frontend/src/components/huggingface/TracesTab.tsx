@@ -1,11 +1,5 @@
 import { useState } from 'react'
-import {
-  FileText,
-  Upload,
-  Loader2,
-  ExternalLink,
-  RefreshCw,
-} from 'lucide-react'
+import { FileText, Upload, Loader2, ExternalLink, RefreshCw } from 'lucide-react'
 import { hfApi } from '../../services/api'
 import { hfTraceDatasetsResource } from '../../stores/hfResources'
 import { useSessionResource } from '../../stores/sessionResource'
@@ -13,7 +7,7 @@ import { useSessionResource } from '../../stores/sessionResource'
 const DEFAULT_TRACE_DIRS = [
   '~/.bashgym/gold_traces_local',
   '~/.bashgym/failed_traces_local',
-  '~/.bashgym/traces',
+  '~/.bashgym/traces'
 ]
 
 export function TracesTab() {
@@ -39,7 +33,7 @@ export function TracesTab() {
     const result = await hfApi.uploadTraces({
       trace_dir: traceDir.trim(),
       repo_id: repoId.trim(),
-      private: isPrivate,
+      private: isPrivate
     })
 
     if (result.ok && result.data) {
@@ -57,7 +51,8 @@ export function TracesTab() {
         <div>
           <h2 className="text-lg font-brand text-text-primary">Agent Traces</h2>
           <p className="text-sm text-text-secondary mt-1">
-            Upload bashgym traces to HuggingFace Hub. HF auto-detects agent trace formats and provides a specialized viewer.
+            Upload bashgym traces to HuggingFace Hub. HF auto-detects agent trace formats and
+            provides a specialized viewer.
           </p>
         </div>
         <button onClick={() => refresh()} className="btn-icon" title="Refresh">
@@ -169,14 +164,19 @@ export function TracesTab() {
         ) : (
           <div className="space-y-2">
             {datasets.map((ds) => (
-              <div key={ds.id} className="border-2 border-border rounded-brutal p-3 flex items-center justify-between">
+              <div
+                key={ds.id}
+                className="border-2 border-border rounded-brutal p-3 flex items-center justify-between"
+              >
                 <div className="flex items-center gap-3">
                   <FileText className="w-5 h-5 text-text-secondary" />
                   <div>
                     <span className="font-mono text-sm text-text-primary">{ds.id}</span>
                     <div className="flex items-center gap-3 mt-0.5">
                       {ds.private && (
-                        <span className="text-xs text-text-muted border border-border-subtle rounded px-1">private</span>
+                        <span className="text-xs text-text-muted border border-border-subtle rounded px-1">
+                          private
+                        </span>
                       )}
                       <span className="text-xs text-text-muted">{ds.downloads} downloads</span>
                     </div>

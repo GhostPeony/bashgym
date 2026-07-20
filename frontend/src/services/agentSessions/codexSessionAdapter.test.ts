@@ -35,7 +35,8 @@ function makeIpc(buffer: Buffer) {
       const slice = buffer.subarray(offset, offset + toRead)
       const lastNewline = slice.lastIndexOf(0x0a)
       if (lastNewline === -1) {
-        if (toRead >= cap) return { success: true as const, data: '', newOffset: offset + toRead, size, reset }
+        if (toRead >= cap)
+          return { success: true as const, data: '', newOffset: offset + toRead, size, reset }
         return { success: true as const, data: '', newOffset: offset, size, reset }
       }
       return {
@@ -111,10 +112,16 @@ test('codex ingest recovers cwd from a tail turn_context when the meta line is u
   // A meta line larger than the IPC hard cap can never be captured by the head
   // read; the session must still surface via turn_context events in the tail.
   const meta = bigSessionMeta('', HARD_CAP + 50_000).replace('"cwd":""', '"cwd":null')
-  const turnContext = JSON.stringify({ type: 'turn_context', payload: { turn_id: 't1', cwd, model: 'gpt-5.6' } })
+  const turnContext = JSON.stringify({
+    type: 'turn_context',
+    payload: { turn_id: 't1', cwd, model: 'gpt-5.6' }
+  })
   const tokenCount = JSON.stringify({
     type: 'event_msg',
-    payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 5, output_tokens: 5 } } }
+    payload: {
+      type: 'token_count',
+      info: { total_token_usage: { input_tokens: 5, output_tokens: 5 } }
+    }
   })
   const buffer = Buffer.from([meta, turnContext, tokenCount].join('\n') + '\n', 'utf-8')
   const filePath = 'C:/codex/rollout-huge-meta.jsonl'

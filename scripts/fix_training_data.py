@@ -166,12 +166,18 @@ def add_closing_assistant(examples: list[dict]) -> list[dict]:
                     files_str += f" and {len(files_touched) - 5} more"
                 summary_parts.append(f"touched {files_str}")
 
-            summary = "Task completed. " + ". ".join(summary_parts) + "." if summary_parts else "Task completed."
+            summary = (
+                "Task completed. " + ". ".join(summary_parts) + "."
+                if summary_parts
+                else "Task completed."
+            )
 
-            msgs.append({
-                "role": "assistant",
-                "content": summary,
-            })
+            msgs.append(
+                {
+                    "role": "assistant",
+                    "content": summary,
+                }
+            )
             fixed += 1
 
     logger.info(f"  Added closing messages to {fixed}/{len(examples)} examples")
@@ -252,11 +258,13 @@ def chunk_long_example(ex: dict, max_tokens: int, tokenizer=None) -> list[dict]:
 
         if current_tokens + pair_tokens > max_tokens and len(current_chunk_msgs) > len(header):
             # Save current chunk
-            chunks.append({
-                "messages": current_chunk_msgs,
-                "tools": ex.get("tools"),
-                "metadata": ex.get("metadata"),
-            })
+            chunks.append(
+                {
+                    "messages": current_chunk_msgs,
+                    "tools": ex.get("tools"),
+                    "metadata": ex.get("metadata"),
+                }
+            )
             current_chunk_msgs = list(header)
             current_tokens = header_tokens
 
@@ -265,11 +273,13 @@ def chunk_long_example(ex: dict, max_tokens: int, tokenizer=None) -> list[dict]:
 
     # Save last chunk
     if len(current_chunk_msgs) > len(header):
-        chunks.append({
-            "messages": current_chunk_msgs,
-            "tools": ex.get("tools"),
-            "metadata": ex.get("metadata"),
-        })
+        chunks.append(
+            {
+                "messages": current_chunk_msgs,
+                "tools": ex.get("tools"),
+                "metadata": ex.get("metadata"),
+            }
+        )
 
     return chunks if chunks else [ex]
 
@@ -319,12 +329,15 @@ def export_unsloth_formats(train_path: Path, val_path: Path, output_dir: Path):
 
     try:
         from export_unsloth import convert_file
+
         for jsonl_file in [train_path, val_path]:
             logger.info(f"  Converting {jsonl_file.name}:")
             convert_file(jsonl_file, unsloth_dir, ["chatml", "chatml_flat", "sharegpt"])
     except ImportError:
         logger.warning("  Could not import export_unsloth — skipping format conversion")
-        logger.info("  Run manually: python scripts/export_unsloth.py --input-dir data-pipeline-fixed")
+        logger.info(
+            "  Run manually: python scripts/export_unsloth.py --input-dir data-pipeline-fixed"
+        )
 
 
 # =========================================================================
@@ -346,10 +359,11 @@ def main():
     tokenizer = None
     try:
         from transformers import AutoTokenizer
+
         tokenizer_path = Path.home() / ".unsloth/studio/outputs/unsloth_gemma-4-E4B-it_1775370273"
         if tokenizer_path.exists():
             tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_path))
-            logger.info(f"Using Gemma 4 tokenizer for accurate token counts\n")
+            logger.info("Using Gemma 4 tokenizer for accurate token counts\n")
     except ImportError:
         logger.info("transformers not available, using char/4 estimates\n")
 
@@ -390,12 +404,8 @@ def main():
     logger.info(f"  Max seq length: {MAX_SEQ_LENGTH}")
 
     # Quick validation
-    train_final_roles = Counter(
-        ex["messages"][-1]["role"] for ex in train if ex.get("messages")
-    )
-    val_final_roles = Counter(
-        ex["messages"][-1]["role"] for ex in val if ex.get("messages")
-    )
+    train_final_roles = Counter(ex["messages"][-1]["role"] for ex in train if ex.get("messages"))
+    val_final_roles = Counter(ex["messages"][-1]["role"] for ex in val if ex.get("messages"))
     logger.info(f"  Train final roles: {dict(train_final_roles)}")
     logger.info(f"  Val final roles: {dict(val_final_roles)}")
 
@@ -407,7 +417,7 @@ def main():
             f"  Sample token check (first 50): {exceeds}/{len(train_tokens)} exceed {MAX_SEQ_LENGTH}"
         )
 
-    logger.info(f"\nDone! Run validate_training_data.py on the fixed data to verify.")
+    logger.info("\nDone! Run validate_training_data.py on the fixed data to verify.")
     logger.info(f"Fixed data at: {OUTPUT_DIR}/")
 
 

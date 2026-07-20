@@ -89,9 +89,13 @@ export function buildWorkspaceSessionIndex({
       workspace,
       isActive,
       sessions: records,
-      runningCount: records.filter(({ session }) => session.status === 'running' || session.status === 'tool_calling').length,
+      runningCount: records.filter(
+        ({ session }) => session.status === 'running' || session.status === 'tool_calling'
+      ).length,
       waitingCount: records.filter(({ session }) => session.status === 'waiting_input').length,
-      errorCount: records.filter(({ session }) => session.attention === 'error' || Boolean(session.errorMessage)).length,
+      errorCount: records.filter(
+        ({ session }) => session.attention === 'error' || Boolean(session.errorMessage)
+      ).length,
       liveCount: records.filter(({ runtimeState }) => runtimeState === 'live').length
     }
   })

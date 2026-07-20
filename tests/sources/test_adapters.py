@@ -13,7 +13,9 @@ def _preference_record():
     return {
         "id": "uf-1",
         "prompt": "Explain how to debug a failing pytest case.",
-        "chosen": [{"role": "assistant", "content": "Run pytest, read the failure, patch the cause."}],
+        "chosen": [
+            {"role": "assistant", "content": "Run pytest, read the failure, patch the cause."}
+        ],
         "rejected": [{"role": "assistant", "content": "Assume the tests are wrong and skip them."}],
         "split": "train",
         "metadata": {

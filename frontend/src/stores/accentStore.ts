@@ -17,7 +17,7 @@ export const ACCENT_PRESETS: AccentPreset[] = [
   { name: 'Sky', hue: 210 },
   { name: 'Cobalt', hue: 228 },
   { name: 'Lavender', hue: 270 },
-  { name: 'Orchid', hue: 308 },
+  { name: 'Orchid', hue: 308 }
 ]
 
 export interface TerminalFgPreset {
@@ -38,7 +38,7 @@ export const TERMINAL_FG_PRESETS: TerminalFgPreset[] = [
   { name: 'Sky', hue: 210 },
   { name: 'Amber', hue: 30 },
   { name: 'Violet', hue: 270 },
-  { name: 'Aqua', hue: 185 },
+  { name: 'Aqua', hue: 185 }
 ]
 
 const DEFAULT_HUE = 258
@@ -64,9 +64,7 @@ export function getTerminalFgColor(theme: 'light' | 'dark', value: number): stri
     return theme === 'dark' ? '#F0EDE8' : '#000000'
   }
 
-  return theme === 'dark'
-    ? `hsl(${value}, 30%, 82%)`
-    : `hsl(${value}, 45%, 25%)`
+  return theme === 'dark' ? `hsl(${value}, 30%, 82%)` : `hsl(${value}, 45%, 25%)`
 }
 
 export function getTerminalFgLabel(value: number): string {
@@ -123,7 +121,7 @@ export const useAccentStore = create<AccentState>()(
 
       resetTerminalFgHue: () => {
         set({ terminalFgHue: DEFAULT_TERMINAL_FG_HUE })
-      },
+      }
     }),
     {
       name: 'bashgym-accent-hue',

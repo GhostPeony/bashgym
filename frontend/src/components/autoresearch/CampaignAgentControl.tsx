@@ -6,25 +6,25 @@ import {
   CampaignAgentSessionPanel,
   type CampaignAgentEligibleSession,
   type CampaignAgentHostState,
-  type CampaignAgentPendingAction,
+  type CampaignAgentPendingAction
 } from './CampaignAgentSessionPanel'
 import {
   invokeCampaignAgentHostAction,
   launchCodexCampaignAgent,
   type CampaignAgentHostAction,
-  type CampaignAgentHostRendererAPI,
+  type CampaignAgentHostRendererAPI
 } from './campaignAgentHostClient'
 import { parseCampaignAgentEligibleSessions } from './campaignAgentHostModel'
 import {
   adoptCampaignAgentTerminal,
   finalizeSuccessfulCampaignAgentLaunch,
-  preserveDurableCampaignAgentError,
+  preserveDurableCampaignAgentError
 } from './campaignAgentTerminalAdoption'
 import type {
   CampaignAgentCapability,
   CampaignAgentFreshness,
   CampaignAgentPublicView,
-  CampaignAgentScope,
+  CampaignAgentScope
 } from './campaignAgentModel'
 
 export interface CampaignAgentControlProps {
@@ -40,7 +40,7 @@ function newAuthorizationIdempotencyKey(): string {
 
 function hostAPI(): CampaignAgentHostRendererAPI | null {
   const host = window.bashgym?.campaignAgentHost
-  return host ? host as unknown as CampaignAgentHostRendererAPI : null
+  return host ? (host as unknown as CampaignAgentHostRendererAPI) : null
 }
 
 export function CampaignAgentControl({ scope, freshness }: CampaignAgentControlProps) {
@@ -48,8 +48,14 @@ export function CampaignAgentControl({ scope, freshness }: CampaignAgentControlP
   const [hostError, setHostError] = useState<string | null>(null)
   const [sessions, setSessions] = useState<CampaignAgentEligibleSession[]>([])
   const [selectedTerminalId, setSelectedTerminalId] = useState('')
-  const [requestedCapabilities, setRequestedCapabilities] = useState<CampaignAgentCapability[]>(['campaign_observe', 'artifact_read'])
-  const [grantedCapabilities, setGrantedCapabilities] = useState<CampaignAgentCapability[]>(['campaign_observe', 'artifact_read'])
+  const [requestedCapabilities, setRequestedCapabilities] = useState<CampaignAgentCapability[]>([
+    'campaign_observe',
+    'artifact_read'
+  ])
+  const [grantedCapabilities, setGrantedCapabilities] = useState<CampaignAgentCapability[]>([
+    'campaign_observe',
+    'artifact_read'
+  ])
   const [publicView, setPublicView] = useState<CampaignAgentPublicView | null>(null)
   const [pendingAction, setPendingAction] = useState<CampaignAgentPendingAction>(null)
   const [idempotencyKey, setIdempotencyKey] = useState(newAuthorizationIdempotencyKey)
@@ -58,72 +64,88 @@ export function CampaignAgentControl({ scope, freshness }: CampaignAgentControlP
   const launchLifecycleActive = useRef(false)
   const durableHostError = useRef<string | null>(null)
 
-  const reconcile = useCallback(async (showLoading = true): Promise<void> => {
-    activeReconciliations.current += 1
-    try {
-      const setReconciledHostError = (error: string | null) => {
-        setHostError(preserveDurableCampaignAgentError(durableHostError.current, error))
-      }
-      const generation = ++loadGeneration.current
-      if (showLoading) setHostState('loading')
-      setReconciledHostError(null)
-      const host = hostAPI()
-      const viewPromise = campaignApi.campaignAgentView(scope.workspaceId, scope.campaignId)
-      if (!host) {
-        const view = await viewPromise
-        if (generation !== loadGeneration.current) return
-        if (view.ok && view.data) setPublicView(view.data)
-        setSessions([])
-        setHostState('offline')
-        setReconciledHostError('The desktop campaign-agent host is unavailable. Existing campaign evidence remains visible.')
-        return
-      }
-
+  const reconcile = useCallback(
+    async (showLoading = true): Promise<void> => {
+      activeReconciliations.current += 1
       try {
-        const [eligible, view] = await Promise.all([host.eligible({
-          workspaceId: scope.workspaceId,
-          campaignId: scope.campaignId,
-        }), viewPromise])
-        if (generation !== loadGeneration.current) return
-        if (!eligible.success) {
-          setSessions([])
-          if (view.ok && view.data) setPublicView(view.data)
-          setHostState('error')
-          setReconciledHostError('The desktop host rejected terminal discovery. Session actions remain disabled.')
-          return
+        const setReconciledHostError = (error: string | null) => {
+          setHostError(preserveDurableCampaignAgentError(durableHostError.current, error))
         }
-        const parsedSessions = parseCampaignAgentEligibleSessions(eligible.sessions)
-        if (!parsedSessions) {
-          setSessions([])
-          setHostState('error')
-          setReconciledHostError('The desktop host returned an invalid terminal projection. Session actions remain disabled.')
-          return
-        }
-        if (!view.ok || !view.data) {
-          setSessions(parsedSessions)
-          setHostState(view.code === 'campaign_desktop_bridge_required' ? 'offline' : 'error')
-          setReconciledHostError('Campaign attachment authority is unavailable. Existing Control Room evidence remains visible and session actions stay disabled.')
-          return
-        }
-        setPublicView(view.data)
-        setSessions(parsedSessions)
-        setSelectedTerminalId((current) => (
-          parsedSessions.some((session) => session.terminalId === current)
-            ? current
-            : parsedSessions.find((session) => session.state !== 'failed')?.terminalId ?? ''
-        ))
-        setHostState('ready')
+        const generation = ++loadGeneration.current
+        if (showLoading) setHostState('loading')
         setReconciledHostError(null)
-      } catch {
-        if (generation !== loadGeneration.current) return
-        setSessions([])
-        setHostState('error')
-        setReconciledHostError('The desktop host could not reconcile campaign-agent state. Session actions remain disabled.')
+        const host = hostAPI()
+        const viewPromise = campaignApi.campaignAgentView(scope.workspaceId, scope.campaignId)
+        if (!host) {
+          const view = await viewPromise
+          if (generation !== loadGeneration.current) return
+          if (view.ok && view.data) setPublicView(view.data)
+          setSessions([])
+          setHostState('offline')
+          setReconciledHostError(
+            'The desktop campaign-agent host is unavailable. Existing campaign evidence remains visible.'
+          )
+          return
+        }
+
+        try {
+          const [eligible, view] = await Promise.all([
+            host.eligible({
+              workspaceId: scope.workspaceId,
+              campaignId: scope.campaignId
+            }),
+            viewPromise
+          ])
+          if (generation !== loadGeneration.current) return
+          if (!eligible.success) {
+            setSessions([])
+            if (view.ok && view.data) setPublicView(view.data)
+            setHostState('error')
+            setReconciledHostError(
+              'The desktop host rejected terminal discovery. Session actions remain disabled.'
+            )
+            return
+          }
+          const parsedSessions = parseCampaignAgentEligibleSessions(eligible.sessions)
+          if (!parsedSessions) {
+            setSessions([])
+            setHostState('error')
+            setReconciledHostError(
+              'The desktop host returned an invalid terminal projection. Session actions remain disabled.'
+            )
+            return
+          }
+          if (!view.ok || !view.data) {
+            setSessions(parsedSessions)
+            setHostState(view.code === 'campaign_desktop_bridge_required' ? 'offline' : 'error')
+            setReconciledHostError(
+              'Campaign attachment authority is unavailable. Existing Control Room evidence remains visible and session actions stay disabled.'
+            )
+            return
+          }
+          setPublicView(view.data)
+          setSessions(parsedSessions)
+          setSelectedTerminalId((current) =>
+            parsedSessions.some((session) => session.terminalId === current)
+              ? current
+              : (parsedSessions.find((session) => session.state !== 'failed')?.terminalId ?? '')
+          )
+          setHostState('ready')
+          setReconciledHostError(null)
+        } catch {
+          if (generation !== loadGeneration.current) return
+          setSessions([])
+          setHostState('error')
+          setReconciledHostError(
+            'The desktop host could not reconcile campaign-agent state. Session actions remain disabled.'
+          )
+        }
+      } finally {
+        activeReconciliations.current = Math.max(0, activeReconciliations.current - 1)
       }
-    } finally {
-      activeReconciliations.current = Math.max(0, activeReconciliations.current - 1)
-    }
-  }, [scope.campaignId, scope.workspaceId])
+    },
+    [scope.campaignId, scope.workspaceId]
+  )
 
   useEffect(() => {
     loadGeneration.current += 1
@@ -173,13 +195,14 @@ export function CampaignAgentControl({ scope, freshness }: CampaignAgentControlP
           campaignId: scope.campaignId,
           requestedCapabilities,
           grantedCapabilities,
-          idempotencyKey,
+          idempotencyKey
         })
         if (!result.success) {
           actionError = `The desktop host rejected the ${action} request. Authoritative state was reconciled before retry.`
         }
         await reconcile(false)
-        if (result.success && (action === 'approve' || action === 'revoke')) resetAuthorizationBinding()
+        if (result.success && (action === 'approve' || action === 'revoke'))
+          resetAuthorizationBinding()
       } catch {
         actionError = `The ${action} request could not complete. Authoritative state was reconciled before retry.`
         await reconcile(false)
@@ -201,7 +224,7 @@ export function CampaignAgentControl({ scope, freshness }: CampaignAgentControlP
       try {
         const result = await launchCodexCampaignAgent(host, {
           workspaceId: scope.workspaceId,
-          campaignId: scope.campaignId,
+          campaignId: scope.campaignId
         })
         if (!result.success) {
           await reconcile(false)
@@ -210,16 +233,11 @@ export function CampaignAgentControl({ scope, freshness }: CampaignAgentControlP
         }
 
         const outcome = await finalizeSuccessfulCampaignAgentLaunch(result.terminalId, {
-          adopt: () => adoptCampaignAgentTerminal(
-            useWorkspaceStore.getState(),
-            scope.workspaceId,
-            result,
-          ),
-          kill: (terminalId) => (
-            window.bashgym?.terminal.kill(terminalId) ?? Promise.resolve(false)
-          ),
+          adopt: () =>
+            adoptCampaignAgentTerminal(useWorkspaceStore.getState(), scope.workspaceId, result),
+          kill: (terminalId) => window.bashgym?.terminal.kill(terminalId) ?? Promise.resolve(false),
           selectTerminal: () => setSelectedTerminalId(result.terminalId),
-          reconcile: () => reconcile(false),
+          reconcile: () => reconcile(false)
         })
         if (outcome.status !== 'adopted') {
           durableHostError.current = outcome.durableError
@@ -232,19 +250,27 @@ export function CampaignAgentControl({ scope, freshness }: CampaignAgentControlP
     })()
   }
 
-  const handleRequestedCapabilityChange = (capability: CampaignAgentCapability, checked: boolean) => {
-    setRequestedCapabilities((current) => checked
-      ? [...new Set([...current, capability])]
-      : current.filter((value) => value !== capability))
-    if (!checked) setGrantedCapabilities((current) => current.filter((value) => value !== capability))
+  const handleRequestedCapabilityChange = (
+    capability: CampaignAgentCapability,
+    checked: boolean
+  ) => {
+    setRequestedCapabilities((current) =>
+      checked
+        ? [...new Set([...current, capability])]
+        : current.filter((value) => value !== capability)
+    )
+    if (!checked)
+      setGrantedCapabilities((current) => current.filter((value) => value !== capability))
     resetAuthorizationBinding()
   }
 
   const handleGrantedCapabilityChange = (capability: CampaignAgentCapability, checked: boolean) => {
     if (checked && !requestedCapabilities.includes(capability)) return
-    setGrantedCapabilities((current) => checked
-      ? [...new Set([...current, capability])]
-      : current.filter((value) => value !== capability))
+    setGrantedCapabilities((current) =>
+      checked
+        ? [...new Set([...current, capability])]
+        : current.filter((value) => value !== capability)
+    )
     resetAuthorizationBinding()
   }
 

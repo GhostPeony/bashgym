@@ -257,9 +257,7 @@ class TestHyperparamResearchStatus:
         )
 
         assert response.status_code == 422
-        assert response.json()["detail"]["code"] == (
-            "autoresearch_real_prerequisites_missing"
-        )
+        assert response.json()["detail"]["code"] == ("autoresearch_real_prerequisites_missing")
         assert not hasattr(app.state, "autoresearcher")
 
     def test_invalid_mode_is_rejected(self):

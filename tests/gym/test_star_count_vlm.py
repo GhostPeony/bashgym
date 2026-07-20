@@ -54,9 +54,7 @@ def test_collator_keeps_pixels_and_masks_the_prompt(tmp_path):
             texts = [text] if isinstance(text, str) else text
             length = 3 if texts == ["prompt"] else 5
             return {
-                "input_ids": torch.tensor(
-                    [[index + 1 for index in range(length)]] * len(texts)
-                ),
+                "input_ids": torch.tensor([[index + 1 for index in range(length)]] * len(texts)),
                 "attention_mask": torch.ones((len(texts), length), dtype=torch.long),
                 "pixel_values": torch.ones((len(images), 3, 2, 2)),
             }
@@ -126,9 +124,7 @@ def test_archive_extraction_rejects_path_traversal(tmp_path):
 
 def test_archive_extraction_verifies_manifest_and_member_hashes(tmp_path):
     dataset = tmp_path / "dataset"
-    generate_star_count_dataset(
-        dataset, train_size=1, validation_size=1, heldout_size=1
-    )
+    generate_star_count_dataset(dataset, train_size=1, validation_size=1, heldout_size=1)
     archive = tmp_path / "dataset.zip"
     create_star_count_archive(dataset, archive)
 
@@ -158,6 +154,7 @@ def test_train_command_can_evaluate_the_sealed_candidate(monkeypatch, tmp_path):
         "bashgym.gym.star_count_vlm.extract_star_count_archive",
         lambda *_args: dataset,
     )
+
     def fake_train(_recipe, **kwargs):
         calls["training"] = kwargs
         return {"train_loss": 1.0}

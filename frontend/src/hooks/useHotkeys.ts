@@ -27,7 +27,8 @@ export function useHotkeys(hotkeys: HotkeyConfig[]) {
       }
 
       // Let native clipboard/text shortcuts through when focused on an input
-      const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      const isEditable =
+        target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
       if (isEditable && (event.ctrlKey || event.metaKey)) {
         const key = event.key.toLowerCase()
         // Allow: copy, paste, cut, select all, undo, redo

@@ -8,7 +8,7 @@ import {
   Copy,
   ChevronUp,
   ChevronDown,
-  CheckCircle,
+  CheckCircle
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { FactoryConfig, SeedExample } from '../../services/api'
@@ -22,7 +22,12 @@ interface SeedsPanelProps {
   onNavigateToCreate: () => void
 }
 
-export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavigateToCreate }: SeedsPanelProps) {
+export function SeedsPanel({
+  config,
+  onConfigChange,
+  onImportFromTraces,
+  onNavigateToCreate
+}: SeedsPanelProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [sourceFilter, setSourceFilter] = useState<SeedSourceFilter>('all')
   const [tagFilter, setTagFilter] = useState<string | null>(null)
@@ -53,7 +58,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
 
   // Filtered seeds
   const filteredSeeds = useMemo(() => {
-    return config.seeds.filter(seed => {
+    return config.seeds.filter((seed) => {
       // Source filter
       if (sourceFilter !== 'all' && seed.source !== sourceFilter) return false
 
@@ -63,8 +68,8 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
       // Search query
       if (searchQuery) {
         const q = searchQuery.toLowerCase()
-        const dataMatch = Object.values(seed.data).some(v => v.toLowerCase().includes(q))
-        const tagMatch = (seed.tags || []).some(t => t.includes(q))
+        const dataMatch = Object.values(seed.data).some((v) => v.toLowerCase().includes(q))
+        const tagMatch = (seed.tags || []).some((t) => t.includes(q))
         if (!dataMatch && !tagMatch) return false
       }
 
@@ -72,7 +77,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
     })
   }, [config.seeds, sourceFilter, tagFilter, searchQuery])
 
-  const selectedSeed = config.seeds.find(s => s.id === selectedSeedId) || null
+  const selectedSeed = config.seeds.find((s) => s.id === selectedSeedId) || null
 
   // Seed helpers
   const addSeed = useCallback(() => {
@@ -81,7 +86,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
       data: config.columns.reduce((acc, col) => ({ ...acc, [col.name]: '' }), {}),
       source: 'manual',
       created_at: new Date().toISOString(),
-      tags: [],
+      tags: []
     }
     onConfigChange({
       ...config,
@@ -90,40 +95,49 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
     setSelectedSeedId(newSeed.id)
   }, [config, onConfigChange])
 
-  const removeSeed = useCallback((id: string) => {
-    onConfigChange({
-      ...config,
-      seeds: config.seeds.filter(s => s.id !== id)
-    })
-    if (selectedSeedId === id) setSelectedSeedId(null)
-    setSelectedSeedIds(prev => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
-  }, [config, onConfigChange, selectedSeedId])
+  const removeSeed = useCallback(
+    (id: string) => {
+      onConfigChange({
+        ...config,
+        seeds: config.seeds.filter((s) => s.id !== id)
+      })
+      if (selectedSeedId === id) setSelectedSeedId(null)
+      setSelectedSeedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    },
+    [config, onConfigChange, selectedSeedId]
+  )
 
-  const updateSeed = useCallback((id: string, updates: Partial<SeedExample>) => {
-    onConfigChange({
-      ...config,
-      seeds: config.seeds.map(s => s.id === id ? { ...s, ...updates } : s)
-    })
-  }, [config, onConfigChange])
+  const updateSeed = useCallback(
+    (id: string, updates: Partial<SeedExample>) => {
+      onConfigChange({
+        ...config,
+        seeds: config.seeds.map((s) => (s.id === id ? { ...s, ...updates } : s))
+      })
+    },
+    [config, onConfigChange]
+  )
 
-  const moveSeed = useCallback((id: string, direction: 'up' | 'down') => {
-    const idx = config.seeds.findIndex(s => s.id === id)
-    if (idx < 0) return
-    const targetIdx = direction === 'up' ? idx - 1 : idx + 1
-    if (targetIdx < 0 || targetIdx >= config.seeds.length) return
+  const moveSeed = useCallback(
+    (id: string, direction: 'up' | 'down') => {
+      const idx = config.seeds.findIndex((s) => s.id === id)
+      if (idx < 0) return
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1
+      if (targetIdx < 0 || targetIdx >= config.seeds.length) return
 
-    const newSeeds = [...config.seeds]
-    ;[newSeeds[idx], newSeeds[targetIdx]] = [newSeeds[targetIdx], newSeeds[idx]]
-    onConfigChange({ ...config, seeds: newSeeds })
-  }, [config, onConfigChange])
+      const newSeeds = [...config.seeds]
+      ;[newSeeds[idx], newSeeds[targetIdx]] = [newSeeds[targetIdx], newSeeds[idx]]
+      onConfigChange({ ...config, seeds: newSeeds })
+    },
+    [config, onConfigChange]
+  )
 
   // Bulk operations
   const toggleSelect = useCallback((id: string) => {
-    setSelectedSeedIds(prev => {
+    setSelectedSeedIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -134,7 +148,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
   const bulkDelete = useCallback(() => {
     onConfigChange({
       ...config,
-      seeds: config.seeds.filter(s => !selectedSeedIds.has(s.id))
+      seeds: config.seeds.filter((s) => !selectedSeedIds.has(s.id))
     })
     if (selectedSeedId && selectedSeedIds.has(selectedSeedId)) {
       setSelectedSeedId(null)
@@ -145,13 +159,13 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
   const bulkDuplicate = useCallback(() => {
     const dupes: SeedExample[] = []
     for (const id of selectedSeedIds) {
-      const seed = config.seeds.find(s => s.id === id)
+      const seed = config.seeds.find((s) => s.id === id)
       if (seed) {
         dupes.push({
           ...seed,
           id: `seed_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           source: 'manual',
-          created_at: new Date().toISOString(),
+          created_at: new Date().toISOString()
         })
       }
     }
@@ -166,7 +180,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
   const seedQuality = (seed: SeedExample) => {
     const total = config.columns.length
     if (total === 0) return 0
-    const filled = config.columns.filter(col => {
+    const filled = config.columns.filter((col) => {
       const val = seed.data[col.name]
       return val && val.trim().length > 0
     }).length
@@ -177,7 +191,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
     { id: 'all', label: 'All' },
     { id: 'gold_trace', label: 'Gold' },
     { id: 'imported', label: 'Imported' },
-    { id: 'manual', label: 'Manual' },
+    { id: 'manual', label: 'Manual' }
   ]
 
   return (
@@ -210,7 +224,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
 
         {/* Source filter tabs */}
         <div className="px-4 pb-2 flex gap-1">
-          {sourceFilterTabs.map(tab => (
+          {sourceFilterTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setSourceFilter(tab.id)}
@@ -234,22 +248,17 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
           <div className="px-4 pb-2 overflow-x-auto">
             <div className="flex gap-1">
               {tagFilter && (
-                <button
-                  onClick={() => setTagFilter(null)}
-                  className="tag flex-shrink-0"
-                >
+                <button onClick={() => setTagFilter(null)} className="tag flex-shrink-0">
                   <span>Clear</span>
                 </button>
               )}
-              {activeTags.map(tag => (
+              {activeTags.map((tag) => (
                 <button
                   key={tag}
                   onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
                   className={clsx(
                     'tag flex-shrink-0 transition-colors',
-                    tagFilter === tag
-                      ? 'bg-accent text-white'
-                      : ''
+                    tagFilter === tag ? 'bg-accent text-white' : ''
                   )}
                 >
                   <span>{tag}</span>
@@ -262,7 +271,9 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
         {/* Bulk action bar */}
         {selectedSeedIds.size > 0 && (
           <div className="px-4 py-2 border-y-2 border-border bg-background-secondary flex items-center gap-2">
-            <span className="text-xs text-text-secondary font-mono">{selectedSeedIds.size} selected</span>
+            <span className="text-xs text-text-secondary font-mono">
+              {selectedSeedIds.size} selected
+            </span>
             <div className="flex-1" />
             <button
               onClick={bulkDuplicate}
@@ -289,7 +300,9 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
               {config.seeds.length === 0 ? (
                 <>
                   <p className="font-brand text-lg text-text-primary mb-1">No seeds yet</p>
-                  <p className="text-xs text-text-muted font-mono mb-4">Import from traces or create manually</p>
+                  <p className="text-xs text-text-muted font-mono mb-4">
+                    Import from traces or create manually
+                  </p>
                   <button onClick={onImportFromTraces} className="btn-primary text-xs">
                     <FolderOpen className="w-3.5 h-3.5 mr-1" />
                     Import from Traces
@@ -304,7 +317,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
             </div>
           ) : (
             filteredSeeds.map((seed, _filteredIdx) => {
-              const globalIdx = config.seeds.findIndex(s => s.id === seed.id)
+              const globalIdx = config.seeds.findIndex((s) => s.id === seed.id)
               const quality = seedQuality(seed)
               const isSelected = selectedSeedId === seed.id
               const isChecked = selectedSeedIds.has(seed.id)
@@ -328,31 +341,43 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
                     />
 
                     {/* Content */}
-                    <div
-                      className="flex-1 min-w-0"
-                      onClick={() => setSelectedSeedId(seed.id)}
-                    >
+                    <div className="flex-1 min-w-0" onClick={() => setSelectedSeedId(seed.id)}>
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-mono text-xs font-semibold text-text-primary">#{globalIdx + 1}</span>
-                        <span className={clsx(
-                          'tag text-[10px]',
-                          seed.source === 'gold_trace' ? 'text-status-success' :
-                          seed.source === 'imported' ? 'text-status-info' :
-                          'text-text-muted'
-                        )}>
-                          <span>{seed.source === 'gold_trace' ? 'Gold' : seed.source === 'imported' ? 'Import' : 'Manual'}</span>
+                        <span className="font-mono text-xs font-semibold text-text-primary">
+                          #{globalIdx + 1}
                         </span>
-                        {(seed.tags || []).slice(0, 2).map(tag => (
+                        <span
+                          className={clsx(
+                            'tag text-[10px]',
+                            seed.source === 'gold_trace'
+                              ? 'text-status-success'
+                              : seed.source === 'imported'
+                                ? 'text-status-info'
+                                : 'text-text-muted'
+                          )}
+                        >
+                          <span>
+                            {seed.source === 'gold_trace'
+                              ? 'Gold'
+                              : seed.source === 'imported'
+                                ? 'Import'
+                                : 'Manual'}
+                          </span>
+                        </span>
+                        {(seed.tags || []).slice(0, 2).map((tag) => (
                           <span key={tag} className="tag text-[10px]">
                             <span>{tag}</span>
                           </span>
                         ))}
                         {(seed.tags || []).length > 2 && (
-                          <span className="text-[10px] text-text-muted font-mono">+{(seed.tags || []).length - 2}</span>
+                          <span className="text-[10px] text-text-muted font-mono">
+                            +{(seed.tags || []).length - 2}
+                          </span>
                         )}
                       </div>
                       <p className="text-xs text-text-secondary font-mono truncate">
-                        {Object.values(seed.data).filter(Boolean).join(' \u00b7 ').slice(0, 100) || 'Empty seed'}
+                        {Object.values(seed.data).filter(Boolean).join(' \u00b7 ').slice(0, 100) ||
+                          'Empty seed'}
                       </p>
                       {/* Quality bar */}
                       {config.columns.length > 0 && (
@@ -361,14 +386,18 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
                             <div
                               className={clsx(
                                 'progress-fill',
-                                quality === 1 ? '!bg-status-success' :
-                                quality >= 0.5 ? '!bg-status-warning' :
-                                '!bg-status-error'
+                                quality === 1
+                                  ? '!bg-status-success'
+                                  : quality >= 0.5
+                                    ? '!bg-status-warning'
+                                    : '!bg-status-error'
                               )}
                               style={{ width: `${quality * 100}%` }}
                             />
                           </div>
-                          {quality === 1 && <CheckCircle className="w-3 h-3 text-status-success flex-shrink-0" />}
+                          {quality === 1 && (
+                            <CheckCircle className="w-3 h-3 text-status-success flex-shrink-0" />
+                          )}
                         </div>
                       )}
                     </div>
@@ -376,14 +405,20 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
                     {/* Reorder buttons */}
                     <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                       <button
-                        onClick={(e) => { e.stopPropagation(); moveSeed(seed.id, 'up') }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          moveSeed(seed.id, 'up')
+                        }}
                         disabled={globalIdx === 0}
                         className="p-0.5 text-text-muted hover:text-text-primary disabled:opacity-30 transition-colors"
                       >
                         <ChevronUp className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); moveSeed(seed.id, 'down') }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          moveSeed(seed.id, 'down')
+                        }}
                         disabled={globalIdx === config.seeds.length - 1}
                         className="p-0.5 text-text-muted hover:text-text-primary disabled:opacity-30 transition-colors"
                       >
@@ -422,7 +457,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
         {selectedSeed ? (
           <SeedEditor
             seed={selectedSeed}
-            seedIndex={config.seeds.findIndex(s => s.id === selectedSeed.id)}
+            seedIndex={config.seeds.findIndex((s) => s.id === selectedSeed.id)}
             columns={config.columns}
             onUpdate={updateSeed}
             onDelete={removeSeed}

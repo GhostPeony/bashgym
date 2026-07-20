@@ -9,21 +9,22 @@ import {
   Loader2,
   MoreHorizontal,
   RefreshCw,
-  WifiOff,
+  WifiOff
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
 import { campaignApi } from '../../services/api'
 import { wsService } from '../../services/websocket'
-import type { CampaignArtifact, CampaignEventItem, CampaignRecord } from '../../stores/campaignStore'
-import {
-  retainCampaignSafetyReconcile,
-  useCampaignStore,
+import type {
+  CampaignArtifact,
+  CampaignEventItem,
+  CampaignRecord
 } from '../../stores/campaignStore'
+import { retainCampaignSafetyReconcile, useCampaignStore } from '../../stores/campaignStore'
 import {
   partitionCampaignsByArchive,
   selectArchivedIds,
-  useCampaignArchiveStore,
+  useCampaignArchiveStore
 } from '../../stores/campaignArchive'
 import { useUIStore } from '../../stores/uiStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -37,11 +38,24 @@ import { HumanOversightQueue, type HumanReviewResponse } from './HumanOversightQ
 import {
   CampaignEvidenceDialog,
   CampaignEvidenceRow,
-  type CampaignEvidenceSelection,
+  type CampaignEvidenceSelection
 } from './CampaignEvidenceInspector'
-import type { CampaignRecoveryPublicV1, RecoveryAction, RecoveryRequest } from './campaignRecoveryModel'
-import { buildControlRoomModel, campaignStatusTone, resolveControlRoomFreshness, type ControlRoomViewModel, type PresentationTone } from './controlRoomModel'
-import { resolveControlRoomCampaignSelection, shouldCanonicalizeControlRoomSelection } from './controlRoomSelection'
+import type {
+  CampaignRecoveryPublicV1,
+  RecoveryAction,
+  RecoveryRequest
+} from './campaignRecoveryModel'
+import {
+  buildControlRoomModel,
+  campaignStatusTone,
+  resolveControlRoomFreshness,
+  type ControlRoomViewModel,
+  type PresentationTone
+} from './controlRoomModel'
+import {
+  resolveControlRoomCampaignSelection,
+  shouldCanonicalizeControlRoomSelection
+} from './controlRoomSelection'
 import { controlRoomSnapshotKey, useControlRoomSnapshotCache } from './controlRoomSnapshotCache'
 import { createRecoveryLoadGate } from './recoveryLoadGate'
 import {
@@ -51,25 +65,31 @@ import {
   type HumanPromotionRequest,
   type HumanWorkClaimRequest,
   type HumanWorkSubmitRequest,
-  type ParsedHumanWorkQueuePublicV1,
+  type ParsedHumanWorkQueuePublicV1
 } from './humanWorkModel'
 import {
   buildGuidedSetupView,
   type GuidedSetupContext,
   type GuidedSetupDoctor,
-  type GuidedSetupValidation,
+  type GuidedSetupValidation
 } from './guidedSetupModel'
 import {
   clearGuidedSetupIdempotencyKey,
   getOrCreateGuidedSetupIdempotencyKey,
   getOrCreateGuidedSetupSessionId,
-  readGuidedSetupSessionId,
+  readGuidedSetupSessionId
 } from './guidedSetupSessionStorage'
 
 export type LifecycleAction = 'start' | 'pause' | 'resume' | 'cancel' | 'conclude'
 
 /** Non-terminal statuses from which a campaign can still be cancelled. */
-const CANCELLABLE_STATUSES = new Set(['validating', 'ready', 'active', 'paused', 'awaiting_authority'])
+const CANCELLABLE_STATUSES = new Set([
+  'validating',
+  'ready',
+  'active',
+  'paused',
+  'awaiting_authority'
+])
 
 export interface ControlRoomContentProps {
   model: ControlRoomViewModel
@@ -109,7 +129,7 @@ const unloadedPages: ControlRoomContentProps['pages'] = {
   artifactsLoading: false,
   artifactsError: null,
   artifactsLoaded: false,
-  artifactsHasMore: true,
+  artifactsHasMore: true
 }
 
 const toneClasses: Record<PresentationTone, string> = {
@@ -117,11 +137,14 @@ const toneClasses: Record<PresentationTone, string> = {
   warning: 'border-status-warning/60 bg-status-warning/10 text-status-warning',
   error: 'border-status-error/60 bg-status-error/10 text-status-error',
   info: 'border-accent/60 bg-accent/10 text-accent-dark',
-  neutral: 'border-border-subtle bg-background-secondary text-text-secondary',
+  neutral: 'border-border-subtle bg-background-secondary text-text-secondary'
 }
 
 function readable(value: string): string {
-  const words = value.replace(/^campaign:/, '').replace(/[_:-]+/g, ' ').trim()
+  const words = value
+    .replace(/^campaign:/, '')
+    .replace(/[_:-]+/g, ' ')
+    .trim()
   return words ? words.replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 }
 
@@ -130,17 +153,23 @@ function compactNumber(value: number): string {
 }
 
 function StatusPill({ label, tone = 'neutral' }: { label: string; tone?: PresentationTone }) {
-  const dotClass = tone === 'success'
-    ? 'status-success'
-    : tone === 'warning'
-      ? 'status-warning'
-      : tone === 'error'
-        ? 'status-error'
-        : tone === 'info'
-          ? 'border-accent bg-accent'
-          : 'border-text-muted bg-text-muted'
+  const dotClass =
+    tone === 'success'
+      ? 'status-success'
+      : tone === 'warning'
+        ? 'status-warning'
+        : tone === 'error'
+          ? 'status-error'
+          : tone === 'info'
+            ? 'border-accent bg-accent'
+            : 'border-text-muted bg-text-muted'
   return (
-    <span className={clsx('inline-flex items-center gap-1.5 rounded-brutal border-brutal px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-wide', toneClasses[tone])}>
+    <span
+      className={clsx(
+        'inline-flex items-center gap-1.5 rounded-brutal border-brutal px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-wide',
+        toneClasses[tone]
+      )}
+    >
       <span className={clsx('status-dot', dotClass)} aria-hidden="true" />
       {label}
     </span>
@@ -150,11 +179,14 @@ function StatusPill({ label, tone = 'neutral' }: { label: string; tone?: Present
 function CampaignSelector({
   campaigns,
   selectedCampaignId,
-  onSelect,
+  onSelect
 }: Pick<ControlRoomContentProps, 'campaigns' | 'selectedCampaignId' | 'onSelect'>) {
   return (
     <div className="min-w-0 w-full sm:max-w-xl">
-      <label htmlFor="autoresearch-campaign" className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-widest text-text-muted">
+      <label
+        htmlFor="autoresearch-campaign"
+        className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-widest text-text-muted"
+      >
         Campaign
       </label>
       <select
@@ -163,7 +195,9 @@ function CampaignSelector({
         value={selectedCampaignId || ''}
         onChange={(event) => event.target.value && onSelect(event.target.value)}
       >
-        <option value="" disabled>Select a campaign</option>
+        <option value="" disabled>
+          Select a campaign
+        </option>
         {campaigns.map((campaign) => (
           <option key={campaign.campaign_id} value={campaign.campaign_id}>
             {campaign.title} · {readable(campaign.status)}
@@ -174,13 +208,20 @@ function CampaignSelector({
   )
 }
 
-function ControlRoomHeader(props: Pick<ControlRoomContentProps, 'campaigns' | 'selectedCampaignId' | 'onSelect'> & { withSelector?: boolean }) {
+function ControlRoomHeader(
+  props: Pick<ControlRoomContentProps, 'campaigns' | 'selectedCampaignId' | 'onSelect'> & {
+    withSelector?: boolean
+  }
+) {
   const { withSelector = true, ...selectorProps } = props
   return (
     <header className="flex flex-col gap-3 border-b border-border-subtle pb-3 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
         <h1 className="font-brand text-2xl text-text-primary">AutoResearch Control Room</h1>
-        <p className="mt-1 text-sm text-text-secondary">Run bounded experiments on registered private compute with durable evidence and human oversight.</p>
+        <p className="mt-1 text-sm text-text-secondary">
+          Run bounded experiments on registered private compute with durable evidence and human
+          oversight.
+        </p>
       </div>
       {withSelector ? (
         <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end lg:max-w-2xl lg:justify-end">
@@ -199,33 +240,62 @@ function UnavailableControlRoomGrid({ loading = false }: { loading?: boolean }) 
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]" aria-busy={loading}>
       <section className="card p-4" aria-labelledby="unavailable-journey-title">
         <div className="flex items-center justify-between gap-3">
-          <h2 id="unavailable-journey-title" className="font-brand text-lg text-text-primary">Journey</h2>
-          <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">Five durable phases</span>
+          <h2 id="unavailable-journey-title" className="font-brand text-lg text-text-primary">
+            Journey
+          </h2>
+          <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
+            Five durable phases
+          </span>
         </div>
         <ol className="mt-3 grid gap-2 md:grid-cols-5">
           {unavailableJourney.map((phase, index) => (
-            <li key={phase} className="rounded-brutal border-brutal border-border-subtle bg-background-secondary p-3 text-text-muted">
+            <li
+              key={phase}
+              className="rounded-brutal border-brutal border-border-subtle bg-background-secondary p-3 text-text-muted"
+            >
               <div className="flex items-center justify-between font-mono text-[10px] font-bold uppercase tracking-wide">
-                <span>{index + 1}</span><Circle className="h-4 w-4" />
+                <span>{index + 1}</span>
+                <Circle className="h-4 w-4" />
               </div>
               <h3 className="mt-3 font-brand text-base text-text-primary">{phase}</h3>
-              <div className="mt-1 font-mono text-[9px] uppercase tracking-wide">Awaiting verified state</div>
+              <div className="mt-1 font-mono text-[9px] uppercase tracking-wide">
+                Awaiting verified state
+              </div>
             </li>
           ))}
         </ol>
         <div className="mt-4 border-t border-border-subtle pt-3">
-          <h3 className="font-brand text-base text-text-primary">Active work &amp; Recent activity</h3>
-          <p className="mt-1 text-xs text-text-muted">{placeholder}. Existing evidence remains visible as soon as verified state is restored.</p>
+          <h3 className="font-brand text-base text-text-primary">
+            Active work &amp; Recent activity
+          </h3>
+          <p className="mt-1 text-xs text-text-muted">
+            {placeholder}. Existing evidence remains visible as soon as verified state is restored.
+          </p>
         </div>
       </section>
       <aside className="card p-4" aria-label="Campaign authority summary">
-        <div className="flex items-center gap-2 text-text-primary"><Database className="h-4 w-4 text-accent" /><h2 className="font-brand text-lg">Campaign overview</h2></div>
+        <div className="flex items-center gap-2 text-text-primary">
+          <Database className="h-4 w-4 text-accent" />
+          <h2 className="font-brand text-lg">Campaign overview</h2>
+        </div>
         <p className="mt-2 text-xs text-text-muted">{placeholder}</p>
         <dl className="mt-4 space-y-2 border-t border-border-subtle pt-3 text-xs text-text-secondary">
-          <div className="flex justify-between gap-3"><dt>Controller</dt><dd>Unverified</dd></div>
-          <div className="flex justify-between gap-3"><dt>Evidence &amp; metrics</dt><dd>Preserved</dd></div>
-          <div className="flex justify-between gap-3"><dt>Budget</dt><dd>Read only</dd></div>
-          <div className="flex justify-between gap-3"><dt>Collection counts</dt><dd>Read only</dd></div>
+          <div className="flex justify-between gap-3">
+            <dt>Controller</dt>
+            <dd>Unverified</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Evidence &amp; metrics</dt>
+            <dd>Preserved</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Budget</dt>
+            <dd>Read only</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Collection counts</dt>
+            <dd>Read only</dd>
+          </div>
         </dl>
       </aside>
     </div>
@@ -235,7 +305,7 @@ function UnavailableControlRoomGrid({ loading = false }: { loading?: boolean }) 
 function ControlRoomStateNotice({
   model,
   onRetry,
-  noCampaigns = false,
+  noCampaigns = false
 }: {
   model: Exclude<ControlRoomViewModel, { kind: 'snapshot' }>
   onRetry: () => void
@@ -244,40 +314,65 @@ function ControlRoomStateNotice({
   const loading = model.kind === 'loading'
   const offline = model.kind === 'offline'
   const error = model.kind === 'error'
-  const title = noCampaigns && model.kind === 'empty'
-    ? 'No durable AutoResearch campaigns yet'
-    : loading
-    ? 'Loading AutoResearch control room'
-    : offline
-      ? 'AutoResearch service is offline'
-      : error
-        ? 'AutoResearch control room unavailable'
-        : model.kind === 'empty'
-          ? 'Select a campaign'
-          : 'No durable AutoResearch campaigns yet'
-  const icon = loading
-    ? <Loader2 className="h-5 w-5 animate-spin" />
-    : offline
-      ? <WifiOff className="h-5 w-5" />
-      : error
-        ? <AlertTriangle className="h-5 w-5" />
-        : <Database className="h-5 w-5" />
+  const title =
+    noCampaigns && model.kind === 'empty'
+      ? 'No durable AutoResearch campaigns yet'
+      : loading
+        ? 'Loading AutoResearch control room'
+        : offline
+          ? 'AutoResearch service is offline'
+          : error
+            ? 'AutoResearch control room unavailable'
+            : model.kind === 'empty'
+              ? 'Select a campaign'
+              : 'No durable AutoResearch campaigns yet'
+  const icon = loading ? (
+    <Loader2 className="h-5 w-5 animate-spin" />
+  ) : offline ? (
+    <WifiOff className="h-5 w-5" />
+  ) : error ? (
+    <AlertTriangle className="h-5 w-5" />
+  ) : (
+    <Database className="h-5 w-5" />
+  )
 
   return (
-    <section className={clsx('card border-l-4 p-4', offline || error ? 'border-l-status-warning' : 'border-l-accent')} role="status" aria-live="polite">
+    <section
+      className={clsx(
+        'card border-l-4 p-4',
+        offline || error ? 'border-l-status-warning' : 'border-l-accent'
+      )}
+      role="status"
+      aria-live="polite"
+    >
       <div className="flex items-start gap-3">
-        <span className={clsx('mt-0.5 shrink-0', offline || error ? 'text-status-warning' : 'text-accent')}>{icon}</span>
+        <span
+          className={clsx(
+            'mt-0.5 shrink-0',
+            offline || error ? 'text-status-warning' : 'text-accent'
+          )}
+        >
+          {icon}
+        </span>
         <div className="min-w-0 flex-1">
           <h2 className="font-brand text-lg text-text-primary">{title}</h2>
           <p className="mt-1 text-sm leading-6 text-text-secondary">{model.message}</p>
           {offline || error ? (
             <p className="mt-2 font-mono text-[10px] uppercase tracking-wide text-status-warning">
-              Live authority unavailable · Last-known campaign data will remain visible when available
+              Live authority unavailable · Last-known campaign data will remain visible when
+              available
             </p>
           ) : null}
         </div>
         {!loading && (offline || error) ? (
-          <Button variant="secondary" size="sm" onClick={onRetry} leftIcon={<RefreshCw className="h-4 w-4" />}>Retry</Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onRetry}
+            leftIcon={<RefreshCw className="h-4 w-4" />}
+          >
+            Retry
+          </Button>
         ) : null}
       </div>
     </section>
@@ -298,11 +393,12 @@ function FreshnessIndicator({ model }: { model: SnapshotViewModel }) {
   }, [model.freshness, display])
   const smoothed = display === 'live' && model.freshness !== 'live'
   const shown = smoothed ? 'live' : model.freshness
-  const dotClass = shown === 'live'
-    ? 'status-success'
-    : shown === 'reconciling' || shown === 'stale'
-      ? 'status-warning'
-      : 'status-error'
+  const dotClass =
+    shown === 'live'
+      ? 'status-success'
+      : shown === 'reconciling' || shown === 'stale'
+        ? 'status-warning'
+        : 'status-error'
   return (
     <span
       className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wide text-text-secondary"
@@ -326,7 +422,7 @@ function CommandStrip({
   onArchive = null,
   transitionPending = null,
   closeoutPending,
-  library,
+  library
 }: {
   model: SnapshotViewModel
   campaigns: CampaignRecord[]
@@ -344,26 +440,34 @@ function CommandStrip({
   const status = campaign.status
   const canMutate = Boolean(onTransition && model.authoritative && !transitionPending)
   const startEnabled = canMutate && status === 'ready' && readiness.launch_ready
-  const startReason = status !== 'ready'
-    ? `Start becomes available from Ready. Current state: ${readable(status)}.`
-    : !model.authoritative
-      ? 'Live data is required. Cached state never enables Start.'
-      : !readiness.launch_ready
-        ? 'Readiness is blocked. Resolve the blocker, then refresh.'
-        : 'Ready to start. The server rechecks every binding and lease before launch.'
+  const startReason =
+    status !== 'ready'
+      ? `Start becomes available from Ready. Current state: ${readable(status)}.`
+      : !model.authoritative
+        ? 'Live data is required. Cached state never enables Start.'
+        : !readiness.launch_ready
+          ? 'Readiness is blocked. Resolve the blocker, then refresh.'
+          : 'Ready to start. The server rechecks every binding and lease before launch.'
   const pendingIcon = (action: LifecycleAction) =>
     transitionPending === action ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : undefined
   return (
-    <header className="card flex flex-wrap items-center gap-x-3 gap-y-2 p-3" aria-label="Campaign command bar">
+    <header
+      className="card flex flex-wrap items-center gap-x-3 gap-y-2 p-3"
+      aria-label="Campaign command bar"
+    >
       <div className="min-w-0 max-w-[24rem] flex-1 sm:flex-none">
-        <label htmlFor="autoresearch-campaign" className="sr-only">Campaign</label>
+        <label htmlFor="autoresearch-campaign" className="sr-only">
+          Campaign
+        </label>
         <select
           id="autoresearch-campaign"
           className="input w-full font-mono text-xs"
           value={selectedCampaignId || ''}
           onChange={(event) => event.target.value && onSelect(event.target.value)}
         >
-          <option value="" disabled>Select a campaign</option>
+          <option value="" disabled>
+            Select a campaign
+          </option>
           {campaigns.map((record) => (
             <option key={record.campaign_id} value={record.campaign_id}>
               {record.title} · {readable(record.status)}
@@ -379,27 +483,63 @@ function CommandStrip({
       <BudgetChip model={model} />
       <div className="hidden flex-1 sm:block" />
       {status === 'ready' ? (
-        <Button variant="primary" size="sm" onClick={() => onTransition?.('start')} disabled={!startEnabled} aria-label="Start campaign" title={startReason} leftIcon={pendingIcon('start')}>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => onTransition?.('start')}
+          disabled={!startEnabled}
+          aria-label="Start campaign"
+          title={startReason}
+          leftIcon={pendingIcon('start')}
+        >
           {transitionPending === 'start' ? 'Starting' : 'Start campaign'}
         </Button>
       ) : null}
       {status === 'active' && closeoutPending ? (
-        <Button variant="primary" size="sm" onClick={() => onTransition?.('conclude')} disabled={!canMutate} title="Close this finished campaign and preserve its results." leftIcon={pendingIcon('conclude')}>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => onTransition?.('conclude')}
+          disabled={!canMutate}
+          title="Close this finished campaign and preserve its results."
+          leftIcon={pendingIcon('conclude')}
+        >
           {transitionPending === 'conclude' ? 'Closing' : 'Close campaign'}
         </Button>
       ) : null}
       {status === 'active' && !closeoutPending ? (
-        <Button variant="secondary" size="sm" onClick={() => onTransition?.('pause')} disabled={!canMutate} title="Pause scheduling. Running work finishes; no new actions are claimed." leftIcon={pendingIcon('pause')}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onTransition?.('pause')}
+          disabled={!canMutate}
+          title="Pause scheduling. Running work finishes; no new actions are claimed."
+          leftIcon={pendingIcon('pause')}
+        >
           {transitionPending === 'pause' ? 'Pausing' : 'Pause'}
         </Button>
       ) : null}
       {status === 'paused' ? (
-        <Button variant="primary" size="sm" onClick={() => onTransition?.('resume')} disabled={!canMutate} title="Resume scheduling from where the campaign paused." leftIcon={pendingIcon('resume')}>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => onTransition?.('resume')}
+          disabled={!canMutate}
+          title="Resume scheduling from where the campaign paused."
+          leftIcon={pendingIcon('resume')}
+        >
           {transitionPending === 'resume' ? 'Resuming' : 'Resume'}
         </Button>
       ) : null}
       {CANCELLABLE_STATUSES.has(status) && !closeoutPending ? (
-        <Button variant="ghost" size="sm" onClick={() => onTransition?.('cancel')} disabled={!canMutate} title="Stop the campaign. Scheduled work is halted; this cannot be undone." leftIcon={pendingIcon('cancel')}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onTransition?.('cancel')}
+          disabled={!canMutate}
+          title="Stop the campaign. Scheduled work is halted; this cannot be undone."
+          leftIcon={pendingIcon('cancel')}
+        >
           {transitionPending === 'cancel' ? 'Cancelling' : 'Cancel'}
         </Button>
       ) : null}
@@ -453,11 +593,16 @@ function NeedsYouLine({ model }: { model: SnapshotViewModel }) {
       aria-label="What needs you"
     >
       <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
-      <p className="min-w-0 flex-1 truncate text-sm leading-6 text-text-primary" title={needs.sentence}>
+      <p
+        className="min-w-0 flex-1 truncate text-sm leading-6 text-text-primary"
+        title={needs.sentence}
+      >
         <span className="font-semibold">Waiting on you:</span> {needs.sentence}
       </p>
       {needs.code ? (
-        <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide text-text-muted">{needs.code}</span>
+        <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide text-text-muted">
+          {needs.code}
+        </span>
       ) : null}
     </section>
   )
@@ -476,7 +621,10 @@ function JourneyStepper({ model }: { model: SnapshotViewModel }) {
           const current = phase.tone === 'info' || phase.tone === 'warning'
           return (
             <li key={phase.id} className="flex flex-1 items-center gap-1">
-              <div className="flex items-center gap-2" title={`${phase.label} · ${phase.stateLabel}`}>
+              <div
+                className="flex items-center gap-2"
+                title={`${phase.label} · ${phase.stateLabel}`}
+              >
                 <span
                   className={clsx(
                     'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 font-mono text-[10px] font-bold',
@@ -484,7 +632,7 @@ function JourneyStepper({ model }: { model: SnapshotViewModel }) {
                       ? 'border-status-success bg-status-success text-white'
                       : current
                         ? 'border-accent-dark bg-accent text-text-primary'
-                        : 'border-border-subtle text-text-muted',
+                        : 'border-border-subtle text-text-muted'
                   )}
                 >
                   {done ? <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> : index + 1}
@@ -492,13 +640,15 @@ function JourneyStepper({ model }: { model: SnapshotViewModel }) {
                 <span
                   className={clsx(
                     'whitespace-nowrap font-mono text-[10px] font-bold uppercase tracking-wide',
-                    current ? 'text-accent-dark' : done ? 'text-text-primary' : 'text-text-muted',
+                    current ? 'text-accent-dark' : done ? 'text-text-primary' : 'text-text-muted'
                   )}
                 >
                   {phase.label}
                 </span>
               </div>
-              {index < phases.length - 1 ? <span className="h-0.5 flex-1 bg-border-subtle" aria-hidden="true" /> : null}
+              {index < phases.length - 1 ? (
+                <span className="h-0.5 flex-1 bg-border-subtle" aria-hidden="true" />
+              ) : null}
             </li>
           )
         })}
@@ -523,17 +673,32 @@ function BudgetChip({ model }: { model: SnapshotViewModel }) {
       <span className="flex h-1.5 w-16 overflow-hidden rounded-brutal border border-border-subtle bg-background-secondary">
         <span className="bg-accent" style={{ width: `${fraction * 100}%` }} aria-hidden="true" />
       </span>
-      <span className="tabular-nums">{compactNumber(used)}/{compactNumber(resource.limit)}</span>
+      <span className="tabular-nums">
+        {compactNumber(used)}/{compactNumber(resource.limit)}
+      </span>
     </span>
   )
 }
 
 function ReadinessCheck({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <div className={clsx('flex items-baseline gap-2 py-0.5 text-xs', ok ? 'text-text-secondary' : 'font-semibold text-text-primary')}>
-      {ok
-        ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 translate-y-0.5 text-status-success" aria-hidden="true" />
-        : <AlertTriangle className="h-3.5 w-3.5 shrink-0 translate-y-0.5 text-status-error" aria-hidden="true" />}
+    <div
+      className={clsx(
+        'flex items-baseline gap-2 py-0.5 text-xs',
+        ok ? 'text-text-secondary' : 'font-semibold text-text-primary'
+      )}
+    >
+      {ok ? (
+        <CheckCircle2
+          className="h-3.5 w-3.5 shrink-0 translate-y-0.5 text-status-success"
+          aria-hidden="true"
+        />
+      ) : (
+        <AlertTriangle
+          className="h-3.5 w-3.5 shrink-0 translate-y-0.5 text-status-error"
+          aria-hidden="true"
+        />
+      )}
       <span>{label}</span>
     </div>
   )
@@ -542,8 +707,15 @@ function ReadinessCheck({ ok, label }: { ok: boolean; label: string }) {
 function ConfigPanel({ model }: { model: SnapshotViewModel }) {
   const { snapshot } = model
   const { bindings, campaign, controller, readiness } = snapshot
-  const controllerTone: PresentationTone = controller.state === 'online' ? 'success' : controller.state === 'stale' ? 'warning' : 'error'
-  const bindingsResolved = [bindings.model, bindings.data, bindings.evaluator, bindings.source, bindings.compute].every(Boolean)
+  const controllerTone: PresentationTone =
+    controller.state === 'online' ? 'success' : controller.state === 'stale' ? 'warning' : 'error'
+  const bindingsResolved = [
+    bindings.model,
+    bindings.data,
+    bindings.evaluator,
+    bindings.source,
+    bindings.compute
+  ].every(Boolean)
   const primaryMetric = model.metrics[0]
   const metricValue = primaryMetric
     ? primaryMetric.target != null
@@ -557,7 +729,7 @@ function ConfigPanel({ model }: { model: SnapshotViewModel }) {
     ['Evaluator', bindings.evaluator?.display_label || 'Not bound'],
     ['Source', bindings.source?.display_label || 'Not bound'],
     ['Compute', bindings.compute?.display_label || 'Not bound'],
-    ['Primary metric', metricValue],
+    ['Primary metric', metricValue]
   ]
   return (
     <FixedPanel
@@ -568,21 +740,37 @@ function ConfigPanel({ model }: { model: SnapshotViewModel }) {
     >
       <dl className="text-xs">
         <div>
-          <dt className="font-mono text-[10px] uppercase tracking-wide text-text-secondary">Objective</dt>
-          <dd className="mt-0.5 text-text-primary" title={campaign.objective || undefined}>{campaign.objective || '—'}</dd>
+          <dt className="font-mono text-[10px] uppercase tracking-wide text-text-secondary">
+            Objective
+          </dt>
+          <dd className="mt-0.5 text-text-primary" title={campaign.objective || undefined}>
+            {campaign.objective || '—'}
+          </dd>
         </div>
         <div className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2">
-          {rows.filter(([label]) => label !== 'Objective').map(([label, value]) => (
-            <div key={label} className="min-w-0">
-              <dt className="font-mono text-[10px] uppercase tracking-wide text-text-secondary">{label}</dt>
-              <dd className="mt-0.5 truncate font-mono text-text-primary" title={value}>{value}</dd>
-            </div>
-          ))}
+          {rows
+            .filter(([label]) => label !== 'Objective')
+            .map(([label, value]) => (
+              <div key={label} className="min-w-0">
+                <dt className="font-mono text-[10px] uppercase tracking-wide text-text-secondary">
+                  {label}
+                </dt>
+                <dd className="mt-0.5 truncate font-mono text-text-primary" title={value}>
+                  {value}
+                </dd>
+              </div>
+            ))}
         </div>
       </dl>
       <div className="mt-3 border-t border-border-subtle pt-2">
-        <ReadinessCheck ok={controller.state === 'online'} label={`Controller ${controller.state}`} />
-        <ReadinessCheck ok={bindingsResolved} label="Model, data, evaluator, source & compute bindings resolved" />
+        <ReadinessCheck
+          ok={controller.state === 'online'}
+          label={`Controller ${controller.state}`}
+        />
+        <ReadinessCheck
+          ok={bindingsResolved}
+          label="Model, data, evaluator, source & compute bindings resolved"
+        />
         <ReadinessCheck ok={readiness.materializable} label="Campaign is materializable" />
         <ReadinessCheck ok={readiness.launch_ready} label="Launch-ready verdict" />
         {readiness.blocking_codes.map((code) => (
@@ -590,11 +778,16 @@ function ConfigPanel({ model }: { model: SnapshotViewModel }) {
         ))}
         {model.snapshot.agents.length ? (
           <p className="mt-2 font-mono text-[10px] uppercase tracking-wide text-text-secondary">
-            {model.snapshot.agents.length} agent session{model.snapshot.agents.length === 1 ? '' : 's'} attached
+            {model.snapshot.agents.length} agent session
+            {model.snapshot.agents.length === 1 ? '' : 's'} attached
           </p>
         ) : null}
       </div>
-      {controller.safe_guidance ? <p className="mt-3 rounded-brutal border border-border-subtle bg-background-secondary p-2 text-xs text-text-secondary">{controller.safe_guidance}</p> : null}
+      {controller.safe_guidance ? (
+        <p className="mt-3 rounded-brutal border border-border-subtle bg-background-secondary p-2 text-xs text-text-secondary">
+          {controller.safe_guidance}
+        </p>
+      ) : null}
     </FixedPanel>
   )
 }
@@ -604,7 +797,7 @@ function FixedPanel({
   heightClass,
   action,
   sectionId,
-  children,
+  children
 }: {
   title: string
   heightClass: string
@@ -614,9 +807,16 @@ function FixedPanel({
 }) {
   const titleId = sectionId ? `${sectionId}-title` : undefined
   return (
-    <section id={sectionId} className={clsx('card flex flex-col p-4', heightClass)} aria-labelledby={titleId}>
+    <section
+      id={sectionId}
+      className={clsx('card flex flex-col p-4', heightClass)}
+      aria-labelledby={titleId}
+    >
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle pb-2">
-        <h2 id={titleId} className="flex items-center gap-2 whitespace-nowrap font-mono text-[11px] font-bold uppercase tracking-widest text-text-primary">
+        <h2
+          id={titleId}
+          className="flex items-center gap-2 whitespace-nowrap font-mono text-[11px] font-bold uppercase tracking-widest text-text-primary"
+        >
           <span className="h-2 w-2 shrink-0 bg-accent" aria-hidden="true" />
           {title}
         </h2>
@@ -646,9 +846,16 @@ function ActiveWorkIndicator({ model }: { model: SnapshotViewModel }) {
       aria-label={`Active work: ${stageLabel}`}
       role="status"
     >
-      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-muted">Active work</span>
+      <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-muted">
+        Active work
+      </span>
       <span className={clsx('status-dot shrink-0', lightClass)} aria-hidden="true" />
-      <strong className="truncate font-mono text-[10px] font-bold uppercase tracking-wide text-text-primary" title={stageLabel}>{stageLabel}</strong>
+      <strong
+        className="truncate font-mono text-[10px] font-bold uppercase tracking-wide text-text-primary"
+        title={stageLabel}
+      >
+        {stageLabel}
+      </strong>
     </section>
   )
 }
@@ -659,16 +866,18 @@ function EvidenceMetricsPanel({
   pages,
   onLoadArtifacts,
   onInspect,
-  outcome,
+  outcome
 }: Pick<ControlRoomContentProps, 'artifacts' | 'pages' | 'onLoadArtifacts' | 'outcome'> & {
   model: SnapshotViewModel
   onInspect: (selection: CampaignEvidenceSelection) => void
 }) {
   const { snapshot } = model
   const { collections } = snapshot
-  const orderedArtifacts = [...artifacts].sort((left, right) => (
-    left.created_at.localeCompare(right.created_at) || left.artifact_id.localeCompare(right.artifact_id)
-  ))
+  const orderedArtifacts = [...artifacts].sort(
+    (left, right) =>
+      left.created_at.localeCompare(right.created_at) ||
+      left.artifact_id.localeCompare(right.artifact_id)
+  )
   return (
     <FixedPanel title="Evidence & metrics" heightClass="h-[360px]" sectionId="evidence">
       {model.metrics.length ? (
@@ -676,25 +885,47 @@ function EvidenceMetricsPanel({
           {model.metrics.map((metric) => {
             const hasValue = metric.value !== 'Unavailable'
             const comparedMetric = outcome?.metrics.find((item) => item.id === metric.id)
-            const isProportion = /accuracy|reward|rate|mrr|pass|precision|recall|f1/i.test(metric.id)
-            const comparedValue = comparedMetric?.candidate == null
-              ? null
-              : isProportion
-                ? `${(comparedMetric.candidate * 100).toFixed(1)}%`
-                : compactNumber(comparedMetric.candidate)
-            const comparedBaseline = comparedMetric?.baseline == null
-              ? null
-              : isProportion
-                ? `${(comparedMetric.baseline * 100).toFixed(1)}%`
-                : compactNumber(comparedMetric.baseline)
-            const bigNumber = comparedValue ?? (hasValue ? metric.value : metric.target != null ? compactNumber(metric.target) : '—')
+            const isProportion = /accuracy|reward|rate|mrr|pass|precision|recall|f1/i.test(
+              metric.id
+            )
+            const comparedValue =
+              comparedMetric?.candidate == null
+                ? null
+                : isProportion
+                  ? `${(comparedMetric.candidate * 100).toFixed(1)}%`
+                  : compactNumber(comparedMetric.candidate)
+            const comparedBaseline =
+              comparedMetric?.baseline == null
+                ? null
+                : isProportion
+                  ? `${(comparedMetric.baseline * 100).toFixed(1)}%`
+                  : compactNumber(comparedMetric.baseline)
+            const bigNumber =
+              comparedValue ??
+              (hasValue ? metric.value : metric.target != null ? compactNumber(metric.target) : '—')
             return (
-              <div key={metric.id} className="rounded-brutal border border-border-subtle bg-background-secondary p-3">
-                <div className="truncate font-mono text-[10px] uppercase tracking-wide text-text-secondary" title={metric.label}>{metric.label}</div>
+              <div
+                key={metric.id}
+                className="rounded-brutal border border-border-subtle bg-background-secondary p-3"
+              >
+                <div
+                  className="truncate font-mono text-[10px] uppercase tracking-wide text-text-secondary"
+                  title={metric.label}
+                >
+                  {metric.label}
+                </div>
                 <div className="mt-1 flex items-baseline gap-1.5">
-                  <span className="font-mono text-xl font-bold text-text-primary tabular-nums">{bigNumber}</span>
-                  {metric.unit ? <span className="text-[10px] text-text-secondary">{metric.unit}</span> : null}
-                  {!hasValue && metric.target != null ? <span className="font-mono text-[9px] uppercase tracking-wide text-text-muted">target</span> : null}
+                  <span className="font-mono text-xl font-bold text-text-primary tabular-nums">
+                    {bigNumber}
+                  </span>
+                  {metric.unit ? (
+                    <span className="text-[10px] text-text-secondary">{metric.unit}</span>
+                  ) : null}
+                  {!hasValue && metric.target != null ? (
+                    <span className="font-mono text-[9px] uppercase tracking-wide text-text-muted">
+                      target
+                    </span>
+                  ) : null}
                 </div>
                 <div className="mt-1 text-[11px] text-text-secondary">
                   {comparedMetric
@@ -705,28 +936,58 @@ function EvidenceMetricsPanel({
             )
           })}
         </div>
-      ) : <p className="text-xs text-text-muted">No metric descriptors are published.</p>}
+      ) : (
+        <p className="text-xs text-text-muted">No metric descriptors are published.</p>
+      )}
       <dl className="mt-3 space-y-1 border-t border-border-subtle pt-3 text-xs">
-        <div className="flex justify-between gap-3"><dt className="text-text-secondary">Champion</dt><dd className="min-w-0 truncate font-mono text-text-primary">{snapshot.champion ? `${snapshot.champion.candidate_ref} · ${readable(snapshot.champion.gate_state)}` : '—'}</dd></div>
-        <div className="flex justify-between gap-3"><dt className="text-text-secondary">Candidate</dt><dd className="min-w-0 truncate font-mono text-text-primary">{snapshot.candidate?.candidate_ref || '—'}{snapshot.candidate ? ` · ${readable(snapshot.candidate.gate_state)}` : ''}</dd></div>
+        <div className="flex justify-between gap-3">
+          <dt className="text-text-secondary">Champion</dt>
+          <dd className="min-w-0 truncate font-mono text-text-primary">
+            {snapshot.champion
+              ? `${snapshot.champion.candidate_ref} · ${readable(snapshot.champion.gate_state)}`
+              : '—'}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt className="text-text-secondary">Candidate</dt>
+          <dd className="min-w-0 truncate font-mono text-text-primary">
+            {snapshot.candidate?.candidate_ref || '—'}
+            {snapshot.candidate ? ` · ${readable(snapshot.candidate.gate_state)}` : ''}
+          </dd>
+        </div>
       </dl>
       <div className="mt-3 border-t border-border-subtle pt-3 font-mono text-[11px] tabular-nums text-text-secondary">
-        events {collections.events.count} · artifacts {collections.artifacts.count} · studies {collections.studies.count} · attempts {collections.attempts.count} · comparisons {collections.comparisons.count}
+        events {collections.events.count} · artifacts {collections.artifacts.count} · studies{' '}
+        {collections.studies.count} · attempts {collections.attempts.count} · comparisons{' '}
+        {collections.comparisons.count}
       </div>
       {artifacts.length ? (
-        <div className="mt-3 border-t border-border-subtle pt-3" role="region" aria-label="Inspectable campaign artifacts">
+        <div
+          className="mt-3 border-t border-border-subtle pt-3"
+          role="region"
+          aria-label="Inspectable campaign artifacts"
+        >
           <ul className="space-y-2">
             {orderedArtifacts.map((artifact) => {
               return (
                 <li key={artifact.artifact_id}>
-                  <CampaignEvidenceRow selection={{ kind: 'artifact', artifact }} onInspect={onInspect} />
+                  <CampaignEvidenceRow
+                    selection={{ kind: 'artifact', artifact }}
+                    onInspect={onInspect}
+                  />
                 </li>
               )
             })}
           </ul>
         </div>
-      ) : pages.artifactsLoaded ? <p className="mt-3 text-xs text-text-muted">No artifact rows were returned.</p> : null}
-      {pages.artifactsError ? <p className="mt-3 text-xs text-status-error" role="alert">{pages.artifactsError}</p> : null}
+      ) : pages.artifactsLoaded ? (
+        <p className="mt-3 text-xs text-text-muted">No artifact rows were returned.</p>
+      ) : null}
+      {pages.artifactsError ? (
+        <p className="mt-3 text-xs text-status-error" role="alert">
+          {pages.artifactsError}
+        </p>
+      ) : null}
       {pages.artifactsError || pages.artifactsHasMore ? (
         <Button
           className="mt-3"
@@ -734,9 +995,21 @@ function EvidenceMetricsPanel({
           size="sm"
           disabled={pages.artifactsLoading}
           onClick={onLoadArtifacts}
-          leftIcon={pages.artifactsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+          leftIcon={
+            pages.artifactsLoading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Database className="h-3.5 w-3.5" />
+            )
+          }
         >
-          {pages.artifactsLoading ? 'Loading artifacts' : pages.artifactsError ? 'Retry artifact page' : pages.artifactsLoaded ? 'Load more artifacts' : 'Load artifact page'}
+          {pages.artifactsLoading
+            ? 'Loading artifacts'
+            : pages.artifactsError
+              ? 'Retry artifact page'
+              : pages.artifactsLoaded
+                ? 'Load more artifacts'
+                : 'Load artifact page'}
         </Button>
       ) : null}
     </FixedPanel>
@@ -747,31 +1020,50 @@ function ActivityPanel({
   events,
   pages,
   onLoadEvents,
-  onInspect,
+  onInspect
 }: Pick<ControlRoomContentProps, 'events' | 'pages' | 'onLoadEvents'> & {
   onInspect: (selection: CampaignEvidenceSelection) => void
 }) {
-  const orderedEvents = [...events].sort((left, right) => (
-    right.cursor - left.cursor || right.event.event_id.localeCompare(left.event.event_id)
-  ))
+  const orderedEvents = [...events].sort(
+    (left, right) =>
+      right.cursor - left.cursor || right.event.event_id.localeCompare(left.event.event_id)
+  )
   return (
     <FixedPanel
       title="Campaign log"
       heightClass="h-[240px] lg:absolute lg:inset-0 lg:h-auto"
       sectionId="activity"
-      action={pages.eventsError || pages.eventsHasMore ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={pages.eventsLoading}
-          onClick={onLoadEvents}
-          leftIcon={pages.eventsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
-        >
-          {pages.eventsLoading ? 'Loading events' : pages.eventsError ? 'Retry event page' : pages.eventsLoaded ? 'Load more events' : 'Load event page'}
-        </Button>
-      ) : undefined}
+      action={
+        pages.eventsError || pages.eventsHasMore ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={pages.eventsLoading}
+            onClick={onLoadEvents}
+            leftIcon={
+              pages.eventsLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Activity className="h-4 w-4" />
+              )
+            }
+          >
+            {pages.eventsLoading
+              ? 'Loading events'
+              : pages.eventsError
+                ? 'Retry event page'
+                : pages.eventsLoaded
+                  ? 'Load more events'
+                  : 'Load event page'}
+          </Button>
+        ) : undefined
+      }
     >
-      {pages.eventsError ? <p className="mb-2 text-xs text-status-error" role="alert">{pages.eventsError}</p> : null}
+      {pages.eventsError ? (
+        <p className="mb-2 text-xs text-status-error" role="alert">
+          {pages.eventsError}
+        </p>
+      ) : null}
       {events.length ? (
         <ol className="divide-y divide-border-subtle" aria-label="Inspectable campaign events">
           {orderedEvents.map(({ cursor, event }) => {
@@ -783,7 +1075,11 @@ function ActivityPanel({
             )
           })}
         </ol>
-      ) : <p className="text-xs text-text-muted">{pages.eventsLoaded ? 'No event rows were returned.' : 'No event detail page is loaded.'}</p>}
+      ) : (
+        <p className="text-xs text-text-muted">
+          {pages.eventsLoaded ? 'No event rows were returned.' : 'No event detail page is loaded.'}
+        </p>
+      )}
     </FixedPanel>
   )
 }
@@ -806,7 +1102,12 @@ function SnapshotControlRoom(props: ControlRoomContentProps & { model: SnapshotV
   }, [])
   return (
     <div className="space-y-3">
-      <ControlRoomHeader campaigns={props.campaigns} selectedCampaignId={props.selectedCampaignId} onSelect={props.onSelect} withSelector={false} />
+      <ControlRoomHeader
+        campaigns={props.campaigns}
+        selectedCampaignId={props.selectedCampaignId}
+        onSelect={props.onSelect}
+        withSelector={false}
+      />
       <CommandStrip
         model={model}
         campaigns={props.campaigns}
@@ -821,7 +1122,10 @@ function SnapshotControlRoom(props: ControlRoomContentProps & { model: SnapshotV
         library={props.campaignLibrary}
       />
       <NeedsYouLine model={model} />
-      <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_14rem]" aria-label="Campaign progress and active work">
+      <section
+        className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_14rem]"
+        aria-label="Campaign progress and active work"
+      >
         <JourneyStepper model={model} />
         <ActiveWorkIndicator model={model} />
       </section>
@@ -830,16 +1134,32 @@ function SnapshotControlRoom(props: ControlRoomContentProps & { model: SnapshotV
         <div className="min-w-0 space-y-3">
           <div className="grid gap-3 lg:grid-cols-2">
             <ConfigPanel model={model} />
-            <EvidenceMetricsPanel model={model} artifacts={props.artifacts} pages={props.pages} onLoadArtifacts={props.onLoadArtifacts} onInspect={setEvidenceSelection} outcome={props.outcome} />
+            <EvidenceMetricsPanel
+              model={model}
+              artifacts={props.artifacts}
+              pages={props.pages}
+              onLoadArtifacts={props.onLoadArtifacts}
+              onInspect={setEvidenceSelection}
+              outcome={props.outcome}
+            />
           </div>
         </div>
         <div className="min-w-0 lg:relative">
-          <ActivityPanel events={props.events} pages={props.pages} onLoadEvents={props.onLoadEvents} onInspect={setEvidenceSelection} />
+          <ActivityPanel
+            events={props.events}
+            pages={props.pages}
+            onLoadEvents={props.onLoadEvents}
+            onInspect={setEvidenceSelection}
+          />
         </div>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         <FixedPanel title="Human oversight" heightClass="h-[280px]" sectionId="oversight">
-          {props.humanOversight || <p className="text-sm text-text-secondary">Nothing needs your review. Blinded samples will appear here before any promotion.</p>}
+          {props.humanOversight || (
+            <p className="text-sm text-text-secondary">
+              Nothing needs your review. Blinded samples will appear here before any promotion.
+            </p>
+          )}
         </FixedPanel>
         <div ref={recoveryRef}>
           <FixedPanel title="Campaign recovery" heightClass="h-[280px]" sectionId="recovery">
@@ -847,7 +1167,10 @@ function SnapshotControlRoom(props: ControlRoomContentProps & { model: SnapshotV
           </FixedPanel>
         </div>
       </div>
-      <CampaignEvidenceDialog selection={evidenceSelection} onClose={() => setEvidenceSelection(null)} />
+      <CampaignEvidenceDialog
+        selection={evidenceSelection}
+        onClose={() => setEvidenceSelection(null)}
+      />
     </div>
   )
 }
@@ -855,35 +1178,61 @@ function SnapshotControlRoom(props: ControlRoomContentProps & { model: SnapshotV
 export function ControlRoomContent(props: ControlRoomContentProps) {
   const { model, campaigns } = props
   if (model.kind !== 'snapshot') {
-    const displayModel = campaigns.length === 0 && model.kind === 'empty'
-      ? { ...model, message: 'BashGym will show every campaign here once its model, data, evaluator, source, and registered private-compute bindings have been resolved.' }
-      : model
+    const displayModel =
+      campaigns.length === 0 && model.kind === 'empty'
+        ? {
+            ...model,
+            message:
+              'BashGym will show every campaign here once its model, data, evaluator, source, and registered private-compute bindings have been resolved.'
+          }
+        : model
     return (
       <div className="space-y-4">
-        <ControlRoomHeader campaigns={campaigns} selectedCampaignId={props.selectedCampaignId} onSelect={props.onSelect} />
-        <ControlRoomStateNotice model={displayModel} onRetry={props.onRetry} noCampaigns={campaigns.length === 0} />
+        <ControlRoomHeader
+          campaigns={campaigns}
+          selectedCampaignId={props.selectedCampaignId}
+          onSelect={props.onSelect}
+        />
+        <ControlRoomStateNotice
+          model={displayModel}
+          onRetry={props.onRetry}
+          noCampaigns={campaigns.length === 0}
+        />
         {props.campaignLibrary}
         {campaigns.length === 0 && !props.campaignLibrary ? (
-          props.guidedSetup ?? <GuidedAutoResearchSetup
-            context={null}
-            connectionState={({ loading: 'reconciling', offline: 'offline', error: 'error', empty: 'offline' } as Record<typeof model.kind, GuidedSetupConnectionState>)[model.kind]}
-            pending={model.kind === 'loading'}
-            error={model.kind === 'error' || model.kind === 'offline' ? model.message : null}
-            doctor={null}
-            validation={null}
-            selectedOptionId=""
-            campaignId=""
-            title=""
-            onSelectedOptionChange={() => {}}
-            onCampaignIdChange={() => {}}
-            onTitleChange={() => {}}
-            onAdvance={() => {}}
-            onDoctor={() => {}}
-            onValidate={() => {}}
-            onCreate={() => {}}
-            onRetry={props.onRetry}
-          />
-        ) : <UnavailableControlRoomGrid loading={model.kind === 'loading'} />}
+          (props.guidedSetup ?? (
+            <GuidedAutoResearchSetup
+              context={null}
+              connectionState={
+                (
+                  {
+                    loading: 'reconciling',
+                    offline: 'offline',
+                    error: 'error',
+                    empty: 'offline'
+                  } as Record<typeof model.kind, GuidedSetupConnectionState>
+                )[model.kind]
+              }
+              pending={model.kind === 'loading'}
+              error={model.kind === 'error' || model.kind === 'offline' ? model.message : null}
+              doctor={null}
+              validation={null}
+              selectedOptionId=""
+              campaignId=""
+              title=""
+              onSelectedOptionChange={() => {}}
+              onCampaignIdChange={() => {}}
+              onTitleChange={() => {}}
+              onAdvance={() => {}}
+              onDoctor={() => {}}
+              onValidate={() => {}}
+              onCreate={() => {}}
+              onRetry={props.onRetry}
+            />
+          ))
+        ) : (
+          <UnavailableControlRoomGrid loading={model.kind === 'loading'} />
+        )}
       </div>
     )
   }
@@ -894,7 +1243,7 @@ export function ControlRoomContent(props: ControlRoomContentProps) {
 function HumanOversightUnavailable({
   loading,
   message,
-  onRetry,
+  onRetry
 }: {
   loading: boolean
   message: string | null
@@ -904,16 +1253,32 @@ function HumanOversightUnavailable({
     <section className="card p-4" aria-labelledby="human-oversight-unavailable-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="human-oversight-unavailable-title" className="font-brand text-xl text-text-primary">Human oversight queue</h2>
-          <p className="mt-1 text-sm leading-6 text-text-secondary">Blinded reviews and explicit promotion decisions remain visible here when campaign services reconnect.</p>
+          <h2
+            id="human-oversight-unavailable-title"
+            className="font-brand text-xl text-text-primary"
+          >
+            Human oversight queue
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-text-secondary">
+            Blinded reviews and explicit promotion decisions remain visible here when campaign
+            services reconnect.
+          </p>
         </div>
         <Button type="button" size="sm" variant="secondary" onClick={onRetry} disabled={loading}>
-          {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+          {loading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-2 h-4 w-4" />
+          )}
           {loading ? 'Reconciling' : 'Retry queue'}
         </Button>
       </div>
-      <div className="mt-3 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary" role={message ? 'alert' : 'status'}>
-        {message || 'Loading the authoritative human-review queue. Review controls stay disabled until reconciliation completes.'}
+      <div
+        className="mt-3 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary"
+        role={message ? 'alert' : 'status'}
+      >
+        {message ||
+          'Loading the authoritative human-review queue. Review controls stay disabled until reconciliation completes.'}
       </div>
     </section>
   )
@@ -943,7 +1308,7 @@ function guidedSetupDraft(context: GuidedSetupContext) {
     workspaceId: context.workspace_id,
     templateId: selections.template_id,
     installationId: selections.installation_id,
-    bindings: { model, data, compute, evaluation },
+    bindings: { model, data, compute, evaluation }
   }
 }
 
@@ -953,13 +1318,19 @@ export function AutoResearchControlRoom() {
   const [humanQueueError, setHumanQueueError] = useState<string | null>(null)
   const [humanQueueLoading, setHumanQueueLoading] = useState(false)
   const [humanMutationPending, setHumanMutationPending] = useState(false)
-  const [humanResponses, setHumanResponses] = useState<Record<string, HumanReviewResponse | undefined>>({})
+  const [humanResponses, setHumanResponses] = useState<
+    Record<string, HumanReviewResponse | undefined>
+  >({})
   const [recoverySnapshot, setRecoverySnapshot] = useState<CampaignRecoveryPublicV1 | null>(null)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const [recoveryUnregistered, setRecoveryUnregistered] = useState(false)
   const [recoveryLoading, setRecoveryLoading] = useState(false)
-  const [recoveryConfirmations, setRecoveryConfirmations] = useState<Record<RecoveryAction, boolean>>({ resume: false, repair: false, takeover: false })
-  const [recoveryIdempotencyKeys, setRecoveryIdempotencyKeys] = useState<Record<RecoveryAction, string>>(() => newRecoveryIdempotencyKeys())
+  const [recoveryConfirmations, setRecoveryConfirmations] = useState<
+    Record<RecoveryAction, boolean>
+  >({ resume: false, repair: false, takeover: false })
+  const [recoveryIdempotencyKeys, setRecoveryIdempotencyKeys] = useState<
+    Record<RecoveryAction, string>
+  >(() => newRecoveryIdempotencyKeys())
   const [setupContext, setSetupContext] = useState<GuidedSetupContext | null>(null)
   const [setupConnection, setSetupConnection] = useState<GuidedSetupConnectionState>('reconciling')
   const [setupPending, setSetupPending] = useState(false)
@@ -989,20 +1360,25 @@ export function AutoResearchControlRoom() {
   const transition = useCampaignStore((state) => state.transition)
   const selectedCampaignId = resolveControlRoomCampaignSelection(
     selection.campaignId,
-    workspace?.selectedCampaignId,
+    workspace?.selectedCampaignId
   )
   const detail = selectedCampaignId ? workspace?.details[selectedCampaignId] : undefined
-  const outcomeLoadKey = selectedCampaignId && detail?.snapshot
-    ? `${workspaceId}:${selectedCampaignId}:${detail.snapshot.aggregate_version}:${detail.snapshot.latest_event_cursor}`
-    : null
+  const outcomeLoadKey =
+    selectedCampaignId && detail?.snapshot
+      ? `${workspaceId}:${selectedCampaignId}:${detail.snapshot.aggregate_version}:${detail.snapshot.latest_event_cursor}`
+      : null
   const outcomeLoadKeyRef = useRef<string | null>(null)
-  const outcome = useMemo(() => detail ? projectCampaignOutcome(detail) : null, [detail])
+  const outcome = useMemo(() => (detail ? projectCampaignOutcome(detail) : null), [detail])
   const activeAttemptId = detail?.snapshot?.active_work?.attempt_id ?? null
   const activeExecutorType = detail?.snapshot?.active_work?.executor_type ?? null
   const activeCampaignStatus = detail?.snapshot?.campaign.status ?? null
   const humanSnapshotCursor = detail?.snapshot?.latest_event_cursor ?? null
-  const shouldLoadGuidedSetup = Boolean(workspace && !workspace.loading && workspace.campaigns.length === 0)
-  const archivedCampaignIds = useCampaignArchiveStore((state) => selectArchivedIds(state, workspaceId))
+  const shouldLoadGuidedSetup = Boolean(
+    workspace && !workspace.loading && workspace.campaigns.length === 0
+  )
+  const archivedCampaignIds = useCampaignArchiveStore((state) =>
+    selectArchivedIds(state, workspaceId)
+  )
   const workspaceCampaigns = workspace?.campaigns
   useEffect(() => {
     const archiveStore = useCampaignArchiveStore.getState()
@@ -1011,7 +1387,7 @@ export function AutoResearchControlRoom() {
   }, [workspaceCampaigns, workspaceId])
   const { visible: visibleCampaigns, archived: archivedCampaigns } = useMemo(
     () => partitionCampaignsByArchive(workspaceCampaigns || [], new Set(archivedCampaignIds)),
-    [archivedCampaignIds, workspaceCampaigns],
+    [archivedCampaignIds, workspaceCampaigns]
   )
 
   const loadHumanWork = useCallback(async () => {
@@ -1021,13 +1397,21 @@ export function AutoResearchControlRoom() {
     const response = await campaignApi.humanWork(workspaceId, selectedCampaignId)
     if (generation !== humanLoadGeneration.current) return
     if (!response.ok || !response.data) {
-      setHumanQueueError(`Human oversight service is unavailable${response.code ? ` (${response.code})` : ''}. Cached campaign context remains visible.`)
+      setHumanQueueError(
+        `Human oversight service is unavailable${response.code ? ` (${response.code})` : ''}. Cached campaign context remains visible.`
+      )
       setHumanQueueLoading(false)
       return
     }
     const parsed = parseHumanWorkQueue(response.data)
-    if (!parsed || parsed.workspace_id !== workspaceId || parsed.campaign_id !== selectedCampaignId) {
-      setHumanQueueError('The human oversight response did not match the selected campaign. Controls remain disabled until reconciliation succeeds.')
+    if (
+      !parsed ||
+      parsed.workspace_id !== workspaceId ||
+      parsed.campaign_id !== selectedCampaignId
+    ) {
+      setHumanQueueError(
+        'The human oversight response did not match the selected campaign. Controls remain disabled until reconciliation succeeds.'
+      )
       setHumanQueueLoading(false)
       return
     }
@@ -1047,13 +1431,19 @@ export function AutoResearchControlRoom() {
       if (!response.ok || !response.data) {
         if (response.code === 'campaign_recovery_conflict') {
           setRecoveryUnregistered(true)
-          setRecoveryError('No recovery authority is registered for this campaign yet — recovery becomes available once the campaign has started.')
+          setRecoveryError(
+            'No recovery authority is registered for this campaign yet — recovery becomes available once the campaign has started.'
+          )
         } else if (response.code === 'campaign_desktop_bridge_required') {
           setRecoveryUnregistered(false)
-          setRecoveryError('Recovery is read-only — the desktop connection isn\'t available. The rest of the Control Room still works.')
+          setRecoveryError(
+            "Recovery is read-only — the desktop connection isn't available. The rest of the Control Room still works."
+          )
         } else {
           setRecoveryUnregistered(false)
-          setRecoveryError(`Recovery state couldn't be loaded${response.code ? ` (${response.code})` : ''}. The rest of the Control Room still works.`)
+          setRecoveryError(
+            `Recovery state couldn't be loaded${response.code ? ` (${response.code})` : ''}. The rest of the Control Room still works.`
+          )
         }
         setRecoveryLoading(false)
         return
@@ -1065,22 +1455,29 @@ export function AutoResearchControlRoom() {
     })
   }, [selectedCampaignId, workspaceId])
 
-  const loadGuidedSetup = useCallback(async (sessionIdOverride?: string): Promise<void> => {
-    const generation = ++setupLoadGeneration.current
-    setSetupConnection('reconciling')
-    setSetupDoctor(null)
-    setSetupValidation(null)
-    const response = await campaignApi.guidedSetupContext(workspaceId, sessionIdOverride)
-    if (generation !== setupLoadGeneration.current) return
-    if (!response.ok || !response.data) {
-      setSetupConnection(response.code === 'campaign_desktop_bridge_required' ? 'offline' : 'error')
-      setSetupError(`Setup is read-only — the desktop connection isn't available. Changes unlock when it reconnects.${response.code ? ` (${response.code})` : ''}`)
-      return
-    }
-    setSetupContext(response.data)
-    setSetupConnection('live')
-    setSetupError(null)
-  }, [workspaceId])
+  const loadGuidedSetup = useCallback(
+    async (sessionIdOverride?: string): Promise<void> => {
+      const generation = ++setupLoadGeneration.current
+      setSetupConnection('reconciling')
+      setSetupDoctor(null)
+      setSetupValidation(null)
+      const response = await campaignApi.guidedSetupContext(workspaceId, sessionIdOverride)
+      if (generation !== setupLoadGeneration.current) return
+      if (!response.ok || !response.data) {
+        setSetupConnection(
+          response.code === 'campaign_desktop_bridge_required' ? 'offline' : 'error'
+        )
+        setSetupError(
+          `Setup is read-only — the desktop connection isn't available. Changes unlock when it reconnects.${response.code ? ` (${response.code})` : ''}`
+        )
+        return
+      }
+      setSetupContext(response.data)
+      setSetupConnection('live')
+      setSetupError(null)
+    },
+    [workspaceId]
+  )
 
   useEffect(() => wsService.retainCampaignWorkspace(workspaceId), [workspaceId])
 
@@ -1097,7 +1494,9 @@ export function AutoResearchControlRoom() {
     setSetupCampaignId('')
     setSetupTitle('')
     if (!shouldLoadGuidedSetup) {
-      return () => { setupLoadGeneration.current += 1 }
+      return () => {
+        setupLoadGeneration.current += 1
+      }
     }
     try {
       const persistedSessionId = readGuidedSetupSessionId(window.localStorage, workspaceId)
@@ -1106,9 +1505,13 @@ export function AutoResearchControlRoom() {
     } catch {
       setSetupSessionId(null)
       setSetupConnection('error')
-      setSetupError('This browser could not persist the workspace-scoped setup session. Setup remains visible, but durable writes are disabled.')
+      setSetupError(
+        'This browser could not persist the workspace-scoped setup session. Setup remains visible, but durable writes are disabled.'
+      )
     }
-    return () => { setupLoadGeneration.current += 1 }
+    return () => {
+      setupLoadGeneration.current += 1
+    }
   }, [loadGuidedSetup, shouldLoadGuidedSetup, workspaceId])
 
   useEffect(() => {
@@ -1117,18 +1520,25 @@ export function AutoResearchControlRoom() {
   }, [selectedCampaignId, workspaceId])
 
   useEffect(() => {
-    if (!selectedCampaignId || !detail || !outcomeLoadKey || outcomeLoadKeyRef.current === outcomeLoadKey) return
+    if (
+      !selectedCampaignId ||
+      !detail ||
+      !outcomeLoadKey ||
+      outcomeLoadKeyRef.current === outcomeLoadKey
+    )
+      return
     outcomeLoadKeyRef.current = outcomeLoadKey
     void loadLegacyDetail(workspaceId, selectedCampaignId)
   }, [detail, loadLegacyDetail, outcomeLoadKey, selectedCampaignId, workspaceId])
 
   useEffect(() => {
     if (
-      !selectedCampaignId
-      || !activeAttemptId
-      || activeExecutorType !== 'ssh_remote'
-      || activeCampaignStatus !== 'active'
-    ) return
+      !selectedCampaignId ||
+      !activeAttemptId ||
+      activeExecutorType !== 'ssh_remote' ||
+      activeCampaignStatus !== 'active'
+    )
+      return
     const refreshMetrics = () => {
       if (typeof document === 'undefined' || document.visibilityState === 'visible') {
         void loadAttemptMetrics(workspaceId, selectedCampaignId, activeAttemptId)
@@ -1137,13 +1547,24 @@ export function AutoResearchControlRoom() {
     refreshMetrics()
     const timer = window.setInterval(refreshMetrics, 2_500)
     return () => window.clearInterval(timer)
-  }, [activeAttemptId, activeCampaignStatus, activeExecutorType, loadAttemptMetrics, selectedCampaignId, workspaceId])
+  }, [
+    activeAttemptId,
+    activeCampaignStatus,
+    activeExecutorType,
+    loadAttemptMetrics,
+    selectedCampaignId,
+    workspaceId
+  ])
 
   useEffect(() => {
     recoveryLoadGeneration.current += 1
-    setRecoverySnapshot(selectedCampaignId
-      ? useControlRoomSnapshotCache.getState().recoverySnapshots[controlRoomSnapshotKey(workspaceId, selectedCampaignId)] ?? null
-      : null)
+    setRecoverySnapshot(
+      selectedCampaignId
+        ? (useControlRoomSnapshotCache.getState().recoverySnapshots[
+            controlRoomSnapshotKey(workspaceId, selectedCampaignId)
+          ] ?? null)
+        : null
+    )
     setRecoveryError(null)
     setRecoveryUnregistered(false)
     setRecoveryLoading(false)
@@ -1153,9 +1574,13 @@ export function AutoResearchControlRoom() {
 
   useEffect(() => {
     humanLoadGeneration.current += 1
-    setHumanQueue(selectedCampaignId
-      ? useControlRoomSnapshotCache.getState().humanQueues[controlRoomSnapshotKey(workspaceId, selectedCampaignId)] ?? null
-      : null)
+    setHumanQueue(
+      selectedCampaignId
+        ? (useControlRoomSnapshotCache.getState().humanQueues[
+            controlRoomSnapshotKey(workspaceId, selectedCampaignId)
+          ] ?? null)
+        : null
+    )
     setHumanQueueError(null)
     setHumanQueueLoading(false)
     setHumanMutationPending(false)
@@ -1167,19 +1592,20 @@ export function AutoResearchControlRoom() {
   // belonging to a previous workspace/campaign is never cached under the new key.
   useEffect(() => {
     if (humanQueue && humanQueue.workspace_id === workspaceId) {
-      useControlRoomSnapshotCache.getState().putHumanQueue(
-        controlRoomSnapshotKey(workspaceId, humanQueue.campaign_id),
-        humanQueue,
-      )
+      useControlRoomSnapshotCache
+        .getState()
+        .putHumanQueue(controlRoomSnapshotKey(workspaceId, humanQueue.campaign_id), humanQueue)
     }
   }, [humanQueue, workspaceId])
 
   useEffect(() => {
     if (recoverySnapshot && recoverySnapshot.workspace_id === workspaceId) {
-      useControlRoomSnapshotCache.getState().putRecoverySnapshot(
-        controlRoomSnapshotKey(workspaceId, recoverySnapshot.campaign_id),
-        recoverySnapshot,
-      )
+      useControlRoomSnapshotCache
+        .getState()
+        .putRecoverySnapshot(
+          controlRoomSnapshotKey(workspaceId, recoverySnapshot.campaign_id),
+          recoverySnapshot
+        )
     }
   }, [recoverySnapshot, workspaceId])
 
@@ -1192,46 +1618,64 @@ export function AutoResearchControlRoom() {
   useEffect(() => {
     if (!selectedCampaignId || humanSnapshotCursor === null) return
     void loadHumanWork()
-    return () => { humanLoadGeneration.current += 1 }
+    return () => {
+      humanLoadGeneration.current += 1
+    }
   }, [humanSnapshotCursor, loadHumanWork, selectedCampaignId])
 
   useEffect(() => {
     if (!selectedCampaignId) return
     void loadRecovery()
-    return () => { recoveryLoadGeneration.current += 1 }
+    return () => {
+      recoveryLoadGeneration.current += 1
+    }
   }, [humanSnapshotCursor, loadRecovery, selectedCampaignId])
 
   const recoveryExecutionStatus = recoverySnapshot?.latest_execution?.status
   useEffect(() => {
     if (recoveryExecutionStatus !== 'accepted' && recoveryExecutionStatus !== 'executing') return
-    const timer = window.setInterval(() => { void loadRecovery() }, 1500)
+    const timer = window.setInterval(() => {
+      void loadRecovery()
+    }, 1500)
     return () => window.clearInterval(timer)
   }, [loadRecovery, recoveryExecutionStatus])
 
   useEffect(() => {
     const current = useCampaignStore.getState().workspaces[workspaceId]
     if (
-      selection.campaignId
-      && current?.selectedCampaignId === selection.campaignId
-      && current.campaigns.length > 0
-    ) return
+      selection.campaignId &&
+      current?.selectedCampaignId === selection.campaignId &&
+      current.campaigns.length > 0
+    )
+      return
     void load(workspaceId, selection.campaignId || undefined)
   }, [load, selection.campaignId, workspaceId])
 
   useEffect(() => {
     if (!workspace?.selectedCampaignId) return
-    if (selection.workspaceId === workspaceId && selection.campaignId === workspace.selectedCampaignId) return
-    if (!shouldCanonicalizeControlRoomSelection({
-      requestedCampaignId: selection.campaignId,
-      selectedCampaignId: workspace.selectedCampaignId,
-      campaigns: workspace.campaigns,
-      loading: workspace.loading,
-      error: workspace.error,
-    })) return
-    openTraining('autoresearch', {
-      workspaceId,
-      campaignId: workspace.selectedCampaignId,
-    }, 'replace')
+    if (
+      selection.workspaceId === workspaceId &&
+      selection.campaignId === workspace.selectedCampaignId
+    )
+      return
+    if (
+      !shouldCanonicalizeControlRoomSelection({
+        requestedCampaignId: selection.campaignId,
+        selectedCampaignId: workspace.selectedCampaignId,
+        campaigns: workspace.campaigns,
+        loading: workspace.loading,
+        error: workspace.error
+      })
+    )
+      return
+    openTraining(
+      'autoresearch',
+      {
+        workspaceId,
+        campaignId: workspace.selectedCampaignId
+      },
+      'replace'
+    )
   }, [
     openTraining,
     selection.campaignId,
@@ -1240,7 +1684,7 @@ export function AutoResearchControlRoom() {
     workspace?.error,
     workspace?.loading,
     workspace?.selectedCampaignId,
-    workspaceId,
+    workspaceId
   ])
 
   const model = buildControlRoomModel({
@@ -1249,9 +1693,9 @@ export function AutoResearchControlRoom() {
       detailFreshness: detail?.freshness,
       workspaceFreshness: workspace?.freshness,
       workspaceLoading: !workspace || workspace.loading,
-      workspaceError: workspace?.error,
+      workspaceError: workspace?.error
     }),
-    error: detail?.error || workspace?.error || null,
+    error: detail?.error || workspace?.error || null
   })
 
   const handleSelect = (campaignId: string) => {
@@ -1271,11 +1715,25 @@ export function AutoResearchControlRoom() {
   }
 
   const handleTransition = async (action: LifecycleAction) => {
-    if (transitionPending || !selectedCampaignId || model.kind !== 'snapshot' || !model.authoritative) return
-    if (action === 'cancel'
-      && !window.confirm('Cancel this campaign? Scheduled work stops and this cannot be undone.')) return
-    if (action === 'conclude'
-      && !window.confirm('Close this campaign as completed? Its results and evidence stay available, but no more experiments can be added.')) return
+    if (
+      transitionPending ||
+      !selectedCampaignId ||
+      model.kind !== 'snapshot' ||
+      !model.authoritative
+    )
+      return
+    if (
+      action === 'cancel' &&
+      !window.confirm('Cancel this campaign? Scheduled work stops and this cannot be undone.')
+    )
+      return
+    if (
+      action === 'conclude' &&
+      !window.confirm(
+        'Close this campaign as completed? Its results and evidence stay available, but no more experiments can be added.'
+      )
+    )
+      return
     setTransitionPending(action)
     try {
       await transition(
@@ -1285,7 +1743,7 @@ export function AutoResearchControlRoom() {
         model.snapshot.aggregate_version,
         action === 'conclude'
           ? 'Operator closed the campaign after the bounded AutoResearch stop rule was reached.'
-          : undefined,
+          : undefined
       )
     } finally {
       setTransitionPending(null)
@@ -1295,14 +1753,19 @@ export function AutoResearchControlRoom() {
   const handleSetupAdvance = () => {
     if (!setupContext || setupConnection !== 'live' || setupPending) return
     const view = buildGuidedSetupView(setupContext)
-    if (view.currentStep === 'doctor' || view.currentStep === 'create' || !setupSelectedOptionId) return
+    if (view.currentStep === 'doctor' || view.currentStep === 'create' || !setupSelectedOptionId)
+      return
     let activeSessionId: string
     try {
-      activeSessionId = setupSessionId ?? getOrCreateGuidedSetupSessionId(window.localStorage, workspaceId, randomAuthorityHex)
+      activeSessionId =
+        setupSessionId ??
+        getOrCreateGuidedSetupSessionId(window.localStorage, workspaceId, randomAuthorityHex)
       if (!setupSessionId) setSetupSessionId(activeSessionId)
     } catch {
       setSetupConnection('error')
-      setSetupError('This browser could not persist the workspace-scoped setup session. Durable writes remain disabled.')
+      setSetupError(
+        'This browser could not persist the workspace-scoped setup session. Durable writes remain disabled.'
+      )
       return
     }
     const scope = {
@@ -1310,38 +1773,50 @@ export function AutoResearchControlRoom() {
       sessionId: activeSessionId,
       version: setupContext.session?.version ?? 0,
       step: view.currentStep,
-      selectionId: setupSelectedOptionId,
+      selectionId: setupSelectedOptionId
     }
     void (async () => {
       setSetupPending(true)
       try {
-        const idempotencyKey = getOrCreateGuidedSetupIdempotencyKey(window.localStorage, scope, randomAuthorityHex)
+        const idempotencyKey = getOrCreateGuidedSetupIdempotencyKey(
+          window.localStorage,
+          scope,
+          randomAuthorityHex
+        )
         const response = await campaignApi.advanceGuidedSetupSession({
           workspaceId,
           sessionId: activeSessionId,
           expectedVersion: scope.version,
           step: scope.step,
           selectionId: scope.selectionId,
-          idempotencyKey,
+          idempotencyKey
         })
         if (!response.ok || !response.data) {
           if (response.status === undefined) setSetupConnection('offline')
           if (response.status === 409) await loadGuidedSetup(activeSessionId)
-          setSetupError(`The ${scope.step} choice was not sealed${response.code ? ` (${response.code})` : ''}. The current receipt chain is unchanged.`)
+          setSetupError(
+            `The ${scope.step} choice was not sealed${response.code ? ` (${response.code})` : ''}. The current receipt chain is unchanged.`
+          )
           return
         }
         clearGuidedSetupIdempotencyKey(window.localStorage, scope)
-        setSetupContext((current) => current ? {
-          ...current,
-          session: response.data!.session,
-          reason_codes: response.data!.session.reason_codes,
-        } : current)
+        setSetupContext((current) =>
+          current
+            ? {
+                ...current,
+                session: response.data!.session,
+                reason_codes: response.data!.session.reason_codes
+              }
+            : current
+        )
         setSetupSelectedOptionId('')
         setSetupDoctor(null)
         setSetupValidation(null)
         setSetupError(null)
       } catch {
-        setSetupError('The setup choice could not be persisted. Its idempotency authority is retained for a safe retry.')
+        setSetupError(
+          'The setup choice could not be persisted. Its idempotency authority is retained for a safe retry.'
+        )
       } finally {
         setSetupPending(false)
       }
@@ -1358,7 +1833,9 @@ export function AutoResearchControlRoom() {
         const response = await campaignApi.doctorGuidedSetup(draft)
         if (!response.ok || !response.data) {
           if (response.status === undefined) setSetupConnection('offline')
-          setSetupError(`Setup doctor could not verify the registered bindings${response.code ? ` (${response.code})` : ''}.`)
+          setSetupError(
+            `Setup doctor could not verify the registered bindings${response.code ? ` (${response.code})` : ''}.`
+          )
           return
         }
         setSetupDoctor(response.data)
@@ -1371,7 +1848,14 @@ export function AutoResearchControlRoom() {
   }
 
   const handleSetupValidation = () => {
-    if (!setupContext || !setupSessionId || !setupDoctor?.ready || setupConnection !== 'live' || setupPending) return
+    if (
+      !setupContext ||
+      !setupSessionId ||
+      !setupDoctor?.ready ||
+      setupConnection !== 'live' ||
+      setupPending
+    )
+      return
     const draft = guidedSetupDraft(setupContext)
     const receiptId = setupContext.session?.latest_receipt.receipt_id
     if (!draft || !receiptId) return
@@ -1380,24 +1864,32 @@ export function AutoResearchControlRoom() {
       sessionId: setupSessionId,
       version: 6,
       step: 'evaluation' as const,
-      selectionId: `validate-${receiptId}`,
+      selectionId: `validate-${receiptId}`
     }
     void (async () => {
       setSetupPending(true)
       try {
-        const idempotencyKey = getOrCreateGuidedSetupIdempotencyKey(window.localStorage, scope, randomAuthorityHex)
+        const idempotencyKey = getOrCreateGuidedSetupIdempotencyKey(
+          window.localStorage,
+          scope,
+          randomAuthorityHex
+        )
         const response = await campaignApi.validateGuidedSetup(draft, idempotencyKey)
         if (!response.ok || !response.data) {
           if (response.status === undefined) setSetupConnection('offline')
           if (response.status === 409) await loadGuidedSetup(setupSessionId)
-          setSetupError(`Setup validation was not sealed${response.code ? ` (${response.code})` : ''}. Run doctor again after resolving any changed binding.`)
+          setSetupError(
+            `Setup validation was not sealed${response.code ? ` (${response.code})` : ''}. Run doctor again after resolving any changed binding.`
+          )
           return
         }
         clearGuidedSetupIdempotencyKey(window.localStorage, scope)
         setSetupValidation(response.data)
         setSetupError(null)
       } catch {
-        setSetupError('Validation could not be persisted. Its exact idempotency authority is retained for retry.')
+        setSetupError(
+          'Validation could not be persisted. Its exact idempotency authority is retained for retry.'
+        )
       } finally {
         setSetupPending(false)
       }
@@ -1405,55 +1897,69 @@ export function AutoResearchControlRoom() {
   }
 
   const handleSetupCreate = () => {
-    if (!setupSessionId || !setupValidation?.ready || setupConnection !== 'live' || setupPending) return
+    if (!setupSessionId || !setupValidation?.ready || setupConnection !== 'live' || setupPending)
+      return
     const scope = {
       workspaceId,
       sessionId: setupSessionId,
       version: 6,
       step: 'evaluation' as const,
-      selectionId: `create-${setupCampaignId}`,
+      selectionId: `create-${setupCampaignId}`
     }
     void (async () => {
       setSetupPending(true)
       try {
-        const idempotencyKey = getOrCreateGuidedSetupIdempotencyKey(window.localStorage, scope, randomAuthorityHex)
+        const idempotencyKey = getOrCreateGuidedSetupIdempotencyKey(
+          window.localStorage,
+          scope,
+          randomAuthorityHex
+        )
         const response = await campaignApi.createGuidedSetup({
           workspaceId,
           campaignId: setupCampaignId,
           title: setupTitle,
           validationReceiptId: setupValidation.receipt_id,
-          idempotencyKey,
+          idempotencyKey
         })
         if (!response.ok || !response.data) {
           if (response.status === undefined) setSetupConnection('offline')
           if (response.status === 409) await loadGuidedSetup(setupSessionId)
-          setSetupError(`Campaign creation was rejected${response.code ? ` (${response.code})` : ''}. No Start action was taken.`)
+          setSetupError(
+            `Campaign creation was rejected${response.code ? ` (${response.code})` : ''}. No Start action was taken.`
+          )
           return
         }
         clearGuidedSetupIdempotencyKey(window.localStorage, scope)
         await load(workspaceId, response.data.campaign_id)
-        openTraining('autoresearch', { workspaceId, campaignId: response.data.campaign_id }, 'replace')
+        openTraining(
+          'autoresearch',
+          { workspaceId, campaignId: response.data.campaign_id },
+          'replace'
+        )
         await select(workspaceId, response.data.campaign_id)
       } catch {
-        setSetupError('Campaign creation could not complete. Its exact idempotency authority is retained for retry; no Start action was taken.')
+        setSetupError(
+          'Campaign creation could not complete. Its exact idempotency authority is retained for retry; no Start action was taken.'
+        )
       } finally {
         setSetupPending(false)
       }
     })()
   }
 
-  const reconcileHumanMutation = async (operation: () => ReturnType<typeof campaignApi.claimHumanWork>) => {
+  const reconcileHumanMutation = async (
+    operation: () => ReturnType<typeof campaignApi.claimHumanWork>
+  ) => {
     if (humanMutationPending || !selectedCampaignId) return
     setHumanMutationPending(true)
     try {
       const response = await operation()
       if (!response.ok) {
-        setHumanQueueError(`The human oversight request was rejected${response.code ? ` (${response.code})` : ''}. Reconciled authoritative state is shown below.`)
+        setHumanQueueError(
+          `The human oversight request was rejected${response.code ? ` (${response.code})` : ''}. Reconciled authoritative state is shown below.`
+        )
       }
-      await Promise.all([
-        loadHumanWork(),
-        refresh(workspaceId, selectedCampaignId),
-      ])
+      await Promise.all([loadHumanWork(), refresh(workspaceId, selectedCampaignId)])
     } finally {
       setHumanMutationPending(false)
     }
@@ -1465,9 +1971,11 @@ export function AutoResearchControlRoom() {
 
   const handleHumanSubmit = (
     request: HumanWorkSubmitRequest,
-    response: HumanReviewResponse & { decision: Exclude<HumanReviewResponse['decision'], ''> },
+    response: HumanReviewResponse & { decision: Exclude<HumanReviewResponse['decision'], ''> }
   ) => {
-    void reconcileHumanMutation(() => campaignApi.submitHumanWork(request, response.decision, response.rationale))
+    void reconcileHumanMutation(() =>
+      campaignApi.submitHumanWork(request, response.decision, response.rationale)
+    )
   }
 
   const handleHumanPromotion = (request: HumanPromotionRequest) => {
@@ -1478,93 +1986,168 @@ export function AutoResearchControlRoom() {
     void (async () => {
       const response = await campaignApi.requestRecovery(request)
       if (!response.ok) {
-        setRecoveryError(`Recovery request was rejected${response.code ? ` (${response.code})` : ''}. Reconcile before retrying.`)
+        setRecoveryError(
+          `Recovery request was rejected${response.code ? ` (${response.code})` : ''}. Reconcile before retrying.`
+        )
       }
       setRecoveryConfirmations((current) => ({ ...current, [request.action]: false }))
-      setRecoveryIdempotencyKeys((current) => ({ ...current, [request.action]: newRecoveryIdempotencyKeys()[request.action] }))
+      setRecoveryIdempotencyKeys((current) => ({
+        ...current,
+        [request.action]: newRecoveryIdempotencyKeys()[request.action]
+      }))
       await Promise.all([loadRecovery(), refresh(workspaceId, request.campaignId)])
     })()
   }
 
   const humanSummary = model.kind === 'snapshot' ? model.snapshot.human_work : null
   const showHumanOversight = Boolean(
-    humanSummary && (
-      humanSummary.open_count > 0
-      || humanSummary.blocking_count > 0
-      || humanQueue
-      || humanQueueError
-      || humanQueueLoading
-    ),
+    humanSummary &&
+    (humanSummary.open_count > 0 ||
+      humanSummary.blocking_count > 0 ||
+      humanQueue ||
+      humanQueueError ||
+      humanQueueLoading)
   )
-  const humanOversightModel = humanQueue && model.kind === 'snapshot'
-    ? buildHumanOversightModel({
-        queue: humanQueue,
-        authority: { workspaceId, campaignId: model.snapshot.campaign_id },
-        freshness: humanMutationPending ? 'reconciling' : model.freshness,
-        error: humanQueueError,
-        now: new Date().toISOString(),
-      })
-    : null
-  const humanOversight = showHumanOversight
-    ? humanOversightModel
-      ? (
-          <div className="space-y-2">
-            {humanQueueError ? <p className="border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary" role="alert">{humanQueueError}</p> : null}
-            <HumanOversightQueue
-              model={humanOversightModel}
-              responses={humanResponses}
-              onResponseChange={(responseKey, response) => {
-                if (responseKey !== humanReviewResponseKey(response)) return
-                setHumanResponses((current) => ({ ...current, [responseKey]: response }))
-              }}
-              onClaim={handleHumanClaim}
-              onSubmit={handleHumanSubmit}
-              onPromotion={handleHumanPromotion}
-            />
-          </div>
-        )
-      : <HumanOversightUnavailable loading={humanQueueLoading} message={humanQueueError} onRetry={() => { void loadHumanWork() }} />
-    : undefined
+  const humanOversightModel =
+    humanQueue && model.kind === 'snapshot'
+      ? buildHumanOversightModel({
+          queue: humanQueue,
+          authority: { workspaceId, campaignId: model.snapshot.campaign_id },
+          freshness: humanMutationPending ? 'reconciling' : model.freshness,
+          error: humanQueueError,
+          now: new Date().toISOString()
+        })
+      : null
+  const humanOversight = showHumanOversight ? (
+    humanOversightModel ? (
+      <div className="space-y-2">
+        {humanQueueError ? (
+          <p
+            className="border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary"
+            role="alert"
+          >
+            {humanQueueError}
+          </p>
+        ) : null}
+        <HumanOversightQueue
+          model={humanOversightModel}
+          responses={humanResponses}
+          onResponseChange={(responseKey, response) => {
+            if (responseKey !== humanReviewResponseKey(response)) return
+            setHumanResponses((current) => ({ ...current, [responseKey]: response }))
+          }}
+          onClaim={handleHumanClaim}
+          onSubmit={handleHumanSubmit}
+          onPromotion={handleHumanPromotion}
+        />
+      </div>
+    ) : (
+      <HumanOversightUnavailable
+        loading={humanQueueLoading}
+        message={humanQueueError}
+        onRetry={() => {
+          void loadHumanWork()
+        }}
+      />
+    )
+  ) : undefined
   const recoveryFreshness = recoveryError
     ? 'error'
     : recoveryLoading
       ? 'reconciling'
-      : model.kind === 'snapshot' ? model.freshness : 'error'
-  const campaignRecovery = selectedCampaignId
-    ? recoverySnapshot
-      ? (
-          <div className="space-y-2">
-            {recoveryError || recoveryLoading ? <div className="flex flex-wrap items-center justify-between gap-2 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary" role={recoveryError ? 'alert' : 'status'}><span>{recoveryError || 'Refreshing recovery lifecycle…'}</span><Button type="button" size="sm" variant="secondary" onClick={() => { void loadRecovery() }} disabled={recoveryLoading}>Retry recovery</Button></div> : null}
-            <CampaignRecoveryPanel
-              snapshot={recoverySnapshot}
-              freshness={recoveryFreshness}
-              now={new Date().toISOString()}
-              confirmations={recoveryConfirmations}
-              idempotencyKeys={recoveryIdempotencyKeys}
-              onConfirmationChange={(action, confirmed) => setRecoveryConfirmations((current) => ({ ...current, [action]: confirmed }))}
-              onRequest={handleRecoveryRequest}
-            />
+      : model.kind === 'snapshot'
+        ? model.freshness
+        : 'error'
+  const campaignRecovery = selectedCampaignId ? (
+    recoverySnapshot ? (
+      <div className="space-y-2">
+        {recoveryError || recoveryLoading ? (
+          <div
+            className="flex flex-wrap items-center justify-between gap-2 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary"
+            role={recoveryError ? 'alert' : 'status'}
+          >
+            <span>{recoveryError || 'Refreshing recovery lifecycle…'}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void loadRecovery()
+              }}
+              disabled={recoveryLoading}
+            >
+              Retry recovery
+            </Button>
           </div>
-        )
-      : recoveryUnregistered
-        ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs text-text-secondary" role="status"><span>{recoveryError}</span><Button type="button" size="sm" variant="secondary" onClick={() => { void loadRecovery() }} disabled={recoveryLoading}>Check again</Button></div>
-          )
-        : (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary" role={recoveryError ? 'alert' : 'status'}><span>{recoveryError || (recoveryLoading ? 'Loading authoritative recovery evidence…' : 'Recovery evidence has not loaded. Controls remain disabled.')}</span><Button type="button" size="sm" variant="secondary" onClick={() => { void loadRecovery() }} disabled={recoveryLoading}>{recoveryLoading ? 'Reconciling' : 'Retry recovery'}</Button></div>
-              <CampaignRecoveryPanel
-                snapshot={null}
-                freshness={recoveryFreshness}
-                now={new Date().toISOString()}
-                confirmations={recoveryConfirmations}
-                idempotencyKeys={recoveryIdempotencyKeys}
-                onConfirmationChange={(action, confirmed) => setRecoveryConfirmations((current) => ({ ...current, [action]: confirmed }))}
-                onRequest={handleRecoveryRequest}
-              />
-            </div>
-          )
-    : undefined
+        ) : null}
+        <CampaignRecoveryPanel
+          snapshot={recoverySnapshot}
+          freshness={recoveryFreshness}
+          now={new Date().toISOString()}
+          confirmations={recoveryConfirmations}
+          idempotencyKeys={recoveryIdempotencyKeys}
+          onConfirmationChange={(action, confirmed) =>
+            setRecoveryConfirmations((current) => ({ ...current, [action]: confirmed }))
+          }
+          onRequest={handleRecoveryRequest}
+        />
+      </div>
+    ) : recoveryUnregistered ? (
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs text-text-secondary"
+        role="status"
+      >
+        <span>{recoveryError}</span>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            void loadRecovery()
+          }}
+          disabled={recoveryLoading}
+        >
+          Check again
+        </Button>
+      </div>
+    ) : (
+      <div className="space-y-2">
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary"
+          role={recoveryError ? 'alert' : 'status'}
+        >
+          <span>
+            {recoveryError ||
+              (recoveryLoading
+                ? 'Loading authoritative recovery evidence…'
+                : 'Recovery evidence has not loaded. Controls remain disabled.')}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              void loadRecovery()
+            }}
+            disabled={recoveryLoading}
+          >
+            {recoveryLoading ? 'Reconciling' : 'Retry recovery'}
+          </Button>
+        </div>
+        <CampaignRecoveryPanel
+          snapshot={null}
+          freshness={recoveryFreshness}
+          now={new Date().toISOString()}
+          confirmations={recoveryConfirmations}
+          idempotencyKeys={recoveryIdempotencyKeys}
+          onConfirmationChange={(action, confirmed) =>
+            setRecoveryConfirmations((current) => ({ ...current, [action]: confirmed }))
+          }
+          onRequest={handleRecoveryRequest}
+        />
+      </div>
+    )
+  ) : undefined
   const guidedSetup = (
     <GuidedAutoResearchSetup
       context={setupContext}
@@ -1583,7 +2166,9 @@ export function AutoResearchControlRoom() {
       onDoctor={handleSetupDoctor}
       onValidate={handleSetupValidation}
       onCreate={handleSetupCreate}
-      onRetry={() => { void loadGuidedSetup(setupSessionId ?? undefined) }}
+      onRetry={() => {
+        void loadGuidedSetup(setupSessionId ?? undefined)
+      }}
     />
   )
 
@@ -1604,20 +2189,28 @@ export function AutoResearchControlRoom() {
               ? handleArchive
               : null
           }
-          campaignLibrary={archivedCampaigns.length > 0 ? (
-            <CampaignLibrary
-              campaigns={archivedCampaigns}
-              onUnarchive={handleUnarchive}
-              onOpen={handleSelect}
-            />
-          ) : undefined}
+          campaignLibrary={
+            archivedCampaigns.length > 0 ? (
+              <CampaignLibrary
+                campaigns={archivedCampaigns}
+                onUnarchive={handleUnarchive}
+                onOpen={handleSelect}
+              />
+            ) : undefined
+          }
           onRetry={() => {
             if (selectedCampaignId) void refresh(workspaceId, selectedCampaignId)
             else void load(workspaceId, selection.campaignId || undefined)
           }}
-          onLoadEvents={() => selectedCampaignId && void loadEventsPage(workspaceId, selectedCampaignId)}
-          onLoadArtifacts={() => selectedCampaignId && void loadArtifactsPage(workspaceId, selectedCampaignId)}
-          onTransition={(action) => { void handleTransition(action) }}
+          onLoadEvents={() =>
+            selectedCampaignId && void loadEventsPage(workspaceId, selectedCampaignId)
+          }
+          onLoadArtifacts={() =>
+            selectedCampaignId && void loadArtifactsPage(workspaceId, selectedCampaignId)
+          }
+          onTransition={(action) => {
+            void handleTransition(action)
+          }}
           transitionPending={transitionPending}
           humanOversight={humanOversight}
           campaignRecovery={campaignRecovery}

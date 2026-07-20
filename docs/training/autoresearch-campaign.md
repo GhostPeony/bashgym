@@ -220,17 +220,17 @@ Once those identities are registered, the same baseline-first research loop
 applies to language models, vision-language models, embedding models, and future
 open models using any approved BashGym trainer.
 
-| Capability | Every registered BashGym model | Additional NeMo RL/Gym capability |
-|---|---:|---:|
-| Agent intake, objective, hypothesis, and stop rules | Yes | No change |
-| Durable campaign, attempts, budgets, leases, cancellation, and recovery | Yes | Reused unchanged |
-| Local or private-SSH compute binding | Yes | Reused unchanged |
-| Artifact sealing, evaluation, experiment ledger, and keep/discard decision | Yes | Reused unchanged |
-| Workspace canvas, CLI, API, and source-managed operator guidance | Yes | Reused unchanged |
-| Trainer recipe and model loader | Per registered backend/model | NeMo RL recipe adapter |
-| Ray placement, vLLM generation actors, and policy-to-generation refit | No | Optional NeMo RL |
-| Gym agent/resources servers and isolated multi-turn sessions | No | Optional NeMo Gym |
-| Message-level generation token IDs and behavior logprobs | Backend-dependent | NeMo Gym/NeMo RL contract |
+| Capability                                                                 | Every registered BashGym model | Additional NeMo RL/Gym capability |
+| -------------------------------------------------------------------------- | -----------------------------: | --------------------------------: |
+| Agent intake, objective, hypothesis, and stop rules                        |                            Yes |                         No change |
+| Durable campaign, attempts, budgets, leases, cancellation, and recovery    |                            Yes |                  Reused unchanged |
+| Local or private-SSH compute binding                                       |                            Yes |                  Reused unchanged |
+| Artifact sealing, evaluation, experiment ledger, and keep/discard decision |                            Yes |                  Reused unchanged |
+| Workspace canvas, CLI, API, and source-managed operator guidance           |                            Yes |                  Reused unchanged |
+| Trainer recipe and model loader                                            |   Per registered backend/model |            NeMo RL recipe adapter |
+| Ray placement, vLLM generation actors, and policy-to-generation refit      |                             No |                  Optional NeMo RL |
+| Gym agent/resources servers and isolated multi-turn sessions               |                             No |                 Optional NeMo Gym |
+| Message-level generation token IDs and behavior logprobs                   |              Backend-dependent |         NeMo Gym/NeMo RL contract |
 
 Bringing a model file into a cache does not safely activate it. A new trainable
 model needs an immutable base revision, a compatible trainer/runtime recipe, a

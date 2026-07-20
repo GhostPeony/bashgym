@@ -1,5 +1,11 @@
 import { memo, useCallback, useRef, useState, useEffect } from 'react'
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps, type Edge } from '@xyflow/react'
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  type EdgeProps,
+  type Edge
+} from '@xyflow/react'
 import { Eye, Send, ArrowLeftRight, Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { MonitorAutoMode } from '../../../stores'
@@ -46,29 +52,41 @@ export const MonitorEdge = memo(function MonitorEdge({
   const [sendState, setSendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  useEffect(() => () => {
-    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
-  }, [])
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    },
+    []
+  )
 
-  const handleSend = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!data?.onSendSnapshot || sendState === 'sending') return
-    setSendState('sending')
-    const result = await data.onSendSnapshot(id)
-    setSendState(result.sent ? 'sent' : 'error')
-    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
-    flashTimerRef.current = setTimeout(() => setSendState('idle'), 1500)
-  }, [data, id, sendState])
+  const handleSend = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!data?.onSendSnapshot || sendState === 'sending') return
+      setSendState('sending')
+      const result = await data.onSendSnapshot(id)
+      setSendState(result.sent ? 'sent' : 'error')
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+      flashTimerRef.current = setTimeout(() => setSendState('idle'), 1500)
+    },
+    [data, id, sendState]
+  )
 
-  const handleCycleAuto = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    data?.onCycleAuto?.(id)
-  }, [data, id])
+  const handleCycleAuto = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      data?.onCycleAuto?.(id)
+    },
+    [data, id]
+  )
 
-  const handleSwap = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    data?.onSwapDirection?.(id)
-  }, [data, id])
+  const handleSwap = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      data?.onSwapDirection?.(id)
+    },
+    [data, id]
+  )
 
   return (
     <>
@@ -112,11 +130,15 @@ export const MonitorEdge = memo(function MonitorEdge({
                 title="Prefill a snapshot file path into the watcher's input — nothing runs until you press Enter there"
               >
                 {sendState === 'sent' ? (
-                  <span className="flex items-center gap-1"><Check className="w-2.5 h-2.5" /> SENT</span>
+                  <span className="flex items-center gap-1">
+                    <Check className="w-2.5 h-2.5" /> SENT
+                  </span>
                 ) : sendState === 'error' ? (
                   'NO OUTPUT'
                 ) : (
-                  <span className="flex items-center gap-1"><Send className="w-2.5 h-2.5" /> SEND SNAPSHOT</span>
+                  <span className="flex items-center gap-1">
+                    <Send className="w-2.5 h-2.5" /> SEND SNAPSHOT
+                  </span>
                 )}
               </button>
               <button
@@ -131,7 +153,9 @@ export const MonitorEdge = memo(function MonitorEdge({
                 className="node-btn node-btn-wide"
                 title="Swap watcher and watched"
               >
-                <span className="flex items-center gap-1"><ArrowLeftRight className="w-2.5 h-2.5" /> SWAP</span>
+                <span className="flex items-center gap-1">
+                  <ArrowLeftRight className="w-2.5 h-2.5" /> SWAP
+                </span>
               </button>
             </div>
           )}

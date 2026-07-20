@@ -135,9 +135,7 @@ def test_project_context_trend_health_and_incremental_events(tmp_path):
         params={"workspace_id": "workspace-a", "after_cursor": 0, "limit": 1},
         headers=headers,
     )
-    health = http.get(
-        "/api/ledger/health", params={"workspace_id": "workspace-a"}, headers=headers
-    )
+    health = http.get("/api/ledger/health", params={"workspace_id": "workspace-a"}, headers=headers)
 
     assert projects.status_code == 200
     assert projects.json()["projects"][0]["project_id"] == "project-a"
@@ -405,6 +403,9 @@ def test_completed_campaign_evaluation_triggers_authoritative_autoresearch_inges
         "campaign_id": "campaign-1",
         "outcome": None,
     }
-    assert repository.get_evaluation_result(
-        "workspace-a", "project-a", "eval-result-deferred"
-    )["status"] == "completed"
+    assert (
+        repository.get_evaluation_result("workspace-a", "project-a", "eval-result-deferred")[
+            "status"
+        ]
+        == "completed"
+    )

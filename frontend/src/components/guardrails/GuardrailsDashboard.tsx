@@ -16,7 +16,7 @@ import {
   Code,
   MessageSquare,
   Eye,
-  Lock,
+  Lock
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { observabilityApi, GuardrailEvent, GuardrailStats } from '../../services/api'
@@ -24,7 +24,7 @@ import { useKeyedSessionResource, useSessionResource } from '../../stores/sessio
 import {
   guardrailEventsResource,
   guardrailStatsResource,
-  observabilitySettingsResource,
+  observabilitySettingsResource
 } from '../../stores/factoryResources'
 import { wsService, MessageTypes } from '../../services/websocket'
 
@@ -142,12 +142,12 @@ export function GuardrailsDashboard() {
     data: cachedEvents,
     loading: eventsLoading,
     refreshing: eventsRefreshing,
-    refresh: refreshEvents,
+    refresh: refreshEvents
   } = useKeyedSessionResource(guardrailEventsResource, eventsKey)
   const {
     data: cachedStats,
     refreshing: statsRefreshing,
-    refresh: refreshStats,
+    refresh: refreshStats
   } = useSessionResource(guardrailStatsResource)
   const { data: settings } = useSessionResource(observabilitySettingsResource)
   const [events, setEvents] = useState<GuardrailEvent[]>(() => cachedEvents ?? [])
@@ -166,18 +166,23 @@ export function GuardrailsDashboard() {
   // Update rules based on server settings
   useEffect(() => {
     if (!settings) return
-    setRules(prev => prev.map(rule => {
-      if (rule.category === 'pii' && settings.guardrails.pii_filtering !== undefined) {
-        return { ...rule, enabled: settings.guardrails.pii_filtering }
-      }
-      if (rule.category === 'injection' && settings.guardrails.injection_detection !== undefined) {
-        return { ...rule, enabled: settings.guardrails.injection_detection }
-      }
-      if (rule.category === 'custom' && settings.guardrails.code_safety !== undefined) {
-        return { ...rule, enabled: settings.guardrails.code_safety }
-      }
-      return rule
-    }))
+    setRules((prev) =>
+      prev.map((rule) => {
+        if (rule.category === 'pii' && settings.guardrails.pii_filtering !== undefined) {
+          return { ...rule, enabled: settings.guardrails.pii_filtering }
+        }
+        if (
+          rule.category === 'injection' &&
+          settings.guardrails.injection_detection !== undefined
+        ) {
+          return { ...rule, enabled: settings.guardrails.injection_detection }
+        }
+        if (rule.category === 'custom' && settings.guardrails.code_safety !== undefined) {
+          return { ...rule, enabled: settings.guardrails.code_safety }
+        }
+        return rule
+      })
+    )
   }, [settings])
 
   // Subscribe to WebSocket events
@@ -192,13 +197,17 @@ export function GuardrailsDashboard() {
         original_content: payload.content_preview || '',
         details: payload.details || {}
       }
-      setEvents(prev => [newEvent, ...prev].slice(0, 100))
+      setEvents((prev) => [newEvent, ...prev].slice(0, 100))
       // Update stats
-      setStats(prev => prev ? {
-        ...prev,
-        total_events: prev.total_events + 1,
-        by_action: { ...prev.by_action, block: (prev.by_action.block || 0) + 1 }
-      } : null)
+      setStats((prev) =>
+        prev
+          ? {
+              ...prev,
+              total_events: prev.total_events + 1,
+              by_action: { ...prev.by_action, block: (prev.by_action.block || 0) + 1 }
+            }
+          : null
+      )
     }
 
     const handleGuardrailWarn = (payload: any) => {
@@ -211,12 +220,16 @@ export function GuardrailsDashboard() {
         original_content: payload.content_preview || '',
         details: payload.details || {}
       }
-      setEvents(prev => [newEvent, ...prev].slice(0, 100))
-      setStats(prev => prev ? {
-        ...prev,
-        total_events: prev.total_events + 1,
-        by_action: { ...prev.by_action, warn: (prev.by_action.warn || 0) + 1 }
-      } : null)
+      setEvents((prev) => [newEvent, ...prev].slice(0, 100))
+      setStats((prev) =>
+        prev
+          ? {
+              ...prev,
+              total_events: prev.total_events + 1,
+              by_action: { ...prev.by_action, warn: (prev.by_action.warn || 0) + 1 }
+            }
+          : null
+      )
     }
 
     const handlePiiRedacted = (payload: any) => {
@@ -229,12 +242,16 @@ export function GuardrailsDashboard() {
         original_content: `${payload.redaction_count} items redacted`,
         details: { pii_types: payload.pii_types, ...payload.details }
       }
-      setEvents(prev => [newEvent, ...prev].slice(0, 100))
-      setStats(prev => prev ? {
-        ...prev,
-        total_events: prev.total_events + 1,
-        by_action: { ...prev.by_action, modify: (prev.by_action.modify || 0) + 1 }
-      } : null)
+      setEvents((prev) => [newEvent, ...prev].slice(0, 100))
+      setStats((prev) =>
+        prev
+          ? {
+              ...prev,
+              total_events: prev.total_events + 1,
+              by_action: { ...prev.by_action, modify: (prev.by_action.modify || 0) + 1 }
+            }
+          : null
+      )
     }
 
     const unsubBlocked = wsService.subscribe(MessageTypes.GUARDRAIL_BLOCKED, handleGuardrailBlocked)
@@ -249,16 +266,12 @@ export function GuardrailsDashboard() {
   }, [])
 
   const toggleRule = (id: string) => {
-    setRules(prev => prev.map(r =>
-      r.id === id ? { ...r, enabled: !r.enabled } : r
-    ))
+    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)))
     setIsDefaultConfig(false)
   }
 
   const updateRule = (id: string, updates: Partial<GuardrailRule>) => {
-    setRules(prev => prev.map(r =>
-      r.id === id ? { ...r, ...updates } : r
-    ))
+    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...updates } : r)))
     setIsDefaultConfig(false)
   }
 
@@ -274,13 +287,13 @@ export function GuardrailsDashboard() {
         patterns: []
       }
     }
-    setRules(prev => [...prev, newRule])
+    setRules((prev) => [...prev, newRule])
     setExpandedRule(newRule.id)
     setIsDefaultConfig(false)
   }
 
   const deleteRule = (id: string) => {
-    setRules(prev => prev.filter(r => r.id !== id))
+    setRules((prev) => prev.filter((r) => r.id !== id))
     setIsDefaultConfig(false)
   }
 
@@ -293,15 +306,19 @@ export function GuardrailsDashboard() {
     // Local pattern matching for testing (basic functionality)
     // Full NeMo guardrails evaluation requires backend connection
     const results: TestResult[] = rules
-      .filter(r => r.enabled)
-      .map(rule => {
+      .filter((r) => r.enabled)
+      .map((rule) => {
         let triggered = false
         let details = ''
 
         // Only pattern-based rules can be tested locally
-        if (rule.category === 'injection' || rule.category === 'custom' || rule.category === 'pii') {
+        if (
+          rule.category === 'injection' ||
+          rule.category === 'custom' ||
+          rule.category === 'pii'
+        ) {
           const patterns = rule.config.patterns || []
-          const matched = patterns.find(p => testInput.toLowerCase().includes(p.toLowerCase()))
+          const matched = patterns.find((p) => testInput.toLowerCase().includes(p.toLowerCase()))
           if (matched) {
             triggered = true
             details = `Matched pattern: "${matched}"`
@@ -316,7 +333,7 @@ export function GuardrailsDashboard() {
           rule_name: rule.name,
           triggered,
           action: triggered ? rule.config.action : 'pass',
-          details: triggered ? details : (details || 'No pattern matches')
+          details: triggered ? details : details || 'No pattern matches'
         }
       })
 
@@ -328,9 +345,9 @@ export function GuardrailsDashboard() {
     setIsSaving(true)
 
     // Build settings from rules
-    const piiRule = rules.find(r => r.category === 'pii')
-    const injectionRule = rules.find(r => r.category === 'injection')
-    const customRule = rules.find(r => r.category === 'custom')
+    const piiRule = rules.find((r) => r.category === 'pii')
+    const injectionRule = rules.find((r) => r.category === 'injection')
+    const customRule = rules.find((r) => r.category === 'custom')
 
     const result = await observabilityApi.updateGuardrailSettings({
       pii_filtering: piiRule?.enabled,
@@ -345,7 +362,7 @@ export function GuardrailsDashboard() {
     setIsSaving(false)
   }
 
-  const enabledCount = rules.filter(r => r.enabled).length
+  const enabledCount = rules.filter((r) => r.enabled).length
 
   return (
     <div className="h-full flex flex-col">
@@ -374,7 +391,11 @@ export function GuardrailsDashboard() {
               disabled={isSaving}
               className="btn-primary flex items-center gap-2"
             >
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
               Save Configuration
             </button>
           </div>
@@ -385,8 +406,13 @@ export function GuardrailsDashboard() {
           {[
             { id: 'rules' as const, label: 'Rules', icon: Shield },
             { id: 'colang' as const, label: 'Colang Config', icon: Code },
-            { id: 'logs' as const, label: 'Activity Log', icon: FileText, badge: stats?.total_events },
-          ].map(tab => (
+            {
+              id: 'logs' as const,
+              label: 'Activity Log',
+              icon: FileText,
+              badge: stats?.total_events
+            }
+          ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -420,14 +446,17 @@ export function GuardrailsDashboard() {
                     <Shield className="w-5 h-5 text-accent" />
                     <h3 className="font-brand text-xl text-text-primary">Guardrail Rules</h3>
                   </div>
-                  <button onClick={addRule} className="btn-secondary text-sm flex items-center gap-1">
+                  <button
+                    onClick={addRule}
+                    className="btn-secondary text-sm flex items-center gap-1"
+                  >
                     <Plus className="w-4 h-4" />
                     Add Rule
                   </button>
                 </div>
 
                 <div className="divide-y divide-border">
-                  {rules.map(rule => {
+                  {rules.map((rule) => {
                     const CategoryIcon = CATEGORY_INFO[rule.category].icon
                     const isExpanded = expandedRule === rule.id
 
@@ -444,23 +473,31 @@ export function GuardrailsDashboard() {
                               <ChevronRight className="w-4 h-4 text-text-muted" />
                             )}
                           </button>
-                          <CategoryIcon className={clsx('w-5 h-5', CATEGORY_INFO[rule.category].color)} />
+                          <CategoryIcon
+                            className={clsx('w-5 h-5', CATEGORY_INFO[rule.category].color)}
+                          />
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-text-primary">{rule.name}</span>
                               <span className="tag">
                                 <span>{rule.type}</span>
                               </span>
-                              <span className={clsx(
-                                'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
-                                rule.config.action === 'block' ? 'bg-status-error/20 text-status-error border-status-error' :
-                                rule.config.action === 'warn' ? 'bg-status-warning/20 text-status-warning border-status-warning' :
-                                'bg-status-info/20 text-status-info border-status-info'
-                              )}>
+                              <span
+                                className={clsx(
+                                  'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
+                                  rule.config.action === 'block'
+                                    ? 'bg-status-error/20 text-status-error border-status-error'
+                                    : rule.config.action === 'warn'
+                                      ? 'bg-status-warning/20 text-status-warning border-status-warning'
+                                      : 'bg-status-info/20 text-status-info border-status-info'
+                                )}
+                              >
                                 {rule.config.action}
                               </span>
                             </div>
-                            <p className="text-xs text-text-muted font-mono">{CATEGORY_INFO[rule.category].label}</p>
+                            <p className="text-xs text-text-muted font-mono">
+                              {CATEGORY_INFO[rule.category].label}
+                            </p>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer">
                             <input
@@ -469,14 +506,20 @@ export function GuardrailsDashboard() {
                               onChange={() => toggleRule(rule.id)}
                               className="sr-only peer"
                             />
-                            <div className={clsx(
-                              'w-10 h-5 border-brutal rounded-brutal transition-colors',
-                              rule.enabled ? 'bg-accent border-accent' : 'bg-background-tertiary border-border'
-                            )}>
-                              <div className={clsx(
-                                'absolute top-[3px] w-3.5 h-3.5 bg-white border-brutal border-border rounded-brutal transition-transform',
-                                rule.enabled ? 'translate-x-[22px]' : 'translate-x-[3px]'
-                              )} />
+                            <div
+                              className={clsx(
+                                'w-10 h-5 border-brutal rounded-brutal transition-colors',
+                                rule.enabled
+                                  ? 'bg-accent border-accent'
+                                  : 'bg-background-tertiary border-border'
+                              )}
+                            >
+                              <div
+                                className={clsx(
+                                  'absolute top-[3px] w-3.5 h-3.5 bg-white border-brutal border-border rounded-brutal transition-transform',
+                                  rule.enabled ? 'translate-x-[22px]' : 'translate-x-[3px]'
+                                )}
+                              />
                             </div>
                           </label>
                           <button
@@ -492,7 +535,9 @@ export function GuardrailsDashboard() {
                             <div className="p-4 bg-background-secondary border-brutal border-border rounded-brutal space-y-4">
                               {/* Rule Name */}
                               <div>
-                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Rule Name</label>
+                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                  Rule Name
+                                </label>
                                 <input
                                   type="text"
                                   value={rule.name}
@@ -504,10 +549,16 @@ export function GuardrailsDashboard() {
                               {/* Type and Action */}
                               <div className="grid grid-cols-3 gap-3">
                                 <div>
-                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Apply To</label>
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                    Apply To
+                                  </label>
                                   <select
                                     value={rule.type}
-                                    onChange={(e) => updateRule(rule.id, { type: e.target.value as 'input' | 'output' | 'both' })}
+                                    onChange={(e) =>
+                                      updateRule(rule.id, {
+                                        type: e.target.value as 'input' | 'output' | 'both'
+                                      })
+                                    }
                                     className="input text-sm w-full"
                                   >
                                     <option value="input">Input only</option>
@@ -516,24 +567,39 @@ export function GuardrailsDashboard() {
                                   </select>
                                 </div>
                                 <div>
-                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Category</label>
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                    Category
+                                  </label>
                                   <select
                                     value={rule.category}
-                                    onChange={(e) => updateRule(rule.id, { category: e.target.value as GuardrailRule['category'] })}
+                                    onChange={(e) =>
+                                      updateRule(rule.id, {
+                                        category: e.target.value as GuardrailRule['category']
+                                      })
+                                    }
                                     className="input text-sm w-full"
                                   >
                                     {Object.entries(CATEGORY_INFO).map(([key, info]) => (
-                                      <option key={key} value={key}>{info.label}</option>
+                                      <option key={key} value={key}>
+                                        {info.label}
+                                      </option>
                                     ))}
                                   </select>
                                 </div>
                                 <div>
-                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Action</label>
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                    Action
+                                  </label>
                                   <select
                                     value={rule.config.action}
-                                    onChange={(e) => updateRule(rule.id, {
-                                      config: { ...rule.config, action: e.target.value as 'block' | 'warn' | 'log' }
-                                    })}
+                                    onChange={(e) =>
+                                      updateRule(rule.id, {
+                                        config: {
+                                          ...rule.config,
+                                          action: e.target.value as 'block' | 'warn' | 'log'
+                                        }
+                                      })
+                                    }
                                     className="input text-sm w-full"
                                   >
                                     <option value="block">Block</option>
@@ -544,16 +610,23 @@ export function GuardrailsDashboard() {
                               </div>
 
                               {/* Patterns */}
-                              {(rule.category === 'injection' || rule.category === 'custom' || rule.category === 'pii') && (
+                              {(rule.category === 'injection' ||
+                                rule.category === 'custom' ||
+                                rule.category === 'pii') && (
                                 <div>
                                   <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
                                     Patterns (one per line)
                                   </label>
                                   <textarea
                                     value={rule.config.patterns?.join('\n') || ''}
-                                    onChange={(e) => updateRule(rule.id, {
-                                      config: { ...rule.config, patterns: e.target.value.split('\n').filter(Boolean) }
-                                    })}
+                                    onChange={(e) =>
+                                      updateRule(rule.id, {
+                                        config: {
+                                          ...rule.config,
+                                          patterns: e.target.value.split('\n').filter(Boolean)
+                                        }
+                                      })
+                                    }
                                     rows={4}
                                     className="input text-sm w-full font-mono"
                                     placeholder="Enter patterns to match..."
@@ -570,9 +643,17 @@ export function GuardrailsDashboard() {
                                   <input
                                     type="text"
                                     value={rule.config.topics?.join(', ') || ''}
-                                    onChange={(e) => updateRule(rule.id, {
-                                      config: { ...rule.config, topics: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }
-                                    })}
+                                    onChange={(e) =>
+                                      updateRule(rule.id, {
+                                        config: {
+                                          ...rule.config,
+                                          topics: e.target.value
+                                            .split(',')
+                                            .map((t) => t.trim())
+                                            .filter(Boolean)
+                                        }
+                                      })
+                                    }
                                     className="input text-sm w-full"
                                     placeholder="coding, development, software"
                                   />
@@ -592,9 +673,14 @@ export function GuardrailsDashboard() {
                                       max="1"
                                       step="0.05"
                                       value={rule.config.threshold || 0.8}
-                                      onChange={(e) => updateRule(rule.id, {
-                                        config: { ...rule.config, threshold: parseFloat(e.target.value) }
-                                      })}
+                                      onChange={(e) =>
+                                        updateRule(rule.id, {
+                                          config: {
+                                            ...rule.config,
+                                            threshold: parseFloat(e.target.value)
+                                          }
+                                        })
+                                      }
                                       className="flex-1"
                                     />
                                     <span className="font-brand text-xl text-text-primary w-14 text-right">
@@ -647,27 +733,35 @@ export function GuardrailsDashboard() {
                 <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
                   <h3 className="font-brand text-xl text-text-primary mb-3">Test Results</h3>
                   <div className="space-y-2">
-                    {testResults.map(result => (
+                    {testResults.map((result) => (
                       <div
                         key={result.rule_id}
                         className={clsx(
                           'p-3 border-brutal rounded-brutal',
                           result.triggered
-                            ? result.action === 'block' ? 'bg-status-error/10 border-status-error' :
-                              result.action === 'warn' ? 'bg-status-warning/10 border-status-warning' :
-                              'bg-status-info/10 border-status-info'
+                            ? result.action === 'block'
+                              ? 'bg-status-error/10 border-status-error'
+                              : result.action === 'warn'
+                                ? 'bg-status-warning/10 border-status-warning'
+                                : 'bg-status-info/10 border-status-info'
                             : 'bg-status-success/10 border-status-success'
                         )}
                       >
                         <div className="flex items-center gap-2 mb-1">
                           {result.triggered ? (
-                            result.action === 'block' ? <ShieldX className="w-4 h-4 text-status-error" /> :
-                            result.action === 'warn' ? <ShieldAlert className="w-4 h-4 text-status-warning" /> :
-                            <Shield className="w-4 h-4 text-status-info" />
+                            result.action === 'block' ? (
+                              <ShieldX className="w-4 h-4 text-status-error" />
+                            ) : result.action === 'warn' ? (
+                              <ShieldAlert className="w-4 h-4 text-status-warning" />
+                            ) : (
+                              <Shield className="w-4 h-4 text-status-info" />
+                            )
                           ) : (
                             <ShieldCheck className="w-4 h-4 text-status-success" />
                           )}
-                          <span className="text-sm font-medium text-text-primary">{result.rule_name}</span>
+                          <span className="text-sm font-medium text-text-primary">
+                            {result.rule_name}
+                          </span>
                         </div>
                         <p className="text-xs text-text-muted ml-6 font-mono">{result.details}</p>
                       </div>
@@ -685,17 +779,25 @@ export function GuardrailsDashboard() {
                     disabled={statsRefreshing}
                     className="btn-icon w-8 h-8 flex items-center justify-center"
                   >
-                    <RefreshCw className={clsx('w-4 h-4 text-text-muted', statsRefreshing && 'animate-spin')} />
+                    <RefreshCw
+                      className={clsx('w-4 h-4 text-text-muted', statsRefreshing && 'animate-spin')}
+                    />
                   </button>
                 </div>
                 {stats ? (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Total Events</span>
-                      <span className="font-brand text-2xl text-text-primary">{stats.total_events}</span>
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+                        Total Events
+                      </span>
+                      <span className="font-brand text-2xl text-text-primary">
+                        {stats.total_events}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Block Rate</span>
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+                        Block Rate
+                      </span>
                       <span className="font-brand text-2xl text-status-error">
                         {(stats.block_rate * 100).toFixed(1)}%
                       </span>
@@ -704,12 +806,18 @@ export function GuardrailsDashboard() {
                     <div className="section-divider" />
 
                     {Object.entries(stats.by_action).map(([action, count]) => (
-                      <div key={action} className="flex items-center justify-between p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                      <div
+                        key={action}
+                        className="flex items-center justify-between p-3 bg-background-secondary border-brutal border-border rounded-brutal"
+                      >
                         <div className="flex items-center gap-2">
-                          <span className={clsx(
-                            'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
-                            ACTION_COLORS[action as keyof typeof ACTION_COLORS] || 'bg-background-tertiary border-border'
-                          )}>
+                          <span
+                            className={clsx(
+                              'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
+                              ACTION_COLORS[action as keyof typeof ACTION_COLORS] ||
+                                'bg-background-tertiary border-border'
+                            )}
+                          >
                             {action}
                           </span>
                         </div>
@@ -731,7 +839,9 @@ export function GuardrailsDashboard() {
               <Code className="w-5 h-5 text-accent" />
               <div>
                 <h3 className="font-brand text-xl text-text-primary">Colang Configuration</h3>
-                <p className="text-sm text-text-muted">Advanced guardrail rules using NeMo Colang syntax</p>
+                <p className="text-sm text-text-muted">
+                  Advanced guardrail rules using NeMo Colang syntax
+                </p>
               </div>
             </div>
             <div className="terminal-chrome">
@@ -778,7 +888,9 @@ define flow
                 <div className="flex items-center gap-2">
                   <select
                     value={eventFilter.action || ''}
-                    onChange={(e) => setEventFilter(prev => ({ ...prev, action: e.target.value || undefined }))}
+                    onChange={(e) =>
+                      setEventFilter((prev) => ({ ...prev, action: e.target.value || undefined }))
+                    }
                     className="input text-sm"
                   >
                     <option value="">All Actions</option>
@@ -789,7 +901,9 @@ define flow
                   </select>
                   <select
                     value={eventFilter.type || ''}
-                    onChange={(e) => setEventFilter(prev => ({ ...prev, type: e.target.value || undefined }))}
+                    onChange={(e) =>
+                      setEventFilter((prev) => ({ ...prev, type: e.target.value || undefined }))
+                    }
                     className="input text-sm"
                   >
                     <option value="">All Types</option>
@@ -803,7 +917,12 @@ define flow
                     disabled={eventsLoading || eventsRefreshing}
                     className="btn-secondary text-sm flex items-center gap-1"
                   >
-                    <RefreshCw className={clsx('w-4 h-4', (eventsLoading || eventsRefreshing) && 'animate-spin')} />
+                    <RefreshCw
+                      className={clsx(
+                        'w-4 h-4',
+                        (eventsLoading || eventsRefreshing) && 'animate-spin'
+                      )}
+                    />
                     Refresh
                   </button>
                 </div>
@@ -813,13 +932,20 @@ define flow
             {events.length === 0 ? (
               <div className="p-12 text-center">
                 <FileText className="w-12 h-12 text-text-muted mx-auto mb-4" />
-                <h3 className="font-brand text-xl text-text-primary mb-2">No activity recorded yet</h3>
-                <p className="text-text-muted text-sm">Guardrail events will appear here in real-time</p>
+                <h3 className="font-brand text-xl text-text-primary mb-2">
+                  No activity recorded yet
+                </h3>
+                <p className="text-text-muted text-sm">
+                  Guardrail events will appear here in real-time
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
                 {events.map((event, idx) => (
-                  <div key={`${event.timestamp}-${idx}`} className="p-4 hover:bg-background-secondary transition-press">
+                  <div
+                    key={`${event.timestamp}-${idx}`}
+                    className="p-4 hover:bg-background-secondary transition-press"
+                  >
                     <div className="flex items-start gap-3">
                       {event.action_taken === 'block' ? (
                         <ShieldX className="w-5 h-5 text-status-error mt-0.5" />
@@ -832,10 +958,13 @@ define flow
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className={clsx(
-                            'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
-                            ACTION_COLORS[event.action_taken as keyof typeof ACTION_COLORS] || 'bg-background-tertiary border-border'
-                          )}>
+                          <span
+                            className={clsx(
+                              'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
+                              ACTION_COLORS[event.action_taken as keyof typeof ACTION_COLORS] ||
+                                'bg-background-tertiary border-border'
+                            )}
+                          >
                             {event.action_taken}
                           </span>
                           <span className="tag">

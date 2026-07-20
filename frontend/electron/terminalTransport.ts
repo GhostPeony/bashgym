@@ -5,7 +5,7 @@ export interface TerminalTimerApi {
 
 const defaultTimerApi: TerminalTimerApi = {
   set: (callback, delayMs) => setTimeout(callback, delayMs),
-  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
 }
 
 /**
@@ -20,7 +20,7 @@ export function buildPowerShellArgs(enablePsReadLine: boolean): string[] {
     '-NoProfile',
     '-NoExit',
     '-Command',
-    'Remove-Module PSReadLine -ErrorAction SilentlyContinue',
+    'Remove-Module PSReadLine -ErrorAction SilentlyContinue'
   ]
 }
 
@@ -28,7 +28,7 @@ export function buildPowerShellArgs(enablePsReadLine: boolean): string[] {
 export class TerminalSizeTracker {
   constructor(
     private cols: number,
-    private rows: number,
+    private rows: number
   ) {}
 
   update(cols: number, rows: number): boolean {
@@ -89,7 +89,7 @@ export class TerminalIpcBatcher {
   constructor(
     private readonly onFlush: (data: string) => void,
     private readonly delayMs = 8,
-    private readonly timerApi: TerminalTimerApi = defaultTimerApi,
+    private readonly timerApi: TerminalTimerApi = defaultTimerApi
   ) {}
 
   push(data: string): void {
@@ -149,12 +149,12 @@ export class TerminalOutputFlowController {
   constructor(
     private readonly onDeliver: (data: string, frameId?: number) => void,
     private readonly onPauseChange: (paused: boolean) => void,
-    options: TerminalOutputFlowOptions = {},
+    options: TerminalOutputFlowOptions = {}
   ) {
     this.highWatermarkChars = Math.max(1, options.highWatermarkChars ?? 64 * 1024)
     this.lowWatermarkChars = Math.min(
       this.highWatermarkChars,
-      Math.max(0, options.lowWatermarkChars ?? 16 * 1024),
+      Math.max(0, options.lowWatermarkChars ?? 16 * 1024)
     )
   }
 
@@ -280,5 +280,4 @@ export class TerminalOutputFlowOwnership {
   acknowledge(owner: string, frameId: number): void {
     if (this.owner === owner) this.flow.acknowledge(frameId)
   }
-
 }

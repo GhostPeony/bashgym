@@ -18,7 +18,8 @@ export interface CampaignDecisionMeaningInput {
 }
 
 // Remote supervisors seal the numeric exit code with a trailing newline.
-const SUCCESSFUL_REMOTE_EXIT_SHA256 = '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa'
+const SUCCESSFUL_REMOTE_EXIT_SHA256 =
+  '9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa'
 
 const ARTIFACT_SUMMARIES: Record<string, string> = {
   'campaign_development_comparison.v1': 'Development comparison recorded',
@@ -37,7 +38,7 @@ const ARTIFACT_SUMMARIES: Record<string, string> = {
   'query_format_ablation_manifest.v2': 'Query-format ablation plan recorded',
   'training_manifest.v1': 'Training plan recorded',
   'training_metrics_jsonl.v1': 'Training metrics captured',
-  'unclassified_artifact.v1': 'Unclassified artifact recorded',
+  'unclassified_artifact.v1': 'Unclassified artifact recorded'
 }
 
 const EVENT_SUMMARIES: Record<string, string> = {
@@ -51,7 +52,7 @@ const EVENT_SUMMARIES: Record<string, string> = {
   'campaign:campaign_completed': 'Campaign completed',
   'campaign:stage_advanced': 'Campaign advanced to the next stage',
   'campaign:study_completed': 'Study completed',
-  'campaign:study_created': 'Study created',
+  'campaign:study_created': 'Study created'
 }
 
 function readable(value: string): string {
@@ -78,15 +79,20 @@ function artifactState(artifact: CampaignArtifact): { label: string; tone: Campa
 
 export function describeCampaignArtifact(artifact: CampaignArtifact): CampaignMeaningPresentation {
   const state = artifactState(artifact)
-  const successfulRemoteExit = artifact.schema_name === 'campaign_remote_exit_code.v1'
-    && artifact.sha256 === SUCCESSFUL_REMOTE_EXIT_SHA256
+  const successfulRemoteExit =
+    artifact.schema_name === 'campaign_remote_exit_code.v1' &&
+    artifact.sha256 === SUCCESSFUL_REMOTE_EXIT_SHA256
   const knownSummary = ARTIFACT_SUMMARIES[artifact.schema_name]
-  const summary = artifact.schema_name === 'campaign_remote_exit_code.v1'
-    ? successfulRemoteExit ? 'Remote run finished successfully' : 'Remote run exit status sealed'
-    : knownSummary || 'Artifact sealed for inspection'
-  const schemaDetail = knownSummary || artifact.schema_name === 'campaign_remote_exit_code.v1'
-    ? ''
-    : `${readable(artifact.schema_name)} · `
+  const summary =
+    artifact.schema_name === 'campaign_remote_exit_code.v1'
+      ? successfulRemoteExit
+        ? 'Remote run finished successfully'
+        : 'Remote run exit status sealed'
+      : knownSummary || 'Artifact sealed for inspection'
+  const schemaDetail =
+    knownSummary || artifact.schema_name === 'campaign_remote_exit_code.v1'
+      ? ''
+      : `${readable(artifact.schema_name)} · `
 
   return {
     summary,
@@ -96,13 +102,13 @@ export function describeCampaignArtifact(artifact: CampaignArtifact): CampaignMe
       `schema ${artifact.schema_name}`,
       `SHA-256 ${artifact.sha256}`,
       `producer ${artifact.producer_action_id || 'none'}`,
-      `created ${artifact.created_at}`,
+      `created ${artifact.created_at}`
     ].join(' · '),
     tone: successfulRemoteExit
       ? 'success'
       : artifact.schema_name === 'campaign_remote_exit_code.v1'
         ? 'neutral'
-        : state.tone,
+        : state.tone
   }
 }
 
@@ -114,13 +120,13 @@ function stageCompletionSummary(event: CampaignPublicEvent): string | null {
 }
 
 export function describeCampaignEvent(event: CampaignPublicEvent): CampaignMeaningPresentation {
-  const summary = stageCompletionSummary(event)
-    || EVENT_SUMMARIES[event.event_type]
-    || readable(event.event_type)
+  const summary =
+    stageCompletionSummary(event) || EVENT_SUMMARIES[event.event_type] || readable(event.event_type)
   const details: string[] = []
   if (event.summary?.attempt_id) details.push(`Attempt ${event.summary.attempt_id}`)
   if (event.summary?.study_id) details.push(`Study ${event.summary.study_id}`)
-  if (event.summary?.stage && !stageCompletionSummary(event)) details.push(`Stage ${readable(event.summary.stage)}`)
+  if (event.summary?.stage && !stageCompletionSummary(event))
+    details.push(`Stage ${readable(event.summary.stage)}`)
   if (event.summary?.code) details.push(readable(event.summary.code))
   if (event.summary?.alert_count !== undefined) details.push(`${event.summary.alert_count} alerts`)
 
@@ -130,7 +136,7 @@ export function describeCampaignEvent(event: CampaignPublicEvent): CampaignMeani
     summary,
     detail: details.join(' · ') || `Recorded by ${readable(event.actor_id)}`,
     forensic: `${event.event_id} · seq ${event.sequence} · v${event.aggregate_version}`,
-    tone: failed ? 'error' : completed ? 'success' : 'info',
+    tone: failed ? 'error' : completed ? 'success' : 'info'
   }
 }
 
@@ -141,11 +147,12 @@ export function describeCampaignExecutor(executor: string | null | undefined): s
   return executor ? readable(executor) : 'Executor not assigned'
 }
 
-export function describeCampaignDecision(decision: CampaignDecisionMeaningInput): CampaignMeaningPresentation {
+export function describeCampaignDecision(
+  decision: CampaignDecisionMeaningInput
+): CampaignMeaningPresentation {
   const rawOutcome = decision.outcome.trim()
-  const outcomeLabel = /[._:-]/.test(rawOutcome) && !/\s/.test(rawOutcome)
-    ? readable(rawOutcome)
-    : rawOutcome
+  const outcomeLabel =
+    /[._:-]/.test(rawOutcome) && !/\s/.test(rawOutcome) ? readable(rawOutcome) : rawOutcome
   const summary = outcomeLabel
     ? `${outcomeLabel.charAt(0)}${/[._:-]/.test(rawOutcome) ? outcomeLabel.slice(1).toLowerCase() : outcomeLabel.slice(1)}`
     : `${readable(decision.decision_type)} decision recorded`
@@ -155,6 +162,6 @@ export function describeCampaignDecision(decision: CampaignDecisionMeaningInput)
     summary,
     detail: decision.rationale?.trim() || `${readable(decision.decision_type)} decision recorded`,
     forensic: `Decision ${decision.decision_id} · type ${decision.decision_type} · evidence ${evidence}`,
-    tone: /promote|accept|advance/i.test(decision.outcome) ? 'success' : 'info',
+    tone: /promote|accept|advance/i.test(decision.outcome) ? 'success' : 'info'
   }
 }

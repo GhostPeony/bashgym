@@ -2,9 +2,7 @@
 
 **Turn your AI coding sessions into fine-tuned models.**
 
-
 <img width="1745" height="906" alt="autobashgym" src="https://github.com/user-attachments/assets/3ba9430e-e910-4d74-8860-d9e4c88161d3" />
-
 
 ---
 
@@ -44,14 +42,14 @@ Fine-tune with SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation (Unsl
 Export to LoRA adapter, merged weights, or GGUF → run via Ollama
 ```
 
-| Stage | What Happens |
-|-------|--------------|
-| **Capture** | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
-| **Curate** | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed. |
-| **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation. |
-| **Train** | SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a private compute target, or via HuggingFace cloud. |
-| **Evaluate** | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result. |
-| **Route** | Confidence-based routing shifts simple tasks from Claude to your trained model over time. |
+| Stage          | What Happens                                                                                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Capture**    | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
+| **Curate**     | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed.                                                               |
+| **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation.                                                     |
+| **Train**      | SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a private compute target, or via HuggingFace cloud.        |
+| **Evaluate**   | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result.                                                                                                                |
+| **Route**      | Confidence-based routing shifts simple tasks from Claude to your trained model over time.                                                                                                                  |
 
 The pipeline can run automatically — file watchers monitor session directories across all configured tools and trigger import → classify → train when thresholds are met.
 
@@ -59,13 +57,13 @@ The pipeline can run automatically — file watchers monitor session directories
 
 ## Supported AI Coding Tools
 
-| Tool | Live Capture | Historical Import | Hook Location |
-|------|-------------|-------------------|---------------|
-| **Claude Code** | Yes | Yes | `~/.claude/hooks/` |
-| **Gemini CLI** | Yes | Yes | `~/.gemini/settings.json` |
-| **OpenCode** | Yes | Yes | `~/.config/opencode/plugins/` |
-| **Codex** | Import only | Yes | `~/.codex/` |
-| **Copilot CLI** | Yes | Yes | `~/.copilot/hooks/` |
+| Tool            | Live Capture | Historical Import | Hook Location                 |
+| --------------- | ------------ | ----------------- | ----------------------------- |
+| **Claude Code** | Yes          | Yes               | `~/.claude/hooks/`            |
+| **Gemini CLI**  | Yes          | Yes               | `~/.gemini/settings.json`     |
+| **OpenCode**    | Yes          | Yes               | `~/.config/opencode/plugins/` |
+| **Codex**       | Import only  | Yes               | `~/.codex/`                   |
+| **Copilot CLI** | Yes          | Yes               | `~/.copilot/hooks/`           |
 
 Live capture hooks run silently alongside your coding tool and record sessions in real time. Historical import harvests existing session data already on disk — no hooks needed.
 
@@ -85,11 +83,11 @@ The workspace is an infinite canvas where terminals, browsers, and integration n
 
 **Integration nodes** plug external services into the canvas:
 
-| Node | What It Does |
-|------|--------------|
-| **Context** | Freeform notes, file contents, URLs, or snippets. Reload files and fetch URLs on demand. |
-| **Neon** | Connect to a Postgres database. Introspect schema, run queries, send results to terminals as markdown. |
-| **Vercel** | Monitor deployments, pull build logs, generate code with v0, push previews to browser nodes. |
+| Node        | What It Does                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------ |
+| **Context** | Freeform notes, file contents, URLs, or snippets. Reload files and fetch URLs on demand.               |
+| **Neon**    | Connect to a Postgres database. Introspect schema, run queries, send results to terminals as markdown. |
+| **Vercel**  | Monitor deployments, pull build logs, generate code with v0, push previews to browser nodes.           |
 
 **Edges are context channels.** Connect any two nodes and content flows between them — schema from Neon, build logs from Vercel, screenshots from browsers, notes from context nodes — all prefilled into linked terminal inputs for review before sending.
 
@@ -101,12 +99,12 @@ The workspace is an infinite canvas where terminals, browsers, and integration n
 
 ### Prerequisites
 
-| Requirement | Version | Notes |
-|-------------|---------|-------|
-| **Python** | 3.10+ | Backend API and control plane; use a backend-supported Python/CUDA combination for training |
-| **Node.js** | 22+ LTS | Frontend dashboard and native Electron packaging |
-| **Provider API key** | Optional | Add Anthropic, NVIDIA, OpenAI, or Hugging Face credentials only for features that use them |
-| **CUDA GPU** | 8GB+ VRAM | Only needed for local training. Not required for trace capture or the dashboard. |
+| Requirement          | Version   | Notes                                                                                       |
+| -------------------- | --------- | ------------------------------------------------------------------------------------------- |
+| **Python**           | 3.10+     | Backend API and control plane; use a backend-supported Python/CUDA combination for training |
+| **Node.js**          | 22+ LTS   | Frontend dashboard and native Electron packaging                                            |
+| **Provider API key** | Optional  | Add Anthropic, NVIDIA, OpenAI, or Hugging Face credentials only for features that use them  |
+| **CUDA GPU**         | 8GB+ VRAM | Only needed for local training. Not required for trace capture or the dashboard.            |
 
 On Windows, `npm install` requires Visual Studio Build Tools with "Desktop development with C++" (for `node-pty` native compilation).
 
@@ -299,10 +297,10 @@ See [Training](#training) for details.
 
 Two feedback loops that improve agent behavior at different speeds:
 
-| Loop | Mechanism | Latency | Effect |
-|------|-----------|---------|--------|
+| Loop          | Mechanism                                                                                         | Latency | Effect                      |
+| ------------- | ------------------------------------------------------------------------------------------------- | ------- | --------------------------- |
 | **Fast loop** | Prompt evolution — analyze failure patterns, mutate worker prompts, evaluate, deploy best variant | Minutes | Immediate behavioral change |
-| **Slow loop** | Weight training — accumulate traces, generate examples, fine-tune model | Hours | Deep, permanent learning |
+| **Slow loop** | Weight training — accumulate traces, generate examples, fine-tune model                           | Hours   | Deep, permanent learning    |
 
 The fast loop extracts recurring failure patterns from decision logs (wrong tool choices, missing context, anti-patterns) and uses an LLM to generate targeted prompt patches. Variants are scored against held-out traces and retained only when they improve quality.
 
@@ -316,19 +314,19 @@ Typed event bus with 44 event types covering pipeline, training, orchestration, 
 
 11 benchmarks for scoring trained models:
 
-| Benchmark | Focus |
-|-----------|-------|
-| HumanEval | Function-level code generation (164 problems) |
-| MBPP | Mostly basic programming problems (974 problems) |
-| BigCodeBench | Complex, multi-library coding tasks |
-| SWE-bench | Real GitHub issue resolution |
-| DS-1000 | Data science problems |
-| BFCL | Function calling accuracy |
-| GSM8K | Math reasoning |
-| ARC | Abstract reasoning |
-| HellaSwag | Commonsense inference |
-| ToxiGen | Toxicity detection |
-| BBQ | Bias measurement |
+| Benchmark    | Focus                                            |
+| ------------ | ------------------------------------------------ |
+| HumanEval    | Function-level code generation (164 problems)    |
+| MBPP         | Mostly basic programming problems (974 problems) |
+| BigCodeBench | Complex, multi-library coding tasks              |
+| SWE-bench    | Real GitHub issue resolution                     |
+| DS-1000      | Data science problems                            |
+| BFCL         | Function calling accuracy                        |
+| GSM8K        | Math reasoning                                   |
+| ARC          | Abstract reasoning                               |
+| HellaSwag    | Commonsense inference                            |
+| ToxiGen      | Toxicity detection                               |
+| BBQ          | Bias measurement                                 |
 
 Plus LLM-as-Judge scoring (correctness, helpfulness, safety) and RAG metrics (faithfulness, answer relevancy, context precision) via NeMo Evaluator integration.
 
@@ -353,13 +351,13 @@ Built-in assistant with tool use and system context. Available in-app and as a s
 
 Guardrails pipeline with 5 check types applied to inputs and outputs:
 
-| Check | Description |
-|-------|-------------|
-| **Injection detection** | Regex patterns for prompt injection attempts |
-| **Content moderation** | Blocks harmful or inappropriate content |
-| **Topic control** | Constrains responses to allowed domains |
-| **Code safety** | Blocks dangerous commands (`rm -rf /`, fork bombs, `curl \| sh`, privilege escalation) |
-| **PII filter** | Opt-in detection and redaction of personal information |
+| Check                   | Description                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| **Injection detection** | Regex patterns for prompt injection attempts                                           |
+| **Content moderation**  | Blocks harmful or inappropriate content                                                |
+| **Topic control**       | Constrains responses to allowed domains                                                |
+| **Code safety**         | Blocks dangerous commands (`rm -rf /`, fork bombs, `curl \| sh`, privilege escalation) |
+| **PII filter**          | Opt-in detection and redaction of personal information                                 |
 
 ### Observability
 
@@ -375,15 +373,15 @@ Gamified progress tracking across trace collection, quality, training, and maste
 
 ### Strategies
 
-| Strategy | What It Does | When To Use |
-|----------|--------------|-------------|
-| **SFT** | Supervised fine-tuning — trains the model to reproduce successful traces | Start here. Works with 20–30 gold traces. |
-| **DPO** | Direct Preference Optimization — learns from pairs of good and bad responses | When you have both gold and failed traces. |
-| **GRPO** | Group Relative Policy Optimization via `trl.GRPOTrainer`. Three tiered reward functions: syntax (`ast.parse`), execution (`subprocess`), and verification (`pytest`). Model generates multiple completions per prompt and learns from the reward signal. | When you want RL-based training. Needs test cases for verification mode. |
-| **RLVR** | RL with Verifiable Rewards — GRPO with verification-locked rewards. Test results from `pytest` are the reward signal: pass rate becomes the score. | When your traces include test code. The strongest signal for code correctness. |
-| **Distillation** | Knowledge distillation from a large teacher (e.g. Claude) into a small student. Combines soft labels (KL divergence) and hard labels (cross-entropy) weighted by alpha. Supports offline and on-policy modes. | When you want a compact model that reasons like a larger one. |
-| **Session Distillation** | Targeted self-distillation from failed trace spans: insert a short local hint, score the same target tokens under original and hinted context, and train with masked KL/CE. | When traces contain local mistakes, retries, or recovery pivots that are too narrow for DPO and not yet ready for GRPO/RLVR. |
-| **Cascade RL** | Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Trains each coding domain independently with tailored reward functions, then merges domain experts via MOPD distillation. | When you want domain-specialized training. Best results with diverse traces across file editing, bash, search, and multi-step tasks. |
+| Strategy                 | What It Does                                                                                                                                                                                                                                             | When To Use                                                                                                                          |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **SFT**                  | Supervised fine-tuning — trains the model to reproduce successful traces                                                                                                                                                                                 | Start here. Works with 20–30 gold traces.                                                                                            |
+| **DPO**                  | Direct Preference Optimization — learns from pairs of good and bad responses                                                                                                                                                                             | When you have both gold and failed traces.                                                                                           |
+| **GRPO**                 | Group Relative Policy Optimization via `trl.GRPOTrainer`. Three tiered reward functions: syntax (`ast.parse`), execution (`subprocess`), and verification (`pytest`). Model generates multiple completions per prompt and learns from the reward signal. | When you want RL-based training. Needs test cases for verification mode.                                                             |
+| **RLVR**                 | RL with Verifiable Rewards — GRPO with verification-locked rewards. Test results from `pytest` are the reward signal: pass rate becomes the score.                                                                                                       | When your traces include test code. The strongest signal for code correctness.                                                       |
+| **Distillation**         | Knowledge distillation from a large teacher (e.g. Claude) into a small student. Combines soft labels (KL divergence) and hard labels (cross-entropy) weighted by alpha. Supports offline and on-policy modes.                                            | When you want a compact model that reasons like a larger one.                                                                        |
+| **Session Distillation** | Targeted self-distillation from failed trace spans: insert a short local hint, score the same target tokens under original and hinted context, and train with masked KL/CE.                                                                              | When traces contain local mistakes, retries, or recovery pivots that are too narrow for DPO and not yet ready for GRPO/RLVR.         |
+| **Cascade RL**           | Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Trains each coding domain independently with tailored reward functions, then merges domain experts via MOPD distillation.                                                      | When you want domain-specialized training. Best results with diverse traces across file editing, bash, search, and multi-step tasks. |
 
 ### Base Models
 
@@ -401,11 +399,11 @@ backend and model support it, but is not silently forced for every run.
 
 ### Output Formats
 
-| Format | Location | Use Case |
-|--------|----------|----------|
-| **LoRA adapter** | `lora_adapters/` | ~50MB, composable, hot-swappable |
-| **Merged weights** | `merged/` | Full 16-bit model, ready for inference |
-| **GGUF** | `exported_gguf/` | Quantized (default `q4_k_m`), for Ollama / llama.cpp / LM Studio / GPT4All |
+| Format             | Location         | Use Case                                                                   |
+| ------------------ | ---------------- | -------------------------------------------------------------------------- |
+| **LoRA adapter**   | `lora_adapters/` | ~50MB, composable, hot-swappable                                           |
+| **Merged weights** | `merged/`        | Full 16-bit model, ready for inference                                     |
+| **GGUF**           | `exported_gguf/` | Quantized (default `q4_k_m`), for Ollama / llama.cpp / LM Studio / GPT4All |
 
 ### Private Compute Training
 
@@ -520,11 +518,11 @@ schema exploration. These routes are hidden by default; set
 of the official Control Room, have no renderer-owned state surface, and must
 not be presented as durable campaign evidence:
 
-| Mode | What It Evolves | What It Searches | How It Evaluates |
-|------|----------------|-----------------|-----------------|
-| **Hyperparameter search** | Training configuration | Learning rate, LoRA rank/alpha/dropout, batch size, sequence length, quantization, warmup ratio | Short training runs (50-100 steps) measuring validation loss |
-| **Trace research** | Data curation strategy | Quality thresholds, segmentation boundaries, cognitive tag inclusion, silver trace ratio, dedup threshold, per-repo caps | End-to-end: filter traces → generate examples → micro-train → measure loss |
-| **Schema evolution** | Data Designer pipeline configs | Temperatures, column toggles, judge rubrics, provider assignments, code validation, embedding dedup | Two-stage: judge scores filter bad candidates fast (25 examples), then micro-train validates top 5 |
+| Mode                      | What It Evolves                | What It Searches                                                                                                         | How It Evaluates                                                                                   |
+| ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| **Hyperparameter search** | Training configuration         | Learning rate, LoRA rank/alpha/dropout, batch size, sequence length, quantization, warmup ratio                          | Short training runs (50-100 steps) measuring validation loss                                       |
+| **Trace research**        | Data curation strategy         | Quality thresholds, segmentation boundaries, cognitive tag inclusion, silver trace ratio, dedup threshold, per-repo caps | End-to-end: filter traces → generate examples → micro-train → measure loss                         |
+| **Schema evolution**      | Data Designer pipeline configs | Temperatures, column toggles, judge rubrics, provider assignments, code validation, embedding dedup                      | Two-stage: judge scores filter bad candidates fast (25 examples), then micro-train validates top 5 |
 
 **Schema evolution** is the newest mode — the AutoCurriculum Compiler. Instead of tuning hyperparameters or data curation rules, it evolves the entire data generation pipeline. A `SchemaSearchSpace` mutates Data Designer configs (which models generate code vs judge quality, what temperature, how many judge dimensions, whether to include code validation), evaluates each mutant by generating real training data and measuring downstream training loss, and keeps winners. The template library maps failure patterns from your traces to starting templates — if your model keeps picking the wrong tool, the schema evolves toward tool-use-focused training data.
 
@@ -547,21 +545,21 @@ local/private target during campaign resolution.
 
 Copy `.env.example` to `.env`:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | No | — | Claude teacher/provider features only |
-| `OPENAI_API_KEY` | No | — | OpenAI provider features only |
-| `GOOGLE_API_KEY` | No | — | Google/Gemini provider features only |
-| `BASE_MODEL` | No | — | Explicit compatible trainable-base ID; durable campaigns also pin an immutable revision |
-| `HF_TOKEN` | No | — | HuggingFace token (for cloud training and model push) |
-| `NVIDIA_API_KEY` | No | — | NVIDIA NIM API key (for synthetic data augmentation) |
-| `ROUTING_STRATEGY` | No | `confidence_based` | Model routing strategy |
-| `AUGMENTATION_PROVIDER` | No | `anthropic` | Synthetic data provider: `anthropic` or `nim` |
-| `OLLAMA_ENABLED` | No | `true` | Enable Ollama local inference provider |
-| `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server URL |
-| `SSH_REMOTE_HOST` | No | — | Private compute target host |
-| `SSH_REMOTE_USER` | No | — | SSH username for remote training |
-| `SSH_REMOTE_KEY_PATH` | No | `~/.ssh/id_rsa` | Path to SSH private key |
+| Variable                | Required | Default                  | Description                                                                             |
+| ----------------------- | -------- | ------------------------ | --------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`     | No       | —                        | Claude teacher/provider features only                                                   |
+| `OPENAI_API_KEY`        | No       | —                        | OpenAI provider features only                                                           |
+| `GOOGLE_API_KEY`        | No       | —                        | Google/Gemini provider features only                                                    |
+| `BASE_MODEL`            | No       | —                        | Explicit compatible trainable-base ID; durable campaigns also pin an immutable revision |
+| `HF_TOKEN`              | No       | —                        | HuggingFace token (for cloud training and model push)                                   |
+| `NVIDIA_API_KEY`        | No       | —                        | NVIDIA NIM API key (for synthetic data augmentation)                                    |
+| `ROUTING_STRATEGY`      | No       | `confidence_based`       | Model routing strategy                                                                  |
+| `AUGMENTATION_PROVIDER` | No       | `anthropic`              | Synthetic data provider: `anthropic` or `nim`                                           |
+| `OLLAMA_ENABLED`        | No       | `true`                   | Enable Ollama local inference provider                                                  |
+| `OLLAMA_BASE_URL`       | No       | `http://localhost:11434` | Ollama server URL                                                                       |
+| `SSH_REMOTE_HOST`       | No       | —                        | Private compute target host                                                             |
+| `SSH_REMOTE_USER`       | No       | —                        | SSH username for remote training                                                        |
+| `SSH_REMOTE_KEY_PATH`   | No       | `~/.ssh/id_rsa`          | Path to SSH private key                                                                 |
 
 API keys can also be managed through the dashboard at **Settings > API Keys**, which provides secure storage via the Electron keychain.
 
@@ -628,10 +626,12 @@ bashgym/
 See [TODOS.md](TODOS.md) for the full roadmap with details.
 
 **Recently shipped:**
+
 - **AutoCurriculum Compiler** — Data Designer schemas evolve via evolutionary search (SchemaResearcher). Two-stage evaluation: judge scores filter bad candidates fast, micro-training validates winners. Template library auto-selects pipelines from failure analysis.
 - **Cascade RL** — Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Four coding domains (file ops, bash, search, multi-step reasoning) each get tailored reward functions. MOPD distillation merges domain experts into one model.
 
 **Up next:**
+
 - **Black-Box On-Policy Distillation** — Real-time teacher inference (Claude/NIM) during training, targeting the student's actual weaknesses instead of using stale pre-generated outputs
 - **Schema Sharing** — Export/import evolved schemas with provenance so others can skip the search
 

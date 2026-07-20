@@ -3,24 +3,27 @@
 
 import asyncio
 import json
-import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bashgym.orchestrator.models import (
-    TaskNode, TaskStatus, TaskPriority,
-    WorkerConfig, WorkerResult, MergeResult,
-    LLMConfig, LLMProvider,
-)
 from bashgym.orchestrator.dispatcher import WorkerPool
-from bashgym.orchestrator.worktree import WorktreeManager
+from bashgym.orchestrator.models import (
+    LLMConfig,
+    LLMProvider,
+    MergeResult,
+    TaskNode,
+    WorkerConfig,
+    WorkerResult,
+)
 from bashgym.orchestrator.synthesizer import (
-    ResultSynthesizer, SynthesisReport, CONFLICT_RESOLUTION_PROMPT,
+    CONFLICT_RESOLUTION_PROMPT,
+    ResultSynthesizer,
+    SynthesisReport,
 )
 from bashgym.orchestrator.task_dag import TaskDAG
-
+from bashgym.orchestrator.worktree import WorktreeManager
 
 # =============================================================================
 # WorkerPool Tests
@@ -76,7 +79,7 @@ class TestWorkerPoolSpawn:
             nonlocal captured_cmd
             captured_cmd = args
             proc = AsyncMock()
-            proc.communicate = AsyncMock(return_value=(b'{}', b''))
+            proc.communicate = AsyncMock(return_value=(b"{}", b""))
             proc.returncode = 0
             return proc
 
@@ -96,7 +99,9 @@ class TestWorkerPoolSpawn:
 
         # When worker_prompt is set, it's used
         task = TaskNode(
-            id="t1", title="Test", description="Desc",
+            id="t1",
+            title="Test",
+            description="Desc",
             worker_prompt="Custom prompt",
         )
 
@@ -105,7 +110,7 @@ class TestWorkerPoolSpawn:
         async def mock_exec(*args, **kwargs):
             captured_cmds.append(args)
             proc = AsyncMock()
-            proc.communicate = AsyncMock(return_value=(b'{}', b''))
+            proc.communicate = AsyncMock(return_value=(b"{}", b""))
             proc.returncode = 0
             return proc
 
@@ -119,7 +124,9 @@ class TestWorkerPoolSpawn:
     async def test_spawn_sets_cwd_to_worktree(self):
         pool = WorkerPool(max_workers=5)
         task = TaskNode(
-            id="t1", title="Test", description="Desc",
+            id="t1",
+            title="Test",
+            description="Desc",
             worktree_path=Path("/tmp/worktree/t1"),
         )
 
@@ -129,7 +136,7 @@ class TestWorkerPoolSpawn:
             nonlocal captured_kwargs
             captured_kwargs = kwargs
             proc = AsyncMock()
-            proc.communicate = AsyncMock(return_value=(b'{}', b''))
+            proc.communicate = AsyncMock(return_value=(b"{}", b""))
             proc.returncode = 0
             return proc
 
@@ -153,24 +160,22 @@ class TestWorkerPoolResults:
         pool = WorkerPool(max_workers=5)
         self._prepare_pool_for_run(pool)
 
-        output = json.dumps({
-            "session_id": "sess-123",
-            "result": "All done!",
-            "usage": {"total_tokens": 5000},
-            "cost_usd": 0.15,
-        })
+        output = json.dumps(
+            {
+                "session_id": "sess-123",
+                "result": "All done!",
+                "usage": {"total_tokens": 5000},
+                "cost_usd": 0.15,
+            }
+        )
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(output.encode(), b'')
-        )
+        mock_proc.communicate = AsyncMock(return_value=(output.encode(), b""))
         mock_proc.returncode = 0
         mock_proc.kill = AsyncMock()
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await pool._run_worker(
-                "t1", ["claude", "-p", "test"], None, 60.0
-            )
+            result = await pool._run_worker("t1", ["claude", "-p", "test"], None, 60.0)
 
         assert result.success is True
         assert result.task_id == "t1"
@@ -184,9 +189,7 @@ class TestWorkerPoolResults:
         self._prepare_pool_for_run(pool)
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            side_effect=asyncio.TimeoutError()
-        )
+        mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
         mock_proc.kill = AsyncMock()
         mock_proc.returncode = -1
 
@@ -197,14 +200,12 @@ class TestWorkerPoolResults:
             communicate_calls[0] += 1
             if communicate_calls[0] == 1:
                 raise asyncio.TimeoutError()
-            return (b'', b'')
+            return (b"", b"")
 
         mock_proc.communicate = AsyncMock(side_effect=communicate_side_effect)
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await pool._run_worker(
-                "t1", ["claude", "-p", "test"], None, 0.001
-            )
+            result = await pool._run_worker("t1", ["claude", "-p", "test"], None, 0.001)
 
         assert result.success is False
         assert "timed out" in result.error.lower()
@@ -218,9 +219,7 @@ class TestWorkerPoolResults:
             "asyncio.create_subprocess_exec",
             side_effect=FileNotFoundError("claude not found"),
         ):
-            result = await pool._run_worker(
-                "t1", ["claude", "-p", "test"], None, 60.0
-            )
+            result = await pool._run_worker("t1", ["claude", "-p", "test"], None, 60.0)
 
         assert result.success is False
         assert "claude CLI not found" in result.error
@@ -232,14 +231,12 @@ class TestWorkerPoolResults:
 
         mock_proc = AsyncMock()
         mock_proc.communicate = AsyncMock(
-            return_value=(b'partial output', b'Error: something broke')
+            return_value=(b"partial output", b"Error: something broke")
         )
         mock_proc.returncode = 1
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await pool._run_worker(
-                "t1", ["claude", "-p", "test"], None, 60.0
-            )
+            result = await pool._run_worker("t1", ["claude", "-p", "test"], None, 60.0)
 
         assert result.success is False
         assert result.exit_code == 1
@@ -250,8 +247,12 @@ class TestWorkerPoolResults:
         pool = WorkerPool()
         # Pre-populate results
         result = WorkerResult(
-            task_id="t1", session_id="s1", success=True,
-            output="done", exit_code=0, duration_seconds=1.0,
+            task_id="t1",
+            session_id="s1",
+            success=True,
+            output="done",
+            exit_code=0,
+            duration_seconds=1.0,
         )
         pool._results["t1"] = result
         pool._completion_events["t1"] = asyncio.Event()
@@ -284,7 +285,7 @@ class TestWorkerPoolCancel:
         mock_proc = AsyncMock()
         mock_proc.terminate = MagicMock()
         mock_proc.kill = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b'', b''))
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
         pool._processes["t1"] = mock_proc
         pool._tasks["t1"] = AsyncMock()
@@ -303,7 +304,7 @@ class TestWorkerPoolCancel:
             mock_proc = AsyncMock()
             mock_proc.terminate = MagicMock()
             mock_proc.kill = AsyncMock()
-            mock_proc.communicate = AsyncMock(return_value=(b'', b''))
+            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
             pool._processes[f"t{i}"] = mock_proc
             pool._tasks[f"t{i}"] = AsyncMock()
             pool._tasks[f"t{i}"].cancel = MagicMock()
@@ -318,13 +319,21 @@ class TestWorkerPoolProperties:
     def test_total_cost(self):
         pool = WorkerPool()
         pool._results["t1"] = WorkerResult(
-            task_id="t1", session_id="", success=True,
-            output="", exit_code=0, duration_seconds=10,
+            task_id="t1",
+            session_id="",
+            success=True,
+            output="",
+            exit_code=0,
+            duration_seconds=10,
             cost_usd=0.50,
         )
         pool._results["t2"] = WorkerResult(
-            task_id="t2", session_id="", success=False,
-            output="", exit_code=1, duration_seconds=5,
+            task_id="t2",
+            session_id="",
+            success=False,
+            output="",
+            exit_code=1,
+            duration_seconds=5,
             cost_usd=0.25,
         )
         assert pool.total_cost == pytest.approx(0.75)
@@ -360,7 +369,7 @@ class TestWorktreeManager:
         mgr = WorktreeManager(tmp_path)
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b'', b''))
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
         mock_proc.returncode = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
@@ -381,18 +390,16 @@ class TestWorktreeManager:
             proc = AsyncMock()
             if call_count[0] == 1:
                 # First call fails with "already exists"
-                proc.communicate = AsyncMock(
-                    return_value=(b'', b'branch already exists')
-                )
+                proc.communicate = AsyncMock(return_value=(b"", b"branch already exists"))
                 proc.returncode = 1
             else:
                 # Second call succeeds (without -b flag)
-                proc.communicate = AsyncMock(return_value=(b'', b''))
+                proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 0
             return proc
 
         with patch("asyncio.create_subprocess_exec", side_effect=mock_exec):
-            path = await mgr.create("t1", "task/t1", "main")
+            await mgr.create("t1", "task/t1", "main")
 
         assert call_count[0] == 2
         assert "t1" in mgr.active_worktrees
@@ -402,9 +409,7 @@ class TestWorktreeManager:
         mgr = WorktreeManager(tmp_path)
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(b'', b'fatal: some error')
-        )
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"fatal: some error"))
         mock_proc.returncode = 1
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
@@ -423,13 +428,11 @@ class TestWorktreeManager:
             proc = AsyncMock()
             if call_count[0] == 1:
                 # git diff --name-only
-                proc.communicate = AsyncMock(
-                    return_value=(b'file1.py\nfile2.py', b'')
-                )
+                proc.communicate = AsyncMock(return_value=(b"file1.py\nfile2.py", b""))
                 proc.returncode = 0
             else:
                 # git merge
-                proc.communicate = AsyncMock(return_value=(b'', b''))
+                proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 0
             return proc
 
@@ -452,25 +455,21 @@ class TestWorktreeManager:
             proc = AsyncMock()
             if call_count[0] == 1:
                 # git diff --name-only
-                proc.communicate = AsyncMock(
-                    return_value=(b'conflicted.py', b'')
-                )
+                proc.communicate = AsyncMock(return_value=(b"conflicted.py", b""))
                 proc.returncode = 0
             elif call_count[0] == 2:
                 # git merge -> CONFLICT
                 proc.communicate = AsyncMock(
-                    return_value=(b'CONFLICT in conflicted.py', b'CONFLICT')
+                    return_value=(b"CONFLICT in conflicted.py", b"CONFLICT")
                 )
                 proc.returncode = 1
             elif call_count[0] == 3:
                 # git diff --name-only --diff-filter=U
-                proc.communicate = AsyncMock(
-                    return_value=(b'conflicted.py', b'')
-                )
+                proc.communicate = AsyncMock(return_value=(b"conflicted.py", b""))
                 proc.returncode = 0
             else:
                 # git merge --abort
-                proc.communicate = AsyncMock(return_value=(b'', b''))
+                proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 0
             return proc
 
@@ -495,7 +494,7 @@ class TestWorktreeManager:
         mgr._branches["t1"] = "task/t1"
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b'', b''))
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
         mock_proc.returncode = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
@@ -512,7 +511,7 @@ class TestWorktreeManager:
             mgr._branches[f"t{i}"] = f"task/t{i}"
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b'', b''))
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
         mock_proc.returncode = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
@@ -573,37 +572,70 @@ class TestResultSynthesizer:
     def _make_dag(self):
         """Create a simple 2-task DAG for testing."""
         dag = TaskDAG()
-        dag.add_task(TaskNode(
-            id="t1", title="Task 1", description="Do 1",
-            files_touched=["a.py"],
-        ))
-        dag.add_task(TaskNode(
-            id="t2", title="Task 2", description="Do 2",
-            dependencies=["t1"], files_touched=["b.py"],
-        ))
-        dag.mark_completed("t1", WorkerResult(
-            task_id="t1", session_id="s1", success=True,
-            output="done", exit_code=0, duration_seconds=10.0,
-            cost_usd=0.50,
-        ))
-        dag.mark_completed("t2", WorkerResult(
-            task_id="t2", session_id="s2", success=True,
-            output="done", exit_code=0, duration_seconds=15.0,
-            cost_usd=0.75,
-        ))
+        dag.add_task(
+            TaskNode(
+                id="t1",
+                title="Task 1",
+                description="Do 1",
+                files_touched=["a.py"],
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="t2",
+                title="Task 2",
+                description="Do 2",
+                dependencies=["t1"],
+                files_touched=["b.py"],
+            )
+        )
+        dag.mark_completed(
+            "t1",
+            WorkerResult(
+                task_id="t1",
+                session_id="s1",
+                success=True,
+                output="done",
+                exit_code=0,
+                duration_seconds=10.0,
+                cost_usd=0.50,
+            ),
+        )
+        dag.mark_completed(
+            "t2",
+            WorkerResult(
+                task_id="t2",
+                session_id="s2",
+                success=True,
+                output="done",
+                exit_code=0,
+                duration_seconds=15.0,
+                cost_usd=0.75,
+            ),
+        )
         return dag
 
     def _make_results(self):
         return [
             WorkerResult(
-                task_id="t1", session_id="s1", success=True,
-                output="done1", exit_code=0, duration_seconds=10.0,
-                cost_usd=0.50, files_modified=["a.py"],
+                task_id="t1",
+                session_id="s1",
+                success=True,
+                output="done1",
+                exit_code=0,
+                duration_seconds=10.0,
+                cost_usd=0.50,
+                files_modified=["a.py"],
             ),
             WorkerResult(
-                task_id="t2", session_id="s2", success=True,
-                output="done2", exit_code=0, duration_seconds=15.0,
-                cost_usd=0.75, files_modified=["b.py"],
+                task_id="t2",
+                session_id="s2",
+                success=True,
+                output="done2",
+                exit_code=0,
+                duration_seconds=15.0,
+                cost_usd=0.75,
+                files_modified=["b.py"],
             ),
         ]
 
@@ -630,12 +662,12 @@ class TestResultSynthesizer:
         results = self._make_results()
 
         mock_worktrees = AsyncMock(spec=WorktreeManager)
-        mock_worktrees.merge = AsyncMock(side_effect=[
-            MergeResult(task_id="t1", branch="task/t1", success=True,
-                        files_merged=["a.py"]),
-            MergeResult(task_id="t2", branch="task/t2", success=True,
-                        files_merged=["b.py"]),
-        ])
+        mock_worktrees.merge = AsyncMock(
+            side_effect=[
+                MergeResult(task_id="t1", branch="task/t1", success=True, files_merged=["a.py"]),
+                MergeResult(task_id="t2", branch="task/t2", success=True, files_merged=["b.py"]),
+            ]
+        )
         mock_worktrees.cleanup_all = AsyncMock()
 
         synth = ResultSynthesizer(worktrees=mock_worktrees)
@@ -652,12 +684,12 @@ class TestResultSynthesizer:
         results = self._make_results()
 
         mock_worktrees = AsyncMock(spec=WorktreeManager)
-        mock_worktrees.merge = AsyncMock(side_effect=[
-            MergeResult(task_id="t1", branch="task/t1", success=True,
-                        files_merged=["a.py"]),
-            MergeResult(task_id="t2", branch="task/t2", success=False,
-                        error="Detached HEAD"),
-        ])
+        mock_worktrees.merge = AsyncMock(
+            side_effect=[
+                MergeResult(task_id="t1", branch="task/t1", success=True, files_merged=["a.py"]),
+                MergeResult(task_id="t2", branch="task/t2", success=False, error="Detached HEAD"),
+            ]
+        )
         mock_worktrees.cleanup_all = AsyncMock()
 
         synth = ResultSynthesizer(worktrees=mock_worktrees)
@@ -673,13 +705,18 @@ class TestResultSynthesizer:
         results = self._make_results()
 
         mock_worktrees = AsyncMock(spec=WorktreeManager)
-        mock_worktrees.merge = AsyncMock(side_effect=[
-            MergeResult(task_id="t1", branch="task/t1", success=True,
-                        files_merged=["a.py"]),
-            MergeResult(task_id="t2", branch="task/t2", success=False,
-                        conflicts=["shared.py"],
-                        error="Merge conflicts detected"),
-        ])
+        mock_worktrees.merge = AsyncMock(
+            side_effect=[
+                MergeResult(task_id="t1", branch="task/t1", success=True, files_merged=["a.py"]),
+                MergeResult(
+                    task_id="t2",
+                    branch="task/t2",
+                    success=False,
+                    conflicts=["shared.py"],
+                    error="Merge conflicts detected",
+                ),
+            ]
+        )
         mock_worktrees.cleanup_all = AsyncMock()
 
         synth = ResultSynthesizer(
@@ -703,8 +740,10 @@ class TestResultSynthesizer:
         async def track_merge(task_id, target_branch):
             merge_order.append(task_id)
             return MergeResult(
-                task_id=task_id, branch=f"task/{task_id}",
-                success=True, files_merged=[],
+                task_id=task_id,
+                branch=f"task/{task_id}",
+                success=True,
+                files_merged=[],
             )
 
         mock_worktrees = AsyncMock(spec=WorktreeManager)
@@ -722,21 +761,37 @@ class TestResultSynthesizer:
         """Report includes failed result counts."""
         dag = TaskDAG()
         dag.add_task(TaskNode(id="t1", title="T1", description="D1"))
-        dag.mark_completed("t1", WorkerResult(
-            task_id="t1", session_id="", success=True,
-            output="done", exit_code=0, duration_seconds=10.0,
-        ))
+        dag.mark_completed(
+            "t1",
+            WorkerResult(
+                task_id="t1",
+                session_id="",
+                success=True,
+                output="done",
+                exit_code=0,
+                duration_seconds=10.0,
+            ),
+        )
 
         results = [
             WorkerResult(
-                task_id="t1", session_id="", success=True,
-                output="done", exit_code=0, duration_seconds=10.0,
+                task_id="t1",
+                session_id="",
+                success=True,
+                output="done",
+                exit_code=0,
+                duration_seconds=10.0,
                 cost_usd=0.50,
             ),
             WorkerResult(
-                task_id="t2", session_id="", success=False,
-                output="", exit_code=1, duration_seconds=5.0,
-                cost_usd=0.20, error="Broke",
+                task_id="t2",
+                session_id="",
+                success=False,
+                output="",
+                exit_code=1,
+                duration_seconds=5.0,
+                cost_usd=0.20,
+                error="Broke",
             ),
         ]
 
@@ -755,12 +810,18 @@ class TestResultSynthesizerConflictResolution:
     async def test_resolve_conflicts_calls_llm(self, tmp_path):
         """Conflict resolution reads conflict markers and calls LLM."""
         dag = TaskDAG()
-        dag.add_task(TaskNode(
-            id="t1", title="Task One", description="First task",
-        ))
+        dag.add_task(
+            TaskNode(
+                id="t1",
+                title="Task One",
+                description="First task",
+            )
+        )
 
         failed_merge = MergeResult(
-            task_id="t1", branch="task/t1", success=False,
+            task_id="t1",
+            branch="task/t1",
+            success=False,
             conflicts=["conflict.py"],
             files_merged=["conflict.py"],
             error="Merge conflicts detected",
@@ -791,23 +852,23 @@ class TestResultSynthesizerConflictResolution:
             proc = AsyncMock()
             if merge_call_count[0] == 1:
                 # Re-attempt merge fails (expected)
-                proc.communicate = AsyncMock(return_value=(b'', b''))
+                proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 1
             else:
                 # git add / git commit succeed
-                proc.communicate = AsyncMock(return_value=(b'', b''))
+                proc.communicate = AsyncMock(return_value=(b"", b""))
                 proc.returncode = 0
             return proc
 
         with (
             patch("asyncio.create_subprocess_exec", side_effect=mock_exec),
-            patch("bashgym.orchestrator.synthesizer._call_llm",
-                  new_callable=AsyncMock,
-                  return_value="resolved code"),
+            patch(
+                "bashgym.orchestrator.synthesizer._call_llm",
+                new_callable=AsyncMock,
+                return_value="resolved code",
+            ),
         ):
-            result = await synth._resolve_conflicts(
-                dag, "t1", failed_merge, "main"
-            )
+            result = await synth._resolve_conflicts(dag, "t1", failed_merge, "main")
 
         assert result.success is True
         # Verify the file was written with resolved content
@@ -817,12 +878,18 @@ class TestResultSynthesizerConflictResolution:
     async def test_resolve_conflicts_aborts_on_llm_failure(self):
         """If LLM resolution fails, merge is aborted."""
         dag = TaskDAG()
-        dag.add_task(TaskNode(
-            id="t1", title="Task One", description="First task",
-        ))
+        dag.add_task(
+            TaskNode(
+                id="t1",
+                title="Task One",
+                description="First task",
+            )
+        )
 
         failed_merge = MergeResult(
-            task_id="t1", branch="task/t1", success=False,
+            task_id="t1",
+            branch="task/t1",
+            success=False,
             conflicts=["conflict.py"],
             files_merged=["conflict.py"],
         )
@@ -840,22 +907,23 @@ class TestResultSynthesizerConflictResolution:
 
         async def mock_exec(*args, **kwargs):
             proc = AsyncMock()
-            proc.communicate = AsyncMock(return_value=(b'', b''))
+            proc.communicate = AsyncMock(return_value=(b"", b""))
             proc.returncode = 1  # merge re-attempt fails, as expected
             return proc
 
         with (
             patch("asyncio.create_subprocess_exec", side_effect=mock_exec),
-            patch("bashgym.orchestrator.synthesizer._call_llm",
-                  new_callable=AsyncMock,
-                  side_effect=Exception("API error")),
+            patch(
+                "bashgym.orchestrator.synthesizer._call_llm",
+                new_callable=AsyncMock,
+                side_effect=Exception("API error"),
+            ),
             patch.object(Path, "exists", return_value=True),
-            patch.object(Path, "read_text",
-                         return_value="<<<<<<< HEAD\nold\n=======\nnew\n>>>>>>>"),
+            patch.object(
+                Path, "read_text", return_value="<<<<<<< HEAD\nold\n=======\nnew\n>>>>>>>"
+            ),
         ):
-            result = await synth._resolve_conflicts(
-                dag, "t1", failed_merge, "main"
-            )
+            result = await synth._resolve_conflicts(dag, "t1", failed_merge, "main")
 
         assert result.success is False
         assert "incomplete" in result.error.lower()
@@ -867,14 +935,14 @@ class TestResultSynthesizerConflictResolution:
         dag.add_task(TaskNode(id="t1", title="T1", description="D1"))
 
         failed_merge = MergeResult(
-            task_id="t1", branch="task/t1", success=False,
+            task_id="t1",
+            branch="task/t1",
+            success=False,
             conflicts=["file.py"],
         )
 
         synth = ResultSynthesizer(worktrees=None, llm_config=LLMConfig())
-        result = await synth._resolve_conflicts(
-            dag, "t1", failed_merge, "main"
-        )
+        result = await synth._resolve_conflicts(dag, "t1", failed_merge, "main")
         assert result.success is False
 
 

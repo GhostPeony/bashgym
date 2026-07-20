@@ -60,7 +60,7 @@ def call_model(url: str, messages: list, max_tokens: int = 200, temp: float = 0.
 
 def load_val_examples() -> list[dict]:
     with open(VAL_PATH) as f:
-        return [json.loads(l) for l in f if l.strip()]
+        return [json.loads(line) for line in f if line.strip()]
 
 
 def get_user_prompt(ex: dict) -> str:
@@ -110,9 +110,9 @@ def tier1_speed(prompts: list[str]) -> dict:
     base_avg = sum(r.get("tokens_per_sec", 0) for r in results["base"] if "error" not in r) / max(
         1, sum(1 for r in results["base"] if "error" not in r)
     )
-    ft_avg = sum(r.get("tokens_per_sec", 0) for r in results["finetuned"] if "error" not in r) / max(
-        1, sum(1 for r in results["finetuned"] if "error" not in r)
-    )
+    ft_avg = sum(
+        r.get("tokens_per_sec", 0) for r in results["finetuned"] if "error" not in r
+    ) / max(1, sum(1 for r in results["finetuned"] if "error" not in r))
 
     logger.info(f"\n  Base avg: {base_avg:.1f} tok/s")
     logger.info(f"  FT avg:   {ft_avg:.1f} tok/s")
@@ -135,9 +135,7 @@ def tier2_tool_prediction(val_examples: list[dict], n: int = 30) -> dict:
     logger.info("=" * 60)
 
     # Pick examples that have a clear first tool
-    examples_with_tool = [
-        ex for ex in val_examples if get_first_tool_used(ex)
-    ][:n]
+    examples_with_tool = [ex for ex in val_examples if get_first_tool_used(ex)][:n]
     logger.info(f"  Testing {len(examples_with_tool)} examples")
 
     base_correct = 0
@@ -151,7 +149,11 @@ def tier2_tool_prediction(val_examples: list[dict], n: int = 30) -> dict:
             continue
 
         # Get system prompt from the example
-        system = ex["messages"][0]["content"] if ex["messages"][0].get("role") == "system" else "You are an expert software development agent."
+        system = (
+            ex["messages"][0]["content"]
+            if ex["messages"][0].get("role") == "system"
+            else "You are an expert software development agent."
+        )
 
         msgs = [
             {"role": "system", "content": system},
@@ -173,12 +175,14 @@ def tier2_tool_prediction(val_examples: list[dict], n: int = 30) -> dict:
         if ft_match:
             ft_correct += 1
 
-        results.append({
-            "gold_tool": gold_tool,
-            "prompt": user_prompt[:200],
-            "base_match": base_match,
-            "ft_match": ft_match,
-        })
+        results.append(
+            {
+                "gold_tool": gold_tool,
+                "prompt": user_prompt[:200],
+                "base_match": base_match,
+                "ft_match": ft_match,
+            }
+        )
 
         if (i + 1) % 5 == 0:
             logger.info(
@@ -196,7 +200,11 @@ def tier2_tool_prediction(val_examples: list[dict], n: int = 30) -> dict:
         "ft_correct": ft_correct,
         "base_accuracy": round(base_correct / total, 3) if total else 0,
         "ft_accuracy": round(ft_correct / total, 3) if total else 0,
-        "winner": "finetuned" if ft_correct > base_correct else "base" if base_correct > ft_correct else "tie",
+        "winner": (
+            "finetuned"
+            if ft_correct > base_correct
+            else "base" if base_correct > ft_correct else "tie"
+        ),
     }
 
 
@@ -227,7 +235,11 @@ def tier3_llm_judge(val_examples: list[dict], n: int = 15) -> dict:
         if not user_prompt or len(user_prompt) < 30:
             continue
 
-        system = ex["messages"][0]["content"] if ex["messages"][0].get("role") == "system" else "You are an expert software development agent."
+        system = (
+            ex["messages"][0]["content"]
+            if ex["messages"][0].get("role") == "system"
+            else "You are an expert software development agent."
+        )
         msgs = [
             {"role": "system", "content": system},
             {"role": "user", "content": user_prompt[:2000]},
@@ -275,14 +287,18 @@ Reply with JSON only: {{"a_score": <1-5>, "b_score": <1-5>, "reason": "<brief>"}
             scores = json.loads(text[start:end])
             base_scores.append(scores["a_score"])
             ft_scores.append(scores["b_score"])
-            judgments.append({
-                "prompt": user_prompt[:200],
-                "base_score": scores["a_score"],
-                "ft_score": scores["b_score"],
-                "reason": scores.get("reason", ""),
-            })
+            judgments.append(
+                {
+                    "prompt": user_prompt[:200],
+                    "base_score": scores["a_score"],
+                    "ft_score": scores["b_score"],
+                    "reason": scores.get("reason", ""),
+                }
+            )
             if (i + 1) % 3 == 0:
-                logger.info(f"  [{i+1}/{len(test_examples)}] base={scores['a_score']} ft={scores['b_score']}")
+                logger.info(
+                    f"  [{i+1}/{len(test_examples)}] base={scores['a_score']} ft={scores['b_score']}"
+                )
         except Exception as e:
             logger.warning(f"  Judge failed: {e}")
 
@@ -370,11 +386,19 @@ def main():
     logger.info("\n" + "=" * 60)
     logger.info("FINAL VERDICT")
     logger.info("=" * 60)
-    logger.info(f"  Tier 1 Speed:        base={tier1['base_avg_tps']}t/s ft={tier1['ft_avg_tps']}t/s")
-    logger.info(f"  Tier 2 Tool acc:     base={tier2['base_accuracy']:.1%} ft={tier2['ft_accuracy']:.1%} → {tier2['winner']}")
+    logger.info(
+        f"  Tier 1 Speed:        base={tier1['base_avg_tps']}t/s ft={tier1['ft_avg_tps']}t/s"
+    )
+    logger.info(
+        f"  Tier 2 Tool acc:     base={tier2['base_accuracy']:.1%} ft={tier2['ft_accuracy']:.1%} → {tier2['winner']}"
+    )
     if tier3 and "error" not in tier3:
-        logger.info(f"  Tier 3 LLM judge:    base={tier3['base_avg_score']}/5 ft={tier3['ft_avg_score']}/5 → {tier3['winner']}")
-        logger.info(f"     FT wins: {tier3['ft_wins']}, ties: {tier3['ties']}, base wins: {tier3['base_wins']}")
+        logger.info(
+            f"  Tier 3 LLM judge:    base={tier3['base_avg_score']}/5 ft={tier3['ft_avg_score']}/5 → {tier3['winner']}"
+        )
+        logger.info(
+            f"     FT wins: {tier3['ft_wins']}, ties: {tier3['ties']}, base wins: {tier3['base_wins']}"
+        )
     logger.info(f"\nReport saved to: {out_path}")
 
 

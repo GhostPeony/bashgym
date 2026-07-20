@@ -11,21 +11,26 @@ export function loadCanvasViewport(storage: ViewportStorage, key: string): Viewp
     if (!stored) return null
     const parsed = JSON.parse(stored) as Partial<Viewport>
     if (
-      typeof parsed.x !== 'number'
-      || typeof parsed.y !== 'number'
-      || typeof parsed.zoom !== 'number'
-      || !Number.isFinite(parsed.x)
-      || !Number.isFinite(parsed.y)
-      || !Number.isFinite(parsed.zoom)
-      || parsed.zoom <= 0
-    ) return null
+      typeof parsed.x !== 'number' ||
+      typeof parsed.y !== 'number' ||
+      typeof parsed.zoom !== 'number' ||
+      !Number.isFinite(parsed.x) ||
+      !Number.isFinite(parsed.y) ||
+      !Number.isFinite(parsed.zoom) ||
+      parsed.zoom <= 0
+    )
+      return null
     return { x: parsed.x, y: parsed.y, zoom: parsed.zoom }
   } catch {
     return null
   }
 }
 
-export function saveCanvasViewport(storage: ViewportStorage, key: string, viewport: Viewport): void {
+export function saveCanvasViewport(
+  storage: ViewportStorage,
+  key: string,
+  viewport: Viewport
+): void {
   try {
     storage.setItem(key, JSON.stringify(viewport))
   } catch {

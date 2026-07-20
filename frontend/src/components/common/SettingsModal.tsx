@@ -8,17 +8,37 @@ import {
   TERMINAL_FG_PRESETS,
   isTerminalFgHue,
   getTerminalFgColor,
-  getTerminalFgLabel,
+  getTerminalFgLabel
 } from '../../stores'
 import { HooksSection, ModelsSection, ApiKeysSection } from '../settings'
-import { Palette, Key, Cpu, Terminal, Globe, Moon, Sun, Monitor, Dices, RotateCcw, RefreshCw } from 'lucide-react'
+import {
+  Palette,
+  Key,
+  Cpu,
+  Terminal,
+  Globe,
+  Moon,
+  Sun,
+  Monitor,
+  Dices,
+  RotateCcw,
+  RefreshCw
+} from 'lucide-react'
 
 type SettingsTab = 'appearance' | 'apikeys' | 'models' | 'agents' | 'connection'
 type Theme = 'light' | 'dark' | 'system'
 
 export function SettingsModal() {
   const { isSettingsOpen, setSettingsOpen } = useUIStore()
-  const { accentHue, setAccentHue, randomizeHue, resetHue, terminalFgHue, setTerminalFgHue, resetTerminalFgHue } = useAccentStore()
+  const {
+    accentHue,
+    setAccentHue,
+    randomizeHue,
+    resetHue,
+    terminalFgHue,
+    setTerminalFgHue,
+    resetTerminalFgHue
+  } = useAccentStore()
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
   const [theme, setTheme] = useState<Theme>('dark')
 
@@ -45,7 +65,10 @@ export function SettingsModal() {
 
   const handleThemeChange = (newTheme: Theme) => {
     setTheme(newTheme)
-    if (newTheme === 'dark' || (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    if (
+      newTheme === 'dark' ||
+      (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    ) {
       document.documentElement.classList.add('dark')
     } else {
       document.documentElement.classList.remove('dark')
@@ -57,13 +80,16 @@ export function SettingsModal() {
     { id: 'apikeys' as const, label: 'API Keys', icon: Key },
     { id: 'models' as const, label: 'Models', icon: Cpu },
     { id: 'agents' as const, label: 'Agents', icon: Terminal },
-    { id: 'connection' as const, label: 'Connection', icon: Globe },
+    { id: 'connection' as const, label: 'Connection', icon: Globe }
   ]
-  const previewTheme = theme === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : theme === 'system'
-      ? 'light'
-      : theme
+  const previewTheme =
+    theme === 'system' &&
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : theme === 'system'
+        ? 'light'
+        : theme
 
   return (
     <Modal
@@ -86,7 +112,7 @@ export function SettingsModal() {
       <div className="flex gap-6 h-[450px]">
         {/* Sidebar Tabs */}
         <div className="w-36 flex-shrink-0 space-y-1 border-r border-border pr-4">
-          {tabs.map(tab => (
+          {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -115,12 +141,14 @@ export function SettingsModal() {
 
                 {/* Theme Selector */}
                 <div className="space-y-3 mb-6">
-                  <label className="text-xs font-mono uppercase tracking-widest text-text-secondary">Theme</label>
+                  <label className="text-xs font-mono uppercase tracking-widest text-text-secondary">
+                    Theme
+                  </label>
                   <div className="flex gap-2">
                     {[
                       { value: 'light' as const, icon: Sun, label: 'Light' },
                       { value: 'dark' as const, icon: Moon, label: 'Dark' },
-                      { value: 'system' as const, icon: Monitor, label: 'System' },
+                      { value: 'system' as const, icon: Monitor, label: 'System' }
                     ].map(({ value, icon: Icon, label }) => (
                       <button
                         key={value}
@@ -140,7 +168,9 @@ export function SettingsModal() {
 
                 {/* Accent Color Slider */}
                 <div className="space-y-3">
-                  <label className="text-xs font-mono uppercase tracking-widest text-text-secondary">Accent Color</label>
+                  <label className="text-xs font-mono uppercase tracking-widest text-text-secondary">
+                    Accent Color
+                  </label>
 
                   {/* Slider Row */}
                   <div className="flex items-center gap-3">
@@ -172,7 +202,7 @@ export function SettingsModal() {
 
                   {/* Preset Chips */}
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {ACCENT_PRESETS.map(preset => (
+                    {ACCENT_PRESETS.map((preset) => (
                       <button
                         key={preset.name}
                         onClick={() => setAccentHue(preset.hue)}
@@ -197,7 +227,9 @@ export function SettingsModal() {
 
                   {/* Live Preview Swatches */}
                   <div className="flex items-center gap-3 mt-3">
-                    <span className="text-xs font-mono text-text-muted uppercase tracking-widest">Preview:</span>
+                    <span className="text-xs font-mono text-text-muted uppercase tracking-widest">
+                      Preview:
+                    </span>
                     <div className="flex gap-2">
                       <div
                         className="w-8 h-8 border-brutal border-border rounded-brutal"
@@ -221,7 +253,9 @@ export function SettingsModal() {
 
                 {/* Terminal Text Color Slider */}
                 <div className="space-y-3 mt-6">
-                  <label className="text-xs font-mono uppercase tracking-widest text-text-secondary">Terminal Text Color</label>
+                  <label className="text-xs font-mono uppercase tracking-widest text-text-secondary">
+                    Terminal Text Color
+                  </label>
 
                   {/* Slider Row */}
                   <div className="flex items-center gap-3">
@@ -245,7 +279,7 @@ export function SettingsModal() {
 
                   {/* Preset Chips */}
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {TERMINAL_FG_PRESETS.map(preset => (
+                    {TERMINAL_FG_PRESETS.map((preset) => (
                       <button
                         key={preset.name}
                         onClick={() => setTerminalFgHue(preset.hue)}
@@ -265,16 +299,20 @@ export function SettingsModal() {
                   </div>
 
                   <p className="text-xs text-text-muted">
-                    Use presets for `default`, `black`, or `white`. Dragging the slider switches back to a hue-based text color.
+                    Use presets for `default`, `black`, or `white`. Dragging the slider switches
+                    back to a hue-based text color.
                   </p>
 
                   {/* Live Preview */}
                   <div className="flex items-center gap-3 mt-3">
-                    <span className="text-xs font-mono text-text-muted uppercase tracking-widest">Preview:</span>
+                    <span className="text-xs font-mono text-text-muted uppercase tracking-widest">
+                      Preview:
+                    </span>
                     <div
                       className="px-4 py-2 border-brutal border-border rounded-brutal font-mono text-sm"
                       style={{
-                        backgroundColor: previewTheme === 'dark' ? '#1a1a2e' : `hsl(${accentHue}, 45%, 85%)`,
+                        backgroundColor:
+                          previewTheme === 'dark' ? '#1a1a2e' : `hsl(${accentHue}, 45%, 85%)`,
                         color: getTerminalFgColor(previewTheme, terminalFgHue)
                       }}
                     >
@@ -300,8 +338,8 @@ export function SettingsModal() {
                     { label: 'Toggle Theme', key: 'Ctrl+D' },
                     { label: 'Close Overlay', key: 'Escape' },
                     { label: 'Command Palette', key: 'Ctrl+K' },
-                    { label: 'Settings', key: 'Ctrl+,' },
-                  ].map(shortcut => (
+                    { label: 'Settings', key: 'Ctrl+,' }
+                  ].map((shortcut) => (
                     <div key={shortcut.key} className="flex items-center justify-between py-1">
                       <span className="text-text-secondary">{shortcut.label}</span>
                       <kbd className="px-2 py-0.5 font-mono text-xs border-brutal border-border bg-background-secondary rounded-brutal text-text-muted">
@@ -322,7 +360,9 @@ export function SettingsModal() {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => {
-                      if (window.confirm('Reload the app? This will close all terminal sessions.')) {
+                      if (
+                        window.confirm('Reload the app? This will close all terminal sessions.')
+                      ) {
                         window.location.reload()
                       }
                     }}
@@ -344,14 +384,10 @@ export function SettingsModal() {
           </div>
 
           {/* API Keys Tab */}
-          {activeTab === 'apikeys' && (
-            <ApiKeysSection />
-          )}
+          {activeTab === 'apikeys' && <ApiKeysSection />}
 
           {/* Agents Tab */}
-          {activeTab === 'agents' && (
-            <HooksSection />
-          )}
+          {activeTab === 'agents' && <HooksSection />}
 
           {/* Connection Tab */}
           {activeTab === 'connection' && (
@@ -361,7 +397,9 @@ export function SettingsModal() {
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-mono uppercase tracking-widest text-text-secondary mb-2">API URL</label>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-text-secondary mb-2">
+                    API URL
+                  </label>
                   <input
                     type="text"
                     value={apiUrl}
@@ -371,7 +409,9 @@ export function SettingsModal() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-mono uppercase tracking-widest text-text-secondary mb-2">WebSocket URL</label>
+                  <label className="block text-xs font-mono uppercase tracking-widest text-text-secondary mb-2">
+                    WebSocket URL
+                  </label>
                   <input
                     type="text"
                     value={wsUrl}

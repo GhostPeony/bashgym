@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, ChevronDown, ChevronRight, Clock3, FolderGit2, Plus, RefreshCw } from 'lucide-react'
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  FolderGit2,
+  Plus,
+  RefreshCw
+} from 'lucide-react'
 import { clsx } from 'clsx'
 import {
   buildWorkspaceSessionIndex,
@@ -47,9 +55,27 @@ interface NewSessionLauncherProps {
 function NewSessionLauncher({ cwd, onLaunch }: NewSessionLauncherProps) {
   return (
     <div className="grid grid-cols-3 gap-1 py-1">
-      <button type="button" onClick={() => onLaunch('claude', cwd)} className="node-btn node-btn-wide node-btn-accent">CLAUDE</button>
-      <button type="button" onClick={() => onLaunch('codex', cwd)} className="node-btn node-btn-wide">CODEX</button>
-      <button type="button" onClick={() => onLaunch('shell', cwd)} className="node-btn node-btn-wide">SHELL</button>
+      <button
+        type="button"
+        onClick={() => onLaunch('claude', cwd)}
+        className="node-btn node-btn-wide node-btn-accent"
+      >
+        CLAUDE
+      </button>
+      <button
+        type="button"
+        onClick={() => onLaunch('codex', cwd)}
+        className="node-btn node-btn-wide"
+      >
+        CODEX
+      </button>
+      <button
+        type="button"
+        onClick={() => onLaunch('shell', cwd)}
+        className="node-btn node-btn-wide"
+      >
+        SHELL
+      </button>
     </div>
   )
 }
@@ -133,71 +159,102 @@ export function AgentSessionsRail() {
       }
       if (!project.branch && snapshot.gitBranch) project.branch = snapshot.gitBranch
       project.journals.push(snapshot)
-      project.lastActivity = Math.max(project.lastActivity, snapshot.lastEventAt ?? snapshot.fileMtime)
+      project.lastActivity = Math.max(
+        project.lastActivity,
+        snapshot.lastEventAt ?? snapshot.fileMtime
+      )
     }
 
     for (const project of byKey.values()) {
-      project.journals.sort((a, b) => (b.lastEventAt ?? b.fileMtime) - (a.lastEventAt ?? a.fileMtime))
+      project.journals.sort(
+        (a, b) => (b.lastEventAt ?? b.fileMtime) - (a.lastEventAt ?? a.fileMtime)
+      )
     }
     return Array.from(byKey.values()).sort((a, b) => b.lastActivity - a.lastActivity)
   }, [matches, snapshots])
 
-  const toggleSet = useCallback((current: Set<string>, key: string, apply: (next: Set<string>) => void) => {
-    const next = new Set(current)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    apply(next)
-  }, [])
+  const toggleSet = useCallback(
+    (current: Set<string>, key: string, apply: (next: Set<string>) => void) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      apply(next)
+    },
+    []
+  )
 
-  const handleFocus = useCallback((panelId: string, workspaceId: string) => {
-    closeOverlay()
-    presentWorkspacePanel(workspaceId, panelId, 'peek')
-  }, [closeOverlay, presentWorkspacePanel])
+  const handleFocus = useCallback(
+    (panelId: string, workspaceId: string) => {
+      closeOverlay()
+      presentWorkspacePanel(workspaceId, panelId, 'peek')
+    },
+    [closeOverlay, presentWorkspacePanel]
+  )
 
-  const handleResume = useCallback((snapshot: AgentSessionSnapshot) => {
-    if (!snapshot.sessionId) return
-    const command = snapshot.kind === 'claude'
-      ? `claude --resume ${snapshot.sessionId}`
-      : `codex resume ${snapshot.sessionId}`
-    const title = snapshot.title ?? folderNameFromPath(snapshot.cwd, snapshot.kind)
-    useTerminalStore.getState().createTerminal(undefined, title, command, snapshot.cwd)
-    closeOverlay()
-  }, [closeOverlay])
+  const handleResume = useCallback(
+    (snapshot: AgentSessionSnapshot) => {
+      if (!snapshot.sessionId) return
+      const command =
+        snapshot.kind === 'claude'
+          ? `claude --resume ${snapshot.sessionId}`
+          : `codex resume ${snapshot.sessionId}`
+      const title = snapshot.title ?? folderNameFromPath(snapshot.cwd, snapshot.kind)
+      useTerminalStore.getState().createTerminal(undefined, title, command, snapshot.cwd)
+      closeOverlay()
+    },
+    [closeOverlay]
+  )
 
-  const handleLaunch = useCallback((kind: 'claude' | 'codex' | 'shell', cwd?: string) => {
-    const title = kind === 'claude' ? 'Claude Code' : kind === 'codex' ? 'Codex' : 'Terminal'
-    useTerminalStore.getState().createTerminal(undefined, title, kind === 'shell' ? undefined : kind, cwd)
-    setLauncherFor(null)
-    closeOverlay()
-  }, [closeOverlay])
+  const handleLaunch = useCallback(
+    (kind: 'claude' | 'codex' | 'shell', cwd?: string) => {
+      const title = kind === 'claude' ? 'Claude Code' : kind === 'codex' ? 'Codex' : 'Terminal'
+      useTerminalStore
+        .getState()
+        .createTerminal(undefined, title, kind === 'shell' ? undefined : kind, cwd)
+      setLauncherFor(null)
+      closeOverlay()
+    },
+    [closeOverlay]
+  )
 
-  const handleOpenInNewWorkspace = useCallback((snapshot: AgentSessionSnapshot) => {
-    if (!snapshot.sessionId) return
-    const workspaceStore = useWorkspaceStore.getState()
-    const workspaceId = workspaceStore.createWorkspace(folderNameFromPath(snapshot.cwd, snapshot.kind))
-    workspaceStore.switchWorkspace(workspaceId)
-    const command = snapshot.kind === 'claude'
-      ? `claude --resume ${snapshot.sessionId}`
-      : `codex resume ${snapshot.sessionId}`
-    const title = snapshot.title ?? folderNameFromPath(snapshot.cwd, snapshot.kind)
-    useTerminalStore.getState().createTerminal(undefined, title, command, snapshot.cwd)
-    closeOverlay()
-  }, [closeOverlay])
+  const handleOpenInNewWorkspace = useCallback(
+    (snapshot: AgentSessionSnapshot) => {
+      if (!snapshot.sessionId) return
+      const workspaceStore = useWorkspaceStore.getState()
+      const workspaceId = workspaceStore.createWorkspace(
+        folderNameFromPath(snapshot.cwd, snapshot.kind)
+      )
+      workspaceStore.switchWorkspace(workspaceId)
+      const command =
+        snapshot.kind === 'claude'
+          ? `claude --resume ${snapshot.sessionId}`
+          : `codex resume ${snapshot.sessionId}`
+      const title = snapshot.title ?? folderNameFromPath(snapshot.cwd, snapshot.kind)
+      useTerminalStore.getState().createTerminal(undefined, title, command, snapshot.cwd)
+      closeOverlay()
+    },
+    [closeOverlay]
+  )
 
   const handleMoveToWorkspace = useCallback((panelId: string, workspaceId: string) => {
-    useWorkspaceStore.getState().moveLivePanelToWorkspace(panelId, workspaceId, { switchAfter: false })
+    useWorkspaceStore
+      .getState()
+      .moveLivePanelToWorkspace(panelId, workspaceId, { switchAfter: false })
   }, [])
 
-  const handleMoveToNewWorkspace = useCallback((panelId: string) => {
-    const record = workspaceGroups
-      .flatMap((group) => group.sessions)
-      .find((candidate) => candidate.panel.id === panelId)
-    if (!record || !record.isActiveWorkspace) return
-    const name = folderNameFromPath(record.session.cwd, record.panel.title)
-    const workspaceStore = useWorkspaceStore.getState()
-    const workspaceId = workspaceStore.createWorkspace(name)
-    workspaceStore.moveLivePanelToWorkspace(panelId, workspaceId, { switchAfter: false })
-  }, [workspaceGroups])
+  const handleMoveToNewWorkspace = useCallback(
+    (panelId: string) => {
+      const record = workspaceGroups
+        .flatMap((group) => group.sessions)
+        .find((candidate) => candidate.panel.id === panelId)
+      if (!record || !record.isActiveWorkspace) return
+      const name = folderNameFromPath(record.session.cwd, record.panel.title)
+      const workspaceStore = useWorkspaceStore.getState()
+      const workspaceId = workspaceStore.createWorkspace(name)
+      workspaceStore.moveLivePanelToWorkspace(panelId, workspaceId, { switchAfter: false })
+    },
+    [workspaceGroups]
+  )
 
   const liveRecords = useMemo(
     () => workspaceGroups.flatMap((group) => group.sessions),
@@ -207,7 +264,8 @@ export function AgentSessionsRail() {
   let detailPinCandidates: AgentSessionSnapshot[] = []
   if (detail?.type === 'live') {
     const record = liveRecords.find(
-      (candidate) => candidate.workspaceId === detail.workspaceId && candidate.panel.id === detail.panelId
+      (candidate) =>
+        candidate.workspaceId === detail.workspaceId && candidate.panel.id === detail.panelId
     )
     if (record) {
       const match = matches.get(record.session.id)
@@ -222,13 +280,16 @@ export function AgentSessionsRail() {
         match
       }
       if (!snapshot && record.isActiveWorkspace) {
-        detailPinCandidates = candidatesForTerminal({
-          terminalId: record.session.id,
-          panelId: record.panel.id,
-          cwd: record.session.cwd,
-          agentKind: record.session.agentKind,
-          lastActivity: record.session.lastActivity
-        }, snapshots)
+        detailPinCandidates = candidatesForTerminal(
+          {
+            terminalId: record.session.id,
+            panelId: record.panel.id,
+            cwd: record.session.cwd,
+            agentKind: record.session.agentKind,
+            lastActivity: record.session.lastActivity
+          },
+          snapshots
+        )
       }
     }
   } else if (detail?.type === 'journal') {
@@ -245,13 +306,15 @@ export function AgentSessionsRail() {
         session={record.session}
         snapshot={snapshot}
         runtimeState={record.runtimeState}
-        onOpenDetail={(event) => setDetail({
-          type: 'live',
-          workspaceId: record.workspaceId,
-          panelId: record.panel.id,
-          x: event.clientX,
-          y: event.clientY
-        })}
+        onOpenDetail={(event) =>
+          setDetail({
+            type: 'live',
+            workspaceId: record.workspaceId,
+            panelId: record.panel.id,
+            x: event.clientX,
+            y: event.clientY
+          })
+        }
       />
     )
   }
@@ -261,10 +324,20 @@ export function AgentSessionsRail() {
       {/* Sticky top bar — MENU stays reachable and is never buried under the
           workspace list, no matter how far the feed is scrolled. */}
       <div className="sticky top-0 z-30 -mx-3 -mt-3 px-3 pt-3 pb-2 bg-background-card border-b border-border-subtle flex min-w-0 items-center gap-1.5">
-        <button type="button" onClick={() => setSidebarMode('nav')} className="node-btn node-btn-wide flex-shrink-0" title="Back to menu" aria-label="Back to menu">
-          <span className="flex items-center gap-1"><ArrowLeft className="w-3 h-3" /> MENU</span>
+        <button
+          type="button"
+          onClick={() => setSidebarMode('nav')}
+          className="node-btn node-btn-wide flex-shrink-0"
+          title="Back to menu"
+          aria-label="Back to menu"
+        >
+          <span className="flex items-center gap-1">
+            <ArrowLeft className="w-3 h-3" /> MENU
+          </span>
         </button>
-        <h1 className="min-w-0 flex-1 truncate font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary">Agent Sessions</h1>
+        <h1 className="min-w-0 flex-1 truncate font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary">
+          Agent Sessions
+        </h1>
       </div>
 
       <header className="space-y-2">
@@ -291,7 +364,10 @@ export function AgentSessionsRail() {
           <button
             type="button"
             onClick={() => setLauncherFor(launcherFor === '' ? null : '')}
-            className={clsx('node-btn flex-shrink-0', launcherFor === '' ? 'node-btn-accent' : null)}
+            className={clsx(
+              'node-btn flex-shrink-0',
+              launcherFor === '' ? 'node-btn-accent' : null
+            )}
             title="Start a new session"
             aria-expanded={launcherFor === ''}
           >
@@ -301,7 +377,11 @@ export function AgentSessionsRail() {
             type="button"
             onClick={() => void pollOnce()}
             className="node-btn flex-shrink-0"
-            title={lastScanAt ? `Last refreshed ${new Date(lastScanAt).toLocaleTimeString()}` : 'Refresh session index'}
+            title={
+              lastScanAt
+                ? `Last refreshed ${new Date(lastScanAt).toLocaleTimeString()}`
+                : 'Refresh session index'
+            }
           >
             <RefreshCw className="w-3 h-3" />
           </button>
@@ -318,49 +398,87 @@ export function AgentSessionsRail() {
       <section aria-labelledby="live-session-title" className="space-y-2">
         <div className="flex items-center gap-2">
           <span className="status-dot status-success" />
-          <h2 id="live-session-title" className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-primary flex-1">Live and saved terminals</h2>
+          <h2
+            id="live-session-title"
+            className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-primary flex-1"
+          >
+            Live and saved terminals
+          </h2>
           <span className="font-mono text-[9px] text-text-muted">{liveRecords.length}</span>
         </div>
 
         {workspaceGroups.map((group) => {
-          const filtered = group.sessions.filter(({ session }) => (
-            kindFilter === 'all' || session.agentKind === kindFilter
-          ))
+          const filtered = group.sessions.filter(
+            ({ session }) => kindFilter === 'all' || session.agentKind === kindFilter
+          )
           if (filtered.length === 0) return null
           const isCollapsed = collapsedWorkspaces.has(group.workspace.id)
           return (
-            <div key={group.workspace.id} className="border-t border-border-subtle pt-1.5 space-y-1.5">
+            <div
+              key={group.workspace.id}
+              className="border-t border-border-subtle pt-1.5 space-y-1.5"
+            >
               <button
                 type="button"
-                onClick={() => toggleSet(collapsedWorkspaces, group.workspace.id, setCollapsedWorkspaces)}
+                onClick={() =>
+                  toggleSet(collapsedWorkspaces, group.workspace.id, setCollapsedWorkspaces)
+                }
                 className="w-full flex items-center gap-2 px-1 py-1 text-left hover:bg-accent/[0.06] rounded-brutal min-w-0"
                 aria-expanded={!isCollapsed}
               >
-                {isCollapsed ? <ChevronRight className="w-3 h-3 text-text-muted" /> : <ChevronDown className="w-3 h-3 text-text-muted" />}
-                <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary truncate flex-1">{group.workspace.name}</span>
-                {group.isActive ? <span className="font-mono text-[8px] uppercase tracking-wider text-accent">active</span> : null}
-                {group.waitingCount > 0 ? <span className="font-mono text-[9px] text-status-warning">{group.waitingCount} waiting</span> : null}
+                {isCollapsed ? (
+                  <ChevronRight className="w-3 h-3 text-text-muted" />
+                ) : (
+                  <ChevronDown className="w-3 h-3 text-text-muted" />
+                )}
+                <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary truncate flex-1">
+                  {group.workspace.name}
+                </span>
+                {group.isActive ? (
+                  <span className="font-mono text-[8px] uppercase tracking-wider text-accent">
+                    active
+                  </span>
+                ) : null}
+                {group.waitingCount > 0 ? (
+                  <span className="font-mono text-[9px] text-status-warning">
+                    {group.waitingCount} waiting
+                  </span>
+                ) : null}
                 <span className="font-mono text-[9px] text-text-muted">{filtered.length}</span>
               </button>
-              {!isCollapsed ? <div className="space-y-1">{filtered.map(renderLiveSession)}</div> : null}
+              {!isCollapsed ? (
+                <div className="space-y-1">{filtered.map(renderLiveSession)}</div>
+              ) : null}
             </div>
           )
         })}
 
         {liveRecords.length === 0 ? (
-          <div className="card p-3 font-mono text-[10px] text-text-muted">No terminal sessions are saved in these workspaces.</div>
+          <div className="card p-3 font-mono text-[10px] text-text-muted">
+            No terminal sessions are saved in these workspaces.
+          </div>
         ) : null}
       </section>
 
-      <section aria-labelledby="session-history-title" className="space-y-2 pt-2 border-t border-border-subtle">
+      <section
+        aria-labelledby="session-history-title"
+        className="space-y-2 pt-2 border-t border-border-subtle"
+      >
         <div className="flex items-center gap-2">
           <Clock3 className="w-3.5 h-3.5 text-text-muted" />
-          <h2 id="session-history-title" className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-primary flex-1">Conversation history</h2>
+          <h2
+            id="session-history-title"
+            className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-primary flex-1"
+          >
+            Conversation history
+          </h2>
           <span className="font-mono text-[9px] text-text-muted">by project</span>
         </div>
 
         {projects.map((project) => {
-          const journals = project.journals.filter((snapshot) => kindFilter === 'all' || snapshot.kind === kindFilter)
+          const journals = project.journals.filter(
+            (snapshot) => kindFilter === 'all' || snapshot.kind === kindFilter
+          )
           if (journals.length === 0) return null
           const isCollapsed = collapsedProjects.has(project.key)
           const isExpanded = expandedProjects.has(project.key)
@@ -377,12 +495,20 @@ export function AgentSessionsRail() {
                   title={`Open ${project.name} sessions`}
                   aria-expanded={!isCollapsed}
                 >
-                  {isCollapsed ? <ChevronRight className="w-3 h-3 text-text-muted" /> : <ChevronDown className="w-3 h-3 text-text-muted" />}
+                  {isCollapsed ? (
+                    <ChevronRight className="w-3 h-3 text-text-muted" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3 text-text-muted" />
+                  )}
                   <FolderGit2 className="w-3.5 h-3.5 text-accent" />
                   <span className="flex-1 min-w-0">
-                    <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary truncate">{project.name}</span>
+                    <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary truncate">
+                      {project.name}
+                    </span>
                     {project.branch ? (
-                      <span className="block truncate font-mono text-[9px] text-accent">⎇ {project.branch}</span>
+                      <span className="block truncate font-mono text-[9px] text-accent">
+                        ⎇ {project.branch}
+                      </span>
                     ) : null}
                   </span>
                   <span className="font-mono text-[9px] text-text-muted">{journals.length}</span>
@@ -392,7 +518,9 @@ export function AgentSessionsRail() {
                   onClick={() => setLauncherFor(launcherFor === project.key ? null : project.key)}
                   className={clsx(
                     'node-btn transition-opacity focus:opacity-100',
-                    launcherFor === project.key ? 'node-btn-accent opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    launcherFor === project.key
+                      ? 'node-btn-accent opacity-100'
+                      : 'opacity-0 group-hover:opacity-100'
                   )}
                   title={`Start a session in ${project.name}`}
                   aria-expanded={launcherFor === project.key}
@@ -400,14 +528,23 @@ export function AgentSessionsRail() {
                   <Plus className="w-3 h-3" />
                 </button>
               </div>
-              {launcherFor === project.key ? <NewSessionLauncher cwd={project.path} onLaunch={handleLaunch} /> : null}
+              {launcherFor === project.key ? (
+                <NewSessionLauncher cwd={project.path} onLaunch={handleLaunch} />
+              ) : null}
               {!isCollapsed ? (
                 <div className="divide-y divide-border-subtle border-y border-border-subtle">
                   {shown.map((snapshot) => (
                     <JournalSessionRow
                       key={snapshot.filePath}
                       snapshot={snapshot}
-                      onOpenDetail={(event) => setDetail({ type: 'journal', filePath: snapshot.filePath, x: event.clientX, y: event.clientY })}
+                      onOpenDetail={(event) =>
+                        setDetail({
+                          type: 'journal',
+                          filePath: snapshot.filePath,
+                          x: event.clientX,
+                          y: event.clientY
+                        })
+                      }
                     />
                   ))}
                 </div>
@@ -418,7 +555,9 @@ export function AgentSessionsRail() {
                   onClick={() => toggleSet(expandedProjects, project.key, setExpandedProjects)}
                   className="font-mono text-[10px] text-text-muted hover:text-text-primary px-2"
                 >
-                  {isExpanded ? 'show fewer' : `show ${Math.min(journals.length, JOURNALS_EXPANDED_LIMIT) - JOURNALS_COLLAPSED_COUNT} more`}
+                  {isExpanded
+                    ? 'show fewer'
+                    : `show ${Math.min(journals.length, JOURNALS_EXPANDED_LIMIT) - JOURNALS_COLLAPSED_COUNT} more`}
                 </button>
               ) : null}
             </div>
@@ -427,7 +566,12 @@ export function AgentSessionsRail() {
 
         {!lastScanAt && projects.length === 0 ? (
           <div className="space-y-2" aria-label="Loading session history">
-            {[0, 1, 2].map((item) => <div key={item} className="h-9 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal" />)}
+            {[0, 1, 2].map((item) => (
+              <div
+                key={item}
+                className="h-9 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal"
+              />
+            ))}
           </div>
         ) : null}
       </section>

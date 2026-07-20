@@ -24,17 +24,20 @@ import { clsx } from 'clsx'
 import { isWeb } from '../../utils/platform'
 
 // Tool configuration
-const TOOL_CONFIG: Record<string, {
-  icon: React.ElementType
-  color: string
-  description: string
-  installable: boolean
-  pluginPath: string
-}> = {
+const TOOL_CONFIG: Record<
+  string,
+  {
+    icon: React.ElementType
+    color: string
+    description: string
+    installable: boolean
+    pluginPath: string
+  }
+> = {
   'Claude Code': {
     icon: Terminal,
     color: 'text-status-warning',
-    description: 'Anthropic\'s AI coding assistant',
+    description: "Anthropic's AI coding assistant",
     installable: true,
     pluginPath: '~/.claude/hooks/'
   },
@@ -45,14 +48,14 @@ const TOOL_CONFIG: Record<string, {
     installable: true,
     pluginPath: '~/.gemini/settings.json'
   },
-  'OpenCode': {
+  OpenCode: {
     icon: Sparkles,
     color: 'text-status-info',
     description: 'Open-source AI coding agent',
     installable: true,
     pluginPath: '~/.config/opencode/plugins/'
   },
-  'Codex': {
+  Codex: {
     icon: Terminal,
     color: 'text-status-success',
     description: "OpenAI's terminal coding agent",
@@ -66,21 +69,21 @@ const TOOL_CONFIG: Record<string, {
     installable: true,
     pluginPath: '~/.copilot/hooks/'
   },
-  'Aider': {
+  Aider: {
     icon: Terminal,
     color: 'text-status-success',
     description: 'AI pair programming',
     installable: false,
     pluginPath: ''
   },
-  'Continue': {
+  Continue: {
     icon: Terminal,
     color: 'text-accent',
     description: 'VS Code AI assistant',
     installable: false,
     pluginPath: ''
   },
-  'Cursor': {
+  Cursor: {
     icon: Terminal,
     color: 'text-accent-dark',
     description: 'AI-first code editor',
@@ -127,17 +130,21 @@ function ToolCard({ tool, onInstall, isInstalling }: ToolCardProps) {
     <div className="p-3 border-brutal border-border rounded-brutal bg-background-card shadow-brutal-sm">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <div className={clsx(
-            'w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary',
-            config.color
-          )}>
+          <div
+            className={clsx(
+              'w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary',
+              config.color
+            )}
+          >
             <Icon className="w-4 h-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-sm font-mono font-semibold text-text-primary">{tool.name}</span>
               {tool.installed && (
-                <span className="tag text-[10px] py-0 px-1.5"><span>detected</span></span>
+                <span className="tag text-[10px] py-0 px-1.5">
+                  <span>detected</span>
+                </span>
               )}
             </div>
             <p className="text-xs text-text-muted">{config.description}</p>
@@ -198,7 +205,9 @@ function OpenCodeLocalModelGuide() {
       >
         <div className="flex items-center gap-2">
           <Settings className="w-4 h-4 text-text-muted" />
-          <span className="text-sm font-mono font-semibold text-text-primary">Configure OpenCode for Local Models</span>
+          <span className="text-sm font-mono font-semibold text-text-primary">
+            Configure OpenCode for Local Models
+          </span>
           <span className="text-xs text-text-muted font-mono">(optional)</span>
         </div>
         {expanded ? (
@@ -211,12 +220,15 @@ function OpenCodeLocalModelGuide() {
       {expanded && (
         <div className="p-4 border-t border-border bg-background-secondary space-y-4">
           <p className="text-xs text-text-secondary">
-            To use OpenCode with local Ollama models instead of cloud APIs, create this config file. Choose a model available in your Ollama catalog when you open OpenCode.
+            To use OpenCode with local Ollama models instead of cloud APIs, create this config file.
+            Choose a model available in your Ollama catalog when you open OpenCode.
           </p>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <code className="text-xs font-mono text-text-muted">~/.config/opencode/opencode.json</code>
+              <code className="text-xs font-mono text-text-muted">
+                ~/.config/opencode/opencode.json
+              </code>
               <button
                 onClick={copyConfig}
                 className="flex items-center gap-1 text-xs font-mono text-accent-dark hover:text-accent transition-press"
@@ -242,10 +254,32 @@ function OpenCodeLocalModelGuide() {
           </div>
 
           <div className="text-xs text-text-muted space-y-1">
-            <p><strong className="font-mono text-text-primary">Prerequisites:</strong></p>
-            <p>1. Install Ollama: <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" className="text-accent-dark hover:text-accent font-mono">ollama.com/download</a></p>
-            <p>2. Pull a model from your preferred catalog: <code className="px-1 bg-background-secondary border border-border rounded-brutal font-mono">ollama pull &lt;model-id&gt;</code></p>
-            <p>3. Start Ollama: <code className="px-1 bg-background-secondary border border-border rounded-brutal font-mono">ollama serve</code></p>
+            <p>
+              <strong className="font-mono text-text-primary">Prerequisites:</strong>
+            </p>
+            <p>
+              1. Install Ollama:{' '}
+              <a
+                href="https://ollama.com/download"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent-dark hover:text-accent font-mono"
+              >
+                ollama.com/download
+              </a>
+            </p>
+            <p>
+              2. Pull a model from your preferred catalog:{' '}
+              <code className="px-1 bg-background-secondary border border-border rounded-brutal font-mono">
+                ollama pull &lt;model-id&gt;
+              </code>
+            </p>
+            <p>
+              3. Start Ollama:{' '}
+              <code className="px-1 bg-background-secondary border border-border rounded-brutal font-mono">
+                ollama serve
+              </code>
+            </p>
           </div>
 
           <a
@@ -264,27 +298,64 @@ function OpenCodeLocalModelGuide() {
 }
 
 export function HooksSection() {
-  const { data: hooksStatus, loading: isLoading, error: apiError, refresh } = useSessionResource(hooksStatusResource)
+  const {
+    data: hooksStatus,
+    loading: isLoading,
+    error: apiError,
+    refresh
+  } = useSessionResource(hooksStatusResource)
   const [installingTool, setInstallingTool] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [installResult, setInstallResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [installResult, setInstallResult] = useState<{ success: boolean; message: string } | null>(
+    null
+  )
   const { complete: completeTutorialStep } = useTutorialComplete()
 
   const tools = useMemo<ToolStatus[]>(() => {
     // Default tools that should always be shown
     const defaultTools: ToolStatus[] = [
-      { name: 'Claude Code', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'claude_code' },
-      { name: 'Gemini CLI', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'gemini_cli' },
-      { name: 'OpenCode', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'opencode' },
-      { name: 'Codex', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'codex' },
-      { name: 'Copilot CLI', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'copilot_cli' },
+      {
+        name: 'Claude Code',
+        installed: false,
+        hooks_installed: false,
+        hooks_path: null,
+        adapter_type: 'claude_code'
+      },
+      {
+        name: 'Gemini CLI',
+        installed: false,
+        hooks_installed: false,
+        hooks_path: null,
+        adapter_type: 'gemini_cli'
+      },
+      {
+        name: 'OpenCode',
+        installed: false,
+        hooks_installed: false,
+        hooks_path: null,
+        adapter_type: 'opencode'
+      },
+      {
+        name: 'Codex',
+        installed: false,
+        hooks_installed: false,
+        hooks_path: null,
+        adapter_type: 'codex'
+      },
+      {
+        name: 'Copilot CLI',
+        installed: false,
+        hooks_installed: false,
+        hooks_path: null,
+        adapter_type: 'copilot_cli'
+      }
     ]
 
     if (hooksStatus?.tools && Array.isArray(hooksStatus.tools)) {
       // Merge API tools with defaults to ensure all supported tools always appear
       const apiToolsMap = new Map(hooksStatus.tools.map((t: ToolStatus) => [t.name, t]))
-      const defaultNames = new Set(defaultTools.map(dt => dt.name))
-      const mergedTools = defaultTools.map(dt => {
+      const defaultNames = new Set(defaultTools.map((dt) => dt.name))
+      const mergedTools = defaultTools.map((dt) => {
         const apiTool = apiToolsMap.get(dt.name)
         return apiTool ? { ...dt, ...apiTool } : dt
       })
@@ -332,20 +403,29 @@ export function HooksSection() {
             gemini_cli: 'Gemini CLI',
             opencode: 'OpenCode',
             codex: 'Codex',
-            copilot_cli: 'Copilot CLI',
+            copilot_cli: 'Copilot CLI'
           }
           const toolName = toolNameMap[toolType] || toolType
-          setInstallResult({ success: true, message: `${toolName} trace capture plugin installed!` })
+          setInstallResult({
+            success: true,
+            message: `${toolName} trace capture plugin installed!`
+          })
           completeTutorialStep('install_hooks')
         } else {
-          setInstallResult({ success: false, message: result.data.errors?.join('; ') || 'Installation failed' })
+          setInstallResult({
+            success: false,
+            message: result.data.errors?.join('; ') || 'Installation failed'
+          })
         }
         await refresh()
       } else {
         setInstallResult({ success: false, message: result.error || 'Installation failed' })
       }
     } catch (_err) {
-      setInstallResult({ success: false, message: 'API server not reachable. Try the CLI command below.' })
+      setInstallResult({
+        success: false,
+        message: 'API server not reachable. Try the CLI command below.'
+      })
     } finally {
       setInstallingTool(null)
     }
@@ -399,12 +479,11 @@ export function HooksSection() {
         </div>
       )}
 
-
       {/* Tool Cards - Only show installable tools */}
       <div className="space-y-2">
         {tools
-          .filter(t => TOOL_CONFIG[t.name]?.installable)
-          .map(tool => (
+          .filter((t) => TOOL_CONFIG[t.name]?.installable)
+          .map((tool) => (
             <ToolCard
               key={tool.name}
               tool={tool}
@@ -416,12 +495,14 @@ export function HooksSection() {
 
       {/* Install Result */}
       {installResult && (
-        <div className={clsx(
-          'flex items-center gap-2 p-3 border-brutal rounded-brutal text-sm font-mono',
-          installResult.success
-            ? 'border-status-success bg-background-card text-status-success'
-            : 'border-status-error bg-background-card text-status-error'
-        )}>
+        <div
+          className={clsx(
+            'flex items-center gap-2 p-3 border-brutal rounded-brutal text-sm font-mono',
+            installResult.success
+              ? 'border-status-success bg-background-card text-status-success'
+              : 'border-status-error bg-background-card text-status-error'
+          )}
+        >
           {installResult.success ? (
             <CheckCircle className="w-4 h-4" />
           ) : (
@@ -442,10 +523,7 @@ export function HooksSection() {
           <code className="flex-1 px-3 py-2 text-xs font-mono border-brutal border-border rounded-brutal bg-background-card text-text-secondary">
             python -m bashgym.trace_capture.setup
           </code>
-          <button
-            onClick={handleCopyCommand}
-            className="btn-icon w-8 h-8 text-text-muted"
-          >
+          <button onClick={handleCopyCommand} className="btn-icon w-8 h-8 text-text-muted">
             {copied ? (
               <CheckCircle className="w-4 h-4 text-status-success" />
             ) : (
@@ -460,17 +538,20 @@ export function HooksSection() {
         <>
           <div className="section-divider" />
           <div className="space-y-3">
-            <h4 className="font-brand text-sm font-semibold text-text-primary">Connect Remote Traces</h4>
+            <h4 className="font-brand text-sm font-semibold text-text-primary">
+              Connect Remote Traces
+            </h4>
             <p className="text-xs text-text-muted">
               Send traces from your local machine to this web instance:
             </p>
             <div className="terminal-chrome">
               <pre className="p-3 text-xs font-mono text-text-secondary">
-{`npx bashgym connect ${window.location.origin} --token YOUR_API_TOKEN`}
+                {`npx bashgym connect ${window.location.origin} --token YOUR_API_TOKEN`}
               </pre>
             </div>
             <p className="text-xs text-text-muted">
-              Or upload trace files directly via the <strong>Traces</strong> page (drag-and-drop JSONL files).
+              Or upload trace files directly via the <strong>Traces</strong> page (drag-and-drop
+              JSONL files).
             </p>
           </div>
         </>
@@ -483,9 +564,11 @@ export function HooksSection() {
           <p className="font-mono font-semibold text-text-primary mb-1">How Trace Capture Works</p>
           <p>
             Plugins hook into your AI coding tool and record tool calls (bash, edit, write, read) to
-            <code className="px-1 mx-1 border border-border rounded-brutal bg-background-secondary font-mono">~/.bashgym/traces/</code>.
-            These traces can be used to fine-tune local models. Works with <strong>any model</strong> -
-            cloud APIs or local Ollama.
+            <code className="px-1 mx-1 border border-border rounded-brutal bg-background-secondary font-mono">
+              ~/.bashgym/traces/
+            </code>
+            . These traces can be used to fine-tune local models. Works with{' '}
+            <strong>any model</strong> - cloud APIs or local Ollama.
           </p>
         </div>
       </div>

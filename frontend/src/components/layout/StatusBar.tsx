@@ -80,9 +80,7 @@ export function StatusBar() {
         <div
           className={clsx(
             'flex-1 flex items-center gap-2 px-3 py-1.5 border-brutal border-border rounded-brutal transition-colors',
-            isFocused
-              ? 'border-accent bg-background-primary'
-              : 'bg-background-secondary',
+            isFocused ? 'border-accent bg-background-primary' : 'bg-background-secondary',
             !hasTerminals && 'opacity-50'
           )}
         >

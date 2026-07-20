@@ -20,9 +20,7 @@ def test_evaluation_and_gate_evidence_are_content_addressed_and_replay_safe(tmp_
         "workspace-a", "campaign-1", champion, now=START
     )
     assert (
-        repository.store_retrieval_evaluation(
-            "workspace-a", "campaign-1", champion, now=START
-        )
+        repository.store_retrieval_evaluation("workspace-a", "campaign-1", champion, now=START)
         == champion_id
     )
     assert repository.get_retrieval_evaluation("workspace-a", champion_id) == champion
@@ -31,9 +29,7 @@ def test_evaluation_and_gate_evidence_are_content_addressed_and_replay_safe(tmp_
         "workspace-a", "campaign-1", comparison, now=START
     )
     assert (
-        repository.store_development_comparison(
-            "workspace-a", "campaign-1", comparison, now=START
-        )
+        repository.store_development_comparison("workspace-a", "campaign-1", comparison, now=START)
         == decision_id
     )
     assert repository.get_development_comparison("workspace-a", decision_id) == comparison

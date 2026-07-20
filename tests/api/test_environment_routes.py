@@ -124,7 +124,9 @@ def test_materialize_environment_bundle_writes_files(tmp_path):
     payload = response.json()
     assert payload["build"]["env_id"] == "env_api_bundle"
     assert (tmp_path / "env_api_bundle" / "env.json").exists()
-    assert (tmp_path / "env_api_bundle" / "hello.py").read_text(encoding="utf-8") == "print('hello')\n"
+    assert (tmp_path / "env_api_bundle" / "hello.py").read_text(
+        encoding="utf-8"
+    ) == "print('hello')\n"
 
     response = client.post(
         "/api/environments/materialize",

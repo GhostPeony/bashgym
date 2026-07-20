@@ -21,7 +21,7 @@ export function DatasetInspector() {
     loading,
     refreshing,
     error,
-    refresh,
+    refresh
   } = useKeyedSessionResource(datasetInspectResource, datasetInspectKey(offset, PAGE_SIZE))
   const isFetching = loading || refreshing
 
@@ -42,7 +42,8 @@ export function DatasetInspector() {
               {total} examples
               {report.with_warnings_in_slice > 0 && (
                 <span className="text-status-warning">
-                  {' '}· {report.with_warnings_in_slice} flagged on this page
+                  {' '}
+                  · {report.with_warnings_in_slice} flagged on this page
                 </span>
               )}
             </span>
@@ -69,9 +70,7 @@ export function DatasetInspector() {
         <div
           key={example.index}
           className="border border-border-subtle mb-2 cursor-pointer"
-          onClick={() =>
-            setExpandedIndex(expandedIndex === example.index ? null : example.index)
-          }
+          onClick={() => setExpandedIndex(expandedIndex === example.index ? null : example.index)}
         >
           <div className="flex items-center gap-2 px-3 py-1.5 bg-background-tertiary">
             <span className="text-xs font-mono text-text-muted">#{example.index}</span>

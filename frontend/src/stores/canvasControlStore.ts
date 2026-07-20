@@ -34,7 +34,24 @@ export interface CanvasControlState {
   togglePanelCollapsed: () => void
 
   // Batch update
-  updateSettings: (settings: Partial<Omit<CanvasControlState, 'updateSettings' | 'setGlobalPaused' | 'toggleGlobalPaused' | 'setShowMetrics' | 'setShowToolHistory' | 'setShowRecentFiles' | 'setGridEnabled' | 'setSnapToGrid' | 'setShowMiniMap' | 'setPanelCollapsed' | 'togglePanelCollapsed'>>) => void
+  updateSettings: (
+    settings: Partial<
+      Omit<
+        CanvasControlState,
+        | 'updateSettings'
+        | 'setGlobalPaused'
+        | 'toggleGlobalPaused'
+        | 'setShowMetrics'
+        | 'setShowToolHistory'
+        | 'setShowRecentFiles'
+        | 'setGridEnabled'
+        | 'setSnapToGrid'
+        | 'setShowMiniMap'
+        | 'setPanelCollapsed'
+        | 'togglePanelCollapsed'
+      >
+    >
+  ) => void
 }
 
 export const useCanvasControlStore = create<CanvasControlState>()(

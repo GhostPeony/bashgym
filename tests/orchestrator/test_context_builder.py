@@ -1,20 +1,21 @@
 """Tests for WorkerContextBuilder — inter-agent context awareness."""
 
 import pytest
-from pathlib import Path
-from unittest.mock import patch
 
-from bashgym.orchestrator.models import (
-    TaskNode, TaskStatus, TaskPriority, WorkerResult,
-)
 from bashgym.orchestrator.context_builder import (
-    WorkerContextBuilder, ORCHESTRATION_SEPARATOR,
+    ORCHESTRATION_SEPARATOR,
+    WorkerContextBuilder,
 )
-
+from bashgym.orchestrator.models import (
+    TaskNode,
+    TaskPriority,
+    WorkerResult,
+)
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 def _make_result(task_id, files_modified=None):
     """Helper to create a WorkerResult."""
@@ -45,7 +46,11 @@ def three_task_dag():
             priority=TaskPriority.CRITICAL,
             files_touched=["src/models.py", "tests/test_models.py"],
             provides=[
-                {"file": "src/models.py", "exports": ["User", "Session", "get_db"], "description": "Core models"},
+                {
+                    "file": "src/models.py",
+                    "exports": ["User", "Session", "get_db"],
+                    "description": "Core models",
+                },
             ],
         ),
         "task_2": TaskNode(
@@ -56,10 +61,19 @@ def three_task_dag():
             dependencies=["task_1"],
             files_touched=["src/auth.py", "tests/test_auth.py"],
             provides=[
-                {"file": "src/auth.py", "exports": ["authenticate", "AuthMiddleware"], "description": "Auth functions"},
+                {
+                    "file": "src/auth.py",
+                    "exports": ["authenticate", "AuthMiddleware"],
+                    "description": "Auth functions",
+                },
             ],
             consumes=[
-                {"from_task": "task_1", "file": "src/models.py", "imports": ["User", "get_db"], "description": "User model"},
+                {
+                    "from_task": "task_1",
+                    "file": "src/models.py",
+                    "imports": ["User", "get_db"],
+                    "description": "User model",
+                },
             ],
         ),
         "task_3": TaskNode(
@@ -70,8 +84,18 @@ def three_task_dag():
             dependencies=["task_1"],
             files_touched=["src/api.py", "tests/test_api.py"],
             consumes=[
-                {"from_task": "task_1", "file": "src/models.py", "imports": ["User"], "description": "User model"},
-                {"from_task": "task_2", "file": "src/auth.py", "imports": ["authenticate"], "description": "Auth check"},
+                {
+                    "from_task": "task_1",
+                    "file": "src/models.py",
+                    "imports": ["User"],
+                    "description": "User model",
+                },
+                {
+                    "from_task": "task_2",
+                    "file": "src/auth.py",
+                    "imports": ["authenticate"],
+                    "description": "Auth check",
+                },
             ],
         ),
     }
@@ -112,6 +136,7 @@ def parallel_dag():
 # =============================================================================
 # System Prompt Generation
 # =============================================================================
+
 
 class TestBuildSystemPrompt:
     """Tests for build_system_prompt()."""
@@ -191,6 +216,7 @@ class TestBuildSystemPrompt:
 # =============================================================================
 # CLAUDE.md Generation
 # =============================================================================
+
 
 class TestBuildClaudeMd:
     """Tests for build_claude_md()."""
@@ -285,6 +311,7 @@ class TestBuildClaudeMd:
 # Dynamic Updates
 # =============================================================================
 
+
 class TestBuildUpdate:
     """Tests for build_update()."""
 
@@ -330,6 +357,7 @@ class TestBuildUpdate:
 # =============================================================================
 # File Ownership Resolution
 # =============================================================================
+
 
 class TestFileOwnership:
     """Tests for _resolve_file_ownership()."""
@@ -393,6 +421,7 @@ class TestFileOwnership:
 # =============================================================================
 # CLAUDE.md File Operations
 # =============================================================================
+
 
 class TestClaudeMdFileOps:
     """Tests for write_claude_md() and append_update()."""
@@ -467,6 +496,7 @@ class TestClaudeMdFileOps:
 # Edge Cases
 # =============================================================================
 
+
 class TestEdgeCases:
     """Edge case tests for WorkerContextBuilder."""
 
@@ -502,11 +532,15 @@ class TestEdgeCases:
         """Tasks with no interface contracts should omit those sections."""
         nodes = {
             "t1": TaskNode(
-                id="t1", title="Task A", description="Do A",
+                id="t1",
+                title="Task A",
+                description="Do A",
                 files_touched=["a.py"],
             ),
             "t2": TaskNode(
-                id="t2", title="Task B", description="Do B",
+                id="t2",
+                title="Task B",
+                description="Do B",
                 files_touched=["b.py"],
             ),
         }
@@ -520,9 +554,7 @@ class TestEdgeCases:
         nodes = {
             "t1": TaskNode(id="t1", title="A", description="D"),
         }
-        builder = WorkerContextBuilder(
-            dag_nodes=nodes, spec_title="Test", file_conflicts=[]
-        )
+        builder = WorkerContextBuilder(dag_nodes=nodes, spec_title="Test", file_conflicts=[])
         md = builder.build_claude_md(nodes["t1"])
         assert "File Conflict Warnings" not in md
 
@@ -531,7 +563,9 @@ class TestEdgeCases:
         nodes = {
             "t1": TaskNode(id="t1", title="A", description="D"),
             "t2": TaskNode(
-                id="t2", title="B", description="D",
+                id="t2",
+                title="B",
+                description="D",
                 files_touched=["a.py", "b.py", "c.py", "d.py", "e.py"],
             ),
         }
@@ -543,16 +577,22 @@ class TestEdgeCases:
         """Transitive dependencies should not be marked as forbidden."""
         nodes = {
             "t1": TaskNode(
-                id="t1", title="Base", description="D",
+                id="t1",
+                title="Base",
+                description="D",
                 files_touched=["base.py"],
             ),
             "t2": TaskNode(
-                id="t2", title="Middle", description="D",
+                id="t2",
+                title="Middle",
+                description="D",
                 dependencies=["t1"],
                 files_touched=["mid.py"],
             ),
             "t3": TaskNode(
-                id="t3", title="Top", description="D",
+                id="t3",
+                title="Top",
+                description="D",
                 dependencies=["t2"],
                 files_touched=["top.py"],
             ),

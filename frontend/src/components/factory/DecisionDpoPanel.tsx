@@ -6,12 +6,9 @@ import {
   CheckCircle,
   AlertCircle,
   ShieldCheck,
-  Filter,
+  Filter
 } from 'lucide-react'
-import {
-  dataQualityApi,
-  type DecisionDpoJob,
-} from '../../services/api'
+import { dataQualityApi, type DecisionDpoJob } from '../../services/api'
 import { useSessionResource } from '../../stores/sessionResource'
 import { dataQualityDefaultsResource } from '../../stores/factoryResources'
 
@@ -30,7 +27,7 @@ const DEFAULT_FORM: QualityForm = {
   generate_decision_dpo: true,
   require_successful_verification: true,
   min_trace_steps: 2,
-  max_trace_steps: 50,
+  max_trace_steps: 50
 }
 
 function Toggle({
@@ -38,7 +35,7 @@ function Toggle({
   hint,
   checked,
   onChange,
-  icon: Icon,
+  icon: Icon
 }: {
   label: string
   hint: string
@@ -80,7 +77,7 @@ export function DecisionDpoPanel() {
       generate_decision_dpo: qualityDefaults.generate_decision_dpo,
       require_successful_verification: qualityDefaults.require_successful_verification,
       min_trace_steps: qualityDefaults.min_trace_steps,
-      max_trace_steps: qualityDefaults.max_trace_steps,
+      max_trace_steps: qualityDefaults.max_trace_steps
     }))
   }, [qualityDefaults])
 
@@ -113,7 +110,7 @@ export function DecisionDpoPanel() {
       generate_decision_dpo: form.generate_decision_dpo,
       require_successful_verification: form.require_successful_verification,
       min_trace_steps: form.min_trace_steps,
-      max_trace_steps: form.max_trace_steps,
+      max_trace_steps: form.max_trace_steps
     })
     if (r.ok && r.data) {
       setJob(r.data)

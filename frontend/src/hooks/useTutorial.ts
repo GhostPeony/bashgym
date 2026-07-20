@@ -9,15 +9,21 @@ import { useTutorialStore, TutorialStep } from '../stores/tutorialStore'
 export function useTutorialComplete() {
   const { isTutorialActive, completeStep, currentStep } = useTutorialStore()
 
-  const complete = useCallback((step: TutorialStep) => {
-    if (isTutorialActive) {
-      completeStep(step)
-    }
-  }, [isTutorialActive, completeStep])
+  const complete = useCallback(
+    (step: TutorialStep) => {
+      if (isTutorialActive) {
+        completeStep(step)
+      }
+    },
+    [isTutorialActive, completeStep]
+  )
 
-  const isCurrentStep = useCallback((step: TutorialStep) => {
-    return isTutorialActive && currentStep === step
-  }, [isTutorialActive, currentStep])
+  const isCurrentStep = useCallback(
+    (step: TutorialStep) => {
+      return isTutorialActive && currentStep === step
+    },
+    [isTutorialActive, currentStep]
+  )
 
   return { complete, isCurrentStep, isTutorialActive }
 }

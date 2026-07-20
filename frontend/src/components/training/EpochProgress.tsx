@@ -22,14 +22,18 @@ export function EpochProgress({
         {isWaiting ? (
           <>
             <span className="font-brand text-lg leading-tight text-text-muted">&mdash;</span>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted mt-0.5">Waiting</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted mt-0.5">
+              Waiting
+            </span>
           </>
         ) : (
           <>
             <span className="font-brand text-lg leading-tight text-text-primary">
               {currentEpoch}/{totalEpochs}
             </span>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-text-secondary mt-0.5">Epochs</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-text-secondary mt-0.5">
+              Epochs
+            </span>
           </>
         )}
 
@@ -37,10 +41,7 @@ export function EpochProgress({
         {!isWaiting && totalEpochs > 0 && (
           <div className="flex items-center gap-2 mt-2">
             {Array.from({ length: totalEpochs }, (_, i) => (
-              <div
-                key={i}
-                className={`status-dot ${i < currentEpoch ? 'status-success' : ''}`}
-              />
+              <div key={i} className={`status-dot ${i < currentEpoch ? 'status-success' : ''}`} />
             ))}
           </div>
         )}
@@ -55,10 +56,7 @@ export function EpochProgress({
           </span>
         </div>
         <div className="progress-bar">
-          <div
-            className="progress-fill"
-            style={{ width: `${stepProgress}%` }}
-          />
+          <div className="progress-fill" style={{ width: `${stepProgress}%` }} />
         </div>
         <div className="flex items-center justify-end mt-1">
           <span className="font-mono text-xs text-text-muted">{stepProgress.toFixed(1)}%</span>

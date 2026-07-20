@@ -400,9 +400,7 @@ def test_agent_endpoint_discovery_uses_official_hermes_surfaces(monkeypatch, tmp
     )
 
 
-def test_agent_endpoint_discovery_does_not_treat_public_health_as_connected(
-    monkeypatch, tmp_path
-):
+def test_agent_endpoint_discovery_does_not_treat_public_health_as_connected(monkeypatch, tmp_path):
     monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path)
     monkeypatch.setattr("bashgym.secrets.get_secrets_path", lambda: tmp_path / "secrets.json")
     monkeypatch.setattr(agent_routes.httpx, "AsyncClient", FakeAuthRejectingHermesClient)
@@ -720,9 +718,7 @@ def test_agent_reads_project_isolated_experiment_context(monkeypatch, tmp_path):
 
     projects = json.loads(
         asyncio.run(
-            agent_routes._execute_tool(
-                "list_experiment_projects", {"workspace_id": "workspace-a"}
-            )
+            agent_routes._execute_tool("list_experiment_projects", {"workspace_id": "workspace-a"})
         )
     )
     context = json.loads(

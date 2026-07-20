@@ -233,9 +233,7 @@ def main() -> int:
             )
             row["positive_rank_same_video"] = rank_of_any(ranked_ids, same_video_ids)
             row["top_retrieved_chunk_ids"] = ranked_ids[:10]
-            row["top_retrieved_video_id"] = by_chunk_id[ranked_ids[0]].get(
-                "youtube_video_id"
-            )
+            row["top_retrieved_video_id"] = by_chunk_id[ranked_ids[0]].get("youtube_video_id")
             row["top_retrieved_scores"] = [
                 round(float(scores[row_idx, int(corpus_idx)]), 6) for corpus_idx in ranked[:10]
             ]

@@ -153,9 +153,7 @@ def test_heldout_runs_records_and_polls(tmp_path, monkeypatch):
     assert fake_reg.recorded and fake_reg.recorded[0][0] == "candidate-sft"
 
 
-def test_heldout_environment_evidence_blocks_and_records_combined_verdict(
-    tmp_path, monkeypatch
-):
+def test_heldout_environment_evidence_blocks_and_records_combined_verdict(tmp_path, monkeypatch):
     fake_reg = _FakeRegistry()
     monkeypatch.setattr("bashgym.models.get_registry", lambda *a, **k: fake_reg)
     monkeypatch.setattr(eval_routes.service, "run_heldout", lambda *a, **k: _FakeReport(ship=True))
@@ -314,9 +312,7 @@ def test_heldout_learned_reward_evidence_records_diagnostic(tmp_path, monkeypatc
     reward = report["release_gate"]["learned_reward_evidence"]
     assert report["ship"] is True
     assert report["release_gate"]["learned_reward_evidence_present"] is True
-    assert report["release_gate"]["learned_reward_evidence_sections"] == [
-        "learned_reward_evidence"
-    ]
+    assert report["release_gate"]["learned_reward_evidence_sections"] == ["learned_reward_evidence"]
     assert reward["signal"] == "healthy"
     assert reward["metrics"]["heldout_pair_accuracy"] == pytest.approx(0.81)
     assert report["environment_evidence"]["learned_reward_evidence"]["ok"] is True
@@ -440,9 +436,7 @@ def test_ingest_external_benchmarks_records(monkeypatch):
     data = r.json()
     assert data["report"]["scores"]["harbor_terminal_bench"] == pytest.approx(2 / 3)
     assert data["recorded"] == ["harbor_terminal_bench"]
-    assert fake_reg.benchmarks == [
-        ("candidate-sft", "harbor_terminal_bench", pytest.approx(2 / 3))
-    ]
+    assert fake_reg.benchmarks == [("candidate-sft", "harbor_terminal_bench", pytest.approx(2 / 3))]
 
 
 def test_ingest_external_rewardbench_records(monkeypatch):
@@ -537,7 +531,12 @@ def test_environment_holdout_gate_reports_split_records_and_verdict(monkeypatch)
             {"id": "env_d", "instruction": "Task D", "metadata": {"task_family": "delta"}},
         ],
         "attempts": [
-            {"environment_id": env_id, "attempt_index": 0, "passed": True, "verifier_status": "passed"}
+            {
+                "environment_id": env_id,
+                "attempt_index": 0,
+                "passed": True,
+                "verifier_status": "passed",
+            }
             for env_id in ["env_a", "env_b", "env_c", "env_d"]
         ],
         "split_by": "task_family",
@@ -583,11 +582,21 @@ def test_environment_holdout_comparison_reports_bootstrap_gate():
             {"id": "env_d", "instruction": "Task D", "metadata": {"task_family": "delta"}},
         ],
         "base_attempts": [
-            {"environment_id": env_id, "attempt_index": 0, "passed": False, "verifier_status": "failed"}
+            {
+                "environment_id": env_id,
+                "attempt_index": 0,
+                "passed": False,
+                "verifier_status": "failed",
+            }
             for env_id in ["env_a", "env_b", "env_c", "env_d"]
         ],
         "candidate_attempts": [
-            {"environment_id": env_id, "attempt_index": 0, "passed": True, "verifier_status": "passed"}
+            {
+                "environment_id": env_id,
+                "attempt_index": 0,
+                "passed": True,
+                "verifier_status": "passed",
+            }
             for env_id in ["env_a", "env_b", "env_c", "env_d"]
         ],
         "split_by": "task_family",
@@ -635,7 +644,12 @@ def test_environment_spurious_reward_control_reports_negative_control_gate():
             {"id": "env_d", "instruction": "Task D", "metadata": {"task_family": "delta"}},
         ],
         "attempts": [
-            {"environment_id": env_id, "attempt_index": 0, "passed": True, "verifier_status": "passed"}
+            {
+                "environment_id": env_id,
+                "attempt_index": 0,
+                "passed": True,
+                "verifier_status": "passed",
+            }
             for env_id in ["env_a", "env_b", "env_c", "env_d"]
         ],
         "split_by": "task_family",
@@ -790,10 +804,14 @@ def test_environment_model_rollout_passk_resolves_endpoint_and_records(monkeypat
     def fake_run(environments, endpoint, **kwargs):
         captured["endpoint"] = endpoint
         captured["kwargs"] = kwargs
-        return _FakeEnvPassKReport(), [_FakeRollout()], {
-            "sampling_enabled": True,
-            "selected_environment_ids": ["env_model_ok"],
-        }
+        return (
+            _FakeEnvPassKReport(),
+            [_FakeRollout()],
+            {
+                "sampling_enabled": True,
+                "selected_environment_ids": ["env_model_ok"],
+            },
+        )
 
     monkeypatch.setattr(eval_routes.service, "run_model_environment_rollout_passk", fake_run)
 
@@ -906,9 +924,7 @@ def test_environment_dppo_replay_enrich_attaches_train_logprobs(tmp_path):
         "reward_group_std": 0.5,
         "trajectory": {"commands": ["echo ok"], "observations": [], "verifier_observation": None},
         "behavior_policy": {
-            "response_logprobs": [
-                {"tokens": ["echo", " ok"], "token_logprobs": [-0.2, -0.3]}
-            ],
+            "response_logprobs": [{"tokens": ["echo", " ok"], "token_logprobs": [-0.2, -0.3]}],
             "behavior_logprob_tokens": 2,
         },
         "optimizer": {

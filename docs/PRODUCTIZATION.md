@@ -38,15 +38,15 @@ built wheel on Windows with Python 3.12. Dependency downloads used the local pip
 cache, so network-cold time will vary; remeasure the complete table before a
 release claim.
 
-| Step | Measured time | Evidence |
-|---|---:|---|
-| Build wheel | 8.55 s | Clean publishable source overlay |
-| Create isolated virtual environment | 7.43 s | Fresh Python 3.12 `venv` |
-| Install wheel and declared core dependencies | 29.21 s | Clean environment; `pip check` passed |
-| Render `bashgym --help` | 0.49 s | Installed console entry point |
-| Render local-operator bootstrap help | 0.53 s | Installed campaign command |
-| Run durable AutoResearch control smoke | 3.03 s | All seven control checks passed |
-| **Source-to-first-working-result** | **48.71 s** | Build through bounded control proof |
+| Step                                         | Measured time | Evidence                              |
+| -------------------------------------------- | ------------: | ------------------------------------- |
+| Build wheel                                  |        8.55 s | Clean publishable source overlay      |
+| Create isolated virtual environment          |        7.43 s | Fresh Python 3.12 `venv`              |
+| Install wheel and declared core dependencies |       29.21 s | Clean environment; `pip check` passed |
+| Render `bashgym --help`                      |        0.49 s | Installed console entry point         |
+| Render local-operator bootstrap help         |        0.53 s | Installed campaign command            |
+| Run durable AutoResearch control smoke       |        3.03 s | All seven control checks passed       |
+| **Source-to-first-working-result**           |   **48.71 s** | Build through bounded control proof   |
 
 The current clean-source wheel proof excludes checkout tests, frontend output,
 build artifacts, local model caches, private plans, and machine profiles. It
@@ -269,17 +269,17 @@ signatures, and idempotency keys.
 
 ## DX scorecard
 
-| Dimension | Score | Method and evidence |
-|---|---:|---|
-| Getting started | 7/10 | Tested clean source to control result in 48.71 s; agent-host skill installation, real hardware authority, and the desktop frontend remain explicit installation steps. |
-| CLI/API ergonomics | 8/10 | Tested installed help, docs, API construction, one-argument control smoke, plan-first activation, registry synchronization, bounded guided-setup APIs, current-source guided CLI wrappers, and installed-wheel skill deployment for all three hosts. The installed-bundle flow through `READY` remains; real campaigns retain explicit bindings by design. |
-| Error guidance | 8/10 | Model inspection, guided activation, and campaign doctor fail closed with identity, source, runtime, and compute diagnostics. |
-| Documentation | 8/10 | Public entry points link the durable campaign, training, portability, and contribution contracts; live hardware evidence remains operator-owned. |
-| Upgrade path | 4/10 | Changelog exists, but migrations and compatibility policy need a release-grade guide. |
-| Developer environment | 8/10 | CI defines Python 3.10–3.12/Linux plus Windows/macOS 3.12 packaging cells, the full Node 22 frontend gate, and native three-OS Electron startup/PTY smokes. Historical Black debt is hash-locked so new files and any touched legacy file cannot add formatting drift. Packaging, frontend, and all three native startup jobs have retained current-source hosted passes; the complete Linux suite remains the final software gate. |
-| Community | 5/10 | Contributing guide and issue URL exist; support/discussion workflow is still thin. |
-| DX measurement | 6/10 | CI now measures installed-artifact behavior; recurring cold-install and hardware-lane telemetry are not yet automated. |
-| **Overall** | **6.6/10** | The control plane and guided activation are usable; release-grade upgrades and live hardware proof remain. |
+| Dimension             |      Score | Method and evidence                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------- | ---------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Getting started       |       7/10 | Tested clean source to control result in 48.71 s; agent-host skill installation, real hardware authority, and the desktop frontend remain explicit installation steps.                                                                                                                                                                                                                                                              |
+| CLI/API ergonomics    |       8/10 | Tested installed help, docs, API construction, one-argument control smoke, plan-first activation, registry synchronization, bounded guided-setup APIs, current-source guided CLI wrappers, and installed-wheel skill deployment for all three hosts. The installed-bundle flow through `READY` remains; real campaigns retain explicit bindings by design.                                                                          |
+| Error guidance        |       8/10 | Model inspection, guided activation, and campaign doctor fail closed with identity, source, runtime, and compute diagnostics.                                                                                                                                                                                                                                                                                                       |
+| Documentation         |       8/10 | Public entry points link the durable campaign, training, portability, and contribution contracts; live hardware evidence remains operator-owned.                                                                                                                                                                                                                                                                                    |
+| Upgrade path          |       4/10 | Changelog exists, but migrations and compatibility policy need a release-grade guide.                                                                                                                                                                                                                                                                                                                                               |
+| Developer environment |       8/10 | CI defines Python 3.10–3.12/Linux plus Windows/macOS 3.12 packaging cells, the full Node 22 frontend gate, and native three-OS Electron startup/PTY smokes. Historical Black debt is hash-locked so new files and any touched legacy file cannot add formatting drift. Packaging, frontend, and all three native startup jobs have retained current-source hosted passes; the complete Linux suite remains the final software gate. |
+| Community             |       5/10 | Contributing guide and issue URL exist; support/discussion workflow is still thin.                                                                                                                                                                                                                                                                                                                                                  |
+| DX measurement        |       6/10 | CI now measures installed-artifact behavior; recurring cold-install and hardware-lane telemetry are not yet automated.                                                                                                                                                                                                                                                                                                              |
+| **Overall**           | **6.6/10** | The control plane and guided activation are usable; release-grade upgrades and live hardware proof remain.                                                                                                                                                                                                                                                                                                                          |
 
 ## Remaining productization milestones
 

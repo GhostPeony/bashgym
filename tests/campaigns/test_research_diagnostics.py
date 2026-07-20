@@ -98,9 +98,7 @@ def test_flags_collapsed_candidate_and_ranks_bounded_next_work():
         "diagnostic",
         "evaluation",
     ]
-    assert all(
-        not item.eligible_for_submission for item in diagnostics.ranked_hypotheses
-    )
+    assert all(not item.eligible_for_submission for item in diagnostics.ranked_hypotheses)
 
 
 def test_compares_checkpoint_trajectory_in_training_order():
@@ -133,9 +131,7 @@ def test_compares_checkpoint_trajectory_in_training_order():
         0.010000000000000009,
         0.019999999999999962,
     ]
-    assert "checkpoint_evidence_missing" not in {
-        item.code for item in diagnostics.signals
-    }
+    assert "checkpoint_evidence_missing" not in {item.code for item in diagnostics.signals}
 
 
 def test_minimize_direction_reports_positive_improvement_for_lower_metric():
@@ -162,12 +158,8 @@ def test_minimize_direction_reports_positive_improvement_for_lower_metric():
         runs=[],
     )
 
-    assert diagnostics.checkpoint_comparisons[0].improvement_from_baseline == pytest.approx(
-        0.2
-    )
-    assert "primary_metric_no_improvement" not in {
-        item.code for item in diagnostics.signals
-    }
+    assert diagnostics.checkpoint_comparisons[0].improvement_from_baseline == pytest.approx(0.2)
+    assert "primary_metric_no_improvement" not in {item.code for item in diagnostics.signals}
 
 
 def test_projection_is_deterministic_for_identical_evidence():

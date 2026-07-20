@@ -24,7 +24,7 @@ export function RunComparison() {
     loading,
     refreshing,
     error: runsError,
-    refresh,
+    refresh
   } = useSessionResource(metricRunsResource)
   const runs = runsData ?? []
   const [selected, setSelected] = useState<string[]>([])
@@ -86,9 +86,7 @@ export function RunComparison() {
             onClick={() => toggleRun(run.run_id)}
             className={clsx(
               'tag !text-[11px] !py-0.5 !px-2 font-mono transition-press',
-              selected.includes(run.run_id)
-                ? '!border-accent !text-accent'
-                : 'text-text-muted'
+              selected.includes(run.run_id) ? '!border-accent !text-accent' : 'text-text-muted'
             )}
             title={new Date(run.modified * 1000).toLocaleString()}
           >
@@ -131,7 +129,9 @@ export function RunComparison() {
                 labelStyle={{ color: 'var(--text-secondary)', marginBottom: '4px' }}
                 labelFormatter={(label) => `Step ${label}`}
               />
-              <Legend wrapperStyle={{ fontSize: '11px', fontFamily: "'JetBrains Mono', monospace" }} />
+              <Legend
+                wrapperStyle={{ fontSize: '11px', fontFamily: "'JetBrains Mono', monospace" }}
+              />
               {selected.map((runId, i) => (
                 <Line
                   key={runId}

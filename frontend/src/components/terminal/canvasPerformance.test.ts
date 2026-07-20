@@ -10,7 +10,7 @@ test('indexes canvas connections and monitor direction in one graph snapshot', (
   const panels = [panel('a'), panel('b'), panel('data', 'activity')]
   const edges: CanvasEdge[] = [
     { id: 'monitor', source: 'a', target: 'b' },
-    { id: 'data', source: 'b', target: 'data' },
+    { id: 'data', source: 'b', target: 'data' }
   ]
 
   const graph = buildCanvasGraphIndex(panels, edges)
@@ -26,13 +26,13 @@ test('preserves all unrelated node objects when one high-volume task changes', (
     id: `task-${index}`,
     type: 'terminal',
     position: { x: index * 10, y: 0 },
-    data: { status: 'running', step: 1 },
+    data: { status: 'running', step: 1 }
   }))
   const candidates = previous.map((node, index) => ({
     id: node.id,
     type: node.type,
     position: { ...node.position },
-    data: { status: 'running', step: index === 91 ? 2 : 1 },
+    data: { status: 'running', step: index === 91 ? 2 : 1 }
   }))
 
   const next = reconcileCanvasNodes(previous, candidates)

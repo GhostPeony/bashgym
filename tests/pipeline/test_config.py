@@ -1,7 +1,5 @@
 """Tests for PipelineConfig."""
 
-import json
-import pytest
 from bashgym.pipeline.config import PipelineConfig
 
 

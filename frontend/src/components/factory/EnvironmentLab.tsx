@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   Shuffle,
   Terminal,
-  Upload,
+  Upload
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
@@ -36,7 +36,7 @@ import {
   type EnvironmentPassKResponse,
   type EnvironmentRolloutPassKResponse,
   type EnvironmentSpuriousRewardControlResponse,
-  type TerminalEnvironmentSpec,
+  type TerminalEnvironmentSpec
 } from '../../services/api'
 import { useSessionResource } from '../../stores/sessionResource'
 import { environmentPipelinesResource } from '../../stores/factoryResources'
@@ -222,7 +222,7 @@ function baselineAttempts(
       tool_calls: 0,
       tokens: 0,
       action_tokens: 0,
-      observation_tokens: 0,
+      observation_tokens: 0
     }))
   )
 }
@@ -236,8 +236,8 @@ function seededCommandAttempts(
       environment_id: environment.id,
       attempt_index: 0,
       commands: ['python -c "from pathlib import Path; print(Path.cwd())"'],
-      metadata: { source: 'environment_lab_seed' },
-    },
+      metadata: { source: 'environment_lab_seed' }
+    }
   ]
 }
 
@@ -272,15 +272,7 @@ function metadataTamperHint(metadata: Record<string, unknown>): string {
   return changedPaths.length > 0 ? changedPaths.join(', ') : 'protected file changed'
 }
 
-function MetricTile({
-  label,
-  value,
-  hint,
-}: {
-  label: string
-  value: string
-  hint?: string
-}) {
+function MetricTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="border-brutal border-border rounded-brutal bg-background-card p-4">
       <p className="font-mono text-xs uppercase text-text-muted">{label}</p>
@@ -292,7 +284,7 @@ function MetricTile({
 
 function DistributionList({
   title,
-  values,
+  values
 }: {
   title: string
   values: Record<string, number> | undefined
@@ -323,14 +315,14 @@ function reportSummary(report: EnvironmentMixReport | null) {
       total: '0',
       domains: '0',
       skills: '0',
-      balance: '0%',
+      balance: '0%'
     }
   }
   return {
     total: String(report.total),
     domains: String(Object.keys(report.domain_distribution || {}).length),
     skills: String(Object.keys(report.skill_distribution || {}).length),
-    balance: formatPercent(report.axis_balance?.domain),
+    balance: formatPercent(report.axis_balance?.domain)
   }
 }
 
@@ -341,7 +333,7 @@ function SourcePanel({
   onPreserveRawChange,
   onFileChange,
   onImportPath,
-  loading,
+  loading
 }: {
   sourcePath: string
   preserveRaw: boolean
@@ -371,9 +363,7 @@ function SourcePanel({
       </label>
 
       <label className="block">
-        <span className="block font-mono text-xs uppercase text-text-muted mb-1">
-          Server path
-        </span>
+        <span className="block font-mono text-xs uppercase text-text-muted mb-1">Server path</span>
         <div className="flex gap-2">
           <input
             type="text"
@@ -410,7 +400,7 @@ function SourcePanel({
 function EnvironmentList({
   environments,
   selectedId,
-  onSelect,
+  onSelect
 }: {
   environments: TerminalEnvironmentSpec[]
   selectedId: string | null
@@ -421,7 +411,9 @@ function EnvironmentList({
       <div className="card p-8 text-center">
         <Boxes className="w-9 h-9 text-text-muted mx-auto mb-3" />
         <h3 className="font-brand text-xl text-text-primary">No environments loaded</h3>
-        <p className="font-mono text-xs text-text-muted mt-1">Import JSON or JSONL to inspect the mix</p>
+        <p className="font-mono text-xs text-text-muted mt-1">
+          Import JSON or JSONL to inspect the mix
+        </p>
       </div>
     )
   }
@@ -442,7 +434,9 @@ function EnvironmentList({
             onClick={() => onSelect(env.id)}
             className={clsx(
               'w-full grid grid-cols-[minmax(0,1.6fr)_120px_160px_120px] gap-3 px-4 py-3 text-left transition-colors',
-              selectedId === env.id ? 'bg-accent-light' : 'bg-background-card hover:bg-background-secondary'
+              selectedId === env.id
+                ? 'bg-accent-light'
+                : 'bg-background-card hover:bg-background-secondary'
             )}
           >
             <span className="min-w-0">
@@ -452,7 +446,9 @@ function EnvironmentList({
               <span className="block text-xs text-text-muted truncate">{env.instruction}</span>
             </span>
             <span className="font-mono text-xs text-text-secondary truncate">{env.domain}</span>
-            <span className="text-xs text-text-secondary truncate">{env.skills.join(', ') || 'none'}</span>
+            <span className="text-xs text-text-secondary truncate">
+              {env.skills.join(', ') || 'none'}
+            </span>
             <span className="font-mono text-xs text-text-secondary truncate">
               {env.verifier?.kind || 'unknown'}
             </span>
@@ -471,7 +467,7 @@ function EnvironmentDetail({
   onOutputDirChange,
   onOverwriteChange,
   onMaterialize,
-  loading,
+  loading
 }: {
   environment: TerminalEnvironmentSpec | null
   outputDir: string
@@ -588,7 +584,7 @@ function PassKPanel({
   onAttemptTextChange,
   onKValuesTextChange,
   onSeedBaseline,
-  onEvaluate,
+  onEvaluate
 }: {
   environments: TerminalEnvironmentSpec[]
   attemptText: string
@@ -600,10 +596,7 @@ function PassKPanel({
   onSeedBaseline: () => void
   onEvaluate: () => void
 }) {
-  const passEntries = useMemo(
-    () => Object.entries(result?.report.pass_at_k || {}),
-    [result]
-  )
+  const passEntries = useMemo(() => Object.entries(result?.report.pass_at_k || {}), [result])
   const statusEntries = useMemo(
     () => Object.entries(result?.report.attempt_summary.verifier_status_distribution || {}),
     [result]
@@ -659,7 +652,12 @@ function PassKPanel({
       {result ? (
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
           {passEntries.map(([label, value]) => (
-            <MetricTile key={label} label={label} value={formatPercent(value)} hint="mean over envs" />
+            <MetricTile
+              key={label}
+              label={label}
+              value={formatPercent(value)}
+              hint="mean over envs"
+            />
           ))}
           <MetricTile
             label="Attempts"
@@ -733,7 +731,7 @@ function HoldoutGatePanel({
   onRequireNoContaminationChange,
   onModelIdChange,
   onRecordToRegistryChange,
-  onRun,
+  onRun
 }: {
   environments: TerminalEnvironmentSpec[]
   attemptText: string
@@ -763,14 +761,8 @@ function HoldoutGatePanel({
   const report = result?.result.report || null
   const split = result?.result.split || null
   const reasons = gate?.reasons || []
-  const holdoutGroupsText = useMemo(
-    () => split?.holdout_group_keys.join(', ') || 'none',
-    [split]
-  )
-  const recordedText = useMemo(
-    () => result?.recorded.join(', ') || 'not recorded',
-    [result]
-  )
+  const holdoutGroupsText = useMemo(() => split?.holdout_group_keys.join(', ') || 'none', [split])
+  const recordedText = useMemo(() => result?.recorded.join(', ') || 'not recorded', [result])
   const canRun = environments.length > 0 && attemptText.trim().length > 0 && !loading
 
   return (
@@ -846,7 +838,9 @@ function HoldoutGatePanel({
           />
         </label>
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Timeout max</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Timeout max
+          </span>
           <input
             type="number"
             min={0}
@@ -883,7 +877,9 @@ function HoldoutGatePanel({
 
       <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-end">
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Registry model</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Registry model
+          </span>
           <input
             value={modelId}
             onChange={(event) => onModelIdChange(event.target.value)}
@@ -936,9 +932,7 @@ function HoldoutGatePanel({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="border-brutal border-border-subtle rounded-brutal bg-background-secondary p-3 min-w-0">
             <p className="font-mono text-xs uppercase text-text-muted mb-2">Holdout groups</p>
-            <p className="font-mono text-xs text-text-primary break-words">
-              {holdoutGroupsText}
-            </p>
+            <p className="font-mono text-xs text-text-primary break-words">{holdoutGroupsText}</p>
           </div>
           <div className="border-brutal border-border-subtle rounded-brutal bg-background-secondary p-3 min-w-0">
             <p className="font-mono text-xs uppercase text-text-muted mb-2">Gate reasons</p>
@@ -979,7 +973,7 @@ function HoldoutComparisonPanel({
   onMinCandidatePassAt1Change,
   onNResamplesChange,
   onRequireCiExcludesZeroChange,
-  onRun,
+  onRun
 }: {
   environments: TerminalEnvironmentSpec[]
   baseAttemptText: string
@@ -1083,7 +1077,9 @@ function HoldoutComparisonPanel({
           />
         </label>
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Min cand p@1</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Min cand p@1
+          </span>
           <input
             type="number"
             min={0}
@@ -1195,7 +1191,7 @@ function SpuriousRewardControlPanel({
   onMinObservedPassAt1Change,
   onMaxControlPassAt1Change,
   onMinLiftOverControlChange,
-  onRun,
+  onRun
 }: {
   environments: TerminalEnvironmentSpec[]
   attemptText: string
@@ -1266,7 +1262,9 @@ function SpuriousRewardControlPanel({
           />
         </label>
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Min obs p@1</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Min obs p@1
+          </span>
           <input
             type="number"
             min={0}
@@ -1278,7 +1276,9 @@ function SpuriousRewardControlPanel({
           />
         </label>
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Max ctl p@1</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Max ctl p@1
+          </span>
           <input
             type="number"
             min={0}
@@ -1334,11 +1334,17 @@ function SpuriousRewardControlPanel({
             <p className="font-mono text-xs uppercase text-text-muted mb-2">Control pass@1</p>
             <div className="grid grid-cols-2 gap-2 font-mono text-xs">
               <span className="text-text-muted">p05</span>
-              <span className="text-text-primary text-right">{formatPercent(controlSummary?.p05)}</span>
+              <span className="text-text-primary text-right">
+                {formatPercent(controlSummary?.p05)}
+              </span>
               <span className="text-text-muted">p50</span>
-              <span className="text-text-primary text-right">{formatPercent(controlSummary?.p50)}</span>
+              <span className="text-text-primary text-right">
+                {formatPercent(controlSummary?.p50)}
+              </span>
               <span className="text-text-muted">p95</span>
-              <span className="text-text-primary text-right">{formatPercent(controlSummary?.p95)}</span>
+              <span className="text-text-primary text-right">
+                {formatPercent(controlSummary?.p95)}
+              </span>
             </div>
           </div>
           <div className="border-brutal border-border-subtle rounded-brutal bg-background-secondary p-3 min-w-0">
@@ -1371,7 +1377,7 @@ function LocalRolloutPanel({
   onCommandAttemptTextChange,
   onKValuesTextChange,
   onSeed,
-  onRun,
+  onRun
 }: {
   environments: TerminalEnvironmentSpec[]
   selectedEnvironment: TerminalEnvironmentSpec | null
@@ -1384,10 +1390,7 @@ function LocalRolloutPanel({
   onSeed: () => void
   onRun: () => void
 }) {
-  const passEntries = useMemo(
-    () => Object.entries(result?.report.pass_at_k || {}),
-    [result]
-  )
+  const passEntries = useMemo(() => Object.entries(result?.report.pass_at_k || {}), [result])
   const latestRollout = result?.rollouts[0] || null
   const verifierObservation = latestRollout?.verifier_observation || null
   const latestMetadata = latestRollout?.attempt.metadata || {}
@@ -1425,7 +1428,9 @@ function LocalRolloutPanel({
           <button
             type="button"
             onClick={onRun}
-            disabled={loading || environments.length === 0 || commandAttemptText.trim().length === 0}
+            disabled={
+              loading || environments.length === 0 || commandAttemptText.trim().length === 0
+            }
             className="btn-primary flex items-center gap-2"
           >
             <PlayCircle className="w-4 h-4" />
@@ -1444,7 +1449,12 @@ function LocalRolloutPanel({
       {result ? (
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
           {passEntries.map(([label, value]) => (
-            <MetricTile key={label} label={label} value={formatPercent(value)} hint="verifier pass" />
+            <MetricTile
+              key={label}
+              label={label}
+              value={formatPercent(value)}
+              hint="verifier pass"
+            />
           ))}
           <MetricTile label="Attempts" value={String(result.report.n_attempts)} hint="local runs" />
           <MetricTile
@@ -1452,9 +1462,7 @@ function LocalRolloutPanel({
             value={String(result.report.attempt_summary.mean_tool_calls ?? 0)}
             hint="mean commands"
           />
-          {tamperDetected ? (
-            <MetricTile label="Guard" value="tampered" hint={tamperHint} />
-          ) : null}
+          {tamperDetected ? <MetricTile label="Guard" value="tampered" hint={tamperHint} /> : null}
         </div>
       ) : null}
 
@@ -1470,7 +1478,8 @@ function LocalRolloutPanel({
                     <span>exit {observation.exit_code}</span>
                   </div>
                   <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-words text-text-primary">
-                    {[observation.stdout, observation.stderr].filter(Boolean).join('\n') || '(no output)'}
+                    {[observation.stdout, observation.stderr].filter(Boolean).join('\n') ||
+                      '(no output)'}
                   </pre>
                 </div>
               ))}
@@ -1481,8 +1490,9 @@ function LocalRolloutPanel({
                     <span>exit {verifierObservation.exit_code}</span>
                   </div>
                   <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-words text-text-primary">
-                    {[verifierObservation.stdout, verifierObservation.stderr].filter(Boolean).join('\n') ||
-                      '(no output)'}
+                    {[verifierObservation.stdout, verifierObservation.stderr]
+                      .filter(Boolean)
+                      .join('\n') || '(no output)'}
                   </pre>
                 </div>
               ) : null}
@@ -1490,7 +1500,9 @@ function LocalRolloutPanel({
           </div>
           <div className="border-brutal border-border-subtle rounded-brutal bg-background-secondary p-3 min-w-0">
             <p className="font-mono text-xs uppercase text-text-muted">Workspace</p>
-            <p className="font-mono text-xs text-text-primary mt-2 break-all">{latestRollout.workspace}</p>
+            <p className="font-mono text-xs text-text-primary mt-2 break-all">
+              {latestRollout.workspace}
+            </p>
             <p className="font-mono text-xs uppercase text-text-muted mt-4">Status</p>
             <p className="font-mono text-xs text-text-primary mt-2">
               {latestRollout.attempt.verifier_status || 'unknown'}
@@ -1507,7 +1519,7 @@ function RewardHackingCanaryPanel({
   result,
   loading,
   onCategoryTextChange,
-  onRun,
+  onRun
 }: {
   categoryText: string
   result: EnvironmentCanarySuiteResponse | null
@@ -1517,10 +1529,7 @@ function RewardHackingCanaryPanel({
 }) {
   const canRun = !loading
   const latestResults = result?.summary.results || []
-  const categoryLabels = useMemo(
-    () => Object.keys(result?.summary.categories || {}),
-    [result]
-  )
+  const categoryLabels = useMemo(() => Object.keys(result?.summary.categories || {}), [result])
 
   return (
     <section className="card p-4 space-y-4">
@@ -1558,7 +1567,11 @@ function RewardHackingCanaryPanel({
 
       {result ? (
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-          <MetricTile label="Canaries" value={String(result.summary.total)} hint="exploit attempts" />
+          <MetricTile
+            label="Canaries"
+            value={String(result.summary.total)}
+            hint="exploit attempts"
+          />
           <MetricTile
             label="Guarded"
             value={String(result.summary.guarded)}
@@ -1637,7 +1650,7 @@ function ModelRolloutPanel({
   onFilterZeroStdGroupsChange,
   onActiveSamplingChange,
   onTargetPromptGroupsChange,
-  onRun,
+  onRun
 }: {
   selectedEnvironment: TerminalEnvironmentSpec | null
   endpointBaseUrl: string
@@ -1678,10 +1691,7 @@ function ModelRolloutPanel({
   onTargetPromptGroupsChange: (value: string) => void
   onRun: () => void
 }) {
-  const passEntries = useMemo(
-    () => Object.entries(result?.report.pass_at_k || {}),
-    [result]
-  )
+  const passEntries = useMemo(() => Object.entries(result?.report.pass_at_k || {}), [result])
   const latestRollout = result?.rollouts[0] || null
   const verifierObservation = latestRollout?.verifier_observation || null
   const samplingReport = result?.sampling_report || null
@@ -1778,7 +1788,9 @@ function ModelRolloutPanel({
             />
           </label>
           <label className="block">
-            <span className="block font-mono text-xs uppercase text-text-muted mb-1">Obs chars</span>
+            <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+              Obs chars
+            </span>
             <input
               type="number"
               min={500}
@@ -1834,7 +1846,9 @@ function ModelRolloutPanel({
           Capture logprobs
         </label>
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Top logprobs</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Top logprobs
+          </span>
           <input
             type="number"
             min={0}
@@ -1867,7 +1881,9 @@ function ModelRolloutPanel({
           Include ECHO/RWML replay data
         </label>
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">RWML history</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            RWML history
+          </span>
           <input
             type="number"
             min={0}
@@ -1899,7 +1915,9 @@ function ModelRolloutPanel({
           Active sampling
         </label>
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Target groups</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Target groups
+          </span>
           <input
             type="number"
             min={1}
@@ -1913,9 +1931,18 @@ function ModelRolloutPanel({
       {result ? (
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
           {passEntries.map(([label, value]) => (
-            <MetricTile key={label} label={label} value={formatPercent(value)} hint="model policy" />
+            <MetricTile
+              key={label}
+              label={label}
+              value={formatPercent(value)}
+              hint="model policy"
+            />
           ))}
-          <MetricTile label="Attempts" value={String(result.report.n_attempts)} hint="served model" />
+          <MetricTile
+            label="Attempts"
+            value={String(result.report.n_attempts)}
+            hint="served model"
+          />
           <MetricTile
             label="Tool calls"
             value={String(result.report.attempt_summary.mean_tool_calls ?? 0)}
@@ -1924,9 +1951,7 @@ function ModelRolloutPanel({
           {observationBudget > 0 ? (
             <MetricTile label="Obs budget" value={String(observationBudget)} hint="prompt chars" />
           ) : null}
-          {tamperDetected ? (
-            <MetricTile label="Guard" value="tampered" hint={tamperHint} />
-          ) : null}
+          {tamperDetected ? <MetricTile label="Guard" value="tampered" hint={tamperHint} /> : null}
         </div>
       ) : null}
 
@@ -2011,7 +2036,8 @@ function ModelRolloutPanel({
                     <span>exit {observation.exit_code}</span>
                   </div>
                   <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-words text-text-primary">
-                    {[observation.stdout, observation.stderr].filter(Boolean).join('\n') || '(no output)'}
+                    {[observation.stdout, observation.stderr].filter(Boolean).join('\n') ||
+                      '(no output)'}
                   </pre>
                 </div>
               ))}
@@ -2022,8 +2048,9 @@ function ModelRolloutPanel({
                     <span>exit {verifierObservation.exit_code}</span>
                   </div>
                   <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-words text-text-primary">
-                    {[verifierObservation.stdout, verifierObservation.stderr].filter(Boolean).join('\n') ||
-                      '(no output)'}
+                    {[verifierObservation.stdout, verifierObservation.stderr]
+                      .filter(Boolean)
+                      .join('\n') || '(no output)'}
                   </pre>
                 </div>
               ) : null}
@@ -2031,7 +2058,9 @@ function ModelRolloutPanel({
           </div>
           <div className="border-brutal border-border-subtle rounded-brutal bg-background-secondary p-3 min-w-0">
             <p className="font-mono text-xs uppercase text-text-muted">Workspace</p>
-            <p className="font-mono text-xs text-text-primary mt-2 break-all">{latestRollout.workspace}</p>
+            <p className="font-mono text-xs text-text-primary mt-2 break-all">
+              {latestRollout.workspace}
+            </p>
             <p className="font-mono text-xs uppercase text-text-muted mt-4">Status</p>
             <p className="font-mono text-xs text-text-primary mt-2">
               {latestRollout.attempt.verifier_status || 'unknown'}
@@ -2056,7 +2085,7 @@ function DppoReplayPanel({
   onTrainLogprobsTextChange,
   onDivergenceChange,
   onThresholdChange,
-  onEnrich,
+  onEnrich
 }: {
   inputPath: string
   outputPath: string
@@ -2104,7 +2133,9 @@ function DppoReplayPanel({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Input JSONL</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Input JSONL
+          </span>
           <input
             type="text"
             value={inputPath}
@@ -2114,7 +2145,9 @@ function DppoReplayPanel({
           />
         </label>
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Scored JSONL</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Scored JSONL
+          </span>
           <input
             type="text"
             value={outputPath}
@@ -2130,7 +2163,9 @@ function DppoReplayPanel({
           <span className="block font-mono text-xs uppercase text-text-muted mb-1">Divergence</span>
           <select
             value={divergence}
-            onChange={(event) => onDivergenceChange(event.target.value as 'binary_tv' | 'binary_kl')}
+            onChange={(event) =>
+              onDivergenceChange(event.target.value as 'binary_tv' | 'binary_kl')
+            }
             className="input w-full font-mono text-xs"
           >
             <option value="binary_tv">Binary-TV</option>
@@ -2226,7 +2261,7 @@ function DppoSmokePanel({
   onBackendChange,
   onMaxStepsChange,
   onGpusChange,
-  onPlan,
+  onPlan
 }: {
   replayPath: string
   outputDir: string
@@ -2239,7 +2274,9 @@ function DppoSmokePanel({
   onReplayPathChange: (value: string) => void
   onOutputDirChange: (value: string) => void
   onBaseModelChange: (value: string) => void
-  onBackendChange: (value: 'auto' | 'verl' | 'skyrl' | 'tmax_open_instruct' | 'grpo_fallback') => void
+  onBackendChange: (
+    value: 'auto' | 'verl' | 'skyrl' | 'tmax_open_instruct' | 'grpo_fallback'
+  ) => void
   onMaxStepsChange: (value: string) => void
   onGpusChange: (value: string) => void
   onPlan: () => void
@@ -2276,7 +2313,9 @@ function DppoSmokePanel({
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <label className="block">
-          <span className="block font-mono text-xs uppercase text-text-muted mb-1">Replay JSONL</span>
+          <span className="block font-mono text-xs uppercase text-text-muted mb-1">
+            Replay JSONL
+          </span>
           <input
             type="text"
             value={replayPath}
@@ -2316,7 +2355,8 @@ function DppoSmokePanel({
             value={backend}
             onChange={(event) =>
               onBackendChange(
-                event.target.value as 'auto' | 'verl' | 'skyrl' | 'tmax_open_instruct' | 'grpo_fallback'
+                event.target.value as
+                  'auto' | 'verl' | 'skyrl' | 'tmax_open_instruct' | 'grpo_fallback'
               )
             }
             className="input w-full font-mono text-xs"
@@ -2356,9 +2396,21 @@ function DppoSmokePanel({
         <div className="space-y-3">
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
             <MetricTile label="Backend" value={result.backend} hint={result.reason} />
-            <MetricTile label="Runnable" value={result.runnable ? 'yes' : 'no'} hint={result.available ? 'detected' : 'missing'} />
-            <MetricTile label="Steps" value={String(result.max_steps)} hint={`${result.n_gpus_per_node} GPU`} />
-            <MetricTile label="Script" value={result.script_path ? 'written' : 'none'} hint={result.script_path || 'dry plan'} />
+            <MetricTile
+              label="Runnable"
+              value={result.runnable ? 'yes' : 'no'}
+              hint={result.available ? 'detected' : 'missing'}
+            />
+            <MetricTile
+              label="Steps"
+              value={String(result.max_steps)}
+              hint={`${result.n_gpus_per_node} GPU`}
+            />
+            <MetricTile
+              label="Script"
+              value={result.script_path ? 'written' : 'none'}
+              hint={result.script_path || 'dry plan'}
+            />
           </div>
           {commandText.length > 0 ? (
             <pre className="bg-[#1E1E1E] text-white border-brutal border-text-primary rounded-brutal p-3 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
@@ -2433,31 +2485,38 @@ export function EnvironmentLab() {
   const [dppoReplayInputPath, setDppoReplayInputPath] = useState('')
   const [dppoReplayOutputPath, setDppoReplayOutputPath] = useState('')
   const [dppoTrainLogprobsText, setDppoTrainLogprobsText] = useState('')
-  const [dppoReplayDivergence, setDppoReplayDivergence] =
-    useState<'binary_tv' | 'binary_kl'>('binary_tv')
+  const [dppoReplayDivergence, setDppoReplayDivergence] = useState<'binary_tv' | 'binary_kl'>(
+    'binary_tv'
+  )
   const [dppoReplayThreshold, setDppoReplayThreshold] = useState('')
   const [dppoSmokeReplayPath, setDppoSmokeReplayPath] = useState('')
   const [dppoSmokeOutputDir, setDppoSmokeOutputDir] = useState('data/dppo_smoke/latest')
   const [dppoSmokeBaseModel, setDppoSmokeBaseModel] = useState('')
-  const [dppoSmokeBackend, setDppoSmokeBackend] =
-    useState<'auto' | 'verl' | 'skyrl' | 'tmax_open_instruct' | 'grpo_fallback'>('auto')
+  const [dppoSmokeBackend, setDppoSmokeBackend] = useState<
+    'auto' | 'verl' | 'skyrl' | 'tmax_open_instruct' | 'grpo_fallback'
+  >('auto')
   const [dppoSmokeMaxSteps, setDppoSmokeMaxSteps] = useState('1')
   const [dppoSmokeGpus, setDppoSmokeGpus] = useState('1')
   const [kValuesText, setKValuesText] = useState('1,4,8')
   const [passKResult, setPassKResult] = useState<EnvironmentPassKResponse | null>(null)
-  const [holdoutGateResult, setHoldoutGateResult] = useState<EnvironmentHoldoutGateResponse | null>(null)
+  const [holdoutGateResult, setHoldoutGateResult] = useState<EnvironmentHoldoutGateResponse | null>(
+    null
+  )
   const [holdoutComparisonResult, setHoldoutComparisonResult] =
     useState<EnvironmentHoldoutComparisonResponse | null>(null)
   const [spuriousControlResult, setSpuriousControlResult] =
     useState<EnvironmentSpuriousRewardControlResponse | null>(null)
   const [rolloutResult, setRolloutResult] = useState<EnvironmentRolloutPassKResponse | null>(null)
   const [canaryResult, setCanaryResult] = useState<EnvironmentCanarySuiteResponse | null>(null)
-  const [modelRolloutResult, setModelRolloutResult] = useState<EnvironmentRolloutPassKResponse | null>(null)
-  const [dppoReplayResult, setDppoReplayResult] = useState<EnvironmentDppoReplaySummary | null>(null)
+  const [modelRolloutResult, setModelRolloutResult] =
+    useState<EnvironmentRolloutPassKResponse | null>(null)
+  const [dppoReplayResult, setDppoReplayResult] = useState<EnvironmentDppoReplaySummary | null>(
+    null
+  )
   const [dppoSmokePlan, setDppoSmokePlan] = useState<DPPOSmokeLaunchPlan | null>(null)
   const [status, setStatus] = useState<LabStatus>({
     kind: 'idle',
-    message: 'Ready',
+    message: 'Ready'
   })
 
   const environments = result?.environments ?? EMPTY_ENVIRONMENTS
@@ -2495,7 +2554,7 @@ export function EnvironmentLab() {
           records,
           source: 'tmax',
           source_uri: file.name,
-          preserve_raw: preserveRaw,
+          preserve_raw: preserveRaw
         })
         if (response.ok && response.data) {
           acceptResult(response.data, `Imported ${response.data.environments.length} environments`)
@@ -2518,7 +2577,7 @@ export function EnvironmentLab() {
     const response = await environmentApi.importJsonl({
       path,
       source: 'tmax',
-      preserve_raw: preserveRaw,
+      preserve_raw: preserveRaw
     })
     if (response.ok && response.data) {
       acceptResult(response.data, `Imported ${response.data.environments.length} environments`)
@@ -2540,14 +2599,14 @@ export function EnvironmentLab() {
     setStatus({ kind: 'loading', message: 'Filtering benchmark overlap' })
     const response = await environmentApi.decontaminate({
       environments,
-      benchmark_texts: benchmarkTexts,
+      benchmark_texts: benchmarkTexts
     })
     if (response.ok && response.data) {
       acceptResult(
         {
           environments: response.data.environments,
           report: response.data.mix_report,
-          errors: [],
+          errors: []
         },
         `Kept ${response.data.report.kept}, dropped ${response.data.report.dropped}`
       )
@@ -2563,11 +2622,14 @@ export function EnvironmentLab() {
     const response = await environmentApi.materialize({
       environment: selectedEnvironment,
       output_dir: outputDir,
-      overwrite,
+      overwrite
     })
     if (response.ok && response.data) {
       setMaterializeResult(response.data.build.path)
-      setStatus({ kind: 'ready', message: `Wrote ${response.data.build.files_written.length} files` })
+      setStatus({
+        kind: 'ready',
+        message: `Wrote ${response.data.build.files_written.length} files`
+      })
     } else {
       setStatus({ kind: 'error', message: response.error || 'Materialize failed' })
     }
@@ -2597,7 +2659,7 @@ export function EnvironmentLab() {
       environments,
       attempts,
       k_values: kValues,
-      record_to_registry: false,
+      record_to_registry: false
     })
     if (response.ok && response.data) {
       setPassKResult(response.data)
@@ -2661,13 +2723,13 @@ export function EnvironmentLab() {
       max_timeout_rate: maxTimeoutRate,
       max_tamper_rate: maxTamperRate,
       require_no_contamination: holdoutRequireNoContamination,
-      record_to_registry: holdoutRecordToRegistry,
+      record_to_registry: holdoutRecordToRegistry
     })
     if (response.ok && response.data) {
       setHoldoutGateResult(response.data)
       setStatus({
         kind: response.data.result.gate.ship ? 'ready' : 'error',
-        message: response.data.result.gate.ship ? 'Holdout gate clear' : 'Holdout gate blocked',
+        message: response.data.result.gate.ship ? 'Holdout gate clear' : 'Holdout gate blocked'
       })
     } else {
       setStatus({ kind: 'error', message: response.error || 'Holdout gate failed' })
@@ -2684,7 +2746,7 @@ export function EnvironmentLab() {
     holdoutRequireNoContamination,
     holdoutSeed,
     holdoutSplitBy,
-    kValuesText,
+    kValuesText
   ])
 
   const handleHoldoutComparison = useCallback(async () => {
@@ -2759,7 +2821,7 @@ export function EnvironmentLab() {
       max_candidate_timeout_rate: maxTimeoutRate,
       max_candidate_tamper_rate: maxTamperRate,
       require_no_contamination: holdoutRequireNoContamination,
-      n_resamples: nResamples,
+      n_resamples: nResamples
     })
     if (response.ok && response.data) {
       setHoldoutComparisonResult(response.data)
@@ -2767,7 +2829,7 @@ export function EnvironmentLab() {
         kind: response.data.result.gate.ship ? 'ready' : 'error',
         message: response.data.result.gate.ship
           ? 'Holdout comparison clear'
-          : 'Holdout comparison blocked',
+          : 'Holdout comparison blocked'
       })
     } else {
       setStatus({ kind: 'error', message: response.error || 'Holdout comparison failed' })
@@ -2788,7 +2850,7 @@ export function EnvironmentLab() {
     holdoutRequireNoContamination,
     holdoutSeed,
     holdoutSplitBy,
-    kValuesText,
+    kValuesText
   ])
 
   const handleSpuriousRewardControl = useCallback(async () => {
@@ -2814,7 +2876,11 @@ export function EnvironmentLab() {
       setStatus({ kind: 'error', message: 'Spurious trials must be an integer from 1 to 5000' })
       return
     }
-    if (Number.isNaN(randomPassProbability) || randomPassProbability < 0 || randomPassProbability > 1) {
+    if (
+      Number.isNaN(randomPassProbability) ||
+      randomPassProbability < 0 ||
+      randomPassProbability > 1
+    ) {
       setStatus({ kind: 'error', message: 'Random probability must be between 0 and 1' })
       return
     }
@@ -2851,7 +2917,7 @@ export function EnvironmentLab() {
       min_observed_pass_at_1: minObservedPassAt1,
       max_control_pass_at_1: maxControlPassAt1,
       min_lift_over_control: minLiftOverControl,
-      require_no_contamination: holdoutRequireNoContamination,
+      require_no_contamination: holdoutRequireNoContamination
     })
     if (response.ok && response.data) {
       setSpuriousControlResult(response.data)
@@ -2859,7 +2925,7 @@ export function EnvironmentLab() {
         kind: response.data.result.gate.ship ? 'ready' : 'error',
         message: response.data.result.gate.ship
           ? 'Spurious control clear'
-          : 'Spurious control blocked',
+          : 'Spurious control blocked'
       })
     } else {
       setStatus({ kind: 'error', message: response.error || 'Spurious control failed' })
@@ -2876,7 +2942,7 @@ export function EnvironmentLab() {
     spuriousMinLiftOverControl,
     spuriousMinObservedPassAt1,
     spuriousRandomPassProbability,
-    spuriousTrials,
+    spuriousTrials
   ])
 
   const handleSeedLocalRollout = useCallback(() => {
@@ -2900,7 +2966,7 @@ export function EnvironmentLab() {
       environments,
       command_attempts: commandAttempts,
       k_values: kValues,
-      record_to_registry: false,
+      record_to_registry: false
     })
     if (response.ok && response.data) {
       setRolloutResult(response.data)
@@ -2915,13 +2981,13 @@ export function EnvironmentLab() {
     setStatus({ kind: 'loading', message: 'Running guardrail canaries' })
     const response = await evalAdvancedApi.environmentRewardHackingCanaries({
       categories,
-      keep_workspace: true,
+      keep_workspace: true
     })
     if (response.ok && response.data) {
       setCanaryResult(response.data)
       setStatus({
         kind: response.data.summary.failed === 0 ? 'ready' : 'error',
-        message: `${response.data.summary.guarded}/${response.data.summary.total} canaries guarded`,
+        message: `${response.data.summary.guarded}/${response.data.summary.total} canaries guarded`
       })
     } else {
       setStatus({ kind: 'error', message: response.error || 'Canary suite failed' })
@@ -2958,7 +3024,10 @@ export function EnvironmentLab() {
       setStatus({ kind: 'error', message: 'Temperature must be between 0 and 2' })
       return
     }
-    if (modelCaptureLogprobs && (!Number.isInteger(topLogprobs) || topLogprobs < 0 || topLogprobs > 20)) {
+    if (
+      modelCaptureLogprobs &&
+      (!Number.isInteger(topLogprobs) || topLogprobs < 0 || topLogprobs > 20)
+    ) {
       setStatus({ kind: 'error', message: 'Top logprobs must be an integer from 0 to 20' })
       return
     }
@@ -2987,7 +3056,7 @@ export function EnvironmentLab() {
       endpoint: {
         base_url: modelEndpointBaseUrl.trim(),
         model: modelEndpointModel.trim(),
-        api_key: modelEndpointApiKey.trim() || undefined,
+        api_key: modelEndpointApiKey.trim() || undefined
       },
       environments: [selectedEnvironment],
       attempts_per_environment: attempts,
@@ -3005,7 +3074,7 @@ export function EnvironmentLab() {
       active_sampling: modelActiveSampling,
       target_prompt_groups:
         modelFilterZeroStdGroups || modelActiveSampling ? targetPromptGroups : undefined,
-      record_to_registry: false,
+      record_to_registry: false
     })
     if (response.ok && response.data) {
       setModelRolloutResult(response.data)
@@ -3036,7 +3105,7 @@ export function EnvironmentLab() {
     modelActiveSampling,
     modelTargetPromptGroups,
     modelUseToolCalling,
-    selectedEnvironment,
+    selectedEnvironment
   ])
 
   const handleDppoReplayEnrich = useCallback(async () => {
@@ -3066,7 +3135,7 @@ export function EnvironmentLab() {
       output_path: outputPath,
       train_logprobs: trainLogprobs,
       divergence: dppoReplayDivergence,
-      threshold,
+      threshold
     })
     if (response.ok && response.data) {
       setDppoReplayResult(response.data.dppo_replay)
@@ -3080,7 +3149,7 @@ export function EnvironmentLab() {
     dppoReplayInputPath,
     dppoReplayOutputPath,
     dppoReplayThreshold,
-    dppoTrainLogprobsText,
+    dppoTrainLogprobsText
   ])
 
   const handleDppoSmokePlan = useCallback(async () => {
@@ -3090,7 +3159,10 @@ export function EnvironmentLab() {
     const maxSteps = Number(dppoSmokeMaxSteps)
     const gpus = Number(dppoSmokeGpus)
     if (!replayPath || !outputDir || !baseModel) {
-      setStatus({ kind: 'error', message: 'DPPO smoke replay path, output dir, and model are required' })
+      setStatus({
+        kind: 'error',
+        message: 'DPPO smoke replay path, output dir, and model are required'
+      })
       return
     }
     if (!Number.isInteger(maxSteps) || maxSteps <= 0 || maxSteps > 100) {
@@ -3109,7 +3181,7 @@ export function EnvironmentLab() {
       backend: dppoSmokeBackend,
       max_steps: maxSteps,
       n_gpus_per_node: gpus,
-      write_script: true,
+      write_script: true
     })
     if (response.ok && response.data) {
       setDppoSmokePlan(response.data.plan)
@@ -3123,7 +3195,7 @@ export function EnvironmentLab() {
     dppoSmokeGpus,
     dppoSmokeMaxSteps,
     dppoSmokeOutputDir,
-    dppoSmokeReplayPath,
+    dppoSmokeReplayPath
   ])
 
   return (
@@ -3141,7 +3213,9 @@ export function EnvironmentLab() {
         <div
           className={clsx(
             'flex items-center gap-2 border-brutal rounded-brutal px-3 py-2 bg-background-card font-mono text-xs',
-            status.kind === 'error' ? 'border-status-error text-status-error' : 'border-border text-text-muted'
+            status.kind === 'error'
+              ? 'border-status-error text-status-error'
+              : 'border-border text-text-muted'
           )}
         >
           {status.kind === 'loading' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -3209,7 +3283,11 @@ export function EnvironmentLab() {
 
         <main className="space-y-4 min-w-0">
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-            <MetricTile label="Environments" value={summary.total} hint={`${validationCount} warnings`} />
+            <MetricTile
+              label="Environments"
+              value={summary.total}
+              hint={`${validationCount} warnings`}
+            />
             <MetricTile label="Domains" value={summary.domains} hint="observed buckets" />
             <MetricTile label="Skills" value={summary.skills} hint="observed buckets" />
             <MetricTile label="Domain balance" value={summary.balance} hint="entropy score" />
@@ -3404,7 +3482,10 @@ export function EnvironmentLab() {
               </div>
               <div className="space-y-1">
                 {result.errors.slice(0, 5).map((error) => (
-                  <p key={`${error.index}:${error.id || error.error}`} className="font-mono text-xs text-text-secondary">
+                  <p
+                    key={`${error.index}:${error.id || error.error}`}
+                    className="font-mono text-xs text-text-secondary"
+                  >
                     #{error.index} {error.id ? `${error.id}: ` : ''}
                     {(error.validation_errors || [error.error]).filter(Boolean).join(', ')}
                   </p>

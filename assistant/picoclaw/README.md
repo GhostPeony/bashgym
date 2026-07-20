@@ -14,7 +14,7 @@
     <a href="https://x.com/SipeedIO"><img src="https://img.shields.io/badge/X_(Twitter)-SipeedIO-black?style=flat&logo=x&logoColor=white" alt="Twitter"></a>
   </p>
 
- [中文](README.zh.md) | [日本語](README.ja.md) | **English**
+[中文](README.zh.md) | [日本語](README.ja.md) | **English**
 </div>
 
 ---
@@ -41,10 +41,9 @@
 > [!CAUTION]
 > **🚨 SECURITY & OFFICIAL CHANNELS / 安全声明**
 >
-> * **NO CRYPTO:** PicoClaw has **NO** official token/coin. All claims on `pump.fun` or other trading platforms are **SCAMS**.
-> * **OFFICIAL DOMAIN:** The **ONLY** official website is **[picoclaw.io](https://picoclaw.io)**, and company website is **[sipeed.com](https://sipeed.com)**
-> * **Warning:** Many `.ai/.org/.com/.net/...` domains are registered by third parties.
->
+> - **NO CRYPTO:** PicoClaw has **NO** official token/coin. All claims on `pump.fun` or other trading platforms are **SCAMS**.
+> - **OFFICIAL DOMAIN:** The **ONLY** official website is **[picoclaw.io](https://picoclaw.io)**, and company website is **[sipeed.com](https://sipeed.com)**
+> - **Warning:** Many `.ai/.org/.com/.net/...` domains are registered by third parties.
 
 ## 📢 News
 
@@ -222,8 +221,8 @@ picoclaw onboard
 
 **3. Get API Keys**
 
-* **LLM Provider**: [OpenRouter](https://openrouter.ai/keys) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) · [Anthropic](https://console.anthropic.com) · [OpenAI](https://platform.openai.com) · [Gemini](https://aistudio.google.com/api-keys)
-* **Web Search** (optional): [Brave Search](https://brave.com/search/api) - Free tier available (2000 requests/month)
+- **LLM Provider**: [OpenRouter](https://openrouter.ai/keys) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) · [Anthropic](https://console.anthropic.com) · [OpenAI](https://platform.openai.com) · [Gemini](https://aistudio.google.com/api-keys)
+- **Web Search** (optional): [Brave Search](https://brave.com/search/api) - Free tier available (2000 requests/month)
 
 > **Note**: See `config.example.json` for a complete configuration template.
 
@@ -254,9 +253,9 @@ Talk to your picoclaw through Telegram, Discord, DingTalk, or LINE
 
 **1. Create a bot**
 
-* Open Telegram, search `@BotFather`
-* Send `/newbot`, follow prompts
-* Copy the token
+- Open Telegram, search `@BotFather`
+- Send `/newbot`, follow prompts
+- Copy the token
 
 **2. Configure**
 
@@ -287,19 +286,19 @@ picoclaw gateway
 
 **1. Create a bot**
 
-* Go to <https://discord.com/developers/applications>
-* Create an application → Bot → Add Bot
-* Copy the bot token
+- Go to <https://discord.com/developers/applications>
+- Create an application → Bot → Add Bot
+- Copy the bot token
 
 **2. Enable intents**
 
-* In the Bot settings, enable **MESSAGE CONTENT INTENT**
-* (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
+- In the Bot settings, enable **MESSAGE CONTENT INTENT**
+- (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
 
 **3. Get your User ID**
 
-* Discord Settings → Advanced → enable **Developer Mode**
-* Right-click your avatar → **Copy User ID**
+- Discord Settings → Advanced → enable **Developer Mode**
+- Right-click your avatar → **Copy User ID**
 
 **4. Configure**
 
@@ -317,10 +316,10 @@ picoclaw gateway
 
 **5. Invite the bot**
 
-* OAuth2 → URL Generator
-* Scopes: `bot`
-* Bot Permissions: `Send Messages`, `Read Message History`
-* Open the generated invite URL and add the bot to your server
+- OAuth2 → URL Generator
+- Scopes: `bot`
+- Bot Permissions: `Send Messages`, `Read Message History`
+- Open the generated invite URL and add the bot to your server
 
 **6. Run**
 
@@ -368,9 +367,9 @@ picoclaw gateway
 
 **1. Create a bot**
 
-* Go to [Open Platform](https://open.dingtalk.com/)
-* Create an internal app
-* Copy Client ID and Client Secret
+- Go to [Open Platform](https://open.dingtalk.com/)
+- Create an internal app
+- Copy Client ID and Client Secret
 
 **2. Configure**
 
@@ -493,34 +492,34 @@ PicoClaw runs in a sandboxed environment by default. The agent can only access f
 }
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `workspace` | `~/.picoclaw/workspace` | Working directory for the agent |
-| `restrict_to_workspace` | `true` | Restrict file/command access to workspace |
+| Option                  | Default                 | Description                               |
+| ----------------------- | ----------------------- | ----------------------------------------- |
+| `workspace`             | `~/.picoclaw/workspace` | Working directory for the agent           |
+| `restrict_to_workspace` | `true`                  | Restrict file/command access to workspace |
 
 #### Protected Tools
 
 When `restrict_to_workspace: true`, the following tools are sandboxed:
 
-| Tool | Function | Restriction |
-|------|----------|-------------|
-| `read_file` | Read files | Only files within workspace |
-| `write_file` | Write files | Only files within workspace |
-| `list_dir` | List directories | Only directories within workspace |
-| `edit_file` | Edit files | Only files within workspace |
-| `append_file` | Append to files | Only files within workspace |
-| `exec` | Execute commands | Command paths must be within workspace |
+| Tool          | Function         | Restriction                            |
+| ------------- | ---------------- | -------------------------------------- |
+| `read_file`   | Read files       | Only files within workspace            |
+| `write_file`  | Write files      | Only files within workspace            |
+| `list_dir`    | List directories | Only directories within workspace      |
+| `edit_file`   | Edit files       | Only files within workspace            |
+| `append_file` | Append to files  | Only files within workspace            |
+| `exec`        | Execute commands | Command paths must be within workspace |
 
 #### Additional Exec Protection
 
 Even with `restrict_to_workspace: false`, the `exec` tool blocks these dangerous commands:
 
-* `rm -rf`, `del /f`, `rmdir /s` — Bulk deletion
-* `format`, `mkfs`, `diskpart` — Disk formatting
-* `dd if=` — Disk imaging
-* Writing to `/dev/sd[a-z]` — Direct disk writes
-* `shutdown`, `reboot`, `poweroff` — System shutdown
-* Fork bomb `:(){ :|:& };:`
+- `rm -rf`, `del /f`, `rmdir /s` — Bulk deletion
+- `format`, `mkfs`, `diskpart` — Disk formatting
+- `dd if=` — Disk imaging
+- Writing to `/dev/sd[a-z]` — Direct disk writes
+- `shutdown`, `reboot`, `poweroff` — System shutdown
+- Fork bomb `:(){ :|:& };:`
 
 #### Error Examples
 
@@ -562,11 +561,11 @@ export PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
 
 The `restrict_to_workspace` setting applies consistently across all execution paths:
 
-| Execution Path | Security Boundary |
-|----------------|-------------------|
-| Main Agent | `restrict_to_workspace` ✅ |
+| Execution Path   | Security Boundary            |
+| ---------------- | ---------------------------- |
+| Main Agent       | `restrict_to_workspace` ✅   |
 | Subagent / Spawn | Inherits same restriction ✅ |
-| Heartbeat tasks | Inherits same restriction ✅ |
+| Heartbeat tasks  | Inherits same restriction ✅ |
 
 All paths share the same workspace restriction — there's no way to bypass the security boundary through subagents or scheduled tasks.
 
@@ -592,21 +591,23 @@ For long-running tasks (web search, API calls), use the `spawn` tool to create a
 # Periodic Tasks
 
 ## Quick Tasks (respond directly)
+
 - Report current time
 
 ## Long Tasks (use spawn for async)
+
 - Search the web for AI news and summarize
 - Check email and report important messages
 ```
 
 **Key behaviors:**
 
-| Feature | Description |
-|---------|-------------|
-| **spawn** | Creates async subagent, doesn't block heartbeat |
-| **Independent context** | Subagent has its own context, no session history |
-| **message tool** | Subagent communicates with user directly via message tool |
-| **Non-blocking** | After spawning, heartbeat continues to next task |
+| Feature                 | Description                                               |
+| ----------------------- | --------------------------------------------------------- |
+| **spawn**               | Creates async subagent, doesn't block heartbeat           |
+| **Independent context** | Subagent has its own context, no session history          |
+| **message tool**        | Subagent communicates with user directly via message tool |
+| **Non-blocking**        | After spawning, heartbeat continues to next task          |
 
 #### How Subagent Communication Works
 
@@ -637,15 +638,15 @@ The subagent has access to tools (message, web_search, etc.) and can communicate
 }
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enabled` | `true` | Enable/disable heartbeat |
-| `interval` | `30` | Check interval in minutes (min: 5) |
+| Option     | Default | Description                        |
+| ---------- | ------- | ---------------------------------- |
+| `enabled`  | `true`  | Enable/disable heartbeat           |
+| `interval` | `30`    | Check interval in minutes (min: 5) |
 
 **Environment variables:**
 
-* `PICOCLAW_HEARTBEAT_ENABLED=false` to disable
-* `PICOCLAW_HEARTBEAT_INTERVAL=60` to change interval
+- `PICOCLAW_HEARTBEAT_ENABLED=false` to disable
+- `PICOCLAW_HEARTBEAT_INTERVAL=60` to change interval
 
 ### Providers
 
@@ -667,7 +668,7 @@ The subagent has access to tools (message, web_search, etc.) and can communicate
 
 **1. Get API key and base URL**
 
-* Get [API key](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)
+- Get [API key](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)
 
 **2. Configure**
 
@@ -784,9 +785,9 @@ picoclaw agent -m "Hello"
 
 PicoClaw supports scheduled reminders and recurring tasks through the `cron` tool:
 
-* **One-time reminders**: "Remind me in 10 minutes" → triggers once after 10min
-* **Recurring tasks**: "Remind me every 2 hours" → triggers every 2 hours
-* **Cron expressions**: "Remind me at 9am daily" → uses cron expression
+- **One-time reminders**: "Remind me in 10 minutes" → triggers once after 10min
+- **Recurring tasks**: "Remind me every 2 hours" → triggers every 2 hours
+- **Cron expressions**: "Remind me at 9am daily" → uses cron expression
 
 Jobs are stored in `~/.picoclaw/workspace/cron/` and processed automatically.
 
@@ -800,7 +801,7 @@ Developer group building, Entry Requirement: At least 1 Merged PR.
 
 User Groups:
 
-discord:  <https://discord.gg/V4sAZ9XWpN>
+discord: <https://discord.gg/V4sAZ9XWpN>
 
 <img src="assets/wechat.png" alt="PicoClaw" width="512">
 

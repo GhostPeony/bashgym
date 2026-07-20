@@ -15,23 +15,27 @@ const event: ActivityEvent = {
   title: 'Campaign action failed — action-1',
   detail: '{"campaign_id":"campaign-1","action_id":"action-1"}',
   destination: {
-    label: 'Open AutoResearch', view: 'autoresearch',
-    workspaceId: 'workspace-a', campaignId: 'campaign-1',
+    label: 'Open AutoResearch',
+    view: 'autoresearch',
+    workspaceId: 'workspace-a',
+    campaignId: 'campaign-1'
   },
-  timestamp: Date.now(),
+  timestamp: Date.now()
 }
 
 test('global activity panel lets users inspect details before navigating', () => {
-  const markup = renderToStaticMarkup(createElement(ActivityFeedPanel, {
-    events: [event],
-    enabledCategories: new Set<string>(),
-    selectedEventId: event.id,
-    onSelect: () => undefined,
-    onNavigate: () => undefined,
-    onToggleCategory: () => undefined,
-    onClear: () => undefined,
-    onClose: () => undefined,
-  }))
+  const markup = renderToStaticMarkup(
+    createElement(ActivityFeedPanel, {
+      events: [event],
+      enabledCategories: new Set<string>(),
+      selectedEventId: event.id,
+      onSelect: () => undefined,
+      onNavigate: () => undefined,
+      onToggleCategory: () => undefined,
+      onClear: () => undefined,
+      onClose: () => undefined
+    })
+  )
   assert.match(markup, /<button[^>]+aria-label="Inspect Campaign action failed/)
   assert.match(markup, /Event detail/)
   assert.match(markup, /campaign:action-failed/)

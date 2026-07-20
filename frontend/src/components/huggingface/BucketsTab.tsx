@@ -8,7 +8,7 @@ import {
   File,
   Copy,
   Loader2,
-  ArrowRight,
+  ArrowRight
 } from 'lucide-react'
 import { hfApi } from '../../services/api'
 import { hfBucketsResource, hfBucketTreeResource } from '../../stores/hfResources'
@@ -39,7 +39,10 @@ export function BucketsTab() {
     if (!newBucketId.trim()) return
     setCreating(true)
     setError(null)
-    const result = await hfApi.createBucket({ bucket_id: newBucketId.trim(), private: newBucketPrivate })
+    const result = await hfApi.createBucket({
+      bucket_id: newBucketId.trim(),
+      private: newBucketPrivate
+    })
     if (result.ok) {
       setNewBucketId('')
       await refresh()
@@ -69,7 +72,10 @@ export function BucketsTab() {
     if (!copySource.trim() || !copyDest.trim()) return
     setCopying(true)
     setError(null)
-    const result = await hfApi.copyFiles({ source: copySource.trim(), destination: copyDest.trim() })
+    const result = await hfApi.copyFiles({
+      source: copySource.trim(),
+      destination: copyDest.trim()
+    })
     if (result.ok) {
       setShowCopy(false)
       setCopySource('')
@@ -98,7 +104,10 @@ export function BucketsTab() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowCopy(true)} className="btn-ghost flex items-center gap-2 text-sm">
+          <button
+            onClick={() => setShowCopy(true)}
+            className="btn-ghost flex items-center gap-2 text-sm"
+          >
             <Copy className="w-4 h-4" />
             Instant Copy
           </button>
@@ -136,7 +145,11 @@ export function BucketsTab() {
           />
           Private
         </label>
-        <button type="submit" disabled={creating} className="btn-primary flex items-center gap-2 text-sm">
+        <button
+          type="submit"
+          disabled={creating}
+          className="btn-primary flex items-center gap-2 text-sm"
+        >
           {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
           Create
         </button>
@@ -158,7 +171,9 @@ export function BucketsTab() {
             <div
               key={b.id}
               className={`border-2 rounded-brutal p-3 flex items-center justify-between cursor-pointer transition-press hover-press ${
-                selectedBucket === b.id ? 'border-accent bg-accent-light' : 'border-border hover:bg-background-secondary'
+                selectedBucket === b.id
+                  ? 'border-accent bg-accent-light'
+                  : 'border-border hover:bg-background-secondary'
               }`}
               onClick={() => handleBrowse(b.id)}
             >
@@ -175,7 +190,10 @@ export function BucketsTab() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={(e) => { e.stopPropagation(); handleDelete(b.id) }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDelete(b.id)
+                  }}
                   className="btn-icon text-status-error hover:bg-background-secondary"
                   title="Delete bucket"
                 >
@@ -224,18 +242,27 @@ export function BucketsTab() {
 
       {/* Copy dialog */}
       {showCopy && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCopy(false)}>
-          <div className="bg-background-card border-2 border-border rounded-brutal p-6 w-full max-w-lg shadow-brutal" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setShowCopy(false)}
+        >
+          <div
+            className="bg-background-card border-2 border-border rounded-brutal p-6 w-full max-w-lg shadow-brutal"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-lg font-brand text-text-primary mb-4 flex items-center gap-2">
               <Copy className="w-5 h-5" />
               Instant File Copy
             </h3>
             <p className="text-sm text-text-secondary mb-4">
-              Server-side copy with zero bandwidth for Xet-tracked files. Use <code className="text-xs bg-background-secondary px-1 rounded">hf://</code> URIs.
+              Server-side copy with zero bandwidth for Xet-tracked files. Use{' '}
+              <code className="text-xs bg-background-secondary px-1 rounded">hf://</code> URIs.
             </p>
             <form onSubmit={handleCopy} className="space-y-3">
               <div>
-                <label className="block text-xs font-mono text-text-secondary uppercase tracking-widest mb-1">Source</label>
+                <label className="block text-xs font-mono text-text-secondary uppercase tracking-widest mb-1">
+                  Source
+                </label>
                 <input
                   type="text"
                   value={copySource}
@@ -248,7 +275,9 @@ export function BucketsTab() {
                 <ArrowRight className="w-5 h-5 text-text-muted" />
               </div>
               <div>
-                <label className="block text-xs font-mono text-text-secondary uppercase tracking-widest mb-1">Destination</label>
+                <label className="block text-xs font-mono text-text-secondary uppercase tracking-widest mb-1">
+                  Destination
+                </label>
                 <input
                   type="text"
                   value={copyDest}
@@ -258,9 +287,23 @@ export function BucketsTab() {
                 />
               </div>
               <div className="flex gap-2 justify-end pt-2">
-                <button type="button" onClick={() => setShowCopy(false)} className="btn-ghost text-sm">Cancel</button>
-                <button type="submit" disabled={copying} className="btn-primary flex items-center gap-2 text-sm">
-                  {copying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
+                <button
+                  type="button"
+                  onClick={() => setShowCopy(false)}
+                  className="btn-ghost text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={copying}
+                  className="btn-primary flex items-center gap-2 text-sm"
+                >
+                  {copying ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
                   Copy
                 </button>
               </div>

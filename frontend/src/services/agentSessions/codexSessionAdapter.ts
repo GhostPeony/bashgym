@@ -57,7 +57,10 @@ function readUsage(usage: Record<string, unknown> | undefined): TokenTotals | nu
 function applyCwd(snap: AgentSessionSnapshot, cwd: unknown): void {
   if (snap.cwd !== undefined || typeof cwd !== 'string' || !cwd) return
   snap.cwd = cwd
-  const base = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
+  const base = cwd
+    .replace(/[\\/]+$/, '')
+    .split(/[\\/]/)
+    .pop()
   if (base) snap.title = base
 }
 
@@ -127,9 +130,11 @@ function finalize(snap: AgentSessionSnapshot, size: number, mtime: number): Agen
   return { ...snap, totals: { ...snap.totals }, recentFiles: [...snap.recentFiles] }
 }
 
-export async function ingestCodexFile(
-  fileInfo: { path: string; size: number; modified: number }
-): Promise<AgentSessionSnapshot | null> {
+export async function ingestCodexFile(fileInfo: {
+  path: string
+  size: number
+  modified: number
+}): Promise<AgentSessionSnapshot | null> {
   const api = window.bashgym?.sessions
   if (!api) return null
 

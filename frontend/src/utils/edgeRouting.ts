@@ -57,13 +57,13 @@ export async function routeBinaryToLinkedTerminals(
   const filePath = result.path
 
   const connectedEdges = canvasEdges.filter(
-    e => e.source === sourcePanelId || e.target === sourcePanelId
+    (e) => e.source === sourcePanelId || e.target === sourcePanelId
   )
 
   let routed = 0
   for (const edge of connectedEdges) {
     const targetPanelId = edge.source === sourcePanelId ? edge.target : edge.source
-    const targetPanel = panels.find(p => p.id === targetPanelId && p.type === 'terminal')
+    const targetPanel = panels.find((p) => p.id === targetPanelId && p.type === 'terminal')
     if (targetPanel?.terminalId) {
       // Prefill the terminal input without submitting (no \r) so the user can review
       window.bashgym?.terminal.write(targetPanel.terminalId, filePath)

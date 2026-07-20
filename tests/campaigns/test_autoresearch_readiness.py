@@ -314,9 +314,7 @@ def test_doctor_requires_declared_remote_evaluation_stage(tmp_path: Path):
         template,
         workspace_id=WORKSPACE,
         ledger=ledger,
-        executor_profiles={
-            (profile.compute_profile_id, profile.target_contract_key): profile
-        },
+        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
         controller=offline_controller(),
         source_profiles={},
     )

@@ -1,5 +1,14 @@
 import { useCallback } from 'react'
-import { RefreshCw, Cpu, HardDrive, AlertCircle, CheckCircle2, XCircle, Server, Wifi } from 'lucide-react'
+import {
+  RefreshCw,
+  Cpu,
+  HardDrive,
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  Server,
+  Wifi
+} from 'lucide-react'
 import { MaskedHost } from '../common'
 import { clsx } from 'clsx'
 import {
@@ -7,7 +16,7 @@ import {
   ollamaStatusResource,
   refreshSystemInfo,
   sshPreflightResource,
-  systemInfoResource,
+  systemInfoResource
 } from '../../stores/appResources'
 import { useKeyedSessionResource, useSessionResource } from '../../stores/sessionResource'
 
@@ -45,10 +54,7 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
         <div className="flex items-center gap-2 text-status-error">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span className="font-mono text-xs flex-1">{error || 'Unknown error'}</span>
-          <button
-            onClick={handleRefresh}
-            className="btn-secondary text-xs px-2 py-1"
-          >
+          <button onClick={handleRefresh} className="btn-secondary text-xs px-2 py-1">
             Retry
           </button>
         </div>
@@ -57,8 +63,8 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
   }
 
   const primaryGpu = systemInfo.gpus[0]
-  const hasNvidiaGpu = systemInfo.gpus.some(g => g.vendor === 'NVIDIA')
-  const maxVram = Math.max(...systemInfo.gpus.map(g => g.vram), 0)
+  const hasNvidiaGpu = systemInfo.gpus.some((g) => g.vendor === 'NVIDIA')
+  const maxVram = Math.max(...systemInfo.gpus.map((g) => g.vram), 0)
   const ollamaModels = ollamaStatus?.models ?? []
 
   if (compact) {
@@ -66,7 +72,16 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
       <div className="card p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={clsx('status-dot', hasNvidiaGpu ? 'status-success' : systemInfo.cuda_available ? 'status-warning' : 'status-error')} />
+            <div
+              className={clsx(
+                'status-dot',
+                hasNvidiaGpu
+                  ? 'status-success'
+                  : systemInfo.cuda_available
+                    ? 'status-warning'
+                    : 'status-error'
+              )}
+            />
             <div>
               <span className="text-sm font-medium text-text-primary">{primaryGpu.model}</span>
               <span className="font-mono text-xs text-text-muted ml-2">
@@ -91,12 +106,32 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
       {/* GPU Section */}
       <div className="card p-4">
         <div className="flex items-center gap-2 mb-3">
-          <Cpu className={clsx('w-4 h-4', hasNvidiaGpu ? 'text-status-success' : systemInfo.cuda_available ? 'text-status-warning' : 'text-status-error')} />
-          <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">GPU</span>
+          <Cpu
+            className={clsx(
+              'w-4 h-4',
+              hasNvidiaGpu
+                ? 'text-status-success'
+                : systemInfo.cuda_available
+                  ? 'text-status-warning'
+                  : 'text-status-error'
+            )}
+          />
+          <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+            GPU
+          </span>
         </div>
         <div className="flex items-baseline gap-2">
           <span className="font-brand text-2xl text-text-primary">{primaryGpu.model}</span>
-          <span className={clsx('font-mono text-xs font-bold', primaryGpu.vram >= 8 ? 'text-status-success' : primaryGpu.vram >= 4 ? 'text-status-warning' : 'text-status-error')}>
+          <span
+            className={clsx(
+              'font-mono text-xs font-bold',
+              primaryGpu.vram >= 8
+                ? 'text-status-success'
+                : primaryGpu.vram >= 4
+                  ? 'text-status-warning'
+                  : 'text-status-error'
+            )}
+          >
             {primaryGpu.vram > 0 ? `${primaryGpu.vram} GB VRAM` : 'VRAM unknown'}
           </span>
         </div>
@@ -107,7 +142,9 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
             <div className="progress-bar">
               <div
                 className="progress-fill"
-                style={{ width: `${Math.min((primaryGpu.vram_used / primaryGpu.vram) * 100, 100)}%` }}
+                style={{
+                  width: `${Math.min((primaryGpu.vram_used / primaryGpu.vram) * 100, 100)}%`
+                }}
               />
             </div>
             <p className="font-mono text-xs text-text-muted mt-1">
@@ -123,7 +160,9 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
               <span className="font-mono text-xs text-text-muted">{primaryGpu.temperature}C</span>
             )}
             {primaryGpu.utilization !== undefined && (
-              <span className="font-mono text-xs text-text-muted">{primaryGpu.utilization}% util</span>
+              <span className="font-mono text-xs text-text-muted">
+                {primaryGpu.utilization}% util
+              </span>
             )}
           </div>
         )}
@@ -133,7 +172,9 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
       <div className="card p-4">
         <div className="flex items-center gap-2 mb-3">
           <HardDrive className="w-4 h-4 text-accent" />
-          <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">RAM</span>
+          <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+            RAM
+          </span>
         </div>
         <div className="flex items-baseline gap-2">
           <span className="font-brand text-2xl text-text-primary">
@@ -173,29 +214,45 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
       {ollamaStatus && (
         <div className="card p-4">
           <div className="flex items-center gap-2 mb-3">
-            <Server className={clsx('w-4 h-4', ollamaStatus.available ? 'text-status-success' : 'text-status-error')} />
-            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Inference Target</span>
+            <Server
+              className={clsx(
+                'w-4 h-4',
+                ollamaStatus.available ? 'text-status-success' : 'text-status-error'
+              )}
+            />
+            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+              Inference Target
+            </span>
           </div>
           {ollamaStatus.available ? (
             <>
               <div className="flex items-center gap-2">
                 <Wifi className="w-3.5 h-3.5 text-status-success" />
                 <span className="text-sm font-medium text-text-primary">Ollama Connected</span>
-                <span className="tag tag-accent">{ollamaModels.length} model{ollamaModels.length !== 1 ? 's' : ''}</span>
+                <span className="tag tag-accent">
+                  {ollamaModels.length} model{ollamaModels.length !== 1 ? 's' : ''}
+                </span>
               </div>
               {ollamaModels.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {ollamaModels.slice(0, 3).map((m) => (
-                    <div key={m.name} className="flex items-center justify-between font-mono text-xs text-text-muted">
+                    <div
+                      key={m.name}
+                      className="flex items-center justify-between font-mono text-xs text-text-muted"
+                    >
                       <span className="flex items-center gap-1.5">
                         {m.is_code_model && <span className="text-accent">{'</>'}</span>}
                         {m.name}
                       </span>
-                      <span>{m.parameter_size} · {m.size_gb.toFixed(1)}GB</span>
+                      <span>
+                        {m.parameter_size} · {m.size_gb.toFixed(1)}GB
+                      </span>
                     </div>
                   ))}
                   {ollamaModels.length > 3 && (
-                    <p className="font-mono text-xs text-text-muted">+{ollamaModels.length - 3} more</p>
+                    <p className="font-mono text-xs text-text-muted">
+                      +{ollamaModels.length - 3} more
+                    </p>
                   )}
                 </div>
               )}
@@ -203,7 +260,10 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
           ) : (
             <div className="flex items-center gap-2 text-text-muted">
               <XCircle className="w-3.5 h-3.5 text-status-error" />
-              <span className="text-sm">Ollama offline — start with <code className="font-mono text-xs bg-surface px-1 py-0.5">ollama serve</code></span>
+              <span className="text-sm">
+                Ollama offline — start with{' '}
+                <code className="font-mono text-xs bg-surface px-1 py-0.5">ollama serve</code>
+              </span>
             </div>
           )}
         </div>
@@ -213,14 +273,23 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
       {sshStatus && (
         <div className="card p-4">
           <div className="flex items-center gap-2 mb-3">
-            <Server className={clsx('w-4 h-4', sshStatus.ok ? 'text-status-success' : 'text-status-error')} />
-            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Training Target</span>
+            <Server
+              className={clsx(
+                'w-4 h-4',
+                sshStatus.ok ? 'text-status-success' : 'text-status-error'
+              )}
+            />
+            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+              Training Target
+            </span>
           </div>
           {sshStatus.ok ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Wifi className="w-3.5 h-3.5 text-status-success" />
-                <span className="text-sm font-medium text-text-primary">Private target connected</span>
+                <span className="text-sm font-medium text-text-primary">
+                  Private target connected
+                </span>
               </div>
               <p className="font-mono text-xs text-text-muted">
                 <MaskedHost username={sshStatus.username} host={sshStatus.host ?? ''} />
@@ -233,7 +302,9 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
           ) : (
             <div className="flex items-center gap-2 text-text-muted">
               <XCircle className="w-3.5 h-3.5 text-status-error" />
-              <span className="text-sm">{sshStatus.error || 'Private compute target not configured'}</span>
+              <span className="text-sm">
+                {sshStatus.error || 'Private compute target not configured'}
+              </span>
             </div>
           )}
         </div>
@@ -241,21 +312,22 @@ export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
 
       {/* Recommendation */}
       {recommendations && (
-        <div className={clsx(
-          'card p-3 font-mono text-xs border-l-4',
-          recommendations.warning
-            ? 'border-l-status-warning text-status-warning'
-            : maxVram >= 8
-              ? 'border-l-status-success text-status-success'
-              : 'border-l-accent text-accent'
-        )}>
-          {recommendations.warning || (
-            maxVram >= 8
+        <div
+          className={clsx(
+            'card p-3 font-mono text-xs border-l-4',
+            recommendations.warning
+              ? 'border-l-status-warning text-status-warning'
+              : maxVram >= 8
+                ? 'border-l-status-success text-status-success'
+                : 'border-l-accent text-accent'
+          )}
+        >
+          {recommendations.warning ||
+            (maxVram >= 8
               ? 'Your GPU supports most models with QLoRA'
               : maxVram >= 4
                 ? 'Your GPU can run small-medium models with QLoRA'
-                : 'Limited VRAM - try smaller models'
-          )}
+                : 'Limited VRAM - try smaller models')}
         </div>
       )}
 

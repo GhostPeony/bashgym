@@ -44,41 +44,37 @@ import {
   factoryConfigResource,
   factoryJobsResource,
   factoryModelsResource,
-  syntheticJobsResource,
+  syntheticJobsResource
 } from '../../stores/factoryResources'
 import { TabId, COLUMN_TYPES, RISK_LEVELS, DEFAULT_CONFIG } from './types'
 
 function HowItWorks({ isCollapsed, onToggle }: { isCollapsed: boolean; onToggle: () => void }) {
   return (
     <div className="card p-0 mb-6">
-      <button
-        onClick={onToggle}
-        className="w-full p-5 flex items-start gap-4 text-left"
-      >
+      <button onClick={onToggle} className="w-full p-5 flex items-start gap-4 text-left">
         <div className="w-10 h-10 flex items-center justify-center border-brutal border-border rounded-brutal bg-accent-light">
           <Sparkles className="w-6 h-6 text-accent-dark" />
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="font-brand text-lg text-text-primary">
-              How Data Creator Works
-            </h3>
-            <ChevronDown className={clsx(
-              'w-4 h-4 text-text-muted transition-transform',
-              isCollapsed && '-rotate-90'
-            )} />
+            <h3 className="font-brand text-lg text-text-primary">How Data Creator Works</h3>
+            <ChevronDown
+              className={clsx(
+                'w-4 h-4 text-text-muted transition-transform',
+                isCollapsed && '-rotate-90'
+              )}
+            />
           </div>
-          <p className="text-sm text-text-secondary">
-            Powered by NVIDIA NeMo Data Designer
-          </p>
+          <p className="text-sm text-text-secondary">Powered by NVIDIA NeMo Data Designer</p>
         </div>
       </button>
 
       {!isCollapsed && (
         <div className="px-5 pb-5 space-y-4 border-t-2 border-border">
           <p className="text-sm text-text-secondary mt-4">
-            Data Creator uses NVIDIA NeMo Data Designer to generate high-quality synthetic training data from your gold traces,
-            expanding limited real data into larger, diverse training sets.
+            Data Creator uses NVIDIA NeMo Data Designer to generate high-quality synthetic training
+            data from your gold traces, expanding limited real data into larger, diverse training
+            sets.
           </p>
 
           <div className="terminal-chrome">
@@ -99,7 +95,9 @@ function HowItWorks({ isCollapsed, onToggle }: { isCollapsed: boolean; onToggle:
           </div>
 
           <div className="text-xs text-text-muted">
-            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Supported column types: </span>
+            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+              Supported column types:{' '}
+            </span>
             LLM, Sampler, Category, Person, DateTime, Expression, UUID, Gaussian, Validator
             <span className="mx-2">&middot;</span>
             <a
@@ -184,7 +182,7 @@ export function FactoryDashboard() {
   const removeColumn = (id: string) => {
     setConfig({
       ...config,
-      columns: config.columns.filter(c => c.id !== id)
+      columns: config.columns.filter((c) => c.id !== id)
     })
     if (expandedColumn === id) setExpandedColumn(null)
   }
@@ -192,7 +190,7 @@ export function FactoryDashboard() {
   const updateColumn = (id: string, updates: Partial<ColumnConfig>) => {
     setConfig({
       ...config,
-      columns: config.columns.map(c => c.id === id ? { ...c, ...updates } : c)
+      columns: config.columns.map((c) => (c.id === id ? { ...c, ...updates } : c))
     })
   }
 
@@ -258,7 +256,9 @@ export function FactoryDashboard() {
       <div className="h-full flex items-center justify-center bg-background-primary">
         <div className="border-brutal border-border rounded-brutal bg-background-card p-8 shadow-brutal-sm text-center">
           <Loader2 className="w-8 h-8 animate-spin text-accent mx-auto mb-3" />
-          <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Loading factory...</p>
+          <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+            Loading factory...
+          </p>
         </div>
       </div>
     )
@@ -273,7 +273,9 @@ export function FactoryDashboard() {
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="font-brand text-2xl text-text-primary">Data Creator</h1>
-                <span className="tag"><span>DATA FACTORY</span></span>
+                <span className="tag">
+                  <span>DATA FACTORY</span>
+                </span>
               </div>
               <p className="text-sm text-text-secondary mt-1">
                 Generate high-quality synthetic training data with NVIDIA NeMo
@@ -338,7 +340,11 @@ export function FactoryDashboard() {
                   disabled={isSaving}
                   className="btn-primary flex items-center gap-2"
                 >
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  {isSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle className="w-4 h-4" />
+                  )}
                   Save
                 </button>
               </>
@@ -354,10 +360,22 @@ export function FactoryDashboard() {
             { id: 'designer' as TabId, label: 'Data Designer', icon: Sparkles },
             { id: 'environments' as TabId, label: 'Environments', icon: Boxes },
             { id: 'quality' as TabId, label: 'Quality', icon: GitBranch },
-            { id: 'seeds' as TabId, label: 'Seeds', icon: Layers, badge: config.seeds.length > 0 ? config.seeds.length : undefined },
+            {
+              id: 'seeds' as TabId,
+              label: 'Seeds',
+              icon: Layers,
+              badge: config.seeds.length > 0 ? config.seeds.length : undefined
+            },
             { id: 'settings' as TabId, label: 'Settings', icon: Settings },
-            { id: 'jobs' as TabId, label: 'Jobs', icon: RefreshCw, badge: jobs.filter(j => j.status === 'running').length + syntheticJobs.filter(j => j.status === 'running').length || undefined },
-          ].map(tab => (
+            {
+              id: 'jobs' as TabId,
+              label: 'Jobs',
+              icon: RefreshCw,
+              badge:
+                jobs.filter((j) => j.status === 'running').length +
+                  syntheticJobs.filter((j) => j.status === 'running').length || undefined
+            }
+          ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -408,13 +426,17 @@ export function FactoryDashboard() {
                   </div>
                   <div>
                     <h3 className="font-brand text-lg text-text-primary">Advanced Configuration</h3>
-                    <p className="text-sm text-text-muted">Schema columns, model settings, and output format</p>
+                    <p className="text-sm text-text-muted">
+                      Schema columns, model settings, and output format
+                    </p>
                   </div>
                 </div>
-                <ChevronDown className={clsx(
-                  'w-5 h-5 text-text-muted transition-transform',
-                  !advancedConfigOpen && '-rotate-90'
-                )} />
+                <ChevronDown
+                  className={clsx(
+                    'w-5 h-5 text-text-muted transition-transform',
+                    !advancedConfigOpen && '-rotate-90'
+                  )}
+                />
               </button>
 
               {advancedConfigOpen && (
@@ -429,47 +451,67 @@ export function FactoryDashboard() {
                       </legend>
                       <div className="space-y-3">
                         <div>
-                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Model</label>
+                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                            Model
+                          </label>
                           <select
                             value={config.default_model.model_id}
-                            onChange={(e) => setConfig({
-                              ...config,
-                              default_model: { ...config.default_model, model_id: e.target.value }
-                            })}
+                            onChange={(e) =>
+                              setConfig({
+                                ...config,
+                                default_model: { ...config.default_model, model_id: e.target.value }
+                              })
+                            }
                             className="input text-sm w-full"
                           >
-                            {availableModels.map(m => (
-                              <option key={m.id} value={m.id}>{m.name}</option>
+                            {availableModels.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
                             ))}
                           </select>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Temperature</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                              Temperature
+                            </label>
                             <input
                               type="number"
                               min="0"
                               max="2"
                               step="0.1"
                               value={config.default_model.temperature}
-                              onChange={(e) => setConfig({
-                                ...config,
-                                default_model: { ...config.default_model, temperature: parseFloat(e.target.value) }
-                              })}
+                              onChange={(e) =>
+                                setConfig({
+                                  ...config,
+                                  default_model: {
+                                    ...config.default_model,
+                                    temperature: parseFloat(e.target.value)
+                                  }
+                                })
+                              }
                               className="input text-sm w-full"
                             />
                           </div>
                           <div>
-                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Max Tokens</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                              Max Tokens
+                            </label>
                             <input
                               type="number"
                               min="1"
                               max="8192"
                               value={config.default_model.max_tokens}
-                              onChange={(e) => setConfig({
-                                ...config,
-                                default_model: { ...config.default_model, max_tokens: parseInt(e.target.value) }
-                              })}
+                              onChange={(e) =>
+                                setConfig({
+                                  ...config,
+                                  default_model: {
+                                    ...config.default_model,
+                                    max_tokens: parseInt(e.target.value)
+                                  }
+                                })
+                              }
                               className="input text-sm w-full"
                             />
                           </div>
@@ -481,31 +523,44 @@ export function FactoryDashboard() {
                     <fieldset className="space-y-4 border-brutal border-border rounded-brutal p-4 bg-background-card">
                       <legend className="flex items-center gap-2 px-2">
                         <FileJson className="w-4 h-4 text-accent" />
-                        <span className="font-brand text-lg text-text-primary">Output Settings</span>
+                        <span className="font-brand text-lg text-text-primary">
+                          Output Settings
+                        </span>
                       </legend>
                       <div className="space-y-3">
                         <div>
-                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Task Name</label>
+                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                            Task Name
+                          </label>
                           <input
                             type="text"
                             value={config.output.task_name}
-                            onChange={(e) => setConfig({
-                              ...config,
-                              output: { ...config.output, task_name: e.target.value }
-                            })}
+                            onChange={(e) =>
+                              setConfig({
+                                ...config,
+                                output: { ...config.output, task_name: e.target.value }
+                              })
+                            }
                             placeholder="default_task"
                             className="input text-sm w-full"
                           />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Format</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                              Format
+                            </label>
                             <select
                               value={config.output.format}
-                              onChange={(e) => setConfig({
-                                ...config,
-                                output: { ...config.output, format: e.target.value as 'jsonl' | 'parquet' }
-                              })}
+                              onChange={(e) =>
+                                setConfig({
+                                  ...config,
+                                  output: {
+                                    ...config.output,
+                                    format: e.target.value as 'jsonl' | 'parquet'
+                                  }
+                                })
+                              }
                               className="input text-sm w-full"
                             >
                               <option value="jsonl">JSONL</option>
@@ -513,17 +568,24 @@ export function FactoryDashboard() {
                             </select>
                           </div>
                           <div>
-                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Train/Val Split</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                              Train/Val Split
+                            </label>
                             <input
                               type="number"
                               min="0.5"
                               max="1"
                               step="0.05"
                               value={config.output.train_val_split}
-                              onChange={(e) => setConfig({
-                                ...config,
-                                output: { ...config.output, train_val_split: parseFloat(e.target.value) }
-                              })}
+                              onChange={(e) =>
+                                setConfig({
+                                  ...config,
+                                  output: {
+                                    ...config.output,
+                                    train_val_split: parseFloat(e.target.value)
+                                  }
+                                })
+                              }
                               className="input text-sm w-full"
                             />
                           </div>
@@ -540,321 +602,456 @@ export function FactoryDashboard() {
                       <div className="flex items-center gap-2">
                         <Database className="w-4 h-4 text-accent" />
                         <h4 className="font-brand text-lg text-text-primary">Column Schema</h4>
-                        <span className="tag text-[10px] py-0 px-1.5"><span>{config.columns.length} cols</span></span>
+                        <span className="tag text-[10px] py-0 px-1.5">
+                          <span>{config.columns.length} cols</span>
+                        </span>
                       </div>
-                      <button onClick={addColumn} className="btn-secondary text-xs flex items-center gap-1 py-1 px-2">
+                      <button
+                        onClick={addColumn}
+                        className="btn-secondary text-xs flex items-center gap-1 py-1 px-2"
+                      >
                         <Plus className="w-3 h-3" />
                         Add Column
                       </button>
                     </div>
 
                     <div className="border-brutal border-border rounded-brutal divide-y-2 divide-border">
-                {config.columns.map((column) => (
-                  <div key={column.id} className="p-4">
-                    {/* Column Header */}
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => setExpandedColumn(expandedColumn === column.id ? null : column.id)}
-                        className="p-1 border-brutal border-border rounded-brutal bg-background-secondary hover:bg-accent-light hover:border-accent transition-colors"
-                      >
-                        {expandedColumn === column.id ? (
-                          <ChevronDown className="w-4 h-4 text-text-muted" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4 text-text-muted" />
-                        )}
-                      </button>
-                      <div className="flex-1 grid grid-cols-4 gap-3">
-                        <input
-                          type="text"
-                          value={column.name}
-                          onChange={(e) => updateColumn(column.id, { name: e.target.value })}
-                          placeholder="Column name"
-                          className="input text-sm"
-                        />
-                        <select
-                          value={column.type}
-                          onChange={(e) => updateColumn(column.id, { type: e.target.value as ColumnConfig['type'] })}
-                          className="input text-sm"
-                        >
-                          {COLUMN_TYPES.map(type => (
-                            <option key={type.id} value={type.id}>{type.label}</option>
-                          ))}
-                        </select>
-                        <select
-                          value={column.risk_level}
-                          onChange={(e) => updateColumn(column.id, { risk_level: e.target.value as 'normal' | 'elevated' | 'high' })}
-                          className={clsx('input text-sm', RISK_LEVELS.find(r => r.id === column.risk_level)?.color)}
-                        >
-                          {RISK_LEVELS.map(level => (
-                            <option key={level.id} value={level.id}>{level.label}</option>
-                          ))}
-                        </select>
-                        <div className="flex items-center gap-2">
-                          <label className="flex items-center gap-1 text-sm text-text-secondary font-mono">
-                            <input
-                              type="checkbox"
-                              checked={column.required}
-                              onChange={(e) => updateColumn(column.id, { required: e.target.checked })}
-                              className="rounded-brutal"
-                            />
-                            Required
-                          </label>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => removeColumn(column.id)}
-                        className="btn-icon w-8 h-8 flex items-center justify-center text-text-muted hover:text-status-error"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Expanded Column Config */}
-                    {expandedColumn === column.id && (
-                      <div className="mt-4 ml-8 p-4 border-brutal border-border rounded-brutal bg-background-secondary space-y-4">
-                        {/* Description */}
-                        <div>
-                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Description</label>
-                          <input
-                            type="text"
-                            value={column.description || ''}
-                            onChange={(e) => updateColumn(column.id, { description: e.target.value })}
-                            placeholder="What this column represents..."
-                            className="input text-sm w-full"
-                          />
-                        </div>
-
-                        {/* Type-specific config */}
-                        {column.type === 'llm' && (
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Prompt Template</label>
-                              <textarea
-                                value={column.config.prompt || ''}
-                                onChange={(e) => updateColumn(column.id, { config: { ...column.config, prompt: e.target.value } })}
-                                placeholder="Generate a {{task_type}} for: {{user_request}}"
-                                rows={3}
-                                className="input text-sm w-full font-mono"
-                              />
-                              <p className="text-xs text-text-muted mt-1 font-mono">Use {'{{column_name}}'} to reference other columns</p>
-                            </div>
-                            <div className="grid grid-cols-3 gap-3">
-                              <div>
-                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Model Override</label>
-                                <select
-                                  value={column.config.model?.model_id || ''}
-                                  onChange={(e) => updateColumn(column.id, {
-                                    config: {
-                                      ...column.config,
-                                      model: e.target.value ? { ...config.default_model, model_id: e.target.value } : undefined
-                                    }
-                                  })}
-                                  className="input text-sm w-full"
-                                >
-                                  <option value="">Use default</option>
-                                  {availableModels.map(m => (
-                                    <option key={m.id} value={m.id}>{m.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Temperature</label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max="2"
-                                  step="0.1"
-                                  value={column.config.model?.temperature ?? config.default_model.temperature}
-                                  onChange={(e) => updateColumn(column.id, {
-                                    config: {
-                                      ...column.config,
-                                      model: {
-                                        ...(column.config.model || config.default_model),
-                                        temperature: parseFloat(e.target.value)
-                                      }
-                                    }
-                                  })}
-                                  className="input text-sm w-full"
-                                />
-                              </div>
-                              <div>
-                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Max Tokens</label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="8192"
-                                  value={column.config.model?.max_tokens ?? config.default_model.max_tokens}
-                                  onChange={(e) => updateColumn(column.id, {
-                                    config: {
-                                      ...column.config,
-                                      model: {
-                                        ...(column.config.model || config.default_model),
-                                        max_tokens: parseInt(e.target.value)
-                                      }
-                                    }
-                                  })}
-                                  className="input text-sm w-full"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {column.type === 'category' && (
-                          <div>
-                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Values (comma-separated)</label>
-                            <input
-                              type="text"
-                              value={column.config.values?.join(', ') || ''}
-                              onChange={(e) => updateColumn(column.id, {
-                                config: { ...column.config, values: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }
-                              })}
-                              placeholder="option_a, option_b, option_c"
-                              className="input text-sm w-full"
-                            />
-                          </div>
-                        )}
-
-                        {column.type === 'expression' && (
-                          <div>
-                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Jinja2 Template</label>
-                            <textarea
-                              value={column.config.template || ''}
-                              onChange={(e) => updateColumn(column.id, { config: { ...column.config, template: e.target.value } })}
-                              placeholder="{{ user_request | upper }} - {{ task_id }}"
-                              rows={2}
-                              className="input text-sm w-full font-mono"
-                            />
-                          </div>
-                        )}
-
-                        {column.type === 'gaussian' && (
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Mean</label>
-                              <input
-                                type="number"
-                                value={column.config.mean ?? 0}
-                                onChange={(e) => updateColumn(column.id, { config: { ...column.config, mean: parseFloat(e.target.value) } })}
-                                className="input text-sm w-full"
-                              />
-                            </div>
-                            <div>
-                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Std Dev</label>
-                              <input
-                                type="number"
-                                value={column.config.std ?? 1}
-                                onChange={(e) => updateColumn(column.id, { config: { ...column.config, std: parseFloat(e.target.value) } })}
-                                className="input text-sm w-full"
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {column.type === 'datetime' && (
-                          <div className="grid grid-cols-3 gap-3">
-                            <div>
-                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Format</label>
+                      {config.columns.map((column) => (
+                        <div key={column.id} className="p-4">
+                          {/* Column Header */}
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() =>
+                                setExpandedColumn(expandedColumn === column.id ? null : column.id)
+                              }
+                              className="p-1 border-brutal border-border rounded-brutal bg-background-secondary hover:bg-accent-light hover:border-accent transition-colors"
+                            >
+                              {expandedColumn === column.id ? (
+                                <ChevronDown className="w-4 h-4 text-text-muted" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-text-muted" />
+                              )}
+                            </button>
+                            <div className="flex-1 grid grid-cols-4 gap-3">
                               <input
                                 type="text"
-                                value={column.config.format || '%Y-%m-%d'}
-                                onChange={(e) => updateColumn(column.id, { config: { ...column.config, format: e.target.value } })}
-                                placeholder="%Y-%m-%d"
-                                className="input text-sm w-full font-mono"
+                                value={column.name}
+                                onChange={(e) => updateColumn(column.id, { name: e.target.value })}
+                                placeholder="Column name"
+                                className="input text-sm"
                               />
-                            </div>
-                            <div>
-                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Min Date</label>
-                              <input
-                                type="date"
-                                value={column.config.min_date || ''}
-                                onChange={(e) => updateColumn(column.id, { config: { ...column.config, min_date: e.target.value } })}
-                                className="input text-sm w-full"
-                              />
-                            </div>
-                            <div>
-                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Max Date</label>
-                              <input
-                                type="date"
-                                value={column.config.max_date || ''}
-                                onChange={(e) => updateColumn(column.id, { config: { ...column.config, max_date: e.target.value } })}
-                                className="input text-sm w-full"
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Constraints */}
-                        <div>
-                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-2">Constraints</label>
-                          <div className="space-y-2">
-                            {column.constraints?.map((constraint, idx) => (
-                              <div key={idx} className="flex items-center gap-2">
-                                <select
-                                  value={constraint.type}
-                                  onChange={(e) => {
-                                    const updated = [...(column.constraints || [])]
-                                    updated[idx] = { ...constraint, type: e.target.value as ColumnConstraint['type'] }
-                                    updateColumn(column.id, { constraints: updated })
-                                  }}
-                                  className="input text-sm"
-                                >
-                                  <option value="enum">Enum</option>
-                                  <option value="regex">Regex</option>
-                                  <option value="min_length">Min Length</option>
-                                  <option value="max_length">Max Length</option>
-                                </select>
-                                <input
-                                  type="text"
-                                  value={Array.isArray(constraint.value) ? constraint.value.join(', ') : String(constraint.value)}
-                                  onChange={(e) => {
-                                    const updated = [...(column.constraints || [])]
-                                    updated[idx] = {
-                                      ...constraint,
-                                      value: constraint.type === 'enum'
-                                        ? e.target.value.split(',').map(v => v.trim())
-                                        : constraint.type.includes('length')
-                                          ? parseInt(e.target.value)
-                                          : e.target.value
+                              <select
+                                value={column.type}
+                                onChange={(e) =>
+                                  updateColumn(column.id, {
+                                    type: e.target.value as ColumnConfig['type']
+                                  })
+                                }
+                                className="input text-sm"
+                              >
+                                {COLUMN_TYPES.map((type) => (
+                                  <option key={type.id} value={type.id}>
+                                    {type.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={column.risk_level}
+                                onChange={(e) =>
+                                  updateColumn(column.id, {
+                                    risk_level: e.target.value as 'normal' | 'elevated' | 'high'
+                                  })
+                                }
+                                className={clsx(
+                                  'input text-sm',
+                                  RISK_LEVELS.find((r) => r.id === column.risk_level)?.color
+                                )}
+                              >
+                                {RISK_LEVELS.map((level) => (
+                                  <option key={level.id} value={level.id}>
+                                    {level.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="flex items-center gap-2">
+                                <label className="flex items-center gap-1 text-sm text-text-secondary font-mono">
+                                  <input
+                                    type="checkbox"
+                                    checked={column.required}
+                                    onChange={(e) =>
+                                      updateColumn(column.id, { required: e.target.checked })
                                     }
-                                    updateColumn(column.id, { constraints: updated })
-                                  }}
-                                  placeholder={constraint.type === 'enum' ? 'value1, value2' : constraint.type === 'regex' ? '^[a-z]+$' : '10'}
-                                  className="input text-sm flex-1 font-mono"
-                                />
-                                <button
-                                  onClick={() => {
-                                    const updated = column.constraints?.filter((_, i) => i !== idx) || []
-                                    updateColumn(column.id, { constraints: updated })
-                                  }}
-                                  className="btn-icon w-8 h-8 flex items-center justify-center text-text-muted hover:text-status-error"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
+                                    className="rounded-brutal"
+                                  />
+                                  Required
+                                </label>
                               </div>
-                            ))}
+                            </div>
                             <button
-                              onClick={() => {
-                                const updated: ColumnConstraint[] = [...(column.constraints || []), { type: 'regex', value: '', error_message: '' }]
-                                updateColumn(column.id, { constraints: updated })
-                              }}
-                              className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline"
+                              onClick={() => removeColumn(column.id)}
+                              className="btn-icon w-8 h-8 flex items-center justify-center text-text-muted hover:text-status-error"
                             >
-                              + Add constraint
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
+
+                          {/* Expanded Column Config */}
+                          {expandedColumn === column.id && (
+                            <div className="mt-4 ml-8 p-4 border-brutal border-border rounded-brutal bg-background-secondary space-y-4">
+                              {/* Description */}
+                              <div>
+                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                  Description
+                                </label>
+                                <input
+                                  type="text"
+                                  value={column.description || ''}
+                                  onChange={(e) =>
+                                    updateColumn(column.id, { description: e.target.value })
+                                  }
+                                  placeholder="What this column represents..."
+                                  className="input text-sm w-full"
+                                />
+                              </div>
+
+                              {/* Type-specific config */}
+                              {column.type === 'llm' && (
+                                <div className="space-y-3">
+                                  <div>
+                                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                      Prompt Template
+                                    </label>
+                                    <textarea
+                                      value={column.config.prompt || ''}
+                                      onChange={(e) =>
+                                        updateColumn(column.id, {
+                                          config: { ...column.config, prompt: e.target.value }
+                                        })
+                                      }
+                                      placeholder="Generate a {{task_type}} for: {{user_request}}"
+                                      rows={3}
+                                      className="input text-sm w-full font-mono"
+                                    />
+                                    <p className="text-xs text-text-muted mt-1 font-mono">
+                                      Use {'{{column_name}}'} to reference other columns
+                                    </p>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-3">
+                                    <div>
+                                      <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                        Model Override
+                                      </label>
+                                      <select
+                                        value={column.config.model?.model_id || ''}
+                                        onChange={(e) =>
+                                          updateColumn(column.id, {
+                                            config: {
+                                              ...column.config,
+                                              model: e.target.value
+                                                ? {
+                                                    ...config.default_model,
+                                                    model_id: e.target.value
+                                                  }
+                                                : undefined
+                                            }
+                                          })
+                                        }
+                                        className="input text-sm w-full"
+                                      >
+                                        <option value="">Use default</option>
+                                        {availableModels.map((m) => (
+                                          <option key={m.id} value={m.id}>
+                                            {m.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                        Temperature
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="2"
+                                        step="0.1"
+                                        value={
+                                          column.config.model?.temperature ??
+                                          config.default_model.temperature
+                                        }
+                                        onChange={(e) =>
+                                          updateColumn(column.id, {
+                                            config: {
+                                              ...column.config,
+                                              model: {
+                                                ...(column.config.model || config.default_model),
+                                                temperature: parseFloat(e.target.value)
+                                              }
+                                            }
+                                          })
+                                        }
+                                        className="input text-sm w-full"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                        Max Tokens
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max="8192"
+                                        value={
+                                          column.config.model?.max_tokens ??
+                                          config.default_model.max_tokens
+                                        }
+                                        onChange={(e) =>
+                                          updateColumn(column.id, {
+                                            config: {
+                                              ...column.config,
+                                              model: {
+                                                ...(column.config.model || config.default_model),
+                                                max_tokens: parseInt(e.target.value)
+                                              }
+                                            }
+                                          })
+                                        }
+                                        className="input text-sm w-full"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {column.type === 'category' && (
+                                <div>
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                    Values (comma-separated)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={column.config.values?.join(', ') || ''}
+                                    onChange={(e) =>
+                                      updateColumn(column.id, {
+                                        config: {
+                                          ...column.config,
+                                          values: e.target.value
+                                            .split(',')
+                                            .map((v) => v.trim())
+                                            .filter(Boolean)
+                                        }
+                                      })
+                                    }
+                                    placeholder="option_a, option_b, option_c"
+                                    className="input text-sm w-full"
+                                  />
+                                </div>
+                              )}
+
+                              {column.type === 'expression' && (
+                                <div>
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                    Jinja2 Template
+                                  </label>
+                                  <textarea
+                                    value={column.config.template || ''}
+                                    onChange={(e) =>
+                                      updateColumn(column.id, {
+                                        config: { ...column.config, template: e.target.value }
+                                      })
+                                    }
+                                    placeholder="{{ user_request | upper }} - {{ task_id }}"
+                                    rows={2}
+                                    className="input text-sm w-full font-mono"
+                                  />
+                                </div>
+                              )}
+
+                              {column.type === 'gaussian' && (
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                      Mean
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={column.config.mean ?? 0}
+                                      onChange={(e) =>
+                                        updateColumn(column.id, {
+                                          config: {
+                                            ...column.config,
+                                            mean: parseFloat(e.target.value)
+                                          }
+                                        })
+                                      }
+                                      className="input text-sm w-full"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                      Std Dev
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={column.config.std ?? 1}
+                                      onChange={(e) =>
+                                        updateColumn(column.id, {
+                                          config: {
+                                            ...column.config,
+                                            std: parseFloat(e.target.value)
+                                          }
+                                        })
+                                      }
+                                      className="input text-sm w-full"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              {column.type === 'datetime' && (
+                                <div className="grid grid-cols-3 gap-3">
+                                  <div>
+                                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                      Format
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={column.config.format || '%Y-%m-%d'}
+                                      onChange={(e) =>
+                                        updateColumn(column.id, {
+                                          config: { ...column.config, format: e.target.value }
+                                        })
+                                      }
+                                      placeholder="%Y-%m-%d"
+                                      className="input text-sm w-full font-mono"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                      Min Date
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={column.config.min_date || ''}
+                                      onChange={(e) =>
+                                        updateColumn(column.id, {
+                                          config: { ...column.config, min_date: e.target.value }
+                                        })
+                                      }
+                                      className="input text-sm w-full"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                                      Max Date
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={column.config.max_date || ''}
+                                      onChange={(e) =>
+                                        updateColumn(column.id, {
+                                          config: { ...column.config, max_date: e.target.value }
+                                        })
+                                      }
+                                      className="input text-sm w-full"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Constraints */}
+                              <div>
+                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-2">
+                                  Constraints
+                                </label>
+                                <div className="space-y-2">
+                                  {column.constraints?.map((constraint, idx) => (
+                                    <div key={idx} className="flex items-center gap-2">
+                                      <select
+                                        value={constraint.type}
+                                        onChange={(e) => {
+                                          const updated = [...(column.constraints || [])]
+                                          updated[idx] = {
+                                            ...constraint,
+                                            type: e.target.value as ColumnConstraint['type']
+                                          }
+                                          updateColumn(column.id, { constraints: updated })
+                                        }}
+                                        className="input text-sm"
+                                      >
+                                        <option value="enum">Enum</option>
+                                        <option value="regex">Regex</option>
+                                        <option value="min_length">Min Length</option>
+                                        <option value="max_length">Max Length</option>
+                                      </select>
+                                      <input
+                                        type="text"
+                                        value={
+                                          Array.isArray(constraint.value)
+                                            ? constraint.value.join(', ')
+                                            : String(constraint.value)
+                                        }
+                                        onChange={(e) => {
+                                          const updated = [...(column.constraints || [])]
+                                          updated[idx] = {
+                                            ...constraint,
+                                            value:
+                                              constraint.type === 'enum'
+                                                ? e.target.value.split(',').map((v) => v.trim())
+                                                : constraint.type.includes('length')
+                                                  ? parseInt(e.target.value)
+                                                  : e.target.value
+                                          }
+                                          updateColumn(column.id, { constraints: updated })
+                                        }}
+                                        placeholder={
+                                          constraint.type === 'enum'
+                                            ? 'value1, value2'
+                                            : constraint.type === 'regex'
+                                              ? '^[a-z]+$'
+                                              : '10'
+                                        }
+                                        className="input text-sm flex-1 font-mono"
+                                      />
+                                      <button
+                                        onClick={() => {
+                                          const updated =
+                                            column.constraints?.filter((_, i) => i !== idx) || []
+                                          updateColumn(column.id, { constraints: updated })
+                                        }}
+                                        className="btn-icon w-8 h-8 flex items-center justify-center text-text-muted hover:text-status-error"
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    onClick={() => {
+                                      const updated: ColumnConstraint[] = [
+                                        ...(column.constraints || []),
+                                        { type: 'regex', value: '', error_message: '' }
+                                      ]
+                                      updateColumn(column.id, { constraints: updated })
+                                    }}
+                                    className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline"
+                                  >
+                                    + Add constraint
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                      ))}
 
                       {config.columns.length === 0 && (
                         <div className="p-6 text-center">
                           <div className="w-12 h-12 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center mx-auto mb-3">
                             <Database className="w-6 h-6 text-text-muted" />
                           </div>
-                          <p className="text-sm text-text-muted mb-3 font-mono">No columns defined yet</p>
+                          <p className="text-sm text-text-muted mb-3 font-mono">
+                            No columns defined yet
+                          </p>
                           <button onClick={addColumn} className="btn-secondary text-sm">
                             <Plus className="w-4 h-4 mr-1" />
                             Add First Column
@@ -868,7 +1065,9 @@ export function FactoryDashboard() {
                   <div className="section-divider" />
                   <div className="pt-4">
                     <p className="text-xs text-text-muted">
-                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Column Types: </span>
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+                        Column Types:{' '}
+                      </span>
                       {COLUMN_TYPES.map((type, i) => (
                         <span key={type.id}>
                           {type.label}
@@ -906,12 +1105,7 @@ export function FactoryDashboard() {
         )}
 
         {/* Settings Tab */}
-        {activeTab === 'settings' && (
-          <SettingsPanel
-            config={config}
-            onConfigChange={setConfig}
-          />
-        )}
+        {activeTab === 'settings' && <SettingsPanel config={config} onConfigChange={setConfig} />}
 
         {/* Jobs Tab - Unified view of both Factory and Synthetic jobs */}
         {activeTab === 'jobs' && (
@@ -933,42 +1127,62 @@ export function FactoryDashboard() {
                 {/* Synthetic Jobs */}
                 {syntheticJobs.length > 0 && (
                   <div className="space-y-3">
-                    <h3 className="font-brand text-lg text-text-primary">Synthetic Generation Jobs</h3>
-                    {syntheticJobs.map(job => (
-                      <div key={job.job_id} className={clsx(
-                        'card p-4',
-                        job.status === 'running' && 'card-accent'
-                      )}>
+                    <h3 className="font-brand text-lg text-text-primary">
+                      Synthetic Generation Jobs
+                    </h3>
+                    {syntheticJobs.map((job) => (
+                      <div
+                        key={job.job_id}
+                        className={clsx('card p-4', job.status === 'running' && 'card-accent')}
+                      >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <div className={clsx(
-                              'w-8 h-8 flex items-center justify-center border-brutal rounded-brutal',
-                              job.status === 'running' && 'border-accent bg-accent-light',
-                              job.status === 'completed' && 'border-status-success bg-background-secondary',
-                              job.status === 'failed' && 'border-status-error bg-background-secondary',
-                              job.status === 'queued' && 'border-border bg-background-secondary'
-                            )}>
-                              {job.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-accent" />}
-                              {job.status === 'completed' && <CheckCircle className="w-4 h-4 text-status-success" />}
-                              {job.status === 'failed' && <AlertCircle className="w-4 h-4 text-status-error" />}
-                              {job.status === 'queued' && <RefreshCw className="w-4 h-4 text-text-muted" />}
+                            <div
+                              className={clsx(
+                                'w-8 h-8 flex items-center justify-center border-brutal rounded-brutal',
+                                job.status === 'running' && 'border-accent bg-accent-light',
+                                job.status === 'completed' &&
+                                  'border-status-success bg-background-secondary',
+                                job.status === 'failed' &&
+                                  'border-status-error bg-background-secondary',
+                                job.status === 'queued' && 'border-border bg-background-secondary'
+                              )}
+                            >
+                              {job.status === 'running' && (
+                                <Loader2 className="w-4 h-4 animate-spin text-accent" />
+                              )}
+                              {job.status === 'completed' && (
+                                <CheckCircle className="w-4 h-4 text-status-success" />
+                              )}
+                              {job.status === 'failed' && (
+                                <AlertCircle className="w-4 h-4 text-status-error" />
+                              )}
+                              {job.status === 'queued' && (
+                                <RefreshCw className="w-4 h-4 text-text-muted" />
+                              )}
                             </div>
                             <div>
                               <div className="flex items-center gap-2">
-                                <p className="font-brand text-lg text-text-primary">AI-Powered Generation</p>
-                                <span className="tag text-[10px] py-0 px-1.5"><span>Synthetic</span></span>
+                                <p className="font-brand text-lg text-text-primary">
+                                  AI-Powered Generation
+                                </p>
+                                <span className="tag text-[10px] py-0 px-1.5">
+                                  <span>Synthetic</span>
+                                </span>
                               </div>
                               <p className="text-sm text-text-muted font-mono">{job.job_id}</p>
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className={clsx(
-                              'font-mono text-xs uppercase tracking-widest font-semibold',
-                              job.status === 'running' && 'text-accent',
-                              job.status === 'completed' && 'text-status-success',
-                              job.status === 'failed' && 'text-status-error',
-                              job.status === 'queued' && 'text-text-muted'
-                            )}>
+                            <p
+                              className={clsx(
+                                'font-mono text-xs uppercase tracking-widest font-semibold',
+                                job.status === 'running' && 'text-accent',
+                                job.status === 'completed' && 'text-status-success',
+                                job.status === 'failed' && 'text-status-error',
+                                job.status === 'queued' && 'text-text-muted'
+                              )}
+                            >
                               {job.status}
                             </p>
                             {job.progress && job.progress.total > 0 && (
@@ -978,21 +1192,25 @@ export function FactoryDashboard() {
                             )}
                           </div>
                         </div>
-                        {(job.status === 'running' || job.status === 'completed') && job.progress && job.progress.total > 0 && (
-                          <div className="mt-3">
-                            <div className="progress-bar">
-                              <div
-                                className="progress-fill"
-                                style={{
-                                  width: `${(job.progress.current / job.progress.total) * 100}%`
-                                }}
-                              />
+                        {(job.status === 'running' || job.status === 'completed') &&
+                          job.progress &&
+                          job.progress.total > 0 && (
+                            <div className="mt-3">
+                              <div className="progress-bar">
+                                <div
+                                  className="progress-fill"
+                                  style={{
+                                    width: `${(job.progress.current / job.progress.total) * 100}%`
+                                  }}
+                                />
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
                         {job.output_dir && (
                           <div className="mt-3 pt-3 border-t-2 border-border">
-                            <p className="text-xs text-text-muted font-mono">Output: {job.output_dir}</p>
+                            <p className="text-xs text-text-muted font-mono">
+                              Output: {job.output_dir}
+                            </p>
                           </div>
                         )}
                         {job.error && (
@@ -1008,51 +1226,71 @@ export function FactoryDashboard() {
                 {/* Schema-based Factory Jobs */}
                 {jobs.length > 0 && (
                   <div className="space-y-3">
-                    <h3 className="font-brand text-lg text-text-primary">Schema-Based Synthesis Jobs</h3>
-                    {jobs.map(job => (
-                      <div key={job.id} className={clsx(
-                        'card p-4',
-                        job.status === 'running' && 'card-accent'
-                      )}>
+                    <h3 className="font-brand text-lg text-text-primary">
+                      Schema-Based Synthesis Jobs
+                    </h3>
+                    {jobs.map((job) => (
+                      <div
+                        key={job.id}
+                        className={clsx('card p-4', job.status === 'running' && 'card-accent')}
+                      >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <div className={clsx(
-                              'w-8 h-8 flex items-center justify-center border-brutal rounded-brutal',
-                              job.status === 'running' && 'border-accent bg-accent-light',
-                              job.status === 'completed' && 'border-status-success bg-background-secondary',
-                              job.status === 'failed' && 'border-status-error bg-background-secondary',
-                              job.status === 'pending' && 'border-border bg-background-secondary'
-                            )}>
-                              {job.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-accent" />}
-                              {job.status === 'completed' && <CheckCircle className="w-4 h-4 text-status-success" />}
-                              {job.status === 'failed' && <AlertCircle className="w-4 h-4 text-status-error" />}
-                              {job.status === 'pending' && <RefreshCw className="w-4 h-4 text-text-muted" />}
+                            <div
+                              className={clsx(
+                                'w-8 h-8 flex items-center justify-center border-brutal rounded-brutal',
+                                job.status === 'running' && 'border-accent bg-accent-light',
+                                job.status === 'completed' &&
+                                  'border-status-success bg-background-secondary',
+                                job.status === 'failed' &&
+                                  'border-status-error bg-background-secondary',
+                                job.status === 'pending' && 'border-border bg-background-secondary'
+                              )}
+                            >
+                              {job.status === 'running' && (
+                                <Loader2 className="w-4 h-4 animate-spin text-accent" />
+                              )}
+                              {job.status === 'completed' && (
+                                <CheckCircle className="w-4 h-4 text-status-success" />
+                              )}
+                              {job.status === 'failed' && (
+                                <AlertCircle className="w-4 h-4 text-status-error" />
+                              )}
+                              {job.status === 'pending' && (
+                                <RefreshCw className="w-4 h-4 text-text-muted" />
+                              )}
                             </div>
                             <div>
                               <div className="flex items-center gap-2">
                                 <p className="font-brand text-lg text-text-primary">
                                   {job.job_type === 'preview' ? 'Preview' : 'Full Synthesis'}
                                 </p>
-                                <span className="tag text-[10px] py-0 px-1.5"><span>Schema</span></span>
+                                <span className="tag text-[10px] py-0 px-1.5">
+                                  <span>Schema</span>
+                                </span>
                               </div>
                               <p className="text-sm text-text-muted font-mono">{job.id}</p>
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className={clsx(
-                              'font-mono text-xs uppercase tracking-widest font-semibold',
-                              job.status === 'running' && 'text-accent',
-                              job.status === 'completed' && 'text-status-success',
-                              job.status === 'failed' && 'text-status-error',
-                              job.status === 'pending' && 'text-text-muted'
-                            )}>
+                            <p
+                              className={clsx(
+                                'font-mono text-xs uppercase tracking-widest font-semibold',
+                                job.status === 'running' && 'text-accent',
+                                job.status === 'completed' && 'text-status-success',
+                                job.status === 'failed' && 'text-status-error',
+                                job.status === 'pending' && 'text-text-muted'
+                              )}
+                            >
                               {job.status}
                             </p>
                             {job.examples_created !== undefined && (
                               <p className="font-brand text-xl text-text-primary">
                                 {job.examples_created} examples
                                 {job.valid_examples !== undefined && (
-                                  <span className="text-sm text-text-muted ml-1">({job.valid_examples} valid)</span>
+                                  <span className="text-sm text-text-muted ml-1">
+                                    ({job.valid_examples} valid)
+                                  </span>
                                 )}
                               </p>
                             )}
@@ -1060,7 +1298,9 @@ export function FactoryDashboard() {
                         </div>
                         {job.output_path && (
                           <div className="mt-3 pt-3 border-t-2 border-border">
-                            <p className="text-xs text-text-muted font-mono">Output: {job.output_path}</p>
+                            <p className="text-xs text-text-muted font-mono">
+                              Output: {job.output_path}
+                            </p>
                           </div>
                         )}
                         {job.error && (

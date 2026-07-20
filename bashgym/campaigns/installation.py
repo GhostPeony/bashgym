@@ -178,9 +178,7 @@ def autoresearch_binding_plan(
         "source_repository_binding_id"
     )
     if not isinstance(source_repository_profile_id, str):
-        raise AutoResearchInstallationError(
-            "definition is missing source_repository_binding_id"
-        )
+        raise AutoResearchInstallationError("definition is missing source_repository_binding_id")
     return AutoResearchBindingPlan(
         template_id=definition.template_id,
         definition_digest=definition.definition_digest,
@@ -206,9 +204,7 @@ def _read_definition(path: Path) -> AutoResearchTemplateDefinition:
     try:
         return AutoResearchTemplateDefinition.model_validate_json(raw)
     except Exception as exc:
-        raise AutoResearchInstallationError(
-            f"installed template is invalid: {path.name}"
-        ) from exc
+        raise AutoResearchInstallationError(f"installed template is invalid: {path.name}") from exc
 
 
 def install_autoresearch_definition(

@@ -18,7 +18,9 @@ export function MyModels() {
     return (
       <div className="card p-6 text-center">
         <p className="text-text-muted">{error}</p>
-        <button onClick={() => refresh()} className="btn-secondary mt-3">Retry</button>
+        <button onClick={() => refresh()} className="btn-secondary mt-3">
+          Retry
+        </button>
       </div>
     )
   }
@@ -48,7 +50,10 @@ export function MyModels() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {models.map((model) => (
-          <div key={model.id} className="card p-4 border-2 hover:border-accent transition-colors shadow-brutal-sm">
+          <div
+            key={model.id}
+            className="card p-4 border-2 hover:border-accent transition-colors shadow-brutal-sm"
+          >
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -60,7 +65,9 @@ export function MyModels() {
                   )}
                 </div>
                 {model.pipeline_tag && (
-                  <span className="font-mono text-[0.65rem] uppercase tracking-wider text-accent">{model.pipeline_tag}</span>
+                  <span className="font-mono text-[0.65rem] uppercase tracking-wider text-accent">
+                    {model.pipeline_tag}
+                  </span>
                 )}
               </div>
               <a

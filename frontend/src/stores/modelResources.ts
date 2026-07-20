@@ -3,7 +3,7 @@ import {
   type LeaderboardEntry,
   type ModelProfile,
   type ModelSummary,
-  type TrendDataPoint,
+  type TrendDataPoint
 } from '../services/api'
 import { createKeyedSessionResource, createSessionResource } from './sessionResource'
 
@@ -26,7 +26,7 @@ export function modelListKey(filters: ModelListFilters): string {
     filters.status,
     filters.starred,
     filters.sortBy,
-    filters.sortOrder,
+    filters.sortOrder
   ])
 }
 
@@ -40,7 +40,7 @@ export const modelListResource = createKeyedSessionResource<{
     string,
     boolean,
     string,
-    'asc' | 'desc',
+    'asc' | 'desc'
   ]
   return modelsApi.list({
     strategy: strategy || undefined,
@@ -48,7 +48,7 @@ export const modelListResource = createKeyedSessionResource<{
     starred: starred || undefined,
     sort_by: sortBy,
     sort_order: sortOrder,
-    limit: 50,
+    limit: 50
   })
 })
 

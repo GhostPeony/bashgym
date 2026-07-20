@@ -2446,9 +2446,7 @@ def campaign_artifact_preview(
         try:
             worker_config = read_worker_config(config_path)
         except (OSError, WorkerServiceError) as exc:
-            raise ArtifactPreviewIntegrityError(
-                ArtifactPreviewIntegrityError.code
-            ) from exc
+            raise ArtifactPreviewIntegrityError(ArtifactPreviewIntegrityError.code) from exc
         return service.artifact_preview(
             workspace_id,
             campaign_id,

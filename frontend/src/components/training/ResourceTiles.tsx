@@ -35,7 +35,9 @@ function Tile({ icon, label, value, subvalue, color, isWaiting }: TileProps) {
         {icon}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">{label}</p>
+        <p className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">
+          {label}
+        </p>
         <div className="flex items-baseline gap-1.5">
           <p className="font-brand text-lg leading-tight text-text-primary">{value}</p>
           {subvalue && <span className="font-mono text-xs text-text-muted">{subvalue}</span>}
@@ -45,8 +47,14 @@ function Tile({ icon, label, value, subvalue, color, isWaiting }: TileProps) {
   )
 }
 
-export function ResourceTiles({ tokensPerSecond, gpuMemoryGb, gpuUtilization, isWaiting }: ResourceTilesProps) {
-  const fmtTps = (v?: number) => (v === undefined ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v).toString())
+export function ResourceTiles({
+  tokensPerSecond,
+  gpuMemoryGb,
+  gpuUtilization,
+  isWaiting
+}: ResourceTilesProps) {
+  const fmtTps = (v?: number) =>
+    v === undefined ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v).toString()
   const fmtGb = (v?: number) => (v === undefined ? '—' : v.toFixed(2))
   // GPU utilization is unavailable on CPU smokes and unified-memory GB10 (NVML unsupported).
   const fmtUtil = (v?: number) => (v === undefined ? 'N/A' : `${Math.round(v)}%`)

@@ -8,14 +8,14 @@ import {
   ArrowRight,
   Cpu,
   GitBranch,
-  ShieldCheck,
+  ShieldCheck
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
   designerApi,
   type DesignerModel,
   type DesignerPipelineInfo,
-  type DesignerJobStatus,
+  type DesignerJobStatus
 } from '../../services/api'
 import { useTrainingStore } from '../../stores'
 import { useActivityStore } from '../../stores/activityStore'
@@ -31,7 +31,7 @@ const ROLLOUT_FORMATS = [
   { value: 'codex', label: 'Codex' },
   { value: 'hermes_agent', label: 'Hermes' },
   { value: 'pi_coding_agent', label: 'Pi' },
-  { value: 'atif', label: 'ATIF' },
+  { value: 'atif', label: 'ATIF' }
 ]
 
 /** A model picker grouped by provider, drawn from the live catalog. */
@@ -40,7 +40,7 @@ function ModelSelect({
   value,
   onChange,
   models,
-  codeOnly,
+  codeOnly
 }: {
   label: string
   value: string
@@ -83,7 +83,7 @@ export function DataDesignerTab() {
     data: modelsData,
     loading: modelsInitialLoading,
     refreshing: modelsRefreshing,
-    refresh: refreshModels,
+    refresh: refreshModels
   } = useSessionResource(designerModelsResource)
   const pipelines = pipelinesData?.pipelines ?? EMPTY_PIPELINES
   const available = pipelinesData?.available ?? true
@@ -138,7 +138,7 @@ export function DataDesignerTab() {
       num_records: Math.min(numRecords, 5),
       text_model: textModel || undefined,
       code_model: codeModel || undefined,
-      judge_model: judgeModel || undefined,
+      judge_model: judgeModel || undefined
     })
     setPreviewLoading(false)
     if (res.ok && res.data) setPreviewRecords(res.data.records)
@@ -156,7 +156,7 @@ export function DataDesignerTab() {
             job_id: res.data.job_id,
             pipeline: res.data.pipeline,
             output_dir: res.data.output_dir,
-            error: res.data.error,
+            error: res.data.error
           })
           clearJobPolling()
           if (res.data.status === 'failed') setJobError(res.data.error || 'Job failed')
@@ -183,7 +183,7 @@ export function DataDesignerTab() {
       code_model: codeModel || undefined,
       judge_model: judgeModel || undefined,
       mcp_backend: isToolPipeline ? mcpBackend : undefined,
-      keep_only_passing: keepOnlyPassing,
+      keep_only_passing: keepOnlyPassing
     })
     if (res.ok && res.data) {
       setJob(res.data)
@@ -191,7 +191,7 @@ export function DataDesignerTab() {
       useActivityStore.getState().addEvent('designer:queued', {
         job_id: res.data.job_id,
         pipeline: res.data.pipeline,
-        num_records: res.data.num_records,
+        num_records: res.data.num_records
       })
       pollRef.current = window.setTimeout(() => pollJob(res.data!.job_id), 2000)
     } else {
@@ -211,7 +211,7 @@ export function DataDesignerTab() {
     mcpBackend,
     keepOnlyPassing,
     pollJob,
-    clearJobPolling,
+    clearJobPolling
   ])
 
   const handleUseDataset = useCallback(() => {
@@ -552,10 +552,8 @@ export function DataDesignerTab() {
                   className="h-full bg-accent transition-all"
                   style={{
                     width: `${
-                      job.progress.total > 0
-                        ? (job.progress.current / job.progress.total) * 100
-                        : 0
-                    }%`,
+                      job.progress.total > 0 ? (job.progress.current / job.progress.total) * 100 : 0
+                    }%`
                   }}
                 />
               </div>

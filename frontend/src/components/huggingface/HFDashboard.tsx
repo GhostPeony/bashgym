@@ -66,7 +66,8 @@ export function HFDashboard() {
   }
 
   const handleRemoveToken = async () => {
-    if (!confirm('Remove HuggingFace token? You will need to reconfigure to use HF features.')) return
+    if (!confirm('Remove HuggingFace token? You will need to reconfigure to use HF features.'))
+      return
 
     const result = await hfApi.removeToken()
     if (result.ok) {
@@ -176,7 +177,11 @@ export function HFDashboard() {
 
             <div className="mt-6 pt-6 border-t-2 border-border">
               <p className="text-xs text-text-muted font-mono">
-                Alternatively, set <code className="px-1 py-0.5 bg-background-secondary border border-border-subtle rounded-brutal font-mono">HF_TOKEN</code> environment variable and restart the server.
+                Alternatively, set{' '}
+                <code className="px-1 py-0.5 bg-background-secondary border border-border-subtle rounded-brutal font-mono">
+                  HF_TOKEN
+                </code>{' '}
+                environment variable and restart the server.
               </p>
             </div>
 
@@ -186,7 +191,8 @@ export function HFDashboard() {
                 <span className="text-sm font-brand text-text-primary">HuggingFace Pro</span>
               </div>
               <p className="text-xs text-text-secondary font-mono">
-                Pro subscribers ($9/month) get access to cloud training on GPUs, ZeroGPU Spaces, 1TB storage, and $2/month inference credits.
+                Pro subscribers ($9/month) get access to cloud training on GPUs, ZeroGPU Spaces, 1TB
+                storage, and $2/month inference credits.
               </p>
               <a
                 href="https://huggingface.co/subscribe/pro"
@@ -212,44 +218,44 @@ export function HFDashboard() {
       id: 'training' as Tab,
       label: 'Cloud Training',
       icon: Server,
-      requiresPro: true,
+      requiresPro: true
     },
     {
       id: 'spaces' as Tab,
       label: 'ZeroGPU Spaces',
       icon: Layers,
-      requiresPro: true,
+      requiresPro: true
     },
     {
       id: 'datasets' as Tab,
       label: 'Datasets',
       icon: Database,
-      requiresPro: false,
+      requiresPro: false
     },
     {
       id: 'models' as Tab,
       label: 'My Models',
       icon: Package,
-      requiresPro: false,
+      requiresPro: false
     },
     {
       id: 'buckets' as Tab,
       label: 'Buckets',
       icon: HardDrive,
-      requiresPro: false,
+      requiresPro: false
     },
     {
       id: 'research' as Tab,
       label: 'Research',
       icon: Search,
-      requiresPro: false,
+      requiresPro: false
     },
     {
       id: 'traces' as Tab,
       label: 'Traces',
       icon: FileText,
-      requiresPro: false,
-    },
+      requiresPro: false
+    }
   ]
 
   return (
@@ -259,13 +265,7 @@ export function HFDashboard() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
-              <GhostPeonyIcon
-                name="huggingface"
-                size="xl"
-                tone="accent"
-                hue={52}
-                active
-              />
+              <GhostPeonyIcon name="huggingface" size="xl" tone="accent" hue={52} active />
               <div>
                 <h1 className="text-xl font-brand text-text-primary">HuggingFace</h1>
                 <div className="flex items-center gap-2 mt-0.5">
@@ -344,15 +344,13 @@ export function HFDashboard() {
                   activeTab === tab.id
                     ? 'bg-accent text-white border-accent-dark shadow-brutal-sm'
                     : isDisabled
-                    ? 'text-text-secondary border-border-subtle cursor-not-allowed bg-background-secondary'
-                    : 'text-text-secondary border-border hover:text-text-primary hover:bg-background-secondary hover-press'
+                      ? 'text-text-secondary border-border-subtle cursor-not-allowed bg-background-secondary'
+                      : 'text-text-secondary border-border hover:text-text-primary hover:bg-background-secondary hover-press'
                 )}
               >
                 <tab.icon className="w-4 h-4" />
                 {tab.label}
-                {tab.requiresPro && !isPro && (
-                  <Sparkles className="w-3 h-3 text-accent" />
-                )}
+                {tab.requiresPro && !isPro && <Sparkles className="w-3 h-3 text-accent" />}
               </button>
             )
           })}

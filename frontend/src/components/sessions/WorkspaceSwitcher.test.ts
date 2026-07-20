@@ -14,7 +14,8 @@ const activeWorkspace = initial.workspaces.find((w) => w.id === initial.activeWo
 
 function group(id: string, name: string, live: number, saved: number): WorkspaceSessionGroup {
   return {
-    workspace: id === activeWorkspace.id ? activeWorkspace : { id, name, createdAt: 1, lastActiveAt: 1 },
+    workspace:
+      id === activeWorkspace.id ? activeWorkspace : { id, name, createdAt: 1, lastActiveAt: 1 },
     isActive: id === activeWorkspace.id,
     sessions: Array.from({ length: saved }, () => ({}) as never),
     runningCount: live,

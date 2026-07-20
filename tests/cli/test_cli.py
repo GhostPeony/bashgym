@@ -534,9 +534,7 @@ def test_ledger_read_commands_require_project_and_preserve_sync_cursor(monkeypat
         == 0
     )
     json.loads(capsys.readouterr().out)
-    assert client.calls[-1]["path"] == (
-        "/ledger/projects/project-one/metrics/train.loss/trend"
-    )
+    assert client.calls[-1]["path"] == ("/ledger/projects/project-one/metrics/train.loss/trend")
     assert client.calls[-1]["query"]["run_id"] == "run:1"
 
     assert (
@@ -851,43 +849,48 @@ def test_campaign_setup_autoresearch_installs_explicit_binding_without_credentia
     install_dir = tmp_path / "autoresearch-templates"
     revision = "b" * 40
 
-    assert main([
-        "campaign",
-        "setup-autoresearch",
-        "--template",
-        "autoresearch-installed-v1",
-        "--objective",
-        "Improve a fixed held-out metric with one controlled change.",
-        "--model-ref",
-        f"hf://example/operator-selected-trainable-model@{revision}",
-        "--target-contract",
-        "operator-selected-model-v1",
-        "--task",
-        "heldout-task-autoresearch",
-        "--dataset-version",
-        "dataset-version-1",
-        "--compute-profile",
-        "private-training-1",
-        "--source-repository-profile",
-        "bashgym-source-1",
-        "--project",
-        "project-1",
-        "--evaluation-suite",
-        "evaluation-suite-1",
-        "--primary-metric",
-        "heldout_pass_at_1",
-        "--metric-direction",
-        "maximize",
-        "--budget-unit",
-        "gpu_hours",
-        "--budget-limit",
-        "4",
-        "--max-attempts",
-        "4",
-        "--install-dir",
-        str(install_dir),
-        "--json",
-    ]) == 0
+    assert (
+        main(
+            [
+                "campaign",
+                "setup-autoresearch",
+                "--template",
+                "autoresearch-installed-v1",
+                "--objective",
+                "Improve a fixed held-out metric with one controlled change.",
+                "--model-ref",
+                f"hf://example/operator-selected-trainable-model@{revision}",
+                "--target-contract",
+                "operator-selected-model-v1",
+                "--task",
+                "heldout-task-autoresearch",
+                "--dataset-version",
+                "dataset-version-1",
+                "--compute-profile",
+                "private-training-1",
+                "--source-repository-profile",
+                "bashgym-source-1",
+                "--project",
+                "project-1",
+                "--evaluation-suite",
+                "evaluation-suite-1",
+                "--primary-metric",
+                "heldout_pass_at_1",
+                "--metric-direction",
+                "maximize",
+                "--budget-unit",
+                "gpu_hours",
+                "--budget-limit",
+                "4",
+                "--max-attempts",
+                "4",
+                "--install-dir",
+                str(install_dir),
+                "--json",
+            ]
+        )
+        == 0
+    )
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["created"] is True
@@ -1290,16 +1293,19 @@ def test_campaign_code_lineage_cli_routes_prepare_and_capture(monkeypatch, capsy
         "--json",
     ]
     for operation in ("prepare", "capture"):
-        assert main(
-            [
-                "campaign",
-                "proposal",
-                f"lineage-{operation}",
-                *common,
-                "--idempotency-key",
-                f"lineage-{operation}-1",
-            ]
-        ) == 0
+        assert (
+            main(
+                [
+                    "campaign",
+                    "proposal",
+                    f"lineage-{operation}",
+                    *common,
+                    "--idempotency-key",
+                    f"lineage-{operation}-1",
+                ]
+            )
+            == 0
+        )
         json.loads(capsys.readouterr().out)
 
     assert [call[1] for call in client.calls] == [
@@ -1354,52 +1360,92 @@ def test_campaign_autoresearch_cli_routes_explicit_roles_and_result_identity(
     }
     proposal_path = tmp_path / "autoresearch-proposal.json"
     proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
-    assert main([
-        "campaign", "doctor", *connection,
-        "--template", "autoresearch-installed-v1",
-    ]) == 0
-    json.loads(capsys.readouterr().out)
-    assert client.calls[-1]["path"] == (
-        "/campaigns/templates/autoresearch-installed-v1/doctor"
+    assert (
+        main(
+            [
+                "campaign",
+                "doctor",
+                *connection,
+                "--template",
+                "autoresearch-installed-v1",
+            ]
+        )
+        == 0
     )
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == ("/campaigns/templates/autoresearch-installed-v1/doctor")
     assert client.calls[-1]["query"] == {"workspace_id": "workspace-a"}
 
-    assert main([
-        "campaign", "propose", *connection,
-        "--campaign", "campaign-1",
-        "--expected-version", "4",
-        "--proposal", str(proposal_path),
-        "--autoresearch-role", "baseline",
-        "--idempotency-key", "baseline-1",
-    ]) == 0
+    assert (
+        main(
+            [
+                "campaign",
+                "propose",
+                *connection,
+                "--campaign",
+                "campaign-1",
+                "--expected-version",
+                "4",
+                "--proposal",
+                str(proposal_path),
+                "--autoresearch-role",
+                "baseline",
+                "--idempotency-key",
+                "baseline-1",
+            ]
+        )
+        == 0
+    )
     json.loads(capsys.readouterr().out)
     assert client.calls[-1]["path"] == "/campaigns/campaign-1/autoresearch/baseline"
 
-    assert main([
-        "campaign", "propose", *connection,
-        "--campaign", "campaign-1",
-        "--expected-version", "5",
-        "--proposal", str(proposal_path),
-        "--autoresearch-role", "candidate",
-        "--parent-proposal", "baseline-1",
-        "--idempotency-key", "candidate-1",
-    ]) == 0
+    assert (
+        main(
+            [
+                "campaign",
+                "propose",
+                *connection,
+                "--campaign",
+                "campaign-1",
+                "--expected-version",
+                "5",
+                "--proposal",
+                str(proposal_path),
+                "--autoresearch-role",
+                "candidate",
+                "--parent-proposal",
+                "baseline-1",
+                "--idempotency-key",
+                "candidate-1",
+            ]
+        )
+        == 0
+    )
     json.loads(capsys.readouterr().out)
     assert client.calls[-1]["path"] == "/campaigns/campaign-1/autoresearch/candidates"
     assert client.calls[-1]["payload"]["parent_proposal_id"] == "baseline-1"
 
-    assert main([
-        "campaign", "autoresearch-result", *connection,
-        "--campaign", "campaign-1",
-        "--project", "project-a",
-        "--evaluation-result", "evaluation-1",
-        "--idempotency-key", "result-1",
-    ]) == 0
+    assert (
+        main(
+            [
+                "campaign",
+                "autoresearch-result",
+                *connection,
+                "--campaign",
+                "campaign-1",
+                "--project",
+                "project-a",
+                "--evaluation-result",
+                "evaluation-1",
+                "--idempotency-key",
+                "result-1",
+            ]
+        )
+        == 0
+    )
     json.loads(capsys.readouterr().out)
     result_call = client.calls[-1]
-    assert result_call["path"] == (
-        "/campaigns/campaign-1/autoresearch/ingest-evaluation"
-    )
+    assert result_call["path"] == ("/campaigns/campaign-1/autoresearch/ingest-evaluation")
     assert result_call["payload"] == {
         "workspace_id": "workspace-a",
         "project_id": "project-a",

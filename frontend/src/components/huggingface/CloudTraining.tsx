@@ -13,7 +13,7 @@ import {
   Server,
   ChevronDown,
   ChevronRight,
-  DollarSign,
+  DollarSign
 } from 'lucide-react'
 import { hfApi, HFJobSubmitRequest } from '../../services/api'
 import { wsService, MessageTypes } from '../../services/websocket'
@@ -22,17 +22,59 @@ import { hfJobsResource } from '../../stores/hfResources'
 import { useSessionResource } from '../../stores/sessionResource'
 
 const HARDWARE_OPTIONS = [
-  { value: 't4-small', label: 'T4 Small', vram: '16GB', costPerHour: 0.60, description: 'Small models (<3B)' },
-  { value: 'a10g-small', label: 'A10G Small', vram: '24GB', costPerHour: 1.05, description: 'Medium models (3-7B)' },
-  { value: 'a10g-large', label: 'A10G Large', vram: '24GB', costPerHour: 1.80, description: 'Longer training' },
-  { value: 'a100-large', label: 'A100 Large', vram: '80GB', costPerHour: 4.50, description: 'Large models (7B+)' },
-  { value: 'h100', label: 'H100', vram: '80GB', costPerHour: 10.00, description: 'Maximum performance' },
+  {
+    value: 't4-small',
+    label: 'T4 Small',
+    vram: '16GB',
+    costPerHour: 0.6,
+    description: 'Small models (<3B)'
+  },
+  {
+    value: 'a10g-small',
+    label: 'A10G Small',
+    vram: '24GB',
+    costPerHour: 1.05,
+    description: 'Medium models (3-7B)'
+  },
+  {
+    value: 'a10g-large',
+    label: 'A10G Large',
+    vram: '24GB',
+    costPerHour: 1.8,
+    description: 'Longer training'
+  },
+  {
+    value: 'a100-large',
+    label: 'A100 Large',
+    vram: '80GB',
+    costPerHour: 4.5,
+    description: 'Large models (7B+)'
+  },
+  {
+    value: 'h100',
+    label: 'H100',
+    vram: '80GB',
+    costPerHour: 10.0,
+    description: 'Maximum performance'
+  }
 ]
 
 const STRATEGY_OPTIONS = [
-  { value: 'sft', label: 'SFT', description: 'Supervised Fine-Tuning — standard instruction tuning' },
-  { value: 'dpo', label: 'DPO', description: 'Direct Preference Optimization — preference-based alignment' },
-  { value: 'distillation', label: 'Distillation', description: 'Knowledge Distillation — learn from a larger teacher model' },
+  {
+    value: 'sft',
+    label: 'SFT',
+    description: 'Supervised Fine-Tuning — standard instruction tuning'
+  },
+  {
+    value: 'dpo',
+    label: 'DPO',
+    description: 'Direct Preference Optimization — preference-based alignment'
+  },
+  {
+    value: 'distillation',
+    label: 'Distillation',
+    description: 'Knowledge Distillation — learn from a larger teacher model'
+  }
 ]
 
 interface CloudTrainingProps {
@@ -40,7 +82,13 @@ interface CloudTrainingProps {
 }
 
 export function CloudTraining({ className }: CloudTrainingProps) {
-  const { data, loading, refreshing, error: fetchError, refresh } = useSessionResource(hfJobsResource)
+  const {
+    data,
+    loading,
+    refreshing,
+    error: fetchError,
+    refresh
+  } = useSessionResource(hfJobsResource)
   const jobs = data ?? []
   const [submitting, setSubmitting] = useState(false)
   const [showForm, setShowForm] = useState(false)
@@ -49,7 +97,9 @@ export function CloudTraining({ className }: CloudTrainingProps) {
   const [jobMetrics, setJobMetrics] = useState<Record<string, Record<string, number>>>({})
   const error =
     submitError ||
-    (fetchError?.includes('403') ? 'HuggingFace Pro subscription required for cloud training' : null)
+    (fetchError?.includes('403')
+      ? 'HuggingFace Pro subscription required for cloud training'
+      : null)
 
   // Form state
   const [formData, setFormData] = useState<HFJobSubmitRequest>({
@@ -63,7 +113,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
     batch_size: 1,
     lora_r: 16,
     lora_alpha: 32,
-    max_seq_length: 2048,
+    max_seq_length: 2048
   })
 
   useEffect(() => {
@@ -74,12 +124,15 @@ export function CloudTraining({ className }: CloudTrainingProps) {
     const unsubscribeStarted = wsService.subscribe(MessageTypes.HF_JOB_STARTED, refreshJobs)
     const unsubscribeCompleted = wsService.subscribe(MessageTypes.HF_JOB_COMPLETED, refreshJobs)
     const unsubscribeFailed = wsService.subscribe(MessageTypes.HF_JOB_FAILED, refreshJobs)
-    const unsubscribeMetrics = wsService.subscribe(MessageTypes.HF_JOB_METRICS, (payload: { job_id: string; metrics: Record<string, number> }) => {
-      setJobMetrics((prev) => ({
-        ...prev,
-        [payload.job_id]: { ...prev[payload.job_id], ...payload.metrics },
-      }))
-    })
+    const unsubscribeMetrics = wsService.subscribe(
+      MessageTypes.HF_JOB_METRICS,
+      (payload: { job_id: string; metrics: Record<string, number> }) => {
+        setJobMetrics((prev) => ({
+          ...prev,
+          [payload.job_id]: { ...prev[payload.job_id], ...payload.metrics }
+        }))
+      }
+    )
 
     return () => {
       unsubscribeStarted()
@@ -154,12 +207,10 @@ export function CloudTraining({ className }: CloudTrainingProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => refresh()}
-            className="btn-icon"
-            title="Refresh"
-          >
-            <RefreshCw className={clsx('w-4 h-4 text-text-secondary', refreshing && 'animate-spin')} />
+          <button onClick={() => refresh()} className="btn-icon" title="Refresh">
+            <RefreshCw
+              className={clsx('w-4 h-4 text-text-secondary', refreshing && 'animate-spin')}
+            />
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
@@ -180,18 +231,28 @@ export function CloudTraining({ className }: CloudTrainingProps) {
 
       {/* Job Submission Form */}
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-6 p-4 border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+        <form
+          onSubmit={handleSubmit}
+          className="mb-6 p-4 border-brutal shadow-brutal-sm rounded-brutal bg-background-card"
+        >
           <h3 className="text-sm font-brand text-text-primary mb-4">Submit Training Job</h3>
 
           {/* Training Strategy */}
           <div className="mb-4">
-            <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">Training Strategy</label>
+            <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">
+              Training Strategy
+            </label>
             <div className="flex gap-2">
               {STRATEGY_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"
-                  onClick={() => setFormData({ ...formData, strategy: opt.value as HFJobSubmitRequest['strategy'] })}
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      strategy: opt.value as HFJobSubmitRequest['strategy']
+                    })
+                  }
                   className={clsx(
                     'flex-1 p-3 border-2 rounded-brutal text-left transition-all duration-150',
                     formData.strategy === opt.value
@@ -199,8 +260,12 @@ export function CloudTraining({ className }: CloudTrainingProps) {
                       : 'border-border-primary hover:border-accent/50'
                   )}
                 >
-                  <span className="block text-sm font-mono font-semibold text-text-primary">{opt.label}</span>
-                  <span className="block text-xs text-text-secondary mt-0.5">{opt.description}</span>
+                  <span className="block text-sm font-mono font-semibold text-text-primary">
+                    {opt.label}
+                  </span>
+                  <span className="block text-xs text-text-secondary mt-0.5">
+                    {opt.description}
+                  </span>
                 </button>
               ))}
             </div>
@@ -208,7 +273,9 @@ export function CloudTraining({ className }: CloudTrainingProps) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Dataset Repo</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                Dataset Repo
+              </label>
               <input
                 type="text"
                 value={formData.dataset_repo}
@@ -219,7 +286,9 @@ export function CloudTraining({ className }: CloudTrainingProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Output Repo</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                Output Repo
+              </label>
               <input
                 type="text"
                 value={formData.output_repo}
@@ -230,7 +299,9 @@ export function CloudTraining({ className }: CloudTrainingProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Hardware</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                Hardware
+              </label>
               <select
                 value={formData.hardware}
                 onChange={(e) => setFormData({ ...formData, hardware: e.target.value })}
@@ -244,29 +315,39 @@ export function CloudTraining({ className }: CloudTrainingProps) {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Base Model</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                Base Model
+              </label>
               <BaseModelSelect
                 value={formData.base_model ?? ''}
                 onChange={(v) => setFormData({ ...formData, base_model: v })}
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Epochs</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                Epochs
+              </label>
               <input
                 type="number"
                 value={formData.num_epochs}
-                onChange={(e) => setFormData({ ...formData, num_epochs: parseInt(e.target.value) || 1 })}
+                onChange={(e) =>
+                  setFormData({ ...formData, num_epochs: parseInt(e.target.value) || 1 })
+                }
                 min={1}
                 max={100}
                 className="input w-full text-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Learning Rate</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                Learning Rate
+              </label>
               <input
                 type="number"
                 value={formData.learning_rate}
-                onChange={(e) => setFormData({ ...formData, learning_rate: parseFloat(e.target.value) || 2e-5 })}
+                onChange={(e) =>
+                  setFormData({ ...formData, learning_rate: parseFloat(e.target.value) || 2e-5 })
+                }
                 step={0.00001}
                 className="input w-full text-sm"
               />
@@ -281,7 +362,10 @@ export function CloudTraining({ className }: CloudTrainingProps) {
               <span className="font-mono font-semibold text-text-primary">
                 ${estimatedCostPerHour.toFixed(2)}/hr
               </span>
-              <span className="font-mono text-text-secondary"> · ~${estimatedTotalCost.toFixed(2)} total</span>
+              <span className="font-mono text-text-secondary">
+                {' '}
+                · ~${estimatedTotalCost.toFixed(2)} total
+              </span>
               <span className="text-xs text-text-muted ml-2">(~1hr/epoch estimate)</span>
             </div>
           </div>
@@ -293,29 +377,41 @@ export function CloudTraining({ className }: CloudTrainingProps) {
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="flex items-center gap-1 text-xs font-mono text-text-secondary hover:text-text-primary uppercase tracking-widest"
             >
-              {showAdvanced ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+              {showAdvanced ? (
+                <ChevronDown className="w-3 h-3" />
+              ) : (
+                <ChevronRight className="w-3 h-3" />
+              )}
               Advanced Settings
             </button>
 
             {showAdvanced && (
               <div className="grid grid-cols-2 gap-4 mt-3 pt-3 border-t border-border-primary">
                 <div>
-                  <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Batch Size</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                    Batch Size
+                  </label>
                   <input
                     type="number"
                     value={formData.batch_size}
-                    onChange={(e) => setFormData({ ...formData, batch_size: parseInt(e.target.value) || 1 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, batch_size: parseInt(e.target.value) || 1 })
+                    }
                     min={1}
                     max={64}
                     className="input w-full text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Max Seq Length</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                    Max Seq Length
+                  </label>
                   <input
                     type="number"
                     value={formData.max_seq_length}
-                    onChange={(e) => setFormData({ ...formData, max_seq_length: parseInt(e.target.value) || 2048 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, max_seq_length: parseInt(e.target.value) || 2048 })
+                    }
                     min={256}
                     max={8192}
                     step={256}
@@ -323,22 +419,30 @@ export function CloudTraining({ className }: CloudTrainingProps) {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">LoRA Rank (r)</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                    LoRA Rank (r)
+                  </label>
                   <input
                     type="number"
                     value={formData.lora_r}
-                    onChange={(e) => setFormData({ ...formData, lora_r: parseInt(e.target.value) || 16 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, lora_r: parseInt(e.target.value) || 16 })
+                    }
                     min={4}
                     max={256}
                     className="input w-full text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">LoRA Alpha</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                    LoRA Alpha
+                  </label>
                   <input
                     type="number"
                     value={formData.lora_alpha}
-                    onChange={(e) => setFormData({ ...formData, lora_alpha: parseInt(e.target.value) || 32 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, lora_alpha: parseInt(e.target.value) || 32 })
+                    }
                     min={4}
                     max={512}
                     className="input w-full text-sm"
@@ -349,11 +453,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
           </div>
 
           <div className="flex justify-end gap-2 mt-4">
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="btn-ghost"
-            >
+            <button type="button" onClick={() => setShowForm(false)} className="btn-ghost">
               Cancel
             </button>
             <button
@@ -384,18 +484,13 @@ export function CloudTraining({ className }: CloudTrainingProps) {
           {jobs.map((job) => {
             const metrics = jobMetrics[job.job_id] || job.metrics
             return (
-              <div
-                key={job.job_id}
-                className="card p-4"
-              >
+              <div key={job.job_id} className="card p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {getStatusIcon(job.status)}
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-mono text-text-primary">
-                          {job.job_id}
-                        </span>
+                        <span className="text-sm font-mono text-text-primary">{job.job_id}</span>
                         <span className="tag">
                           <span>{job.hardware}</span>
                         </span>

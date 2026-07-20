@@ -38,5 +38,5 @@ export const useControlRoomSnapshotCache = create<ControlRoomSnapshotCacheState>
     set((state) => ({ recoverySnapshots: { ...state.recoverySnapshots, [key]: snapshot } })),
 
   putSetupContext: (workspaceId, context) =>
-    set((state) => ({ setupContexts: { ...state.setupContexts, [workspaceId]: context } })),
+    set((state) => ({ setupContexts: { ...state.setupContexts, [workspaceId]: context } }))
 }))

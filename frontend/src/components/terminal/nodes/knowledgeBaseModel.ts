@@ -71,16 +71,23 @@ export function sanitizeKnowledgeConfig(value?: Record<string, unknown>): Knowle
   return {
     provider,
     root: typeof value?.root === 'string' ? value.root.slice(0, 4096) : '',
-    label: typeof value?.label === 'string' && value.label.trim()
-      ? value.label.trim().slice(0, 160)
-      : provider === 'gbrain' ? 'GBrain' : 'Knowledge Base',
-    selectedPath: typeof value?.selectedPath === 'string' ? value.selectedPath.slice(0, 4096) : undefined,
+    label:
+      typeof value?.label === 'string' && value.label.trim()
+        ? value.label.trim().slice(0, 160)
+        : provider === 'gbrain'
+          ? 'GBrain'
+          : 'Knowledge Base',
+    selectedPath:
+      typeof value?.selectedPath === 'string' ? value.selectedPath.slice(0, 4096) : undefined,
     selectedSection: section === 'search' || section === 'config' ? section : 'browse'
   }
 }
 
 export function countVisibleKnowledgeNodes(nodes: KnowledgeTreeNode[]): number {
-  return nodes.reduce((count, node) => count + 1 + countVisibleKnowledgeNodes(node.children ?? []), 0)
+  return nodes.reduce(
+    (count, node) => count + 1 + countVisibleKnowledgeNodes(node.children ?? []),
+    0
+  )
 }
 
 export function buildKnowledgeContext(

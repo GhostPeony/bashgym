@@ -279,8 +279,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         self._require_initialized()
         with self._connection() as connection:
             rows = connection.execute(
-                self._attempt_select()
-                + """
+                self._attempt_select() + """
                 WHERE a.workspace_id = ? AND a.campaign_id = ?
                 ORDER BY t.created_at, t.attempt_id
                 """,
@@ -498,8 +497,7 @@ class CampaignRuntimeRepository(CampaignRepository):
             budget_reservation=reservation,
             executor_kind=(
                 "ssh_remote"
-                if executor_kind
-                in {"registered_compute", "registered_training", "ssh_remote"}
+                if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}
                 else executor_kind
             ),
             executor_config=executor_config,
@@ -2178,8 +2176,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         with self._connection(immediate=True) as connection:
             self._require_leader(connection, leader, claimed_at)
             row = connection.execute(
-                self._attempt_select()
-                + """
+                self._attempt_select() + """
                   JOIN campaigns c ON c.workspace_id = a.workspace_id AND c.campaign_id = a.campaign_id
                   WHERE a.status = ? AND t.status = ? AND c.status = ?
                   ORDER BY a.created_at, a.action_id LIMIT 1

@@ -6,7 +6,16 @@ import { MaskedHost } from '../common'
 import { clsx } from 'clsx'
 
 export function DeviceManager() {
-  const { devices, defaultDeviceId, ensureDevices, addDevice, removeDevice, setDefault, runPreflight, discoverFromSSHConfig } = useDeviceStore()
+  const {
+    devices,
+    defaultDeviceId,
+    ensureDevices,
+    addDevice,
+    removeDevice,
+    setDefault,
+    runPreflight,
+    discoverFromSSHConfig
+  } = useDeviceStore()
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [showDiscovery, setShowDiscovery] = useState(false)
@@ -43,7 +52,7 @@ export function DeviceManager() {
       username: formUsername,
       port: formPort,
       key_path: formKeyPath,
-      work_dir: formWorkDir,
+      work_dir: formWorkDir
     })
     resetForm()
     setShowAddForm(false)
@@ -61,7 +70,7 @@ export function DeviceManager() {
       host: candidate.host,
       username: candidate.username ?? '',
       port: candidate.port,
-      key_path: candidate.key_path,
+      key_path: candidate.key_path
     })
   }
 
@@ -79,7 +88,7 @@ export function DeviceManager() {
     return new Date(lastSeen).getTime() > oneHourAgo
   }
 
-  const formatGpuSummary = (device: typeof devices[number]) => {
+  const formatGpuSummary = (device: (typeof devices)[number]) => {
     const caps = device.capabilities
     if (!caps) return 'Not scanned yet'
     if (caps.gpus && caps.gpus.length > 0) {
@@ -90,7 +99,7 @@ export function DeviceManager() {
     return caps.os ?? 'No GPU detected'
   }
 
-  const formatDiskFree = (device: typeof devices[number]) => {
+  const formatDiskFree = (device: (typeof devices)[number]) => {
     const gb = device.capabilities?.disk_free_gb
     if (gb == null) return null
     return `${gb.toFixed(0)} GB free`
@@ -108,20 +117,16 @@ export function DeviceManager() {
             const diskFree = formatDiskFree(device)
 
             return (
-              <div
-                key={device.id}
-                className={clsx(
-                  'card p-3',
-                  isDefault && 'border-accent'
-                )}
-              >
+              <div key={device.id} className={clsx('card p-3', isDefault && 'border-accent')}>
                 <div className="flex items-start justify-between gap-3">
                   {/* Left: device info */}
                   <div className="flex items-start gap-3 min-w-0">
                     <Server className="w-4 h-4 text-text-muted mt-0.5 flex-shrink-0" />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm text-text-primary">{device.name}</span>
+                        <span className="font-semibold text-sm text-text-primary">
+                          {device.name}
+                        </span>
                         {isDefault && (
                           <span className="font-mono text-xs uppercase tracking-widest text-accent border border-accent px-1 leading-tight">
                             Default
@@ -129,7 +134,11 @@ export function DeviceManager() {
                         )}
                       </div>
                       <p className="font-mono text-xs text-text-muted mt-0.5">
-                        <MaskedHost username={device.username} host={device.host} port={device.port} />
+                        <MaskedHost
+                          username={device.username}
+                          host={device.host}
+                          port={device.port}
+                        />
                       </p>
                       <p className="font-mono text-[10px] text-text-muted mt-0.5 break-all">
                         Device ID: {device.id}
@@ -188,10 +197,11 @@ export function DeviceManager() {
                 </div>
 
                 {/* Preflight result inline — only for this device if it was the last tested */}
-                {preflightResult && testingId === null && device.id === devices.find(d => d.id === device.id)?.id && (
+                {preflightResult &&
+                  testingId === null &&
+                  device.id === devices.find((d) => d.id === device.id)?.id &&
                   // Show result only if this is the device we just tested (tracked by store refresh)
-                  null
-                )}
+                  null}
               </div>
             )
           })}
@@ -219,7 +229,12 @@ export function DeviceManager() {
               <p className="font-mono text-xs text-text-secondary mt-1">
                 {preflightResult.python_version && `Python ${preflightResult.python_version}`}
                 {preflightResult.gpus && preflightResult.gpus.length > 0 && (
-                  <span className="ml-2">· GPU: {preflightResult.gpus.map(g => `${g.name} (${g.vram_total_gb.toFixed(0)}GB)`).join(', ')}</span>
+                  <span className="ml-2">
+                    · GPU:{' '}
+                    {preflightResult.gpus
+                      .map((g) => `${g.name} (${g.vram_total_gb.toFixed(0)}GB)`)
+                      .join(', ')}
+                  </span>
                 )}
                 {preflightResult.disk_free_gb != null && (
                   <span className="ml-2">· {preflightResult.disk_free_gb.toFixed(0)} GB free</span>
@@ -346,7 +361,10 @@ export function DeviceManager() {
             </button>
             <button
               type="button"
-              onClick={() => { setShowAddForm(false); resetForm() }}
+              onClick={() => {
+                setShowAddForm(false)
+                resetForm()
+              }}
               className="btn-secondary py-1.5 px-4 text-xs"
             >
               Cancel
@@ -400,7 +418,10 @@ export function DeviceManager() {
         <div className="flex items-center gap-2 pt-1">
           <button
             type="button"
-            onClick={() => { setShowAddForm(!showAddForm); setShowDiscovery(false) }}
+            onClick={() => {
+              setShowAddForm(!showAddForm)
+              setShowDiscovery(false)
+            }}
             className="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
           >
             <Plus className="w-3 h-3" />

@@ -13,7 +13,9 @@ class FakeSocket {
   onerror: ((error: unknown) => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
 
-  send(message: string) { this.sent.push(message) }
+  send(message: string) {
+    this.sent.push(message)
+  }
   close() {
     this.readyState = 3
     this.onclose?.({ code: 1000, reason: 'closed' })
@@ -45,8 +47,11 @@ test('campaign subscriptions are refcounted and reconnect mints a fresh ticket',
       tickets.push(ticket)
       return { ok: true, data: { ticket } }
     },
-    scheduleReconnect: (callback) => { reconnects.push(callback); return 1 as never },
-    handleConnection: async () => {},
+    scheduleReconnect: (callback) => {
+      reconnects.push(callback)
+      return 1 as never
+    },
+    handleConnection: async () => {}
   })
   const releaseA = service.retainCampaignWorkspace('workspace-a')
   const releaseB = service.retainCampaignWorkspace('workspace-a')
@@ -59,7 +64,7 @@ test('campaign subscriptions are refcounted and reconnect mints a fresh ticket',
   assert.equal(tickets.length, 1)
   assert.deepEqual(JSON.parse(sockets[0].sent[0]), {
     type: 'campaign:subscribe',
-    payload: { ticket: 'ticket-workspace-a-1' },
+    payload: { ticket: 'ticket-workspace-a-1' }
   })
 
   releaseA()
@@ -74,7 +79,7 @@ test('campaign subscriptions are refcounted and reconnect mints a fresh ticket',
   releaseB()
   assert.deepEqual(JSON.parse(sockets[1].sent.at(-1)!), {
     type: 'campaign:unsubscribe',
-    payload: { workspace_id: 'workspace-a' },
+    payload: { workspace_id: 'workspace-a' }
   })
 })
 
@@ -86,9 +91,13 @@ test('campaign hints validate exactly and never enter Activity', async () => {
     url: 'ws://test/ws',
     socketFactory: () => socket as unknown as WebSocket,
     liveTicket: async () => ({ ok: false }),
-    handleCampaignHint: async (hint) => { hints.push(hint) },
+    handleCampaignHint: async (hint) => {
+      hints.push(hint)
+    },
     handleConnection: async () => {},
-    addActivity: (type) => { activity.push(type) },
+    addActivity: (type) => {
+      activity.push(type)
+    }
   })
   service.connect()
   socket.open()
@@ -100,7 +109,7 @@ test('campaign hints validate exactly and never enter Activity', async () => {
     aggregate_version: 2,
     event_type: 'campaign:validation-started',
     correlation_id: 'correlation-a',
-    emitted_at: '2026-07-16T18:00:00Z',
+    emitted_at: '2026-07-16T18:00:00Z'
   })
   socket.message(MessageTypes.CAMPAIGN_HINT, {
     schema_version: 'campaign_hint.v1',
@@ -111,7 +120,7 @@ test('campaign hints validate exactly and never enter Activity', async () => {
     event_type: 'campaign:ready',
     correlation_id: 'correlation-b',
     emitted_at: '2026-07-16T18:00:01Z',
-    payload: { private_path: 'C:/private' },
+    payload: { private_path: 'C:/private' }
   })
   socket.message('campaign:subscribed', { workspace_id: 'workspace-a', accepted_cursor: 3 })
   await flush()
@@ -128,7 +137,7 @@ test('pending subscribe acknowledgement prevents duplicate ticket minting', asyn
     url: 'ws://test/ws',
     socketFactory: () => socket as unknown as WebSocket,
     liveTicket: async () => ({ ok: true, data: { ticket: `ticket-${++tickets}` } }),
-    handleConnection: async () => {},
+    handleConnection: async () => {}
   })
   const releaseA = service.retainCampaignWorkspace('workspace-a')
   service.connect()
@@ -149,8 +158,11 @@ test('intentional disconnect does not reconnect', () => {
     url: 'ws://test/ws',
     socketFactory: () => socket as unknown as WebSocket,
     liveTicket: async () => ({ ok: false }),
-    scheduleReconnect: () => { reconnects += 1; return 1 as never },
-    handleConnection: async () => {},
+    scheduleReconnect: () => {
+      reconnects += 1
+      return 1 as never
+    },
+    handleConnection: async () => {}
   })
   service.connect()
   socket.open()
@@ -173,7 +185,7 @@ test('failed live-ticket mint retries with a fresh bounded attempt and then subs
       scheduled.push({ callback, delay })
       return scheduled.length as never
     },
-    handleConnection: async () => {},
+    handleConnection: async () => {}
   })
   service.retainCampaignWorkspace('workspace-a')
   service.connect()
@@ -188,7 +200,7 @@ test('failed live-ticket mint retries with a fresh bounded attempt and then subs
   assert.equal(tickets, 2)
   assert.deepEqual(JSON.parse(socket.sent.at(-1)!), {
     type: 'campaign:subscribe',
-    payload: { ticket: 'ticket-fresh' },
+    payload: { ticket: 'ticket-fresh' }
   })
 })
 
@@ -209,11 +221,14 @@ test('subscription error reconnects and replays every desired workspace with fre
       tickets.push(ticket)
       return { ok: true, data: { ticket } }
     },
-    scheduleReconnect: (callback) => { reconnects.push(callback); return reconnects.length as never },
+    scheduleReconnect: (callback) => {
+      reconnects.push(callback)
+      return reconnects.length as never
+    },
     handleConnection: async () => {},
     handleSubscription: async (workspaceId, subscribed, generation) => {
       subscriptionStates.push([workspaceId, subscribed, generation])
-    },
+    }
   })
   service.retainCampaignWorkspace('workspace-a')
   service.retainCampaignWorkspace('workspace-b')
@@ -224,10 +239,13 @@ test('subscription error reconnects and replays every desired workspace with fre
 
   sockets[0].message('campaign:subscription-error', { code: 'campaign_subscription_denied' })
   assert.equal(reconnects.length, 1)
-  assert.deepEqual(subscriptionStates.map(([workspaceId, subscribed]) => [workspaceId, subscribed]), [
-    ['workspace-a', false],
-    ['workspace-b', false],
-  ])
+  assert.deepEqual(
+    subscriptionStates.map(([workspaceId, subscribed]) => [workspaceId, subscribed]),
+    [
+      ['workspace-a', false],
+      ['workspace-b', false]
+    ]
+  )
   reconnects[0]()
   sockets[1].open()
   await flush()
@@ -244,7 +262,7 @@ test('subscription acknowledgement notifies the authority coordinator with socke
     handleConnection: async () => {},
     handleSubscription: async (workspaceId, subscribed, generation) => {
       states.push([workspaceId, subscribed, generation])
-    },
+    }
   })
   service.retainCampaignWorkspace('workspace-a')
   service.connect()
@@ -261,16 +279,23 @@ test('malformed campaign control payloads are dropped without poisoning later hi
     url: 'ws://test/ws',
     socketFactory: () => socket as unknown as WebSocket,
     liveTicket: async () => ({ ok: false }),
-    handleCampaignHint: async (value) => { hints.push(value) },
-    handleConnection: async () => {},
+    handleCampaignHint: async (value) => {
+      hints.push(value)
+    },
+    handleConnection: async () => {}
   })
   service.connect()
   socket.open()
   socket.message('campaign:subscribed', null)
   socket.message('campaign:hint', {
-    schema_version: 'campaign_hint.v1', workspace_id: 'workspace:a', campaign_id: 'campaign:a',
-    event_cursor: 4, aggregate_version: 2, event_type: 'campaign:advanced',
-    correlation_id: 'correlation:a', emitted_at: '2026-07-16T18:00:00Z',
+    schema_version: 'campaign_hint.v1',
+    workspace_id: 'workspace:a',
+    campaign_id: 'campaign:a',
+    event_cursor: 4,
+    aggregate_version: 2,
+    event_type: 'campaign:advanced',
+    correlation_id: 'correlation:a',
+    emitted_at: '2026-07-16T18:00:00Z'
   })
   await flush()
   assert.equal(hints.length, 1)

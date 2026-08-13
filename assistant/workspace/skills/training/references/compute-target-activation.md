@@ -7,15 +7,15 @@ submission receipt.
 
 ## Select one execution lane
 
-| Lane | Executable surface | Durable job identity | Artifact authority |
-|---|---|---|---|
-| Same device | BashGym `training start` API/CLI | BashGym `run_id` | BashGym model/run directory; optional Hub push |
-| Private SSH device | BashGym device preflight + `training start` with `ssh:<device_id>` | BashGym `run_id` plus remote PID/evidence | BashGym downloads the selected remote artifacts |
-| NeMo Customizer | `/api/training/start` with `use_nemo_customizer: true` | BashGym `run_id` plus Customizer job id | Customizer result ingested by the BashGym run |
-| Local NeMo RL | Registered private-compute campaign recipe (integration in progress) | BashGym attempt ID plus NeMo RL run/checkpoint identity | BashGym sealed artifacts and experiment ledger |
-| Hugging Face Jobs | `hf jobs uv run` or an installed HF Jobs agent tool | Hugging Face job id | Hub model/dataset repo plus Trackio/log evidence |
-| Managed fine-tune provider | `/api/training/managed/submit` | Provider job id | Provider model id; ingest comparison/report evidence separately |
-| SkyPilot/dstack template | `bashgym compute launch --dry-run` | None | None; this is a plan only |
+| Lane                       | Executable surface                                                   | Durable job identity                                    | Artifact authority                                              |
+| -------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
+| Same device                | BashGym `training start` API/CLI                                     | BashGym `run_id`                                        | BashGym model/run directory; optional Hub push                  |
+| Private SSH device         | BashGym device preflight + `training start` with `ssh:<device_id>`   | BashGym `run_id` plus remote PID/evidence               | BashGym downloads the selected remote artifacts                 |
+| NeMo Customizer            | `/api/training/start` with `use_nemo_customizer: true`               | BashGym `run_id` plus Customizer job id                 | Customizer result ingested by the BashGym run                   |
+| Local NeMo RL              | Registered private-compute campaign recipe (integration in progress) | BashGym attempt ID plus NeMo RL run/checkpoint identity | BashGym sealed artifacts and experiment ledger                  |
+| Hugging Face Jobs          | `hf jobs uv run` or an installed HF Jobs agent tool                  | Hugging Face job id                                     | Hub model/dataset repo plus Trackio/log evidence                |
+| Managed fine-tune provider | `/api/training/managed/submit`                                       | Provider job id                                         | Provider model id; ingest comparison/report evidence separately |
+| SkyPilot/dstack template   | `bashgym compute launch --dry-run`                                   | None                                                    | None; this is a plan only                                       |
 
 `compute_target` is operational for direct BashGym launches:
 

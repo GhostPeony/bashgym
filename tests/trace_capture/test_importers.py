@@ -8,20 +8,19 @@ Tests cover:
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from bashgym.trace_capture.importers.gemini_history import GeminiSessionImporter
+from bashgym.trace_capture.adapters.codex import parse_codex_transcript
 from bashgym.trace_capture.importers.copilot_history import CopilotSessionImporter
+from bashgym.trace_capture.importers.gemini_history import GeminiSessionImporter
 from bashgym.trace_capture.importers.opencode_history import OpenCodeSessionImporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_json(path: Path, data) -> Path:
     """Write JSON data to a file and return the path."""
@@ -33,6 +32,7 @@ def _write_json(path: Path, data) -> Path:
 # ---------------------------------------------------------------------------
 # 1. GeminiSessionImporter
 # ---------------------------------------------------------------------------
+
 
 class TestGeminiSessionImporter:
     """Tests for Gemini CLI session import."""
@@ -73,9 +73,7 @@ class TestGeminiSessionImporter:
             },
             {
                 "role": "model",
-                "parts": [
-                    {"functionCall": {"name": "read_file", "args": {"path": "main.py"}}}
-                ],
+                "parts": [{"functionCall": {"name": "read_file", "args": {"path": "main.py"}}}],
                 "timestamp": "2026-02-24T10:00:01Z",
             },
             {
@@ -147,9 +145,7 @@ class TestGeminiSessionImporter:
                 {"role": "user", "parts": [{"text": "Hello Gemini"}]},
                 {
                     "role": "model",
-                    "parts": [
-                        {"functionCall": {"name": "search", "args": {"q": "test"}}}
-                    ],
+                    "parts": [{"functionCall": {"name": "search", "args": {"q": "test"}}}],
                 },
             ]
         }
@@ -178,6 +174,7 @@ class TestGeminiSessionImporter:
 # 1b. GeminiSessionImporter - Enrichment metadata
 # ---------------------------------------------------------------------------
 
+
 class TestGeminiImporterEnrichment:
     """Tests for enriched conversation metadata in Gemini importer."""
 
@@ -186,7 +183,10 @@ class TestGeminiImporterEnrichment:
             {"role": "user", "parts": [{"text": "hello"}]},
             {"role": "model", "parts": [{"text": "hi"}]},
             {"role": "user", "parts": [{"text": "help me"}]},
-            {"role": "model", "parts": [{"functionCall": {"name": "bash", "args": {"command": "ls"}}}]},
+            {
+                "role": "model",
+                "parts": [{"functionCall": {"name": "bash", "args": {"command": "ls"}}}],
+            },
         ]
         session_file = tmp_path / "session-test.json"
         session_file.write_text(json.dumps(session))
@@ -238,6 +238,7 @@ class TestGeminiImporterEnrichment:
 # 2. CopilotSessionImporter
 # ---------------------------------------------------------------------------
 
+
 class TestCopilotSessionImporter:
     """Tests for Copilot CLI session import."""
 
@@ -270,7 +271,11 @@ class TestCopilotSessionImporter:
 
         session_data = {
             "messages": [
-                {"role": "user", "content": "Deploy the service", "timestamp": "2026-02-24T10:00:00Z"},
+                {
+                    "role": "user",
+                    "content": "Deploy the service",
+                    "timestamp": "2026-02-24T10:00:00Z",
+                },
             ],
             "suggestions": [
                 {"command": "docker compose up -d", "accepted": True, "output": "Starting..."},
@@ -345,7 +350,11 @@ class TestCopilotSessionImporter:
                     "role": "assistant",
                     "content": "",
                     "tool_calls": [
-                        {"name": "read_file", "arguments": {"path": "main.py"}, "output": "print('hello')"}
+                        {
+                            "name": "read_file",
+                            "arguments": {"path": "main.py"},
+                            "output": "print('hello')",
+                        }
                     ],
                     "timestamp": "2026-02-24T10:00:01Z",
                 },
@@ -386,6 +395,7 @@ class TestCopilotSessionImporter:
 # 2b. CopilotImporterEnrichment (conversation + DPO metadata)
 # ---------------------------------------------------------------------------
 
+
 class TestCopilotImporterEnrichment:
     """Tests for enriched metadata in Copilot importer."""
 
@@ -414,7 +424,13 @@ class TestCopilotImporterEnrichment:
         session = {
             "messages": [
                 {"role": "user", "content": "fix the bug"},
-                {"role": "assistant", "content": "Sure", "tool_calls": [{"function": {"name": "bash", "arguments": "{\"command\": \"ls\"}"}}]},
+                {
+                    "role": "assistant",
+                    "content": "Sure",
+                    "tool_calls": [
+                        {"function": {"name": "bash", "arguments": '{"command": "ls"}'}}
+                    ],
+                },
                 {"role": "user", "content": "thanks"},
             ]
         }
@@ -518,6 +534,7 @@ class TestCopilotImporterEnrichment:
 # ---------------------------------------------------------------------------
 # 3. OpenCodeSessionImporter
 # ---------------------------------------------------------------------------
+
 
 class TestOpenCodeSessionImporter:
     """Tests for OpenCode session import."""
@@ -720,6 +737,7 @@ class TestOpenCodeSessionImporter:
 # 3b. OpenCodeImporter - Enrichment metadata
 # ---------------------------------------------------------------------------
 
+
 class TestOpenCodeImporterEnrichment:
     """Tests for enriched conversation metadata in OpenCode importer."""
 
@@ -902,8 +920,6 @@ class TestOpenCodeImporterEnrichment:
 # 4. Codex Importer - Enrichment metadata
 # ---------------------------------------------------------------------------
 
-from bashgym.trace_capture.adapters.codex import parse_codex_transcript
-
 
 class TestCodexImporterEnrichment:
     """Tests for enriched conversation metadata in Codex importer."""
@@ -937,9 +953,7 @@ class TestCodexImporterEnrichment:
                 {
                     "role": "assistant",
                     "model": "codex-v1",
-                    "tool_calls": [
-                        {"name": "bash", "input": {"command": "ls"}}
-                    ],
+                    "tool_calls": [{"name": "bash", "input": {"command": "ls"}}],
                 },
             ],
         }
@@ -963,9 +977,7 @@ class TestCodexImporterEnrichment:
     def test_models_used_empty_when_absent(self):
         """models_used is empty when no model info is present."""
         transcript = {
-            "tool_calls": [
-                {"name": "bash", "input": {"command": "echo hi"}, "output": "hi"}
-            ]
+            "tool_calls": [{"name": "bash", "input": {"command": "echo hi"}, "output": "hi"}]
         }
         steps, metadata = parse_codex_transcript(transcript)
         assert metadata["models_used"] == []
@@ -973,9 +985,7 @@ class TestCodexImporterEnrichment:
     def test_user_prompts_extracted_with_top_level_tool_calls(self):
         """User prompts are extracted even when tool_calls are at top level."""
         transcript = {
-            "tool_calls": [
-                {"name": "bash", "input": {"command": "ls"}, "output": "files"}
-            ],
+            "tool_calls": [{"name": "bash", "input": {"command": "ls"}, "output": "files"}],
             "messages": [
                 {"role": "user", "content": "list files"},
                 {"role": "user", "content": "now sort them"},
@@ -994,9 +1004,7 @@ class TestCodexImporterEnrichment:
                 {"role": "user", "content": long_prompt},
                 {
                     "role": "assistant",
-                    "tool_calls": [
-                        {"name": "bash", "input": {"command": "ls"}}
-                    ],
+                    "tool_calls": [{"name": "bash", "input": {"command": "ls"}}],
                 },
             ],
         }
@@ -1015,9 +1023,7 @@ class TestCodexImporterEnrichment:
 
     def test_list_transcript_no_user_metadata(self):
         """A list-format transcript has tool steps but no user metadata."""
-        transcript = [
-            {"name": "bash", "input": {"command": "echo hello"}, "output": "hello"}
-        ]
+        transcript = [{"name": "bash", "input": {"command": "echo hello"}, "output": "hello"}]
         steps, metadata = parse_codex_transcript(transcript)
         assert len(steps) == 1
         assert metadata["conversation_turns"] == 0
@@ -1036,9 +1042,7 @@ class TestCodexImporterEnrichment:
                 },
                 {
                     "role": "assistant",
-                    "tool_calls": [
-                        {"name": "bash", "input": {"command": "ls"}}
-                    ],
+                    "tool_calls": [{"name": "bash", "input": {"command": "ls"}}],
                 },
             ],
         }

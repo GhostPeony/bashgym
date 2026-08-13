@@ -60,15 +60,19 @@ def test_worker_executes_restart_safe_smoke_without_unlocking_quality_search(tmp
         idempotency_prefix="worker-slice-prepare",
     )
     actor = principal(repository)
-    active = CampaignService(repository).transition(
-        "workspace-a",
-        "campaign-1",
-        CampaignTrigger.START,
-        expected_version=ready.version,
-        principal=actor,
-        correlation_id="worker-slice-start",
-        idempotency_key="worker-slice-start",
-    ).campaign
+    active = (
+        CampaignService(repository)
+        .transition(
+            "workspace-a",
+            "campaign-1",
+            CampaignTrigger.START,
+            expected_version=ready.version,
+            principal=actor,
+            correlation_id="worker-slice-start",
+            idempotency_key="worker-slice-start",
+        )
+        .campaign
+    )
 
     baseline = proposal("baseline-control-smoke", estimated_cost=0.01).model_copy(
         update={
@@ -144,9 +148,7 @@ def test_worker_executes_restart_safe_smoke_without_unlocking_quality_search(tmp
 
     reopened = AutoResearchRepository(database)
     reopened.initialize()
-    restored = AutoResearchCampaignCore(reopened).state(
-        "workspace-a", "campaign-1", now=NOW
-    )
+    restored = AutoResearchCampaignCore(reopened).state("workspace-a", "campaign-1", now=NOW)
     assert restored.baseline_verified is False
     assert restored.best_proposal_id is None
     assert restored.next_action == AutoResearchNextAction.SUBMIT_BASELINE

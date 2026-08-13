@@ -5,7 +5,7 @@ Verifies LossTargetedMiner class and new search params without
 requiring actual GPU/model loading (all model calls are mocked).
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from bashgym.gym.trace_researcher import (
     DATA_SEARCH_SPACE,
@@ -70,11 +70,13 @@ class TestLossTargetedMiner:
             {"role": "user", "content": f"Fix bug in {repo_name}"},
         ]
         for tool in tool_names:
-            messages.append({
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{"function": {"name": tool, "arguments": "{}"}}],
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": tool, "arguments": "{}"}}],
+                }
+            )
             messages.append({"role": "tool", "content": "ok"})
         return {
             "messages": messages,
@@ -95,9 +97,9 @@ class TestLossTargetedMiner:
         miner._models = mock_models  # bypass lazy load
 
         examples = [
-            self._make_example("repo-a", ["Bash"]),            # 4 messages -> loss 4.0
-            self._make_example("repo-b", ["Bash", "Read"]),    # 6 messages -> loss 6.0
-            self._make_example("repo-c", ["Edit"]),            # 4 messages -> loss 4.0
+            self._make_example("repo-a", ["Bash"]),  # 4 messages -> loss 4.0
+            self._make_example("repo-b", ["Bash", "Read"]),  # 6 messages -> loss 6.0
+            self._make_example("repo-c", ["Edit"]),  # 4 messages -> loss 4.0
         ]
 
         scored = miner.score_examples(examples)

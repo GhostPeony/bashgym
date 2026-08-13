@@ -17,7 +17,7 @@ const PREFERRED_OFFSETS: Partial<Record<PanelType, CanvasPosition>> = {
   toolkit: { x: 0, y: 300 },
   // Keep the lab out from under the docked Master Control surface on the right.
   skilllab: { x: -420, y: 0 },
-  activity: { x: 0, y: 300 },
+  activity: { x: 0, y: 300 }
 }
 
 const NEARBY_OFFSETS: CanvasPosition[] = [
@@ -28,13 +28,13 @@ const NEARBY_OFFSETS: CanvasPosition[] = [
   { x: -420, y: 0 },
   { x: -420, y: -280 },
   { x: 0, y: -300 },
-  { x: 420, y: -280 },
+  { x: 420, y: -280 }
 ]
 
 function overlaps(candidate: CanvasPosition, occupied: CanvasPosition): boolean {
   return (
-    Math.abs(candidate.x - occupied.x) < NODE_CLEARANCE_X
-    && Math.abs(candidate.y - occupied.y) < NODE_CLEARANCE_Y
+    Math.abs(candidate.x - occupied.x) < NODE_CLEARANCE_X &&
+    Math.abs(candidate.y - occupied.y) < NODE_CLEARANCE_Y
   )
 }
 
@@ -42,7 +42,7 @@ function overlaps(candidate: CanvasPosition, occupied: CanvasPosition): boolean 
 export function findDynamicNodePosition(
   type: PanelType,
   anchor: CanvasPosition | undefined,
-  occupied: readonly CanvasPosition[],
+  occupied: readonly CanvasPosition[]
 ): CanvasPosition {
   if (!anchor && occupied.length === 0) return { x: 80, y: 80 }
 
@@ -50,16 +50,14 @@ export function findDynamicNodePosition(
   const preferred = PREFERRED_OFFSETS[type] || NEARBY_OFFSETS[0]
   const offsets = [
     preferred,
-    ...NEARBY_OFFSETS.filter((offset) => (
-      offset.x !== preferred.x || offset.y !== preferred.y
-    )),
+    ...NEARBY_OFFSETS.filter((offset) => offset.x !== preferred.x || offset.y !== preferred.y)
   ]
 
   for (let ring = 1; ring <= 4; ring += 1) {
     for (const offset of offsets) {
       const candidate = {
         x: base.x + offset.x * ring,
-        y: base.y + offset.y * ring,
+        y: base.y + offset.y * ring
       }
       if (!occupied.some((position) => overlaps(candidate, position))) return candidate
     }
@@ -67,6 +65,6 @@ export function findDynamicNodePosition(
 
   return {
     x: base.x + 420,
-    y: base.y + 300 * (occupied.length + 1),
+    y: base.y + 300 * (occupied.length + 1)
   }
 }

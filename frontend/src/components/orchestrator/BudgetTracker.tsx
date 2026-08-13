@@ -14,18 +14,18 @@ export function BudgetTracker() {
 
   // Per-task cost breakdown sorted by highest cost first
   const taskCosts = Object.values(currentJob.tasks)
-    .filter(t => t.cost_usd !== undefined && t.cost_usd > 0)
+    .filter((t) => t.cost_usd !== undefined && t.cost_usd > 0)
     .sort((a, b) => (b.cost_usd || 0) - (a.cost_usd || 0))
 
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-mono text-xs uppercase tracking-widest text-text-muted">Budget</h3>
-        {isWarning && !isExceeded && (
-          <AlertTriangle className="w-4 h-4 text-status-warning" />
-        )}
+        {isWarning && !isExceeded && <AlertTriangle className="w-4 h-4 text-status-warning" />}
         {isExceeded && (
-          <span className="tag text-[10px] bg-status-error/20 text-status-error border-status-error"><span>EXCEEDED</span></span>
+          <span className="tag text-[10px] bg-status-error/20 text-status-error border-status-error">
+            <span>EXCEEDED</span>
+          </span>
         )}
       </div>
 
@@ -35,10 +35,16 @@ export function BudgetTracker() {
           <span className="font-mono text-xs text-text-secondary">
             ${budget.spent_usd.toFixed(2)} / ${budget.limit_usd.toFixed(2)}
           </span>
-          <span className={clsx(
-            'font-mono text-xs',
-            isExceeded ? 'text-status-error' : isWarning ? 'text-status-warning' : 'text-text-muted'
-          )}>
+          <span
+            className={clsx(
+              'font-mono text-xs',
+              isExceeded
+                ? 'text-status-error'
+                : isWarning
+                  ? 'text-status-warning'
+                  : 'text-text-muted'
+            )}
+          >
             {percentUsed.toFixed(0)}%
           </span>
         </div>
@@ -69,8 +75,7 @@ export function BudgetTracker() {
             <span className="font-mono text-sm text-text-primary">
               {totalTime > 60
                 ? `${Math.floor(totalTime / 60)}m ${Math.round(totalTime % 60)}s`
-                : `${Math.round(totalTime)}s`
-              }
+                : `${Math.round(totalTime)}s`}
             </span>
           </div>
         </div>
@@ -97,7 +102,9 @@ export function BudgetTracker() {
           <div className="space-y-1.5 max-h-32 overflow-y-auto">
             {taskCosts.map((task) => (
               <div key={task.id} className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary truncate flex-1 mr-2">{task.title}</span>
+                <span className="text-xs text-text-secondary truncate flex-1 mr-2">
+                  {task.title}
+                </span>
                 <span className="font-mono text-xs text-text-primary flex-shrink-0">
                   ${(task.cost_usd || 0).toFixed(3)}
                 </span>

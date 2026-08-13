@@ -1,6 +1,6 @@
 ---
 name: training
-description: "Operate BashGym training and evaluation runs for Hermes or another configured agent endpoint. Use when launching, monitoring, stopping, classifying, or evaluating SFT, DPO, GRPO/RLVR, Session Distillation, DPPO replay, ECHO/RWML, reward-model, or cascade training runs."
+description: 'Operate BashGym training and evaluation runs for Hermes or another configured agent endpoint. Use when launching, monitoring, stopping, classifying, or evaluating SFT, DPO, GRPO/RLVR, Session Distillation, DPPO replay, ECHO/RWML, reward-model, or cascade training runs.'
 ---
 
 # Training

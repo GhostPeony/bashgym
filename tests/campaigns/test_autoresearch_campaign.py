@@ -20,6 +20,7 @@ from bashgym.campaigns.autoresearch import (
     ExperimentProvenance,
     ExperimentRole,
     MetricDirection,
+    ProtectedMetricGate,
     ResultDecision,
     build_autoresearch_template_registry,
     builtin_autoresearch_template_registry,
@@ -27,8 +28,6 @@ from bashgym.campaigns.autoresearch import (
 from bashgym.campaigns.contracts import (
     CampaignStatus,
     CampaignTrigger,
-    CodeLineageState,
-    CodeMutationKind,
     StageDisposition,
     StageKind,
     StagePlan,
@@ -108,15 +107,19 @@ def activate(core):
         idempotency_prefix="autoresearch-prepare",
     )
     actor = principal(core.repository)
-    return CampaignService(core.repository).transition(
-        "workspace-a",
-        "campaign-1",
-        CampaignTrigger.START,
-        expected_version=prepared.version,
-        principal=actor,
-        correlation_id="autoresearch-start",
-        idempotency_key="autoresearch-start",
-    ).campaign
+    return (
+        CampaignService(core.repository)
+        .transition(
+            "workspace-a",
+            "campaign-1",
+            CampaignTrigger.START,
+            expected_version=prepared.version,
+            principal=actor,
+            correlation_id="autoresearch-start",
+            idempotency_key="autoresearch-start",
+        )
+        .campaign
+    )
 
 
 def select_and_finish(repository, proposal_id: str, *, failed: bool = False):
@@ -214,11 +217,44 @@ def result(proposal_id, study_id, attempt_id, metric, *, role, provenance="real"
         outcome=ExperimentOutcome.COMPLETED,
         metric_name="mrr_at_10",
         metric_value=metric,
+        metrics={"mrr_at_10": metric},
         actual_cost=0.5,
         attempt_ids=(attempt_id,),
         evidence_references=(f"eval-{proposal_id}",),
         recorded_at=NOW,
     )
+
+
+def test_protected_metric_gate_blocks_a_primary_gain_with_a_regression() -> None:
+    incumbent = result(
+        "baseline",
+        "study-baseline",
+        "attempt-baseline",
+        0.50,
+        role=ExperimentRole.BASELINE,
+    ).model_copy(update={"metrics": {"mrr_at_10": 0.50, "valid_tool_calls": 0.98}})
+    candidate = result(
+        "candidate",
+        "study-candidate",
+        "attempt-candidate",
+        0.55,
+        role=ExperimentRole.CANDIDATE,
+    ).model_copy(update={"metrics": {"mrr_at_10": 0.55, "valid_tool_calls": 0.70}})
+    gates = (
+        ProtectedMetricGate(
+            metric_name="valid_tool_calls",
+            direction=MetricDirection.MAXIMIZE,
+            max_regression=0.02,
+        ),
+    )
+
+    assert AutoResearchRepository._protected_metric_failure(gates, incumbent, candidate) == (
+        "valid_tool_calls"
+    )
+    acceptable = candidate.model_copy(
+        update={"metrics": {"mrr_at_10": 0.55, "valid_tool_calls": 0.97}}
+    )
+    assert AutoResearchRepository._protected_metric_failure(gates, incumbent, acceptable) is None
 
 
 def test_result_write_rejects_unbounded_candidate_references_before_lineage_lookup(
@@ -235,9 +271,7 @@ def test_result_write_rejects_unbounded_candidate_references_before_lineage_look
     ).model_copy(
         update={
             "attempt_ids": tuple(f"attempt-{index:03d}" for index in range(101)),
-            "evidence_references": tuple(
-                f"artifact-{index:03d}" for index in range(101)
-            ),
+            "evidence_references": tuple(f"artifact-{index:03d}" for index in range(101)),
         }
     )
 
@@ -246,6 +280,38 @@ def test_result_write_rejects_unbounded_candidate_references_before_lineage_look
         match="autoresearch_result_reference_limit_exceeded",
     ):
         core.record_result(oversized)
+
+
+def test_public_record_result_rejects_caller_built_completed_real_result(tmp_path):
+    _path, repository, core = fresh_core(tmp_path)
+    activate(core)
+    core.submit_baseline(
+        proposal("baseline-direct-real", estimated_cost=0.5),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="baseline-direct-real-submit",
+        idempotency_key="baseline-direct-real-submit",
+    )
+    study_id, attempt_id = select_and_finish(repository, "baseline-direct-real")
+
+    caller_result = result(
+        "baseline-direct-real",
+        study_id,
+        attempt_id,
+        0.99,
+        role=ExperimentRole.BASELINE,
+    )
+    with pytest.raises(
+        AutoResearchInvariantError,
+        match="autoresearch_real_result_requires_sealed_projection",
+    ):
+        core.record_result(caller_result)
+    with pytest.raises(
+        AutoResearchInvariantError,
+        match="autoresearch_real_result_requires_sealed_projection",
+    ):
+        repository.record_autoresearch_result(caller_result)
+    assert repository.list_autoresearch_outcomes("workspace-a", "campaign-1") == ()
 
 
 def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_template(tmp_path):
@@ -266,15 +332,19 @@ def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_templa
     assert core.state("workspace-a", "campaign-1", now=NOW).next_action == (
         AutoResearchNextAction.START_CAMPAIGN
     )
-    started = CampaignService(repository).transition(
-        "workspace-a",
-        "campaign-1",
-        CampaignTrigger.START,
-        expected_version=prepared.version,
-        principal=principal(repository),
-        correlation_id="autoresearch-start",
-        idempotency_key="autoresearch-start",
-    ).campaign
+    started = (
+        CampaignService(repository)
+        .transition(
+            "workspace-a",
+            "campaign-1",
+            CampaignTrigger.START,
+            expected_version=prepared.version,
+            principal=principal(repository),
+            correlation_id="autoresearch-start",
+            idempotency_key="autoresearch-start",
+        )
+        .campaign
+    )
     assert started.status == CampaignStatus.ACTIVE
     assert started.version == 4
     assert core.state("workspace-a", "campaign-1", now=NOW).next_action == (
@@ -306,18 +376,19 @@ def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_templa
     assert "template_id" not in registry["autoresearch-local-v1"]
     builtins = builtin_autoresearch_template_registry()
     assert list(builtins) == [AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID]
-    assert builtins[AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID]["manifest"][
-        "promotion_gates"
-    ]["quality_claim_eligible"] is False
+    assert (
+        builtins[AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID]["manifest"]["promotion_gates"][
+            "quality_claim_eligible"
+        ]
+        is False
+    )
     assert all(
         not payload["manifest"]["promotion_gates"].get("quality_claim_eligible", False)
         for payload in builtins.values()
     )
 
 
-def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(
-    tmp_path, monkeypatch
-):
+def test_direct_ledger_evaluation_cannot_bypass_sealed_projection(tmp_path):
     _path, repository, core = fresh_core(tmp_path, evaluation_binding=True)
     activate(core)
     actor = principal(repository)
@@ -533,13 +604,12 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(
         )
     )
 
-    original_append_event = repository._append_event_in_connection
-
-    def fail_event_write(*_args, **_kwargs):
-        raise RuntimeError("injected ledger event failure")
-
-    monkeypatch.setattr(repository, "_append_event_in_connection", fail_event_write)
-    with pytest.raises(RuntimeError, match="injected ledger event failure"):
+    # Task 2 closes the legacy direct-ledger ingestion path: only deterministic
+    # sealed campaign projection can create an authoritative evaluation.
+    with pytest.raises(
+        AutoResearchInvariantError,
+        match="autoresearch_sealed_evaluation_reader_required",
+    ):
         core.ingest_evaluation_result(
             workspace_id="workspace-a",
             campaign_id="campaign-1",
@@ -547,57 +617,9 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(
             evaluation_result_id="evaluation-baseline-ledger",
         )
     assert repository.list_autoresearch_outcomes("workspace-a", "campaign-1") == ()
-    assert ledger.list_decisions("workspace-a", "project-a") == []
-    assert ledger.list_events("workspace-a", "project-a") == []
-
-    monkeypatch.setattr(repository, "_append_event_in_connection", original_append_event)
-    outcome = core.ingest_evaluation_result(
-        workspace_id="workspace-a",
-        campaign_id="campaign-1",
-        project_id="project-a",
-        evaluation_result_id="evaluation-baseline-ledger",
-    )
-    assert outcome.result.metric_value == pytest.approx(0.61)
-    assert outcome.result.actual_cost == pytest.approx(0.5)
-    assert outcome.result.attempt_ids == (campaign_attempt_id,)
-    assert outcome.result.provenance == ExperimentProvenance.REAL
-    assert set(outcome.result.evidence_references) == {
-        "evaluation-baseline-ledger",
-        "run-baseline-ledger",
-        "ledger-eval-artifact",
-        "campaign-eval-artifact",
-        "campaign-nemo-gym-evidence",
-    }
-    decisions = ledger.list_decisions("workspace-a", "project-a")
-    assert len(decisions) == 1
-    assert decisions[0]["experiment_id"] == "experiment-baseline-ledger"
-    assert decisions[0]["run_id"] == "run-baseline-ledger"
-    assert decisions[0]["decision_type"] == "autoresearch_outcome"
-    assert decisions[0]["outcome"] == ResultDecision.BASELINE.value
-    assert decisions[0]["evidence_refs"] == [
-        outcome.result.result_id,
-        *outcome.result.evidence_references,
-    ]
-    events = ledger.list_events("workspace-a", "project-a")
-    assert len(events) == 1
-    assert events[0]["experiment_id"] == "experiment-baseline-ledger"
-    assert events[0]["run_id"] == "run-baseline-ledger"
-    assert events[0]["attempt_id"] == "ledger-attempt-baseline"
-    assert events[0]["event_type"] == "autoresearch_outcome_recorded"
-    assert events[0]["payload"]["result_digest"] == outcome.result.result_digest
-    assert events[0]["payload"]["decision"] == ResultDecision.BASELINE.value
-    replay = core.ingest_evaluation_result(
-        workspace_id="workspace-a",
-        campaign_id="campaign-1",
-        project_id="project-a",
-        evaluation_result_id="evaluation-baseline-ledger",
-    )
-    assert replay.replayed is True
-    assert len(ledger.list_decisions("workspace-a", "project-a")) == 1
-    assert len(ledger.list_events("workspace-a", "project-a")) == 1
 
 
-def test_code_candidate_registers_required_source_lineage(tmp_path):
+def test_caller_built_real_parent_cannot_unlock_code_candidate_or_lineage(tmp_path):
     _path, repository, core = fresh_core(tmp_path)
     activate(core)
     actor = principal(repository)
@@ -608,18 +630,20 @@ def test_code_candidate_registers_required_source_lineage(tmp_path):
         correlation_id="baseline-lineage-submit",
         idempotency_key="baseline-lineage-submit",
     )
-    baseline_study, baseline_attempt = select_and_finish(
-        repository, "baseline-lineage"
-    )
-    core.record_result(
-        result(
-            "baseline-lineage",
-            baseline_study,
-            baseline_attempt,
-            0.50,
-            role=ExperimentRole.BASELINE,
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline-lineage")
+    with pytest.raises(
+        AutoResearchInvariantError,
+        match="autoresearch_real_result_requires_sealed_projection",
+    ):
+        core.record_result(
+            result(
+                "baseline-lineage",
+                baseline_study,
+                baseline_attempt,
+                0.50,
+                role=ExperimentRole.BASELINE,
+            )
         )
-    )
     candidate = proposal("candidate-code", estimated_cost=0.5).model_copy(
         update={
             "primary_variable": "trainer.optimizer",
@@ -627,126 +651,53 @@ def test_code_candidate_registers_required_source_lineage(tmp_path):
         }
     )
 
-    core.submit_controlled_candidate(
-        candidate,
-        parent_proposal_id="baseline-lineage",
-        changed_variable="trainer.optimizer",
-        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
-        principal=actor,
-        correlation_id="candidate-code-submit",
-        idempotency_key="candidate-code-submit",
-    )
+    with pytest.raises(AutoResearchInvariantError, match="proposal_not_ready"):
+        core.submit_controlled_candidate(
+            candidate,
+            parent_proposal_id="baseline-lineage",
+            changed_variable="trainer.optimizer",
+            expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+            principal=actor,
+            correlation_id="candidate-code-submit",
+            idempotency_key="candidate-code-submit",
+        )
 
-    lineage = repository.get_code_lineage("workspace-a", "candidate-code")
-    assert lineage.state == CodeLineageState.REQUIRED
-    assert lineage.mutation_kind == CodeMutationKind.TRAINER
-    assert lineage.source_repository_profile_id == "bashgym-source-v1"
+    assert repository.list_autoresearch_outcomes("workspace-a", "campaign-1") == ()
+    assert repository.list_code_lineages("workspace-a", "campaign-1") == ()
 
 
-def test_baseline_candidate_decisions_persist_and_stop_at_attempt_limit(tmp_path):
-    path, repository, core = fresh_core(tmp_path)
+def test_crashed_real_baseline_records_without_unlocking_quality_search(tmp_path):
+    _path, repository, core = fresh_core(tmp_path)
     activate(core)
     actor = principal(repository)
 
-    baseline_submission = proposal("baseline-1", estimated_cost=0.5)
     core.submit_baseline(
-        baseline_submission,
+        proposal("baseline-crashed", estimated_cost=0.5),
         expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
         principal=actor,
-        correlation_id="baseline-submit",
-        idempotency_key="baseline-submit",
+        correlation_id="baseline-crashed-submit",
+        idempotency_key="baseline-crashed-submit",
     )
-    assert core.state("workspace-a", "campaign-1", now=NOW).next_action == (
-        AutoResearchNextAction.WAIT_FOR_RESULT
+    baseline_study, baseline_attempt = select_and_finish(
+        repository, "baseline-crashed", failed=True
     )
-    baseline_study, baseline_attempt = select_and_finish(repository, "baseline-1")
-    baseline = core.record_result(
-        result(
-            "baseline-1",
-            baseline_study,
-            baseline_attempt,
-            0.50,
-            role=ExperimentRole.BASELINE,
-        )
-    )
-    assert baseline.decision.decision == ResultDecision.BASELINE
-    assert baseline.decision.eligible_for_best is True
-    ready = core.state("workspace-a", "campaign-1", now=NOW)
-    assert ready.next_action == AutoResearchNextAction.PROPOSE_CANDIDATE
-    assert ready.best_proposal_id == "baseline-1"
+    crashed_result = result(
+        "baseline-crashed",
+        baseline_study,
+        baseline_attempt,
+        0.50,
+        role=ExperimentRole.BASELINE,
+    ).model_copy(update={"outcome": ExperimentOutcome.CRASHED, "metric_value": None})
 
-    candidate_submission = proposal("candidate-1", estimated_cost=0.5).model_copy(
-        update={"prerequisite_study_ids": (baseline_study,)}
-    )
-    core.submit_controlled_candidate(
-        candidate_submission,
-        parent_proposal_id="baseline-1",
-        changed_variable="learning_rate",
-        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
-        principal=actor,
-        correlation_id="candidate-1-submit",
-        idempotency_key="candidate-1-submit",
-    )
-    candidate_study, candidate_attempt = select_and_finish(repository, "candidate-1")
-    kept = core.record_result(
-        result(
-            "candidate-1",
-            candidate_study,
-            candidate_attempt,
-            0.62,
-            role=ExperimentRole.CANDIDATE,
-        )
-    )
-    assert kept.decision.decision == ResultDecision.KEEP
-    assert kept.decision.improvement == pytest.approx(0.12)
+    recorded = core.record_result(crashed_result)
 
-    second_submission = proposal("candidate-2", estimated_cost=0.5).model_copy(
-        update={"prerequisite_study_ids": (candidate_study,)}
-    )
-    core.submit_controlled_candidate(
-        second_submission,
-        parent_proposal_id="candidate-1",
-        changed_variable="learning_rate",
-        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
-        principal=actor,
-        correlation_id="candidate-2-submit",
-        idempotency_key="candidate-2-submit",
-    )
-    second_study, second_attempt = select_and_finish(repository, "candidate-2")
-    discarded = core.record_result(
-        result(
-            "candidate-2",
-            second_study,
-            second_attempt,
-            0.60,
-            role=ExperimentRole.CANDIDATE,
-        )
-    )
-    assert discarded.decision.decision == ResultDecision.DISCARD
-    stopped = core.state("workspace-a", "campaign-1", now=NOW)
-    assert stopped.next_action == AutoResearchNextAction.STOP
-    assert stopped.reason_code == "attempt_limit_reached"
-    assert stopped.best_proposal_id == "candidate-1"
-    assert stopped.best_metric == pytest.approx(0.62)
-    assert stopped.budget_used == pytest.approx(1.5)
-
-    exhausted = core.enforce_stop(
-        "workspace-a",
-        "campaign-1",
-        controller_id="autoresearch-controller",
-        correlation_id="attempt-limit-stop",
-        idempotency_key="attempt-limit-stop",
-        now=NOW,
-    )
-    assert exhausted.status == CampaignStatus.EXHAUSTED
-    assert exhausted.stop_reason == "attempt_limit_reached"
-
-    reopened = AutoResearchRepository(path)
-    reopened.initialize()
-    restored = AutoResearchCampaignCore(reopened).state("workspace-a", "campaign-1", now=NOW)
-    assert restored.best_proposal_id == "candidate-1"
-    assert restored.latest_decision == ResultDecision.DISCARD
-    assert len(reopened.list_autoresearch_outcomes("workspace-a", "campaign-1")) == 3
+    assert recorded.decision.decision == ResultDecision.CRASH
+    assert recorded.decision.eligible_for_best is False
+    assert recorded.result == crashed_result
+    state = core.state("workspace-a", "campaign-1", now=NOW)
+    assert state.baseline_verified is False
+    assert state.best_proposal_id is None
+    assert state.next_action == AutoResearchNextAction.SUBMIT_BASELINE
 
 
 def test_simulated_baseline_is_explicit_and_never_unlocks_quality_search(tmp_path):
@@ -793,7 +744,7 @@ def test_simulated_baseline_is_explicit_and_never_unlocks_quality_search(tmp_pat
     )
     with pytest.raises(
         AutoResearchInvariantError,
-        match="fake_executor_cannot_claim_real_result",
+        match="autoresearch_real_result_requires_sealed_projection",
     ):
         core.record_result(claimed_real)
 

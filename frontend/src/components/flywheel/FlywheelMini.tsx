@@ -15,8 +15,12 @@ const stages: { id: FlywheelStage; label: string; icon: string }[] = [
   { id: 'deploy', label: 'Deploy', icon: '\u2197' }
 ]
 
-function StageButton({ stage, isActive, isComplete }: {
-  stage: typeof stages[0]
+function StageButton({
+  stage,
+  isActive,
+  isComplete
+}: {
+  stage: (typeof stages)[0]
   isActive: boolean
   isComplete: boolean
 }) {
@@ -24,9 +28,7 @@ function StageButton({ stage, isActive, isComplete }: {
     <div
       className={clsx(
         'flex items-center gap-1.5 px-2 py-1.5 text-xs transition-press border-brutal rounded-brutal',
-        isActive
-          ? 'bg-accent-light border-accent'
-          : 'bg-background-card border-border-subtle'
+        isActive ? 'bg-accent-light border-accent' : 'bg-background-card border-border-subtle'
       )}
     >
       <span
@@ -35,8 +37,8 @@ function StageButton({ stage, isActive, isComplete }: {
           isActive
             ? 'bg-accent text-white border-accent'
             : isComplete
-            ? 'bg-accent-light text-accent-dark border-border'
-            : 'bg-background-secondary text-text-muted border-border'
+              ? 'bg-accent-light text-accent-dark border-border'
+              : 'bg-background-secondary text-text-muted border-border'
         )}
       >
         {stage.icon}
@@ -47,8 +49,8 @@ function StageButton({ stage, isActive, isComplete }: {
           isActive
             ? 'text-accent-dark font-semibold'
             : isComplete
-            ? 'text-text-secondary'
-            : 'text-text-muted'
+              ? 'text-text-secondary'
+              : 'text-text-muted'
         )}
       >
         {stage.label}
@@ -86,10 +88,7 @@ export function FlywheelMini({ currentStage = 'act', progress = 0 }: FlywheelMin
       {progress > 0 && (
         <div className="pt-1">
           <div className="progress-bar" style={{ height: '8px' }}>
-            <div
-              className="progress-fill"
-              style={{ width: `${progress}%` }}
-            />
+            <div className="progress-fill" style={{ width: `${progress}%` }} />
           </div>
         </div>
       )}

@@ -107,7 +107,9 @@ def project_bundle_markdown(
     truncated = False
 
     while True:
-        blocks = [_evidence_block(item, index + 1, excerpt_limit) for index, item in enumerate(evidence)]
+        blocks = [
+            _evidence_block(item, index + 1, excerpt_limit) for index, item in enumerate(evidence)
+        ]
         markdown = "\n\n".join([_header(bundle), *blocks]).strip()
         if len(markdown) <= max_chars:
             break
@@ -122,9 +124,7 @@ def project_bundle_markdown(
         break
 
     estimated_tokens = (len(markdown) + 3) // 4
-    projection_hash = canonical_hash(
-        {"renderer_version": RENDERER_VERSION, "markdown": markdown}
-    )
+    projection_hash = canonical_hash({"renderer_version": RENDERER_VERSION, "markdown": markdown})
     return ProjectionResult(
         bundle_id=bundle.bundle_id,
         version=bundle.version,

@@ -46,7 +46,8 @@ function createNeonAdapter(
         async handler() {
           try {
             const apiKeyResult = await window.bashgym?.credentials.read('neon-api-key')
-            const connStringResult = await window.bashgym?.credentials.read('neon-connection-string')
+            const connStringResult =
+              await window.bashgym?.credentials.read('neon-connection-string')
 
             if (!apiKeyResult?.value || !connStringResult?.value) {
               onChange('connected', false)
@@ -124,7 +125,8 @@ function createNeonAdapter(
         icon: Play,
         async handler() {
           try {
-            const connStringResult = await window.bashgym?.credentials.read('neon-connection-string')
+            const connStringResult =
+              await window.bashgym?.credentials.read('neon-connection-string')
             if (!connStringResult?.value || !query) return
 
             const { neon } = await import('@neondatabase/serverless')
@@ -146,7 +148,7 @@ function createNeonAdapter(
             const headers = fields.map((f: { name: string }) => f.name)
             const separator = headers.map(() => '---')
             const dataRows = rows.map((row: Record<string, unknown>) =>
-              headers.map(h => String(row[h] ?? ''))
+              headers.map((h) => String(row[h] ?? ''))
             )
 
             const mdLines = [

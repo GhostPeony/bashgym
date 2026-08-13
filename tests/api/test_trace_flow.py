@@ -9,47 +9,55 @@ trace storage, mocked importers, and a patched TestClient.
 """
 
 import json
-import pytest
-import tempfile
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from pathlib import Path
-from typing import Optional
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from bashgym.api.routes import app
-
 
 # ---------------------------------------------------------------------------
 # Helpers — reuse the same trace-building functions from test_import_routes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FakeImportResult:
     """Mimics Claude's ImportResult dataclass."""
+
     session_id: str
     source_file: Path
     steps_imported: int
-    destination_file: Optional[Path] = None
-    error: Optional[str] = None
+    destination_file: Path | None = None
+    error: str | None = None
     skipped: bool = False
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
 
 
-def _make_trace_dict(source_tool: str, steps: int = 5, cost: float = 0.0,
-                     total_score: float = 0.0, repo_name: str = "test-repo",
-                     session_id: str = None):
+def _make_trace_dict(
+    source_tool: str,
+    steps: int = 5,
+    cost: float = 0.0,
+    total_score: float = 0.0,
+    repo_name: str = "test-repo",
+    session_id: str = None,
+):
     """Create a realistic imported TraceSession dict."""
     trace_steps = []
     for i in range(steps):
-        trace_steps.append({
-            "tool_name": "bash" if i % 2 == 0 else "read",
-            "success": True,
-            "exit_code": 0,
-            "input_tokens": 100,
-            "output_tokens": 50,
-            "timestamp": f"2026-01-01T00:0{min(i, 9)}:00Z",
-        })
+        trace_steps.append(
+            {
+                "tool_name": "bash" if i % 2 == 0 else "read",
+                "success": True,
+                "exit_code": 0,
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "timestamp": f"2026-01-01T00:0{min(i, 9)}:00Z",
+            }
+        )
     sid = session_id or f"test_{source_tool}_{id(trace_steps)}"
     return {
         "session_id": sid,
@@ -100,18 +108,22 @@ MCP_PATCH = "bashgym.trace_capture.importers.import_mcp_logs"
 # Minimal settings mock
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _FakeSettings:
     """Minimal settings mock for trace endpoints."""
+
     @dataclass
     class _Data:
         data_dir: str = ""
+
     data: _Data = dc_field(default_factory=_Data)
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def trace_dirs(tmp_path):
@@ -176,6 +188,7 @@ def patched_client(trace_dirs):
     data_dir, bashgym_dir = trace_dirs
 
     from bashgym.config import get_settings
+
     real_settings = get_settings()
     original_data_dir = real_settings.data.data_dir
 
@@ -183,6 +196,7 @@ def patched_client(trace_dirs):
 
     with patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir):
         from bashgym.api.routes import create_app
+
         test_app = create_app()
         with TestClient(test_app, raise_server_exceptions=False) as client:
             yield client
@@ -200,6 +214,7 @@ def client():
 # 1. Import then list by source
 # ---------------------------------------------------------------------------
 
+
 class TestImportThenListBySource:
     """Import via /import/claude, then GET /api/traces?source_tool=claude_code."""
 
@@ -213,7 +228,10 @@ class TestImportThenListBySource:
         # so list_traces can pick it up.
         dest_file = bashgym_dir / "traces" / "imported_claude_new.json"
         trace_data = _make_trace_dict(
-            "claude_code", steps=7, cost=2.00, total_score=0.92,
+            "claude_code",
+            steps=7,
+            cost=2.00,
+            total_score=0.92,
             session_id="claude_new_session",
         )
 
@@ -230,12 +248,16 @@ class TestImportThenListBySource:
             ]
 
         from bashgym.config import get_settings as _gs
+
         _orig = _gs().data.data_dir
         _gs().data.data_dir = str(data_dir)
 
-        with patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir), \
-             patch(CLAUDE_PATCH, side_effect=fake_import):
+        with (
+            patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir),
+            patch(CLAUDE_PATCH, side_effect=fake_import),
+        ):
             from bashgym.api.routes import create_app
+
             test_app = create_app()
             with TestClient(test_app, raise_server_exceptions=False) as c:
 
@@ -258,14 +280,17 @@ class TestImportThenListBySource:
                 # Should include the newly imported trace + existing claude traces
                 assert list_data["total"] >= 1
                 source_tools = {t["source_tool"] for t in list_data["traces"]}
-                assert source_tools == {"claude_code"}, f"Expected only claude_code, got {source_tools}"
+                assert source_tools == {
+                    "claude_code"
+                }, f"Expected only claude_code, got {source_tools}"
 
                 # Verify the newly imported trace is present (by checking trace count increased)
                 # We had gold_claude_001 + session_raw_001 + imported_claude_new = at least 3
                 claude_ids = [t["trace_id"] for t in list_data["traces"]]
                 # The new trace file stem should appear
-                assert any("claude_new" in tid for tid in claude_ids), \
-                    f"New import not found in traces: {claude_ids}"
+                assert any(
+                    "claude_new" in tid for tid in claude_ids
+                ), f"New import not found in traces: {claude_ids}"
 
         _gs().data.data_dir = _orig
 
@@ -273,6 +298,7 @@ class TestImportThenListBySource:
 # ---------------------------------------------------------------------------
 # 2. Import all then analytics
 # ---------------------------------------------------------------------------
+
 
 class TestImportAllThenAnalytics:
     """Import via /import/all, then call /traces/analytics and verify source_breakdown."""
@@ -282,19 +308,23 @@ class TestImportAllThenAnalytics:
         data_dir, bashgym_dir = trace_dirs
 
         from bashgym.config import get_settings as _gs
+
         _orig = _gs().data.data_dir
         _gs().data.data_dir = str(data_dir)
 
         # Mock all importers to return empty (we already have traces on disk)
-        with patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir), \
-             patch(CLAUDE_PATCH, return_value=[]), \
-             patch(GEMINI_PATCH, return_value=[]), \
-             patch(COPILOT_PATCH, return_value=[]), \
-             patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]), \
-             patch(CHATGPT_PATCH, return_value=[]), \
-             patch(MCP_PATCH, return_value=[]):
+        with (
+            patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir),
+            patch(CLAUDE_PATCH, return_value=[]),
+            patch(GEMINI_PATCH, return_value=[]),
+            patch(COPILOT_PATCH, return_value=[]),
+            patch(OPENCODE_PATCH, return_value=[]),
+            patch(CODEX_PATCH, return_value=[]),
+            patch(CHATGPT_PATCH, return_value=[]),
+            patch(MCP_PATCH, return_value=[]),
+        ):
             from bashgym.api.routes import create_app
+
             test_app = create_app()
             with TestClient(test_app, raise_server_exceptions=False) as c:
 
@@ -324,6 +354,7 @@ class TestImportAllThenAnalytics:
 # ---------------------------------------------------------------------------
 # 3. Analytics fields complete
 # ---------------------------------------------------------------------------
+
 
 class TestAnalyticsFieldsComplete:
     """Verify ALL expected analytics fields exist."""
@@ -380,6 +411,7 @@ class TestAnalyticsFieldsComplete:
 # 4. Source filter excludes other tools
 # ---------------------------------------------------------------------------
 
+
 class TestSourceFilterExcludesOtherTools:
     """Create traces from multiple sources, filter by one, verify exclusion."""
 
@@ -394,8 +426,9 @@ class TestSourceFilterExcludesOtherTools:
 
         # Every trace in the response must be gemini_cli
         for trace in data["traces"]:
-            assert trace["source_tool"] == "gemini_cli", \
-                f"Expected gemini_cli, got {trace['source_tool']}"
+            assert (
+                trace["source_tool"] == "gemini_cli"
+            ), f"Expected gemini_cli, got {trace['source_tool']}"
 
     def test_source_filter_excludes_claude_when_filtering_copilot(self, patched_client):
         """Filter by copilot_cli — no claude or gemini traces should appear."""
@@ -432,6 +465,7 @@ class TestSourceFilterExcludesOtherTools:
 # 5. Import invalid source returns 400
 # ---------------------------------------------------------------------------
 
+
 class TestImportInvalidSource:
     """Verify invalid source names are rejected."""
 
@@ -461,30 +495,36 @@ class TestImportInvalidSource:
 # 6. Import all with partial failure
 # ---------------------------------------------------------------------------
 
+
 class TestImportAllPartialFailure:
     """Mock one importer to throw, verify /import/all still returns 200."""
 
     def test_import_all_partial_failure(self, client):
         """One importer throws, others succeed — overall 200 with mixed results."""
-        def _make_gemini_results():
-            return [{
-                "session_id": "gemini_ok_001",
-                "source_file": "/fake/gemini/001.json",
-                "steps_imported": 5,
-                "destination_file": "/fake/dest/gemini_ok_001.json",
-                "error": None,
-                "skipped": False,
-                "skip_reason": None,
-                "source_tool": "gemini_cli",
-            }]
 
-        with patch(CLAUDE_PATCH, side_effect=RuntimeError("Claude dir not found")), \
-             patch(GEMINI_PATCH, return_value=_make_gemini_results()), \
-             patch(COPILOT_PATCH, return_value=[]), \
-             patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]), \
-             patch(CHATGPT_PATCH, return_value=[]), \
-             patch(MCP_PATCH, return_value=[]):
+        def _make_gemini_results():
+            return [
+                {
+                    "session_id": "gemini_ok_001",
+                    "source_file": "/fake/gemini/001.json",
+                    "steps_imported": 5,
+                    "destination_file": "/fake/dest/gemini_ok_001.json",
+                    "error": None,
+                    "skipped": False,
+                    "skip_reason": None,
+                    "source_tool": "gemini_cli",
+                }
+            ]
+
+        with (
+            patch(CLAUDE_PATCH, side_effect=RuntimeError("Claude dir not found")),
+            patch(GEMINI_PATCH, return_value=_make_gemini_results()),
+            patch(COPILOT_PATCH, return_value=[]),
+            patch(OPENCODE_PATCH, return_value=[]),
+            patch(CODEX_PATCH, return_value=[]),
+            patch(CHATGPT_PATCH, return_value=[]),
+            patch(MCP_PATCH, return_value=[]),
+        ):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -509,13 +549,15 @@ class TestImportAllPartialFailure:
 
     def test_import_all_multiple_failures(self, client):
         """Multiple importers fail — still 200, error details for each."""
-        with patch(CLAUDE_PATCH, side_effect=RuntimeError("fail claude")), \
-             patch(GEMINI_PATCH, side_effect=OSError("fail gemini")), \
-             patch(COPILOT_PATCH, side_effect=ValueError("fail copilot")), \
-             patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]), \
-             patch(CHATGPT_PATCH, return_value=[]), \
-             patch(MCP_PATCH, return_value=[]):
+        with (
+            patch(CLAUDE_PATCH, side_effect=RuntimeError("fail claude")),
+            patch(GEMINI_PATCH, side_effect=OSError("fail gemini")),
+            patch(COPILOT_PATCH, side_effect=ValueError("fail copilot")),
+            patch(OPENCODE_PATCH, return_value=[]),
+            patch(CODEX_PATCH, return_value=[]),
+            patch(CHATGPT_PATCH, return_value=[]),
+            patch(MCP_PATCH, return_value=[]),
+        ):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -530,13 +572,15 @@ class TestImportAllPartialFailure:
 
     def test_import_all_partial_failure_preserves_response_shape(self, client):
         """Even with failures, every result has the standard response fields."""
-        with patch(CLAUDE_PATCH, side_effect=RuntimeError("boom")), \
-             patch(GEMINI_PATCH, return_value=[]), \
-             patch(COPILOT_PATCH, return_value=[]), \
-             patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]), \
-             patch(CHATGPT_PATCH, return_value=[]), \
-             patch(MCP_PATCH, return_value=[]):
+        with (
+            patch(CLAUDE_PATCH, side_effect=RuntimeError("boom")),
+            patch(GEMINI_PATCH, return_value=[]),
+            patch(COPILOT_PATCH, return_value=[]),
+            patch(OPENCODE_PATCH, return_value=[]),
+            patch(CODEX_PATCH, return_value=[]),
+            patch(CHATGPT_PATCH, return_value=[]),
+            patch(MCP_PATCH, return_value=[]),
+        ):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -551,6 +595,7 @@ class TestImportAllPartialFailure:
 # ---------------------------------------------------------------------------
 # 7. Full end-to-end flow: import -> list -> analytics consistency
 # ---------------------------------------------------------------------------
+
 
 class TestEndToEndConsistency:
     """Verify that analytics numbers are consistent with list results."""
@@ -579,8 +624,9 @@ class TestEndToEndConsistency:
         # So analytics_sources should be a subset of list_sources
         # (list also includes pending traces)
         for src in analytics_sources:
-            assert src in list_sources, \
-                f"Analytics source {src} not found in list sources: {list_sources}"
+            assert (
+                src in list_sources
+            ), f"Analytics source {src} not found in list sources: {list_sources}"
 
     def test_quality_score_in_valid_range(self, patched_client):
         """Average quality score should be between 0 and 1."""
@@ -591,5 +637,4 @@ class TestEndToEndConsistency:
         """Each source in the breakdown should have at least 1 trace."""
         analytics = patched_client.get("/api/traces/analytics").json()
         for entry in analytics["source_breakdown"]:
-            assert entry["traces"] >= 1, \
-                f"Source {entry['source']} has {entry['traces']} traces"
+            assert entry["traces"] >= 1, f"Source {entry['source']} has {entry['traces']} traces"

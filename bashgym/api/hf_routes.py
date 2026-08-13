@@ -17,8 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+
+from bashgym.integrations.huggingface.jobs import (
+    HF_JOB_LOG_DEFAULT_TAIL_LINES,
+    HF_JOB_LOG_MAX_TAIL_LINES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,22 +92,6 @@ class HFConfigureRequest(BaseModel):
     token: str = Field(description="HuggingFace API token")
 
 
-class JobSubmitRequest(BaseModel):
-    """Request to submit a training job."""
-
-    dataset_repo: str = Field(description="HF repo containing training data")
-    output_repo: str = Field(description="HF repo to push trained model")
-    hardware: str = Field(default="a10g-small", description="Hardware tier")
-    base_model: str = Field(default="", description="Base model to fine-tune (required)")
-    num_epochs: int = Field(default=3, ge=1, le=100)
-    learning_rate: float = Field(default=2e-5, gt=0)
-    strategy: str = Field(default="sft", description="Training strategy: sft, dpo, distillation")
-    batch_size: int = Field(default=1, ge=1, le=64)
-    lora_r: int = Field(default=16, ge=4, le=256)
-    lora_alpha: int = Field(default=32, ge=4, le=512)
-    max_seq_length: int = Field(default=2048, ge=256, le=8192)
-
-
 class JobResponse(BaseModel):
     """Response for job operations."""
 
@@ -110,8 +99,21 @@ class JobResponse(BaseModel):
     status: str
     hardware: str
     created_at: str
+    namespace: str | None = None
     logs_url: str | None = None
     error_message: str | None = None
+
+
+class HFJobsCapabilitiesResponse(BaseModel):
+    """Local SDK capabilities exposed by the read-only Jobs surface."""
+
+    schema_version: str = "bashgym.hf_jobs_capabilities.v1"
+    dependency_available: bool
+    api_available: bool
+    provider_version: str | None = None
+    api_method: str
+    hardware_flavors: list[str] = Field(default_factory=list)
+    direct_mutations_enabled: bool = False
 
 
 class SpaceCreateRequest(BaseModel):
@@ -508,20 +510,63 @@ async def remove_hf_token():
 # =============================================================================
 
 
-@router.get("/jobs", response_model=list[JobResponse])
-async def list_jobs():
-    """List all HF training jobs."""
-    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
+def _require_jobs_access_confirmation(jobs_access_confirmed: bool) -> None:
+    """Fail before provider resolution unless eligible Jobs access is explicit."""
+    if jobs_access_confirmed:
+        return
+    raise HTTPException(
+        status_code=412,
+        detail={
+            "reason_code": "jobs_access_not_confirmed",
+            "message": (
+                "Confirm eligible Hugging Face Jobs access with "
+                "jobs_access_confirmed=true before reading provider job state."
+            ),
+        },
+    )
+
+
+def _confirmed_job_runner():
+    """Build the read-only provider adapter after local confirmation."""
+    from bashgym.integrations.huggingface import get_hf_client
     from bashgym.integrations.huggingface.jobs import create_job_runner
 
     client = get_hf_client()
+    return create_job_runner(client, jobs_access_confirmed=True)
 
+
+def _job_mutation_unavailable(*, reason_code: str, message: str) -> HTTPException:
+    """Describe unsupported provider mutations without inventing an execution adapter."""
+    return HTTPException(
+        status_code=409,
+        detail={
+            "reason_code": reason_code,
+            "message": message,
+            "direct_mutations_enabled": False,
+        },
+    )
+
+
+@router.get("/jobs", response_model=list[JobResponse])
+async def list_jobs(
+    jobs_access_confirmed: bool = Query(
+        default=False,
+        description="Explicit confirmation that the account has eligible HF Jobs access",
+    ),
+    namespace: str | None = Query(
+        default=None,
+        description="User or organization namespace that owns the provider jobs",
+    ),
+):
+    """List provider jobs after explicit access confirmation."""
+    from bashgym.integrations.huggingface import HFJobFailedError
+
+    _require_jobs_access_confirmation(jobs_access_confirmed)
+    runner = _confirmed_job_runner()
     try:
-        client.require_pro()
-        runner = create_job_runner(client)
-        jobs = runner.list_jobs()
-    except HFProRequiredError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        jobs = await asyncio.to_thread(runner.list_jobs, namespace=namespace)
+    except HFJobFailedError as error:
+        raise HTTPException(status_code=503, detail=_sanitize_hf_error(error)) from error
 
     return [
         JobResponse(
@@ -529,6 +574,7 @@ async def list_jobs():
             status=job.status.value,
             hardware=job.hardware,
             created_at=job.created_at.isoformat() if job.created_at else "",
+            namespace=job.namespace,
             logs_url=job.logs_url,
             error_message=job.error_message,
         )
@@ -536,173 +582,124 @@ async def list_jobs():
     ]
 
 
-@router.post("/jobs", response_model=JobResponse)
-async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTasks):
-    """Submit a new training job to HuggingFace."""
-    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
-    from bashgym.integrations.huggingface.jobs import HFJobConfig, create_job_runner
-    from bashgym.integrations.huggingface.script_adapter import (
-        CloudScriptConfig,
-        generate_cloud_script,
+@router.post("/jobs", status_code=409)
+async def submit_job():
+    """Reject direct launches because this integration exposes no launch adapter."""
+    raise _job_mutation_unavailable(
+        reason_code="hf_job_submission_unavailable",
+        message=(
+            "Direct Hugging Face Jobs submission is not connected. Launch with the "
+            "provider workflow that owns the job, then observe its status here."
+        ),
     )
 
-    client = get_hf_client()
 
-    try:
-        client.require_pro()
-    except HFProRequiredError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+@router.get("/jobs/capabilities", response_model=HFJobsCapabilitiesResponse)
+async def get_jobs_capabilities():
+    """Report installed SDK support without credentials or provider calls."""
+    from bashgym.integrations.huggingface.jobs import detect_hf_jobs_availability
 
-    runner = create_job_runner(client)
-
-    # Generate cloud-ready Unsloth script via script adapter
-    try:
-        cloud_config = CloudScriptConfig(
-            strategy=request.strategy,
-            dataset_repo=request.dataset_repo,
-            output_repo=request.output_repo,
-            base_model=request.base_model,
-            hardware=request.hardware,
-            num_epochs=request.num_epochs,
-            learning_rate=request.learning_rate,
-            batch_size=request.batch_size,
-            lora_r=request.lora_r,
-            lora_alpha=request.lora_alpha,
-            max_seq_length=request.max_seq_length,
-        )
-        script_content = generate_cloud_script(cloud_config)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write(script_content)
-        script_path = f.name
-
-    try:
-        job = runner.submit_training_job(
-            script_path=script_path,
-            repo_id=request.output_repo,
-            config=HFJobConfig(
-                hardware=request.hardware,
-                timeout_minutes=120,
-            ),
-        )
-
-        return JobResponse(
-            job_id=job.job_id,
-            status=job.status.value,
-            hardware=job.hardware,
-            created_at=job.created_at.isoformat() if job.created_at else "",
-            logs_url=job.logs_url,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to submit job: {e}")
-    finally:
-        import os
-
-        os.unlink(script_path)
-
-
-@router.get("/jobs/{job_id}", response_model=JobResponse)
-async def get_job(job_id: str):
-    """Get job status."""
-    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
-    from bashgym.integrations.huggingface.jobs import create_job_runner
-
-    client = get_hf_client()
-
-    try:
-        client.require_pro()
-    except HFProRequiredError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    runner = create_job_runner(client)
-
-    try:
-        job = runner.get_job_status(job_id)
-        return JobResponse(
-            job_id=job.job_id,
-            status=job.status.value,
-            hardware=job.hardware,
-            created_at=job.created_at.isoformat() if job.created_at else "",
-            logs_url=job.logs_url,
-            error_message=job.error_message,
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-
-
-@router.get("/jobs/{job_id}/logs")
-async def get_job_logs(job_id: str):
-    """Get job logs."""
-    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
-    from bashgym.integrations.huggingface.jobs import create_job_runner
-
-    client = get_hf_client()
-
-    try:
-        client.require_pro()
-    except HFProRequiredError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    runner = create_job_runner(client)
-
-    try:
-        logs = runner.get_job_logs(job_id)
-        return {"logs": logs}
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-
-
-@router.delete("/jobs/{job_id}")
-async def cancel_job(job_id: str):
-    """Cancel a running job."""
-    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
-    from bashgym.integrations.huggingface.jobs import create_job_runner
-
-    client = get_hf_client()
-
-    try:
-        client.require_pro()
-    except HFProRequiredError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    runner = create_job_runner(client)
-
-    try:
-        success = runner.cancel_job(job_id)
-        if success:
-            return {"status": "cancelled", "job_id": job_id}
-        else:
-            raise HTTPException(
-                status_code=400, detail="Job cannot be cancelled (may already be completed)"
-            )
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+    availability = detect_hf_jobs_availability()
+    return HFJobsCapabilitiesResponse(
+        dependency_available=availability.dependency_available,
+        api_available=availability.api_available,
+        provider_version=availability.provider_version,
+        api_method=availability.api_method,
+        hardware_flavors=list(availability.hardware_flavors),
+    )
 
 
 @router.get("/jobs/hardware")
 async def get_hardware_tiers():
-    """Get available hardware tiers with pricing."""
+    """Return SDK-derived provider flavors without pricing or capacity claims."""
     from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
 
-    tiers = []
-    for tier_id, specs in HARDWARE_SPECS.items():
-        if not specs.get("pro_required", True):
-            continue  # Only return GPU tiers
-        tiers.append(
-            {
-                "id": tier_id,
-                "gpu": specs.get("gpu"),
-                "vram_gb": specs.get("vram_gb", 0),
-                "cost_per_hour": specs.get("cost_per_hour", 0),
-            }
+    return [
+        {
+            "id": tier_id,
+            "provider_value": specs.get("provider_value", tier_id),
+            "source": specs.get("source", "huggingface_hub.SpaceHardware"),
+        }
+        for tier_id, specs in HARDWARE_SPECS.items()
+    ]
+
+
+@router.get("/jobs/{job_id}", response_model=JobResponse)
+async def get_job(
+    job_id: str,
+    jobs_access_confirmed: bool = Query(
+        default=False,
+        description="Explicit confirmation that the account has eligible HF Jobs access",
+    ),
+    namespace: str | None = Query(
+        default=None,
+        description="User or organization namespace that owns the provider job",
+    ),
+):
+    """Get provider job status after explicit access confirmation."""
+    from bashgym.integrations.huggingface import HFJobFailedError
+
+    _require_jobs_access_confirmation(jobs_access_confirmed)
+    runner = _confirmed_job_runner()
+    try:
+        job = await asyncio.to_thread(runner.get_job_status, job_id, namespace=namespace)
+        return JobResponse(
+            job_id=job.job_id,
+            status=job.status.value,
+            hardware=job.hardware,
+            created_at=job.created_at.isoformat() if job.created_at else "",
+            namespace=job.namespace,
+            logs_url=job.logs_url,
+            error_message=job.error_message,
         )
-    return tiers
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}") from error
+    except HFJobFailedError as error:
+        raise HTTPException(status_code=503, detail=_sanitize_hf_error(error)) from error
+
+
+@router.get("/jobs/{job_id}/logs")
+async def get_job_logs(
+    job_id: str,
+    jobs_access_confirmed: bool = Query(
+        default=False,
+        description="Explicit confirmation that the account has eligible HF Jobs access",
+    ),
+    namespace: str | None = Query(
+        default=None,
+        description="User or organization namespace that owns the provider job",
+    ),
+    tail: int = Query(
+        default=HF_JOB_LOG_DEFAULT_TAIL_LINES,
+        ge=1,
+        le=HF_JOB_LOG_MAX_TAIL_LINES,
+        description="Number of final log lines to return",
+    ),
+):
+    """Get provider job logs after explicit access confirmation."""
+    from bashgym.integrations.huggingface import HFJobFailedError
+
+    _require_jobs_access_confirmation(jobs_access_confirmed)
+    runner = _confirmed_job_runner()
+    try:
+        logs = await asyncio.to_thread(runner.get_job_logs, job_id, tail, namespace=namespace)
+        return {"logs": logs}
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}") from error
+    except HFJobFailedError as error:
+        raise HTTPException(status_code=503, detail=_sanitize_hf_error(error)) from error
+
+
+@router.delete("/jobs/{job_id}", status_code=409)
+async def cancel_job(job_id: str):
+    """Reject direct cancellation because this integration is observation-only."""
+    raise _job_mutation_unavailable(
+        reason_code="hf_job_cancellation_unavailable",
+        message=(
+            f"Direct cancellation of Hugging Face job {job_id!r} is not connected. "
+            "Cancel it with the provider workflow that owns the job."
+        ),
+    )
 
 
 # =============================================================================
@@ -1004,9 +1001,7 @@ async def upload_dataset(request: DatasetUploadRequest):
         else:
             val_count = 0
         repo_id = (
-            f"{client.namespace}/{request.repo_name}"
-            if client.namespace
-            else request.repo_name
+            f"{client.namespace}/{request.repo_name}" if client.namespace else request.repo_name
         )
 
         return DatasetResponse(

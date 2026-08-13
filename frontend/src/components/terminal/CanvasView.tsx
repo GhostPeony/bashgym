@@ -20,7 +20,13 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { useTerminalStore, useCanvasControlStore, useCanvasOrchestratorStore, useRuntimeStore, useCampaignStore } from '../../stores'
+import {
+  useTerminalStore,
+  useCanvasControlStore,
+  useCanvasOrchestratorStore,
+  useRuntimeStore,
+  useCampaignStore
+} from '../../stores'
 import type { Panel, TerminalSession, MonitorAutoMode } from '../../stores'
 import { getActiveWorkspaceId, wsKey } from '../../stores/workspacePersistence'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -33,13 +39,14 @@ import { BrowserNode, type BrowserNodeData } from './BrowserNode'
 import { CAMPAIGNS_ENABLED } from './nodes/dataPanels'
 import { configureMcpWorkbenchApi } from './nodes/mcpWorkbenchModel'
 import { DATA_PANEL_DEFS } from './nodes/dataPanels'
-import {
-  buildCustomNodeData,
-  customNodeTypes,
-} from './nodes/customNodeRegistry'
+import { buildCustomNodeData, customNodeTypes } from './nodes/customNodeRegistry'
 import { isCustomNodeType } from './nodes/customNodeTypes'
 import { findDynamicNodePosition } from './canvasPlacement'
-import { buildCanvasGraphIndex, reconcileCanvasNodes, type CanvasGraphIndex } from './canvasPerformance'
+import {
+  buildCanvasGraphIndex,
+  reconcileCanvasNodes,
+  type CanvasGraphIndex
+} from './canvasPerformance'
 import { loadCanvasViewport, saveCanvasViewport } from './canvasViewport'
 import type { IntegrationNodeData, DataNodeData } from './nodes/types'
 import { createMcpWorkbenchApi, designerApi, trainingApi, workspaceApi } from '../../services/api'
@@ -48,8 +55,9 @@ import { useActivityStore } from '../../stores/activityStore'
 import { trainingQueuedPayloadFromResponse } from '../../stores/trainingCanvasLifecycle'
 import {
   campaignsForCanvasAutoMaterialization,
-  materializeCampaignPanel,
+  materializeCampaignPanel
 } from '../../stores/campaignCanvasLifecycle'
+import { selectArchivedIds, useCampaignArchiveStore } from '../../stores/campaignArchive'
 import type { CampaignRecord } from '../../stores/campaignStore'
 import { MasterControlPanel } from './MasterControlPanel'
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys'
@@ -75,7 +83,10 @@ const toPersistedEdge = (e: Edge): PersistedEdge => ({
   source: e.source,
   target: e.target,
   ...(e.type === 'monitor'
-    ? { type: 'monitor' as const, data: { auto: (e.data as MonitorEdgeData | undefined)?.auto ?? 'off' } }
+    ? {
+        type: 'monitor' as const,
+        data: { auto: (e.data as MonitorEdgeData | undefined)?.auto ?? 'off' }
+      }
     : {})
 })
 
@@ -152,7 +163,8 @@ function decorateMonitorEdges(edges: Edge[], panels: Panel[], handlers: MonitorH
 }
 
 // Union of all node data shapes rendered on the canvas
-type CanvasNodeData = TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData
+type CanvasNodeData =
+  TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData
 type CanvasFlowNode = Node<CanvasNodeData>
 
 const SECRET_KEY_RE = /(api[_-]?key|authorization|bearer|password|secret|token)/i
@@ -233,12 +245,12 @@ const nodeTypes = {
   terminal: TerminalNode,
   preview: PreviewNode,
   browser: BrowserNode,
-  ...customNodeTypes,
+  ...customNodeTypes
 }
 
 // Register custom edge types
 const edgeTypes = {
-  monitor: MonitorEdge,
+  monitor: MonitorEdge
 }
 
 // Active work stays responsive; idle canvases back off and hidden windows stop
@@ -257,7 +269,7 @@ function buildNodeData(
   sessions: Map<string, TerminalSession>,
   onFocus: (id: string) => void,
   onClose: (id: string) => void,
-  graph: CanvasGraphIndex,
+  graph: CanvasGraphIndex
 ): TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData {
   const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
   const hasConnections = graph.connectedPanelIds.has(panel.id)
@@ -336,36 +348,46 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   const createTerminal = useTerminalStore((state) => state.createTerminal)
   const setCanvasEdges = useTerminalStore((state) => state.setCanvasEdges)
   const pollRuntime = useRuntimeStore((state) => state.poll)
-  const activeCampaigns = useCampaignStore((state) =>
-    state.workspaces[getActiveWorkspaceId()]?.campaigns || EMPTY_CAMPAIGNS
+  const activeCampaigns = useCampaignStore(
+    (state) => state.workspaces[getActiveWorkspaceId()]?.campaigns || EMPTY_CAMPAIGNS
   )
 
-  const {
-    gridEnabled,
-    snapToGrid,
-    showMiniMap
-  } = useCanvasControlStore()
+  const { gridEnabled, snapToGrid, showMiniMap } = useCanvasControlStore()
 
   // This component remounts per workspace, so capture both persistence keys and
   // the initial zoom before React Flow initializes.
   const wsIdRef = useRef(getActiveWorkspaceId())
   const initialViewportRef = useRef(
-    loadCanvasViewport(localStorage, wsKey(wsIdRef.current, 'viewport')),
+    loadCanvasViewport(localStorage, wsKey(wsIdRef.current, 'viewport'))
   )
   const { fitView, zoomIn, zoomOut, getZoom, getNodes } = useReactFlow()
   const [currentZoom, setCurrentZoom] = useState(initialViewportRef.current?.zoom ?? 1)
 
   // Stable callbacks — consistent references across renders so TerminalNode memo stays effective
-  const handleFocusPanel = useCallback((id: string) => {
-    setActivePanel(id)
-    onFocusPanel(id)
-  }, [setActivePanel, onFocusPanel])
+  const handleFocusPanel = useCallback(
+    (id: string) => {
+      setActivePanel(id)
+      onFocusPanel(id)
+    },
+    [setActivePanel, onFocusPanel]
+  )
 
-  const handleClosePanel = useCallback((id: string) => {
-    // Close the popup overlay if open, then remove the panel from the canvas
-    onClosePopup?.()
-    useTerminalStore.getState().removePanel(id)
-  }, [onClosePopup])
+  const handleClosePanel = useCallback(
+    (id: string) => {
+      // Close the popup overlay if open, then remove the panel from the canvas.
+      // Closing a campaign node archives its campaign so auto-materialization
+      // does not resurrect it on the next reload.
+      onClosePopup?.()
+      const closing = useTerminalStore.getState().panels.find((panel) => panel.id === id)
+      const campaignId =
+        closing?.type === 'campaign' ? closing.adapterConfig?.campaignId : undefined
+      if (typeof campaignId === 'string') {
+        useCampaignArchiveStore.getState().archive(getActiveWorkspaceId(), campaignId)
+      }
+      useTerminalStore.getState().removePanel(id)
+    },
+    [onClosePopup]
+  )
 
   const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const knownPanelIdsRef = useRef(new Set(_panels.map((panel) => panel.id)))
@@ -390,13 +412,21 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     return releaseLiveWorkspace
   }, [])
 
+  const archivedCampaignIds = useCampaignArchiveStore((state) =>
+    selectArchivedIds(state, wsIdRef.current)
+  )
+
   useEffect(() => {
     if (!CAMPAIGNS_ENABLED) return
     if (useWorkspaceStore.getState().switching) return
-    for (const campaign of campaignsForCanvasAutoMaterialization(activeCampaigns)) {
+    const archiveStore = useCampaignArchiveStore.getState()
+    archiveStore.ensureLoaded(wsIdRef.current)
+    archiveStore.reconcile(wsIdRef.current, activeCampaigns)
+    const archived = new Set(selectArchivedIds(useCampaignArchiveStore.getState(), wsIdRef.current))
+    for (const campaign of campaignsForCanvasAutoMaterialization(activeCampaigns, archived)) {
       materializeCampaignPanel(campaign)
     }
-  }, [activeCampaigns])
+  }, [activeCampaigns, archivedCampaignIds])
 
   // Recover active runs after a renderer reload or a missed WebSocket event.
   // Completed history stays out of the active canvas unless it was already
@@ -407,7 +437,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     const reconcileActiveTrainingRuns = async () => {
       try {
         const responses = await Promise.all(
-          ['pending', 'running', 'paused'].map((status) => trainingApi.list(status, 20)),
+          ['pending', 'running', 'paused'].map((status) => trainingApi.list(status, 20))
         )
         if (cancelled) return
 
@@ -455,10 +485,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
       polling = true
       let designerActive = false
       try {
-        const [, response] = await Promise.all([
-          pollRuntime(),
-          designerApi.listJobs(20),
-        ])
+        const [, response] = await Promise.all([pollRuntime(), designerApi.listJobs(20)])
         if (cancelled || !response.ok || !response.data) return
         const orchestrator = useCanvasOrchestratorStore.getState()
         for (const job of response.data) {
@@ -468,18 +495,18 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
           useActivityStore.getState().addEvent('designer:queued', {
             job_id: job.job_id,
             pipeline: job.pipeline,
-            num_records: job.num_records,
+            num_records: job.num_records
           })
         }
       } catch (error) {
         console.debug('[canvas] unable to reconcile Data Designer jobs', error)
       } finally {
         polling = false
-        const runtimeActive = useRuntimeStore.getState().jobs.some((job) => job.status === 'running')
+        const runtimeActive = useRuntimeStore
+          .getState()
+          .jobs.some((job) => job.status === 'running')
         schedule(
-          runtimeActive || designerActive
-            ? ACTIVE_RUNTIME_RECONCILE_MS
-            : IDLE_RUNTIME_RECONCILE_MS,
+          runtimeActive || designerActive ? ACTIVE_RUNTIME_RECONCILE_MS : IDLE_RUNTIME_RECONCILE_MS
         )
       }
     }
@@ -506,24 +533,37 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [edges, setCanvasEdges])
 
   // Monitor edge actions — stable references so edge data survives memo comparison
-  const handleSendSnapshot = useCallback(
-    (edgeId: string) => sendMonitorSnapshot(edgeId, false),
-    []
+  const handleSendSnapshot = useCallback((edgeId: string) => sendMonitorSnapshot(edgeId, false), [])
+  const handleCycleAuto = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId
+            ? {
+                ...e,
+                data: {
+                  ...e.data,
+                  auto: cycleAutoMode((e.data as MonitorEdgeData | undefined)?.auto)
+                }
+              }
+            : e
+        )
+      )
+    },
+    [setEdges]
   )
-  const handleCycleAuto = useCallback((edgeId: string) => {
-    setEdges((eds) => eds.map((e) =>
-      e.id === edgeId
-        ? { ...e, data: { ...e.data, auto: cycleAutoMode((e.data as MonitorEdgeData | undefined)?.auto) } }
-        : e
-    ))
-  }, [setEdges])
-  const handleSwapDirection = useCallback((edgeId: string) => {
-    setEdges((eds) => eds.map((e) =>
-      e.id === edgeId
-        ? { ...e, source: e.target, target: e.source, sourceHandle: null, targetHandle: null }
-        : e
-    ))
-  }, [setEdges])
+  const handleSwapDirection = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId
+            ? { ...e, source: e.target, target: e.source, sourceHandle: null, targetHandle: null }
+            : e
+        )
+      )
+    },
+    [setEdges]
+  )
   const monitorHandlersRef = useRef<MonitorHandlers | null>(null)
   if (!monitorHandlersRef.current) {
     monitorHandlersRef.current = {
@@ -543,7 +583,11 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         const currentShape = JSON.stringify(current.map(toPersistedEdge))
         const nextShape = JSON.stringify(state.canvasEdges)
         if (currentShape === nextShape) return current
-        return decorateMonitorEdges(state.canvasEdges.map(toFlowEdge), state.panels, monitorHandlers)
+        return decorateMonitorEdges(
+          state.canvasEdges.map(toFlowEdge),
+          state.panels,
+          monitorHandlers
+        )
       })
     })
     return unsubscribe
@@ -552,7 +596,9 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   // Upgrade terminal↔terminal edges to monitor edges (covers edges loaded from
   // storage before panels restored, and legacy saved edges)
   useEffect(() => {
-    setEdges((eds) => decorateMonitorEdges(eds, useTerminalStore.getState().panels, monitorHandlers))
+    setEdges((eds) =>
+      decorateMonitorEdges(eds, useTerminalStore.getState().panels, monitorHandlers)
+    )
   }, [_panels, setEdges, monitorHandlers])
 
   // Use stable refs for callbacks so the Zustand subscription never needs to be recreated
@@ -582,15 +628,15 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         const timer = setTimeout(() => {
           materializingPanelIdsRef.current.delete(panel.id)
           materializeTimersRef.current.delete(panel.id)
-          setNodes((current) => current.map((node) => (
-            node.id === panel.id ? { ...node, className: undefined } : node
-          )))
+          setNodes((current) =>
+            current.map((node) => (node.id === panel.id ? { ...node, className: undefined } : node))
+          )
         }, 420)
         materializeTimersRef.current.set(panel.id, timer)
       }
 
       setNodes((prevNodes) => {
-        const positionMap = new Map(prevNodes.map(n => [n.id, n.position]))
+        const positionMap = new Map(prevNodes.map((n) => [n.id, n.position]))
 
         const candidates = state.panels.map((panel, index) => {
           const savedPosition = positionMap.get(panel.id)
@@ -599,16 +645,29 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
             x: 50 + (index % 3) * 380,
             y: 50 + Math.floor(index / 3) * 280
           }
-          const nodeType = panel.type === 'preview' ? 'preview' :
-                           panel.type === 'browser' ? 'browser' :
-                           isCustomNodeType(panel.type) ? panel.type : 'terminal'
+          const nodeType =
+            panel.type === 'preview'
+              ? 'preview'
+              : panel.type === 'browser'
+                ? 'browser'
+                : isCustomNodeType(panel.type)
+                  ? panel.type
+                  : 'terminal'
           return {
             id: panel.id,
             type: nodeType,
             position: persistedPosition || savedPosition || defaultPosition,
             selected: panel.id === state.activePanelId,
-            className: materializingPanelIdsRef.current.has(panel.id) ? 'canvas-node-enter' : undefined,
-            data: buildNodeData(panel, state.sessions, handleFocusPanelRef.current, handleClosePanelRef.current, graph)
+            className: materializingPanelIdsRef.current.has(panel.id)
+              ? 'canvas-node-enter'
+              : undefined,
+            data: buildNodeData(
+              panel,
+              state.sessions,
+              handleFocusPanelRef.current,
+              handleClosePanelRef.current,
+              graph
+            )
           }
         })
         return reconcileCanvasNodes(prevNodes, candidates)
@@ -642,7 +701,8 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         state.activePanelId === prev.activePanelId &&
         state.canvasNodes === prev.canvasNodes &&
         state.canvasEdges === prev.canvasEdges
-      ) return
+      )
+        return
       scheduleRebuild(state)
     })
 
@@ -652,10 +712,13 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     }
   }, [setNodes]) // setNodes is stable; callbacks accessed via ref
 
-  useEffect(() => () => {
-    for (const timer of materializeTimersRef.current.values()) clearTimeout(timer)
-    materializeTimersRef.current.clear()
-  }, [])
+  useEffect(
+    () => () => {
+      for (const timer of materializeTimersRef.current.values()) clearTimeout(timer)
+      materializeTimersRef.current.clear()
+    },
+    []
+  )
 
   // Sync a sanitized live canvas snapshot for terminal/Hermes agents. Throttled
   // and keyed on render-relevant state so terminal output streaming does not
@@ -675,7 +738,8 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         state.sessionsVersion === prev.sessionsVersion &&
         state.canvasEdges === prev.canvasEdges &&
         state.canvasNodes === prev.canvasNodes
-      ) return
+      )
+        return
       pushSnapshot()
     })
     return () => {
@@ -685,42 +749,62 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [])
 
   // Handle node position changes
-  const handleNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
-    onNodesChange(changes)
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<CanvasFlowNode>[]) => {
+      onNodesChange(changes)
 
-    // Save position changes
-    changes.forEach((change) => {
-      if (change.type === 'position' && change.position && !change.dragging) {
-        updateCanvasNode(change.id, change.position)
-      }
-    })
-  }, [onNodesChange, updateCanvasNode])
+      // Save position changes
+      changes.forEach((change) => {
+        if (change.type === 'position' && change.position && !change.dragging) {
+          updateCanvasNode(change.id, change.position)
+        }
+      })
+    },
+    [onNodesChange, updateCanvasNode]
+  )
 
   // Handle connections between nodes. Terminal→terminal = monitor edge
   // (source = watched, target = watcher)
-  const onConnect = useCallback((connection: Connection) => {
-    const panels = useTerminalStore.getState().panels
-    const isTerminal = (pid: string | null) =>
-      !!pid && panels.some((p) => p.id === pid && p.type === 'terminal')
-    if (isTerminal(connection.source) && isTerminal(connection.target) && connection.source !== connection.target) {
-      setEdges((eds) => addEdge({
-        ...connection,
-        type: 'monitor',
-        data: { auto: 'off', ...monitorHandlers }
-      }, eds))
-      return
-    }
-    setEdges((eds) => addEdge({
-      ...connection,
-      animated: true,
-      style: { stroke: 'var(--accent)', strokeWidth: 2 },
-      className: 'canvas-edge-pulse'
-    }, eds))
-  }, [setEdges, monitorHandlers])
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      const panels = useTerminalStore.getState().panels
+      const isTerminal = (pid: string | null) =>
+        !!pid && panels.some((p) => p.id === pid && p.type === 'terminal')
+      if (
+        isTerminal(connection.source) &&
+        isTerminal(connection.target) &&
+        connection.source !== connection.target
+      ) {
+        setEdges((eds) =>
+          addEdge(
+            {
+              ...connection,
+              type: 'monitor',
+              data: { auto: 'off', ...monitorHandlers }
+            },
+            eds
+          )
+        )
+        return
+      }
+      setEdges((eds) =>
+        addEdge(
+          {
+            ...connection,
+            animated: true,
+            style: { stroke: 'var(--accent)', strokeWidth: 2 },
+            className: 'canvas-edge-pulse'
+          },
+          eds
+        )
+      )
+    },
+    [setEdges, monitorHandlers]
+  )
 
   // Auto-connect all nodes when shift+drag box-selects 2+ nodes
   const onSelectionEnd = useCallback(() => {
-    const selectedNodes = getNodes().filter(n => n.selected)
+    const selectedNodes = getNodes().filter((n) => n.selected)
     if (selectedNodes.length < 2) return
 
     setEdges((eds) => {
@@ -731,17 +815,20 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
           const a = selectedNodes[i].id
           const b = selectedNodes[j].id
           const exists = updated.some(
-            e => (e.source === a && e.target === b) || (e.source === b && e.target === a)
+            (e) => (e.source === a && e.target === b) || (e.source === b && e.target === a)
           )
           if (!exists) {
-            updated = addEdge({
-              source: a,
-              target: b,
-              sourceHandle: null,
-              targetHandle: null,
-              animated: true,
-              style: { stroke: 'var(--accent)', strokeWidth: 2 }
-            }, updated)
+            updated = addEdge(
+              {
+                source: a,
+                target: b,
+                sourceHandle: null,
+                targetHandle: null,
+                animated: true,
+                style: { stroke: 'var(--accent)', strokeWidth: 2 }
+              },
+              updated
+            )
           }
         }
       }
@@ -751,9 +838,12 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [getNodes, setEdges, monitorHandlers])
 
   // Handle node selection
-  const onNodeClick = useCallback((_: any, node: Node) => {
-    setActivePanel(node.id)
-  }, [setActivePanel])
+  const onNodeClick = useCallback(
+    (_: any, node: Node) => {
+      setActivePanel(node.id)
+    },
+    [setActivePanel]
+  )
 
   // Load saved viewport or use default
   const savedViewport = initialViewportRef
@@ -830,31 +920,43 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [])
 
   // Spawn a saved/built-in workspace preset: panels at their positions plus edges
-  const handleApplyPreset = useCallback((preset: CanvasPreset) => {
-    const setPosition = (panelId: string, pos: { x: number; y: number }) => {
-      updateCanvasNode(panelId, pos)
-      setNodes((nds) => nds.map((n) => (n.id === panelId ? { ...n, position: pos } : n)))
-    }
-    const pairs = applyPreset(preset, setPosition)
-    setEdges((eds) => {
-      let updated = eds
-      for (const [source, target] of pairs) {
-        const exists = updated.some(
-          (e) => (e.source === source && e.target === target) || (e.source === target && e.target === source)
-        )
-        if (!exists) {
-          updated = addEdge(
-            { source, target, sourceHandle: null, targetHandle: null, animated: true, style: EDGE_STYLE },
-            updated
-          )
-        }
+  const handleApplyPreset = useCallback(
+    (preset: CanvasPreset) => {
+      const setPosition = (panelId: string, pos: { x: number; y: number }) => {
+        updateCanvasNode(panelId, pos)
+        setNodes((nds) => nds.map((n) => (n.id === panelId ? { ...n, position: pos } : n)))
       }
-      return decorateMonitorEdges(updated, useTerminalStore.getState().panels, monitorHandlers)
-    })
-    setTimeout(() => {
-      void fitView({ padding: 0.2 }).then(() => setCurrentZoom(getZoom()))
-    }, 150)
-  }, [setEdges, setNodes, updateCanvasNode, fitView, getZoom, monitorHandlers])
+      const pairs = applyPreset(preset, setPosition)
+      setEdges((eds) => {
+        let updated = eds
+        for (const [source, target] of pairs) {
+          const exists = updated.some(
+            (e) =>
+              (e.source === source && e.target === target) ||
+              (e.source === target && e.target === source)
+          )
+          if (!exists) {
+            updated = addEdge(
+              {
+                source,
+                target,
+                sourceHandle: null,
+                targetHandle: null,
+                animated: true,
+                style: EDGE_STYLE
+              },
+              updated
+            )
+          }
+        }
+        return decorateMonitorEdges(updated, useTerminalStore.getState().panels, monitorHandlers)
+      })
+      setTimeout(() => {
+        void fitView({ padding: 0.2 }).then(() => setCurrentZoom(getZoom()))
+      }, 150)
+    },
+    [setEdges, setNodes, updateCanvasNode, fitView, getZoom, monitorHandlers]
+  )
 
   return (
     <div className={`h-full w-full relative ${currentZoom < 0.55 ? 'canvas-compact' : ''}`}>
@@ -910,7 +1012,10 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
             maskColor="rgba(0, 0, 0, 0.5)"
           />
         )}
-        <FlowPanel position="bottom-center" className="text-xs font-mono text-text-muted bg-background-card border-brutal border-border shadow-brutal-sm px-2 py-1 rounded-brutal">
+        <FlowPanel
+          position="bottom-center"
+          className="text-xs font-mono text-text-muted bg-background-card border-brutal border-border shadow-brutal-sm px-2 py-1 rounded-brutal"
+        >
           Drag to reposition &middot; Shift+drag to select &amp; connect
         </FlowPanel>
       </ReactFlow>

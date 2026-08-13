@@ -10,18 +10,18 @@ import {
   Loader2,
   RefreshCw,
   ShieldAlert,
-  ShieldCheck,
+  ShieldCheck
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
   sourcesApi,
   type SourceCard,
-  type SourceCatalogResponse,
   type SourcePrepareResponse,
-  type SourceRecommendation,
-  type SourceUse,
+  type SourceUse
 } from '../../services/api'
 import { useTrainingStore } from '../../stores'
+import { useKeyedSessionResource, useSessionResource } from '../../stores/sessionResource'
+import { sourceCatalogResource, sourceRecommendationsResource } from '../../stores/factoryResources'
 
 const SOURCE_GOALS: Array<{ value: SourceUse; label: string; detail: string }> = [
   { value: 'sft', label: 'SFT', detail: 'conversation examples' },
@@ -30,22 +30,11 @@ const SOURCE_GOALS: Array<{ value: SourceUse; label: string; detail: string }> =
   { value: 'process_reward', label: 'Process reward', detail: 'step-level reward examples' },
   { value: 'terminal_rl', label: 'Terminal RL', detail: 'environment specs' },
   { value: 'evaluation', label: 'Evaluation', detail: 'eval manifests and heldouts' },
-  { value: 'raw_reference', label: 'Raw reference', detail: 'reference corpus handoff' },
+  { value: 'raw_reference', label: 'Raw reference', detail: 'reference corpus handoff' }
 ]
 
 const EMPTY_SOURCE_CARDS: SourceCard[] = []
 const SOURCE_FETCH_APPROVAL_LIMIT = 1000
-
-type CatalogState =
-  | { status: 'loading' }
-  | { status: 'error'; error: string }
-  | { status: 'ready'; catalog: SourceCatalogResponse }
-
-type RecommendationState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'error'; error: string }
-  | { status: 'ready'; recommendations: SourceRecommendation[] }
 
 type PrepareState =
   | { status: 'idle' }
@@ -100,7 +89,7 @@ function SourceCardButton({
   source,
   selected,
   recommended,
-  onSelect,
+  onSelect
 }: {
   source: SourceCard
   selected: boolean
@@ -133,9 +122,7 @@ function SourceCardButton({
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted mt-3">
         {source.domain} / {source.adapter}
       </p>
-      <p className="text-xs text-text-muted mt-2">
-        Artifacts: {formatList(source.artifact_types)}
-      </p>
+      <p className="text-xs text-text-muted mt-2">Artifacts: {formatList(source.artifact_types)}</p>
       {recommended ? (
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-accent-dark mt-3">
           Recommended for current goal
@@ -158,11 +145,15 @@ function SourceDetails({ source }: { source: SourceCard }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 text-sm">
         <div>
-          <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted">Domain</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted">
+            Domain
+          </p>
           <p className="text-text-primary">{source.domain}</p>
         </div>
         <div>
-          <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted">License</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted">
+            License
+          </p>
           <p className="text-text-primary">{source.license}</p>
         </div>
         <div>
@@ -235,10 +226,6 @@ function SourceDetails({ source }: { source: SourceCard }) {
 }
 
 export function SourceLibraryPanel() {
-  const [catalogState, setCatalogState] = useState<CatalogState>({ status: 'loading' })
-  const [recommendationState, setRecommendationState] = useState<RecommendationState>({
-    status: 'idle',
-  })
   const [prepareState, setPrepareState] = useState<PrepareState>({ status: 'idle' })
   const [selectedSourceId, setSelectedSourceId] = useState('')
   const [goal, setGoal] = useState<SourceUse>('dpo')
@@ -257,23 +244,18 @@ export function SourceLibraryPanel() {
   const [overrideReason, setOverrideReason] = useState('')
   const setDatasetPathOverride = useTrainingStore((state) => state.setDatasetPathOverride)
 
-  const loadCatalog = useCallback(async () => {
-    setCatalogState({ status: 'loading' })
-    const response = await sourcesApi.list()
-    if (response.ok && response.data) {
-      const catalog = response.data
-      setCatalogState({ status: 'ready', catalog })
-      setSelectedSourceId((current) => current || catalog.sources[0]?.id || '')
-    } else {
-      setCatalogState({ status: 'error', error: responseError(response.error) })
-    }
-  }, [])
+  const {
+    data: catalog,
+    loading: catalogLoading,
+    error: catalogError,
+    refresh: refreshCatalog
+  } = useSessionResource(sourceCatalogResource)
 
   useEffect(() => {
-    void loadCatalog()
-  }, [loadCatalog])
+    if (catalog) setSelectedSourceId((current) => current || catalog.sources[0]?.id || '')
+  }, [catalog])
 
-  const sources = catalogState.status === 'ready' ? catalogState.catalog.sources : EMPTY_SOURCE_CARDS
+  const sources = catalog?.sources ?? EMPTY_SOURCE_CARDS
 
   const domains = useMemo(() => {
     const names = new Set<string>()
@@ -285,7 +267,8 @@ export function SourceLibraryPanel() {
     () => sources.find((source) => source.id === selectedSourceId) ?? null,
     [selectedSourceId, sources]
   )
-  const canFetchRemote = selectedSource?.huggingface_id !== null && selectedSource?.huggingface_id !== undefined
+  const canFetchRemote =
+    selectedSource?.huggingface_id !== null && selectedSource?.huggingface_id !== undefined
 
   useEffect(() => {
     if (selectedSourceId) setOutputDir(defaultOutputDir(selectedSourceId, goal))
@@ -295,31 +278,19 @@ export function SourceLibraryPanel() {
     if (!canFetchRemote) setFetchRemote(false)
   }, [canFetchRemote])
 
-  const loadRecommendations = useCallback(async () => {
-    setRecommendationState({ status: 'loading' })
-    const response = await sourcesApi.recommend({
-      domain: domainFilter || undefined,
-      goal,
-      include_eval_only: includeEvalOnly,
-    })
-    if (response.ok && response.data) {
-      setRecommendationState({
-        status: 'ready',
-        recommendations: response.data.recommendations,
-      })
-    } else {
-      setRecommendationState({ status: 'error', error: responseError(response.error) })
-    }
-  }, [domainFilter, goal, includeEvalOnly])
-
-  useEffect(() => {
-    if (catalogState.status === 'ready') void loadRecommendations()
-  }, [catalogState.status, loadRecommendations])
+  const recommendationsKey = JSON.stringify([domainFilter, goal, includeEvalOnly])
+  const {
+    data: recommendations,
+    loading: recommendationsLoading,
+    refreshing: recommendationsRefreshing,
+    error: recommendationsError,
+    refresh: refreshRecommendations
+  } = useKeyedSessionResource(sourceRecommendationsResource, recommendationsKey)
 
   const recommendedSourceIds = useMemo(() => {
-    if (recommendationState.status !== 'ready') return new Set<string>()
-    return new Set(recommendationState.recommendations.map((item) => item.source.id))
-  }, [recommendationState])
+    if (!recommendations) return new Set<string>()
+    return new Set(recommendations.map((item) => item.source.id))
+  }, [recommendations])
 
   const visibleSources = useMemo(() => {
     if (!domainFilter) return sources
@@ -342,7 +313,7 @@ export function SourceLibraryPanel() {
     ) {
       setPrepareState({
         status: 'error',
-        error: `Fetching more than ${SOURCE_FETCH_APPROVAL_LIMIT} records requires an approval reason.`,
+        error: `Fetching more than ${SOURCE_FETCH_APPROVAL_LIMIT} records requires an approval reason.`
       })
       return
     }
@@ -359,13 +330,13 @@ export function SourceLibraryPanel() {
       fetch_approval_reason: fetchRemote ? fetchApprovalReason.trim() || undefined : undefined,
       force_refresh: fetchRemote ? forceRefresh : undefined,
       allow_eval_only: allowEvalOnly,
-      override_reason: allowEvalOnly ? overrideReason.trim() || undefined : undefined,
+      override_reason: allowEvalOnly ? overrideReason.trim() || undefined : undefined
     })
     if (response.ok && response.data) {
       setPrepareState({
         status: 'success',
         report: response.data,
-        artifactPathApplied: false,
+        artifactPathApplied: false
       })
     } else {
       setPrepareState({ status: 'error', error: responseError(response.error) })
@@ -383,11 +354,11 @@ export function SourceLibraryPanel() {
     fetchApprovalReason,
     forceRefresh,
     allowEvalOnly,
-    overrideReason,
+    overrideReason
   ])
 
   const firstArtifactPath =
-    prepareState.status === 'success' ? prepareState.report.artifacts?.[0]?.path ?? null : null
+    prepareState.status === 'success' ? (prepareState.report.artifacts?.[0]?.path ?? null) : null
 
   const handleUseArtifact = useCallback(() => {
     if (prepareState.status !== 'success') return
@@ -410,7 +381,7 @@ export function SourceLibraryPanel() {
     Number.isFinite(parsedLimit) &&
     parsedLimit > SOURCE_FETCH_APPROVAL_LIMIT
 
-  if (catalogState.status === 'loading') {
+  if (catalogLoading) {
     return (
       <div className="p-6 max-w-6xl mx-auto">
         <div className="card p-8 text-center">
@@ -423,12 +394,17 @@ export function SourceLibraryPanel() {
     )
   }
 
-  if (catalogState.status === 'error') {
+  if (!catalog) {
     return (
       <div className="p-6 max-w-5xl mx-auto">
         <div className="card p-4 border-l-4 border-l-status-error bg-status-error/10">
-          <p className="font-mono text-xs text-status-error">{catalogState.error}</p>
-          <button onClick={loadCatalog} className="btn-secondary flex items-center gap-2 mt-3 text-xs">
+          <p className="font-mono text-xs text-status-error">
+            {catalogError || 'Failed to load sources'}
+          </p>
+          <button
+            onClick={() => void refreshCatalog()}
+            className="btn-secondary flex items-center gap-2 mt-3 text-xs"
+          >
             <RefreshCw className="w-4 h-4" />
             Retry
           </button>
@@ -450,7 +426,7 @@ export function SourceLibraryPanel() {
           </p>
         </div>
         <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted">
-          {catalogState.catalog.count} sources / {catalogState.catalog.ok ? 'catalog valid' : 'review catalog'}
+          {catalog.count} sources / {catalog.ok ? 'catalog valid' : 'review catalog'}
         </span>
       </div>
 
@@ -462,12 +438,15 @@ export function SourceLibraryPanel() {
                 Match Sources
               </h3>
               <button
-                onClick={loadRecommendations}
+                onClick={() => void refreshRecommendations()}
                 className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted hover:text-accent-dark flex items-center gap-1 transition-colors"
                 title="Refresh source recommendations"
               >
                 <RefreshCw
-                  className={clsx('w-3 h-3', recommendationState.status === 'loading' && 'animate-spin')}
+                  className={clsx(
+                    'w-3 h-3',
+                    (recommendationsLoading || recommendationsRefreshing) && 'animate-spin'
+                  )}
                 />
                 Recommend
               </button>
@@ -529,8 +508,8 @@ export function SourceLibraryPanel() {
               </button>
             </div>
 
-            {recommendationState.status === 'error' ? (
-              <p className="font-mono text-xs text-status-error mt-3">{recommendationState.error}</p>
+            {recommendationsError ? (
+              <p className="font-mono text-xs text-status-error mt-3">{recommendationsError}</p>
             ) : null}
           </div>
 
@@ -581,7 +560,11 @@ export function SourceLibraryPanel() {
                 ) : (
                   <FileJson className="w-4 h-4" />
                 )}
-                {fetchRemote ? 'Hugging Face fetch on' : canFetchRemote ? 'Use local input' : 'Local input only'}
+                {fetchRemote
+                  ? 'Hugging Face fetch on'
+                  : canFetchRemote
+                    ? 'Use local input'
+                    : 'Local input only'}
               </button>
 
               {fetchRemote ? (
@@ -751,7 +734,8 @@ export function SourceLibraryPanel() {
                 ) : (
                   <FileJson className="w-4 h-4" />
                 )}
-                Prepare {fetchRemote ? 'Remote Artifacts' : inputPath.trim() ? 'Artifacts' : 'Manifest'}
+                Prepare{' '}
+                {fetchRemote ? 'Remote Artifacts' : inputPath.trim() ? 'Artifacts' : 'Manifest'}
               </button>
             </div>
           </div>
@@ -769,7 +753,9 @@ export function SourceLibraryPanel() {
                   <h3 className="font-brand text-lg text-text-primary">Prepared</h3>
                   <p className="font-mono text-xs text-text-muted">
                     {prepareState.report.source_id ?? prepareState.report.source?.id} /{' '}
-                    {prepareState.report.goal ? goalLabel(prepareState.report.goal) : goalLabel(goal)}
+                    {prepareState.report.goal
+                      ? goalLabel(prepareState.report.goal)
+                      : goalLabel(goal)}
                   </p>
                 </div>
                 {prepareState.report.ok ? (
@@ -780,7 +766,9 @@ export function SourceLibraryPanel() {
               </div>
 
               <div className="space-y-2 font-mono text-xs text-text-secondary">
-                {prepareState.report.output_dir ? <p>Output: {prepareState.report.output_dir}</p> : null}
+                {prepareState.report.output_dir ? (
+                  <p>Output: {prepareState.report.output_dir}</p>
+                ) : null}
                 {prepareState.report.fetch_report ? (
                   <p>Fetched: {prepareState.report.fetch_report.records_path}</p>
                 ) : null}
@@ -796,8 +784,12 @@ export function SourceLibraryPanel() {
                     {prepareState.report.fetch_report.approval_granted ? 'recorded' : 'required'}
                   </p>
                 ) : null}
-                {prepareState.report.report_path ? <p>Report: {prepareState.report.report_path}</p> : null}
-                {prepareState.report.manifest_path ? <p>Manifest: {prepareState.report.manifest_path}</p> : null}
+                {prepareState.report.report_path ? (
+                  <p>Report: {prepareState.report.report_path}</p>
+                ) : null}
+                {prepareState.report.manifest_path ? (
+                  <p>Manifest: {prepareState.report.manifest_path}</p>
+                ) : null}
                 {prepareState.report.source_manifest?.manifest_path ? (
                   <p>Manifest: {prepareState.report.source_manifest.manifest_path}</p>
                 ) : null}
@@ -822,9 +814,14 @@ export function SourceLibraryPanel() {
                   </p>
                   <ul className="space-y-2">
                     {prepareState.report.artifacts.map((artifact) => (
-                      <li key={`${artifact.artifact_type}-${artifact.path}`} className="text-sm text-text-secondary">
-                        <span className="font-mono text-text-primary">{artifact.artifact_type}</span> -{' '}
-                        {artifact.path}
+                      <li
+                        key={`${artifact.artifact_type}-${artifact.path}`}
+                        className="text-sm text-text-secondary"
+                      >
+                        <span className="font-mono text-text-primary">
+                          {artifact.artifact_type}
+                        </span>{' '}
+                        - {artifact.path}
                         {artifact.validation ? (
                           <span
                             className={clsx(
@@ -846,7 +843,9 @@ export function SourceLibraryPanel() {
                   onClick={handleUseArtifact}
                   className="btn-secondary flex items-center gap-2 mt-4 text-xs"
                 >
-                  {prepareState.artifactPathApplied ? 'Training path set' : 'Use first artifact in Training'}
+                  {prepareState.artifactPathApplied
+                    ? 'Training path set'
+                    : 'Use first artifact in Training'}
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               ) : null}

@@ -5,7 +5,7 @@ import { pollHFContextBundle, useHFContextStore } from './hfContextStore'
 
 function bundle(
   lifecycle: HFContextBundle['lifecycle'],
-  completionOutcome: HFContextBundle['completion_outcome'] = null,
+  completionOutcome: HFContextBundle['completion_outcome'] = null
 ): HFContextBundle {
   return {
     schema_version: '1',
@@ -23,7 +23,7 @@ function bundle(
     source_status: [],
     content_hash: 'a'.repeat(64),
     created_at: '2026-07-10T00:00:00Z',
-    ready_at: lifecycle === 'ready' ? '2026-07-10T00:00:01Z' : null,
+    ready_at: lifecycle === 'ready' ? '2026-07-10T00:00:01Z' : null
   }
 }
 
@@ -33,7 +33,7 @@ test('polls a collecting context until its exact version is ready', async () => 
   const result = await pollHFContextBundle(
     bundle('collecting'),
     async () => ({ ok: true, data: responses[calls++] }),
-    { wait: async () => undefined },
+    { wait: async () => undefined }
   )
 
   assert.equal(result.lifecycle, 'ready')
@@ -46,7 +46,7 @@ test('cancelled ready context ends polling without substituting another version'
   const result = await pollHFContextBundle(
     bundle('collecting'),
     async () => ({ ok: true, data: cancelled }),
-    { wait: async () => undefined },
+    { wait: async () => undefined }
   )
   assert.equal(result, cancelled)
 })
@@ -57,12 +57,12 @@ test('projection failures are exposed and never return inventory fallback conten
   hfApi.contextMarkdown = async () => ({
     ok: false,
     code: 'hf_private_context_blocked',
-    error: 'Private context access must be refreshed.',
+    error: 'Private context access must be refreshed.'
   })
   try {
     await assert.rejects(
       () => useHFContextStore.getState().projection('workspace-a', bundle('ready', 'complete')),
-      /Private context access must be refreshed/,
+      /Private context access must be refreshed/
     )
     const workspace = useHFContextStore.getState().workspaces['workspace-a']
     assert.equal(workspace.errorCode, 'hf_private_context_blocked')
@@ -79,14 +79,20 @@ test('workspace history remains isolated by workspace key', async () => {
     ok: true,
     data: {
       bundles: [{ ...bundle('ready', 'complete'), workspace_id: workspaceId }],
-      active: null,
-    },
+      active: null
+    }
   })
   try {
     await useHFContextStore.getState().load('workspace-a')
     await useHFContextStore.getState().load('workspace-b')
-    assert.equal(useHFContextStore.getState().workspaces['workspace-a'].bundles[0].workspace_id, 'workspace-a')
-    assert.equal(useHFContextStore.getState().workspaces['workspace-b'].bundles[0].workspace_id, 'workspace-b')
+    assert.equal(
+      useHFContextStore.getState().workspaces['workspace-a'].bundles[0].workspace_id,
+      'workspace-a'
+    )
+    assert.equal(
+      useHFContextStore.getState().workspaces['workspace-b'].bundles[0].workspace_id,
+      'workspace-b'
+    )
   } finally {
     hfApi.contextHistory = original
   }

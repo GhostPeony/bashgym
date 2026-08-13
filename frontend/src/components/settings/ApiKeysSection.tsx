@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   Key,
   Eye,
@@ -9,9 +9,11 @@ import {
   RefreshCw,
   AlertTriangle,
   Info,
-  ExternalLink,
+  ExternalLink
 } from 'lucide-react'
 import { settingsApi, EnvKeyStatus } from '../../services/api'
+import { envKeysResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
 
@@ -32,7 +34,7 @@ const PROVIDERS: {
     placeholder: 'sk-ant-...',
     helpUrl: 'https://console.anthropic.com/',
     color: 'text-status-warning',
-    bgConfigured: 'bg-status-warning/10',
+    bgConfigured: 'bg-status-warning/10'
   },
   {
     envKey: 'OPENAI_API_KEY',
@@ -41,7 +43,7 @@ const PROVIDERS: {
     placeholder: 'sk-...',
     helpUrl: 'https://platform.openai.com/api-keys',
     color: 'text-status-success',
-    bgConfigured: 'bg-status-success/10',
+    bgConfigured: 'bg-status-success/10'
   },
   {
     envKey: 'GOOGLE_API_KEY',
@@ -50,7 +52,7 @@ const PROVIDERS: {
     placeholder: 'AI...',
     helpUrl: 'https://aistudio.google.com/apikey',
     color: 'text-status-info',
-    bgConfigured: 'bg-status-info/10',
+    bgConfigured: 'bg-status-info/10'
   },
   {
     envKey: 'NVIDIA_API_KEY',
@@ -59,7 +61,7 @@ const PROVIDERS: {
     placeholder: 'nvapi-...',
     helpUrl: 'https://build.nvidia.com/',
     color: 'text-accent',
-    bgConfigured: 'bg-accent-light',
+    bgConfigured: 'bg-accent-light'
   },
   {
     envKey: 'HF_TOKEN',
@@ -68,8 +70,8 @@ const PROVIDERS: {
     placeholder: 'hf_...',
     helpUrl: 'https://huggingface.co/settings/tokens',
     color: 'text-accent-dark',
-    bgConfigured: 'bg-accent-dark/10',
-  },
+    bgConfigured: 'bg-accent-dark/10'
+  }
 ]
 
 interface TestResult {
@@ -78,7 +80,7 @@ interface TestResult {
 }
 
 interface ProviderCardProps {
-  provider: typeof PROVIDERS[number]
+  provider: (typeof PROVIDERS)[number]
   status: EnvKeyStatus | undefined
   onSave: (envKey: string, value: string) => Promise<void>
   onTest: (envKey: string) => Promise<void>
@@ -94,7 +96,7 @@ function ProviderCard({
   onTest,
   testResult,
   isTesting,
-  isSaving,
+  isSaving
 }: ProviderCardProps) {
   const [editing, setEditing] = useState(false)
   const [inputValue, setInputValue] = useState('')
@@ -227,11 +229,7 @@ function ProviderCard({
                   onClick={() => setShowValue(!showValue)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-press"
                 >
-                  {showValue ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
+                  {showValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
@@ -294,33 +292,18 @@ function ProviderCard({
 }
 
 export function ApiKeysSection() {
-  const [keys, setKeys] = useState<EnvKeyStatus[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [apiError, setApiError] = useState<string | null>(null)
+  const {
+    data: keysData,
+    loading: isLoading,
+    error: fetchError,
+    refresh
+  } = useSessionResource(envKeysResource)
+  const keys = keysData ?? []
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [testingKey, setTestingKey] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({})
   const [savingKey, setSavingKey] = useState<string | null>(null)
-
-  const fetchKeys = useCallback(async () => {
-    setIsLoading(true)
-    setApiError(null)
-    try {
-      const result = await settingsApi.getEnvKeys()
-      if (result.ok && result.data) {
-        setKeys(result.data.keys)
-      } else {
-        setApiError(result.error || 'Failed to fetch API keys')
-      }
-    } catch {
-      setApiError('API server not running')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchKeys()
-  }, [fetchKeys])
+  const apiError = saveError || fetchError
 
   const handleSave = async (envKey: string, value: string) => {
     setSavingKey(envKey)
@@ -333,12 +316,13 @@ export function ApiKeysSection() {
     try {
       const result = await settingsApi.updateEnvKeys({ [envKey]: value })
       if (result.ok) {
-        await fetchKeys()
+        setSaveError(null)
+        await refresh()
       } else {
-        setApiError(result.error || 'Failed to save key')
+        setSaveError(result.error || 'Failed to save key')
       }
     } catch {
-      setApiError('API server not reachable')
+      setSaveError('API server not reachable')
     } finally {
       setSavingKey(null)
     }
@@ -357,18 +341,18 @@ export function ApiKeysSection() {
       if (result.ok && result.data) {
         setTestResults((prev) => ({
           ...prev,
-          [envKey]: { valid: result.data!.valid, error: result.data!.message || undefined },
+          [envKey]: { valid: result.data!.valid, error: result.data!.message || undefined }
         }))
       } else {
         setTestResults((prev) => ({
           ...prev,
-          [envKey]: { valid: false, error: result.error || 'Test failed' },
+          [envKey]: { valid: false, error: result.error || 'Test failed' }
         }))
       }
     } catch {
       setTestResults((prev) => ({
         ...prev,
-        [envKey]: { valid: false, error: 'API server not reachable' },
+        [envKey]: { valid: false, error: 'API server not reachable' }
       }))
     } finally {
       setTestingKey(null)
@@ -394,7 +378,7 @@ export function ApiKeysSection() {
           </p>
         </div>
         <button
-          onClick={fetchKeys}
+          onClick={() => void refresh()}
           className="btn-icon w-8 h-8 text-text-muted"
           title="Refresh"
         >
@@ -436,7 +420,11 @@ export function ApiKeysSection() {
       <div className="flex items-start gap-2 p-3 border-brutal border-accent rounded-brutal bg-background-card">
         <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
         <p className="text-xs text-text-secondary">
-          Keys are saved to your local <code className="px-1 mx-0.5 border border-border rounded-brutal bg-background-secondary font-mono">.env</code> file and never leave your machine.
+          Keys are saved to your local{' '}
+          <code className="px-1 mx-0.5 border border-border rounded-brutal bg-background-secondary font-mono">
+            .env
+          </code>{' '}
+          file and never leave your machine.
         </p>
       </div>
     </div>

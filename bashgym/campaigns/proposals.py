@@ -14,6 +14,10 @@ from bashgym.campaigns.contracts import (
     StageKind,
     StudyProposalSubmission,
 )
+from bashgym.campaigns.tmax_recipe import (
+    TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA,
+    TMaxCompositeTrainingRecipe,
+)
 
 _FORBIDDEN_EXECUTION_KEYS = frozenset(
     {
@@ -24,7 +28,6 @@ _FORBIDDEN_EXECUTION_KEYS = frozenset(
         "work_dir",
         "remote_work_dir",
         "script_path",
-        "script_args",
         "input_files",
         "output_paths",
         "python_executable",
@@ -98,6 +101,26 @@ def _runtime_policy_reasons(recipe: Mapping[str, Any], *, live_compute_allowed: 
     return set()
 
 
+def _recipe_script_arg_reasons(recipe: Mapping[str, Any]) -> set[str]:
+    """Validate typed arguments consumed by an installation-owned stage script."""
+
+    arguments = recipe.get("script_args")
+    if arguments is None:
+        return set()
+    if not isinstance(arguments, (list, tuple)) or len(arguments) > 256:
+        return {"proposal_recipe_script_args_invalid"}
+    forbidden = ("--token", "--api-key", "--password", "--secret")
+    if any(
+        not isinstance(argument, str)
+        or len(argument) > 4096
+        or any(character in argument for character in "\x00\n\r")
+        or argument.casefold().startswith(forbidden)
+        for argument in arguments
+    ):
+        return {"proposal_recipe_script_args_invalid"}
+    return set()
+
+
 def validate_proposal_submission(
     submission: StudyProposalSubmission,
     manifest: CampaignManifest,
@@ -125,9 +148,16 @@ def validate_proposal_submission(
     )
     if any(not _recipe_has_schema_version(recipe) for recipe in recipes):
         reasons.add("proposal_recipe_schema_missing")
+    if submission.training_recipe.get("schema_version") == TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA:
+        try:
+            TMaxCompositeTrainingRecipe.model_validate(submission.training_recipe)
+        except ValueError:
+            reasons.add("proposal_tmax_training_recipe_invalid")
     if any(_contains_forbidden_execution_material(recipe) for recipe in recipes):
         reasons.add("proposal_executable_material_forbidden")
-    reasons.update(_runtime_policy_reasons(submission.dataset_recipe, live_compute_allowed=False))
+    for recipe in recipes:
+        reasons.update(_recipe_script_arg_reasons(recipe))
+    reasons.update(_runtime_policy_reasons(submission.dataset_recipe, live_compute_allowed=True))
     reasons.update(_runtime_policy_reasons(submission.training_recipe, live_compute_allowed=True))
     reasons.update(_runtime_policy_reasons(submission.evaluation_recipe, live_compute_allowed=True))
 
@@ -144,6 +174,16 @@ def validate_proposal_submission(
         for item in submission.stage_plan.items
         if item.disposition == StageDisposition.REQUIRED
     }
+    required_sequence = tuple(
+        item.stage
+        for item in submission.stage_plan.items
+        if item.disposition == StageDisposition.REQUIRED
+    )
+    dataset_runtime = submission.dataset_recipe.get("runtime")
+    live_data_build = (
+        isinstance(dataset_runtime, Mapping)
+        and dataset_runtime.get("executor_kind") in _REGISTERED_COMPUTE_KINDS
+    )
     training_runtime = submission.training_recipe.get("runtime")
     live_training = (
         isinstance(training_runtime, Mapping)
@@ -154,6 +194,32 @@ def validate_proposal_submission(
         isinstance(evaluation_runtime, Mapping)
         and evaluation_runtime.get("executor_kind") in _REGISTERED_COMPUTE_KINDS
     )
+    if live_data_build or live_training or live_evaluation:
+        allowed_sequences = {
+            (StageKind.DEVELOPMENT_EVALUATION,),
+            (
+                StageKind.FULL_TRAINING,
+                StageKind.DEVELOPMENT_EVALUATION,
+            ),
+            (
+                StageKind.DATA_BUILD,
+                StageKind.FULL_TRAINING,
+                StageKind.DEVELOPMENT_EVALUATION,
+            ),
+        }
+        if required_sequence not in allowed_sequences:
+            reasons.add("proposal_autoresearch_stage_plan_invalid")
+        live_runtime_by_stage = {
+            StageKind.DATA_BUILD: live_data_build,
+            StageKind.FULL_TRAINING: live_training,
+            StageKind.DEVELOPMENT_EVALUATION: live_evaluation,
+        }
+        if any(
+            not live_runtime_by_stage[stage]
+            for stage in required_sequence
+            if stage in live_runtime_by_stage
+        ):
+            reasons.add("proposal_required_stage_runtime_not_registered")
     if live_training:
         if StageKind.SMOKE_TRAINING in required_stages and Capability.COMPUTE_SMOKE not in required:
             reasons.add("proposal_compute_smoke_capability_missing")
@@ -162,6 +228,12 @@ def validate_proposal_submission(
             and Capability.COMPUTE_TRAIN_WITHIN_BUDGET not in required
         ):
             reasons.add("proposal_compute_training_capability_missing")
+    if (
+        live_data_build
+        and StageKind.DATA_BUILD in required_stages
+        and Capability.DATA_BUILD not in required
+    ):
+        reasons.add("proposal_data_build_capability_missing")
     if (
         live_evaluation
         and StageKind.DEVELOPMENT_EVALUATION in required_stages

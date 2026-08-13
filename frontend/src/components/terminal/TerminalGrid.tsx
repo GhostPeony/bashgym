@@ -1,5 +1,17 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
-import { Plus, Terminal, X, Globe, FileText, Layers, FolderTree, GripVertical, LayoutGrid, Maximize2, MessageSquare } from 'lucide-react'
+import {
+  Plus,
+  Terminal,
+  X,
+  Globe,
+  FileText,
+  Layers,
+  FolderTree,
+  GripVertical,
+  LayoutGrid,
+  Maximize2,
+  MessageSquare
+} from 'lucide-react'
 import { useTerminalStore, useUIStore, useWorkspaceStore } from '../../stores'
 import { TerminalPane } from './TerminalPane'
 import { PreviewPane } from './PreviewPane'
@@ -30,7 +42,7 @@ export function TerminalGrid() {
   const canvasEdges = useTerminalStore((state) => state.canvasEdges)
   const canvasGraph = useMemo(
     () => buildCanvasGraphIndex(panels, canvasEdges),
-    [canvasEdges, panels],
+    [canvasEdges, panels]
   )
 
   // Drag state for visual feedback
@@ -75,9 +87,9 @@ export function TerminalGrid() {
       return
     }
 
-    const panel = useTerminalStore.getState().panels.find(
-      (candidate) => candidate.id === panelPresentationRequest.panelId
-    )
+    const panel = useTerminalStore
+      .getState()
+      .panels.find((candidate) => candidate.id === panelPresentationRequest.panelId)
     if (!panel) {
       clearPanelPresentationRequest(panelPresentationRequest.requestedAt)
       return
@@ -96,12 +108,15 @@ export function TerminalGrid() {
   ])
 
   // Handle focus panel from canvas view. Data/config nodes stay on-canvas and own their modal settings.
-  const handleFocusPanel = useCallback((panelId: string) => {
-    setActivePanel(panelId)
-    const panel = useTerminalStore.getState().panels.find(p => p.id === panelId)
-    if (panel && isCustomNodeType(panel.type)) return
-    setCanvasPopupPanelId(panelId)
-  }, [setActivePanel])
+  const handleFocusPanel = useCallback(
+    (panelId: string) => {
+      setActivePanel(panelId)
+      const panel = useTerminalStore.getState().panels.find((p) => p.id === panelId)
+      if (panel && isCustomNodeType(panel.type)) return
+      setCanvasPopupPanelId(panelId)
+    },
+    [setActivePanel]
+  )
 
   // Close canvas popup
   const closeCanvasPopup = useCallback(() => {
@@ -149,33 +164,42 @@ export function TerminalGrid() {
   }
 
   // Drag handlers for tab reordering
-  const handleDragStart = useCallback((e: React.DragEvent, panelId: string) => {
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', panelId)
-    setDraggedPanel(panelId)
-  }, [setDraggedPanel])
+  const handleDragStart = useCallback(
+    (e: React.DragEvent, panelId: string) => {
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', panelId)
+      setDraggedPanel(panelId)
+    },
+    [setDraggedPanel]
+  )
 
-  const handleDragOver = useCallback((e: React.DragEvent, panelId: string) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    if (draggedPanelId && draggedPanelId !== panelId) {
-      setDragOverId(panelId)
-    }
-  }, [draggedPanelId])
+  const handleDragOver = useCallback(
+    (e: React.DragEvent, panelId: string) => {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      if (draggedPanelId && draggedPanelId !== panelId) {
+        setDragOverId(panelId)
+      }
+    },
+    [draggedPanelId]
+  )
 
   const handleDragLeave = useCallback(() => {
     setDragOverId(null)
   }, [])
 
-  const handleDrop = useCallback((e: React.DragEvent, targetPanelId: string) => {
-    e.preventDefault()
-    const sourcePanelId = e.dataTransfer.getData('text/plain')
-    if (sourcePanelId && sourcePanelId !== targetPanelId) {
-      reorderPanels(sourcePanelId, targetPanelId)
-    }
-    setDraggedPanel(null)
-    setDragOverId(null)
-  }, [reorderPanels, setDraggedPanel])
+  const handleDrop = useCallback(
+    (e: React.DragEvent, targetPanelId: string) => {
+      e.preventDefault()
+      const sourcePanelId = e.dataTransfer.getData('text/plain')
+      if (sourcePanelId && sourcePanelId !== targetPanelId) {
+        reorderPanels(sourcePanelId, targetPanelId)
+      }
+      setDraggedPanel(null)
+      setDragOverId(null)
+    },
+    [reorderPanels, setDraggedPanel]
+  )
 
   const handleDragEnd = useCallback(() => {
     setDraggedPanel(null)
@@ -222,7 +246,7 @@ export function TerminalGrid() {
   }, [addPanel])
 
   // Render panel content
-  const renderPanel = (panel: typeof panels[0], isActive: boolean, onPopupClose?: () => void) => {
+  const renderPanel = (panel: (typeof panels)[0], isActive: boolean, onPopupClose?: () => void) => {
     if (panel.type === 'terminal' && panel.terminalId) {
       return (
         <TerminalPane
@@ -244,23 +268,10 @@ export function TerminalGrid() {
       )
     }
     if (panel.type === 'browser') {
-      return (
-        <BrowserPane
-          id={panel.id}
-          title={panel.title}
-          url={panel.url}
-          isActive={isActive}
-        />
-      )
+      return <BrowserPane id={panel.id} title={panel.title} url={panel.url} isActive={isActive} />
     }
     if (panel.type === 'files') {
-      return (
-        <FileBrowser
-          id={panel.id}
-          title={panel.title}
-          isActive={isActive}
-        />
-      )
+      return <FileBrowser id={panel.id} title={panel.title} isActive={isActive} />
     }
     if (isCustomNodeType(panel.type) && viewMode === 'grid') {
       return (
@@ -287,7 +298,9 @@ export function TerminalGrid() {
 
   // Empty state — this workspace has no panels yet
   if (panels.length === 0) {
-    const wsName = useWorkspaceStore.getState().workspaces.find((w) => w.id === activeWorkspaceId)?.name
+    const wsName = useWorkspaceStore
+      .getState()
+      .workspaces.find((w) => w.id === activeWorkspaceId)?.name
     return (
       <div className="h-full flex items-center justify-center bg-background-primary">
         <div className="text-center">
@@ -313,11 +326,10 @@ export function TerminalGrid() {
             >
               NEW CODEX
             </button>
-            <button
-              onClick={() => createTerminal()}
-              className="node-btn node-btn-wide"
-            >
-              <span className="flex items-center gap-1"><Plus className="w-2.5 h-2.5" /> SHELL</span>
+            <button onClick={() => createTerminal()} className="node-btn node-btn-wide">
+              <span className="flex items-center gap-1">
+                <Plus className="w-2.5 h-2.5" /> SHELL
+              </span>
             </button>
           </div>
         </div>
@@ -514,22 +526,25 @@ export function TerminalGrid() {
       <div
         className={clsx(
           'flex-1 min-h-0',
-          viewMode === 'grid'
-            ? 'grid gap-1 overflow-auto p-1'
-            : 'relative overflow-hidden',
+          viewMode === 'grid' ? 'grid gap-1 overflow-auto p-1' : 'relative overflow-hidden'
         )}
-        style={viewMode === 'grid'
-          ? {
-              gridTemplateColumns: `repeat(${gridLayout.tracks}, minmax(0, 1fr))`,
-              gridTemplateRows: getGridTemplateRows(panels.length),
-            }
-          : undefined
+        style={
+          viewMode === 'grid'
+            ? {
+                gridTemplateColumns: `repeat(${gridLayout.tracks}, minmax(0, 1fr))`,
+                gridTemplateRows: getGridTemplateRows(panels.length)
+              }
+            : undefined
         }
       >
         {/* Canvas view background - rendered first so terminals appear on top when in popup */}
         {viewMode === 'canvas' && (
           <div className="absolute inset-0 z-10">
-            <CanvasViewWrapper key={activeWorkspaceId} onFocusPanel={handleFocusPanel} onClosePopup={closeCanvasPopup} />
+            <CanvasViewWrapper
+              key={activeWorkspaceId}
+              onFocusPanel={handleFocusPanel}
+              onClosePopup={closeCanvasPopup}
+            />
           </div>
         )}
 
@@ -566,9 +581,7 @@ export function TerminalGrid() {
           } else if (viewMode === 'single') {
             // Single view - stack all, show only active
             containerStyle = { position: 'absolute', inset: 0 }
-            containerClass = clsx(
-              isActive ? 'visible z-10' : 'invisible z-0'
-            )
+            containerClass = clsx(isActive ? 'visible z-10' : 'invisible z-0')
           } else if (isInPopup) {
             // Canvas view - THIS terminal is in the popup
             // Use flexbox centering (not transforms) to avoid sub-pixel blurriness
@@ -580,7 +593,8 @@ export function TerminalGrid() {
               justifyContent: 'center',
               zIndex: 55
             }
-            containerClass = 'rounded-brutal shadow-brutal border-brutal border-border overflow-hidden bg-background-primary'
+            containerClass =
+              'rounded-brutal shadow-brutal border-brutal border-border overflow-hidden bg-background-primary'
           } else {
             // Canvas view - hide terminals not in popup
             containerStyle = { position: 'absolute', inset: 0 }
@@ -595,26 +609,35 @@ export function TerminalGrid() {
             <div
               key={panel.id}
               className={needsPopupWrapper ? '' : containerClass}
-              style={needsPopupWrapper ? {
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 55,
-                pointerEvents: 'none'
-              } : containerStyle}
+              style={
+                needsPopupWrapper
+                  ? {
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 55,
+                      pointerEvents: 'none'
+                    }
+                  : containerStyle
+              }
               onClick={() => viewMode === 'grid' && setActivePanel(panel.id)}
             >
               <div
-                className={needsPopupWrapper
-                  ? clsx(
-                      'canvas-popup-panel pointer-events-auto',
-                      panel.type === 'terminal' && 'canvas-popup-panel-terminal'
-                    )
-                  : 'h-full w-full'
+                className={
+                  needsPopupWrapper
+                    ? clsx(
+                        'canvas-popup-panel pointer-events-auto',
+                        panel.type === 'terminal' && 'canvas-popup-panel-terminal'
+                      )
+                    : 'h-full w-full'
                 }
-                style={needsPopupWrapper ? { width: '90%', maxWidth: '1280px', height: '85%' } : undefined}
+                style={
+                  needsPopupWrapper
+                    ? { width: '90%', maxWidth: '1280px', height: '85%' }
+                    : undefined
+                }
               >
                 {renderPanel(panel, isPresented, isInPopup ? closeCanvasPopup : undefined)}
               </div>

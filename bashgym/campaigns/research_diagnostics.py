@@ -165,10 +165,7 @@ def _slice_direction(path: str, explicit: Mapping[str, Any]) -> DiagnosticDirect
     leaf = path.rsplit(".", 1)[-1].lower()
     if any(token in leaf for token in ("error", "loss", "latency", "mae")):
         return "minimize"
-    if any(
-        token in leaf
-        for token in ("accuracy", "reward", "recall", "precision", "f1", "mrr")
-    ):
+    if any(token in leaf for token in ("accuracy", "reward", "recall", "precision", "f1", "mrr")):
         return "maximize"
     return "unknown"
 
@@ -255,9 +252,7 @@ def build_autoresearch_diagnostics(
         None,
     )
     candidate_outcomes = [
-        outcome
-        for outcome in outcomes
-        if outcome.get("result", {}).get("role") == "candidate"
+        outcome for outcome in outcomes if outcome.get("result", {}).get("role") == "candidate"
     ]
     candidate_outcome = candidate_outcomes[-1] if candidate_outcomes else None
     baseline_evaluation = _outcome_evaluation(baseline_outcome, evaluations_by_id)
@@ -300,14 +295,10 @@ def build_autoresearch_diagnostics(
             )
 
     candidate_slices: Mapping[str, Any] = (
-        candidate_evaluation.get("slice_metrics") or {}
-        if candidate_evaluation is not None
-        else {}
+        candidate_evaluation.get("slice_metrics") or {} if candidate_evaluation is not None else {}
     )
     baseline_slices: Mapping[str, Any] = (
-        baseline_evaluation.get("slice_metrics") or {}
-        if baseline_evaluation is not None
-        else {}
+        baseline_evaluation.get("slice_metrics") or {} if baseline_evaluation is not None else {}
     )
     example_count = _finite_number(candidate_slices.get("example_count"))
     unique_count = _finite_number(candidate_slices.get("unique_prediction_count"))
@@ -321,7 +312,12 @@ def build_autoresearch_diagnostics(
                 candidate_evaluation_id,
             )
         )
-    if example_count is not None and example_count > 1 and unique_count is not None and unique_count <= 1:
+    if (
+        example_count is not None
+        and example_count > 1
+        and unique_count is not None
+        and unique_count <= 1
+    ):
         signals.append(
             _signal(
                 "prediction_diversity_collapsed",
@@ -330,7 +326,12 @@ def build_autoresearch_diagnostics(
                 candidate_evaluation_id,
             )
         )
-    if example_count is not None and example_count > 1 and modal_fraction is not None and modal_fraction >= 0.95:
+    if (
+        example_count is not None
+        and example_count > 1
+        and modal_fraction is not None
+        and modal_fraction >= 0.95
+    ):
         signals.append(
             _signal(
                 "modal_prediction_dominates",
@@ -367,9 +368,7 @@ def build_autoresearch_diagnostics(
                 improvement=improvement,
                 status=status,
                 evidence_references=tuple(
-                    item
-                    for item in (candidate_evaluation_id, baseline_evaluation_id)
-                    if item
+                    item for item in (candidate_evaluation_id, baseline_evaluation_id) if item
                 ),
             )
         )
@@ -435,8 +434,7 @@ def build_autoresearch_diagnostics(
             run_id=str(evaluation.get("run_id")),
             role=(
                 "checkpoint"
-                if (evaluation.get("slice_metrics") or {}).get("autoresearch_role")
-                == "checkpoint"
+                if (evaluation.get("slice_metrics") or {}).get("autoresearch_role") == "checkpoint"
                 or step is not None
                 else "final"
             ),
@@ -468,12 +466,8 @@ def build_autoresearch_diagnostics(
             )
         )
 
-    deduplicated_signals = tuple(
-        {signal.code: signal for signal in signals}.values()
-    )
-    has_critical_signal = any(
-        signal.severity == "critical" for signal in deduplicated_signals
-    )
+    deduplicated_signals = tuple({signal.code: signal for signal in signals}.values())
+    has_critical_signal = any(signal.severity == "critical" for signal in deduplicated_signals)
     signal_codes = {signal.code for signal in deduplicated_signals}
     hypothesis_specs: list[dict[str, Any]] = []
     if {"degenerate_constant_output", "prediction_diversity_collapsed"} & signal_codes:
@@ -557,8 +551,7 @@ def build_autoresearch_diagnostics(
         primary_metric=primary_metric,
         metric_direction=metric_direction,
         low_signal=any(
-            signal.severity in {"warning", "critical"}
-            for signal in deduplicated_signals
+            signal.severity in {"warning", "critical"} for signal in deduplicated_signals
         ),
         signals=deduplicated_signals,
         checkpoint_comparisons=tuple(comparisons),

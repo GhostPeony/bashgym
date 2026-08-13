@@ -202,7 +202,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   moveLivePanelToWorkspace: (panelId, targetWsId, opts) => {
     const { workspaces, activeWorkspaceId } = get()
-    if (targetWsId === activeWorkspaceId || !workspaces.some((w) => w.id === targetWsId)) return false
+    if (targetWsId === activeWorkspaceId || !workspaces.some((w) => w.id === targetWsId))
+      return false
 
     const terminalState = useTerminalStore.getState()
     const panel = terminalState.panels.find((candidate) => candidate.id === panelId)
@@ -237,12 +238,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         return true
       }
 
-      terminalState.createTerminal(
-        terminal.terminalId,
-        terminal.title,
-        undefined,
-        terminal.cwd
-      )
+      terminalState.createTerminal(terminal.terminalId, terminal.title, undefined, terminal.cwd)
       set((state) => ({ sessionIndexVersion: state.sessionIndexVersion + 1 }))
       return true
     }

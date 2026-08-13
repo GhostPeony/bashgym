@@ -132,8 +132,10 @@ def test_scrub_trace_replay_accepts_trace_event_objects():
 def test_scrub_trace_replay_file_preserves_jsonl_record_count(tmp_path):
     source = tmp_path / "replay.jsonl"
     source.write_text(
-        json.dumps({"stdout": "HF_TOKEN=hf_1234567890abcdefghijklmnop"}) + "\n"
-        + json.dumps({"stderr": "ok"}) + "\n",
+        json.dumps({"stdout": "HF_TOKEN=hf_1234567890abcdefghijklmnop"})
+        + "\n"
+        + json.dumps({"stderr": "ok"})
+        + "\n",
         encoding="utf-8",
     )
     output = tmp_path / "replay.scrubbed.jsonl"

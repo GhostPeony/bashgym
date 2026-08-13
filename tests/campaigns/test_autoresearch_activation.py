@@ -23,6 +23,8 @@ from bashgym.campaigns.remote import (
     ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
+    RegisteredRemoteEvaluationDatasetSource,
+    RegisteredRemoteModelSource,
 )
 from bashgym.campaigns.worker_service import (
     ControllerStatusProjection,
@@ -87,6 +89,10 @@ def _executor_profile(
     target_model_digest: str,
     source_profile_id: str | None,
     required_stages: tuple[StageKind, ...],
+    registered_model_path: str | None = None,
+    registered_dataset_version_id: str | None = None,
+    registered_dataset_path: str | None = None,
+    registered_dataset_digest: str = "b" * 64,
 ) -> ApprovedRemoteExecutorProfile:
     root.mkdir(parents=True, exist_ok=True)
     key = root / f"{profile_id}.key"
@@ -94,7 +100,10 @@ def _executor_profile(
     key.write_text("test-only-ssh-key\n", encoding="utf-8")
     data.write_text("{}\n", encoding="utf-8")
     stages: list[PinnedRemoteStageProfile] = []
-    for stage_kind in sorted(required_stages, key=lambda item: item.value):
+    compute_stages = set(required_stages)
+    if registered_model_path is not None:
+        compute_stages.add(StageKind.DEVELOPMENT_EVALUATION)
+    for stage_kind in sorted(compute_stages, key=lambda item: item.value):
         script = root / f"{profile_id}-{stage_kind.value}.py"
         script.write_text("print('bounded activation test')\n", encoding="utf-8")
         binding = (
@@ -112,8 +121,12 @@ def _executor_profile(
                 stage=stage_kind,
                 script_path=script,
                 script_sha256=_file_sha256(script),
-                input_files=(data,),
-                input_sha256={data.name: _file_sha256(data)},
+                input_files=(() if stage_kind == StageKind.DEVELOPMENT_EVALUATION else (data,)),
+                input_sha256=(
+                    {}
+                    if stage_kind == StageKind.DEVELOPMENT_EVALUATION
+                    else {data.name: _file_sha256(data)}
+                ),
                 budget_unit="gpu_hours",
                 budget_reservation=0.25,
                 code_lineage_binding=binding,
@@ -129,6 +142,37 @@ def _executor_profile(
         username="trainer",
         key_path=str(key),
         stages=tuple(stages),
+        registered_base_model=(
+            RegisteredRemoteModelSource(
+                schema_version="campaign_registered_remote_model_source.v2",
+                source_id=f"{profile_id}-base",
+                compute_profile_id=compute_profile_id,
+                target_contract_key=target_contract_key,
+                model_digest=target_model_digest,
+                remote_model_path=registered_model_path,
+                artifact_receipt={
+                    "schema_version": "campaign_remote_model_artifact_receipt.v1",
+                    "model_id": "example/modern-open-model",
+                    "revision": "a" * 40,
+                    "artifact_manifest_sha256": "e" * 64,
+                    "weight_file_count": 1,
+                    "total_size_bytes": 1024,
+                },
+            )
+            if registered_model_path is not None
+            else None
+        ),
+        registered_evaluation_dataset=(
+            RegisteredRemoteEvaluationDatasetSource(
+                source_id=f"{profile_id}-heldout",
+                compute_profile_id=compute_profile_id,
+                dataset_version_id=registered_dataset_version_id,
+                content_digest=registered_dataset_digest,
+                remote_dataset_path=registered_dataset_path,
+            )
+            if registered_dataset_version_id is not None and registered_dataset_path is not None
+            else None
+        ),
     )
 
 
@@ -165,6 +209,9 @@ def _activation_fixture(tmp_path: Path):
         target_model_digest=binding.target_model_digest,
         source_profile_id=source.profile_id,
         required_stages=binding.required_training_stages,
+        registered_model_path="/srv/bashgym/models/modern-open-model-v1",
+        registered_dataset_version_id=binding.dataset_version_id,
+        registered_dataset_path="/srv/bashgym/datasets/terminal-agent-data-v1.jsonl",
     )
     request = AutoResearchActivationRequest(
         workspace_id="workspace-a",
@@ -186,7 +233,7 @@ def _activation_fixture(tmp_path: Path):
             project_id=binding.ledger_project_id,
             dataset_id="terminal-agent-data",
             dataset_version_id=binding.dataset_version_id,
-            source_uri="artifact://fixture/terminal-agent-data-v1",
+            source_uri="bashgym-remote-dataset://private-terminal-agent-v1-heldout",
             content_digest="b" * 64,
         ),
         evaluation_suite=EvaluationSuiteSpec(
@@ -248,6 +295,74 @@ def test_plan_reports_exact_records_without_writing_installation_state(tmp_path:
     }
     assert {record.disposition for record in receipt.records} == {"planned"}
     assert not data_directory.exists()
+
+
+def test_activation_rejects_executor_without_registered_base(tmp_path: Path) -> None:
+    definition, request = _activation_fixture(tmp_path)
+    executor = ApprovedRemoteExecutorProfile.model_validate(
+        request.executor_profile.model_dump(
+            mode="python", exclude={"profile_digest", "registered_base_model"}
+        )
+    )
+    invalid = request.model_copy(update={"executor_profile": executor})
+
+    with pytest.raises(AutoResearchActivationError, match="registered base model"):
+        activate_autoresearch(
+            definition,
+            invalid,
+            data_directory=tmp_path / "installation",
+        )
+
+
+def test_activation_rejects_legacy_registered_base_without_physical_receipt(
+    tmp_path: Path,
+) -> None:
+    definition, request = _activation_fixture(tmp_path)
+    registered = request.executor_profile.registered_base_model
+    assert registered is not None
+    legacy = RegisteredRemoteModelSource(
+        schema_version="campaign_registered_remote_model_source.v1",
+        source_id=registered.source_id,
+        compute_profile_id=registered.compute_profile_id,
+        target_contract_key=registered.target_contract_key,
+        model_digest=registered.model_digest,
+        remote_model_path=registered.remote_model_path,
+    )
+    executor = ApprovedRemoteExecutorProfile.model_validate(
+        {
+            **request.executor_profile.model_dump(
+                mode="python",
+                exclude={"profile_digest", "registered_base_model"},
+            ),
+            "registered_base_model": legacy,
+        }
+    )
+    invalid = request.model_copy(update={"executor_profile": executor})
+
+    with pytest.raises(AutoResearchActivationError, match="physical model receipt"):
+        activate_autoresearch(
+            definition,
+            invalid,
+            data_directory=tmp_path / "installation",
+        )
+
+
+def test_activation_rejects_executor_without_registered_heldout(tmp_path: Path) -> None:
+    definition, request = _activation_fixture(tmp_path)
+    executor = ApprovedRemoteExecutorProfile.model_validate(
+        request.executor_profile.model_dump(
+            mode="python",
+            exclude={"profile_digest", "registered_evaluation_dataset"},
+        )
+    )
+    invalid = request.model_copy(update={"executor_profile": executor})
+
+    with pytest.raises(AutoResearchActivationError, match="held-out dataset"):
+        activate_autoresearch(
+            definition,
+            invalid,
+            data_directory=tmp_path / "installation",
+        )
 
 
 def test_apply_creates_materializable_installation_with_offline_controller(

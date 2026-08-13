@@ -30,7 +30,7 @@ export function SpecForm() {
         constraints: constraints.length > 0 ? constraints : undefined,
         acceptance_criteria: acceptanceCriteria.length > 0 ? acceptanceCriteria : undefined,
         max_budget_usd: maxBudget,
-        llm_config: { provider },
+        llm_config: { provider }
       })
     } finally {
       setSubmitting(false)
@@ -146,7 +146,11 @@ export function SpecForm() {
               {acceptanceCriteria.map((c, i) => (
                 <span key={i} className="inline-flex items-center gap-1.5 tag">
                   <span>{c}</span>
-                  <button onClick={() => setAcceptanceCriteria(acceptanceCriteria.filter((_, j) => j !== i))}>
+                  <button
+                    onClick={() =>
+                      setAcceptanceCriteria(acceptanceCriteria.filter((_, j) => j !== i))
+                    }
+                  >
                     <X className="w-3 h-3" />
                   </button>
                 </span>
@@ -173,7 +177,7 @@ export function SpecForm() {
                   className="input w-full text-sm appearance-none cursor-pointer"
                 >
                   {providers.length > 0 ? (
-                    providers.map(p => (
+                    providers.map((p) => (
                       <option key={p.provider} value={p.provider}>
                         {p.provider} ({p.default_model})
                       </option>
@@ -197,7 +201,9 @@ export function SpecForm() {
                 Max Budget
               </label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted font-mono text-sm">$</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted font-mono text-sm">
+                  $
+                </span>
                 <input
                   type="number"
                   value={maxBudget}

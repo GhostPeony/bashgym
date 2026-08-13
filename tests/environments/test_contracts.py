@@ -45,9 +45,7 @@ def test_environment_spec_round_trips():
     assert restored.verifier.command == "pytest tests"
     assert restored.verifier.is_multi_reward is True
     assert restored.verifier.reward_components[1].weight == 0.25
-    assert restored.verifier.combine_reward_components(
-        {"correctness": 1.0, "format": 0.5}
-    ) == 1.125
+    assert restored.verifier.combine_reward_components({"correctness": 1.0, "format": 0.5}) == 1.125
     assert restored.build.base_image == "python:3.11-slim"
     assert restored.validation_errors() == []
 

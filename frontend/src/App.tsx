@@ -8,7 +8,9 @@ import { wsService } from './services'
 import { isWeb } from './utils/platform'
 
 // Tree-shaken in Electron builds (isWeb is a compile-time constant)
-const LoginPage = isWeb ? lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage }))) : null
+const LoginPage = isWeb
+  ? lazy(() => import('./components/auth/LoginPage').then((m) => ({ default: m.LoginPage })))
+  : null
 
 // The GitHub login gate only applies to a real deployed web build (the dormant
 // web MVP). Local dev runs the backend in desktop mode with no auth enforced

@@ -63,9 +63,7 @@ def redact_workspace_value(value: Any) -> Any:
         return [redact_workspace_value(item) for item in value]
     if isinstance(value, str):
         lowered = value.lower()
-        if value.startswith(("sk-", "ghp_", "xoxb-", "xoxp-")) or HF_TOKEN_VALUE.fullmatch(
-            value
-        ):
+        if value.startswith(("sk-", "ghp_", "xoxb-", "xoxp-")) or HF_TOKEN_VALUE.fullmatch(value):
             return "[redacted]"
         if "bearer " in lowered:
             return "[redacted]"
@@ -328,7 +326,9 @@ def _runtime_jobs(request: Request) -> list[dict[str, Any]]:
 
 
 def _status_counts(values: list[Any]) -> dict[str, int]:
-    counts = Counter(str(getattr(value, "status", "unknown")).split(".")[-1].lower() for value in values)
+    counts = Counter(
+        str(getattr(value, "status", "unknown")).split(".")[-1].lower() for value in values
+    )
     return dict(sorted(counts.items()))
 
 
@@ -377,9 +377,7 @@ def _campaign_context(
             comparisons = list(
                 repository.list_development_comparisons(workspace_id, campaign.campaign_id)
             )
-            events = repository.list_recent_events(
-                workspace_id, campaign.campaign_id, limit=30
-            )
+            events = repository.list_recent_events(workspace_id, campaign.campaign_id, limit=30)
             exports = repository.list_exports(workspace_id, campaign.campaign_id, limit=5)
         except Exception:
             continue
@@ -576,9 +574,7 @@ def _context_payload(request: Request, workspace_id: str | None = None) -> dict[
     events = _state_events(request, snapshot.workspace_id)
     training_runs = _training_runs(request, snapshot.workspace_id)
     runtime_jobs = _runtime_jobs(request)
-    campaigns, campaign_activity, report_refs = _campaign_context(
-        request, snapshot.workspace_id
-    )
+    campaigns, campaign_activity, report_refs = _campaign_context(request, snapshot.workspace_id)
     experiment_projects = _experiment_project_context(request, snapshot.workspace_id)
     allowed_actions = list(
         dict.fromkeys(
@@ -664,13 +660,15 @@ def _as_markdown(payload: dict[str, Any]) -> str:
                 f"- {conflict.get('code')} ({conflict.get('entity_id')}): "
                 f"{conflict.get('resolution')}"
             )
-    lines.extend([
-        "",
-        "## Canvas",
-        f"- panels: {len(panels)}",
-        f"- edges: {len(edges)}",
-        f"- terminals: {len(terminals)}",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Canvas",
+            f"- panels: {len(panels)}",
+            f"- edges: {len(edges)}",
+            f"- terminals: {len(terminals)}",
+        ]
+    )
     if panels:
         lines.extend(["", "### Panels"])
         for panel in panels:
@@ -712,9 +710,7 @@ def _as_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"  goal: {campaign.get('objective')}")
             target = campaign.get("target_model") or {}
             if target:
-                lines.append(
-                    f"  model/task: {target.get('base_model_ref')} | {target.get('task')}"
-                )
+                lines.append(f"  model/task: {target.get('base_model_ref')} | {target.get('task')}")
             lines.append(f"  budget remaining: {campaign.get('budget_remaining')}")
             lines.append(
                 f"  studies: {campaign.get('study_status_counts')} | attempts: {campaign.get('attempt_status_counts')}"
@@ -748,9 +744,7 @@ def _as_markdown(payload: dict[str, Any]) -> str:
                     f"{evaluation.get('status')}"
                 )
             for decision in (project_context.get("recent_decisions") or [])[:5]:
-                lines.append(
-                    f"  decision {decision.get('decision_id')}: {decision.get('outcome')}"
-                )
+                lines.append(f"  decision {decision.get('decision_id')}: {decision.get('outcome')}")
     if reports:
         lines.extend(["", "## Reports"])
         for report in reports[:10]:
@@ -777,9 +771,7 @@ def _as_markdown(payload: dict[str, Any]) -> str:
             bits = [str(run.get("status") or "unknown")]
             if verdict:
                 bits.append(str(verdict))
-            lines.append(
-                f"- {run.get('skill_name') or run.get('skill_id')}: {' | '.join(bits)}"
-            )
+            lines.append(f"- {run.get('skill_name') or run.get('skill_id')}: {' | '.join(bits)}")
     if hf_context:
         lines.extend(
             [

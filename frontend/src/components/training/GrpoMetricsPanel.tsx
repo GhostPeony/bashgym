@@ -8,7 +8,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ReferenceLine,
+  ReferenceLine
 } from 'recharts'
 import { useTrainingStore } from '../../stores'
 import type { GrpoMetric } from '../../stores'
@@ -23,12 +23,8 @@ function ChartShell({ title, subtitle, children }: ChartShellProps) {
   return (
     <div className="card p-3 h-48 flex flex-col">
       <div className="flex items-baseline justify-between mb-2">
-        <h4 className="font-mono text-xs uppercase tracking-widest text-text-secondary">
-          {title}
-        </h4>
-        {subtitle && (
-          <span className="font-mono text-xs text-text-muted">{subtitle}</span>
-        )}
+        <h4 className="font-mono text-xs uppercase tracking-widest text-text-secondary">{title}</h4>
+        {subtitle && <span className="font-mono text-xs text-text-muted">{subtitle}</span>}
       </div>
       <div className="flex-1 min-h-0">{children}</div>
     </div>
@@ -39,7 +35,7 @@ const AXIS_STYLE = {
   stroke: 'var(--text-muted)',
   fontSize: 10,
   fontFamily: "'JetBrains Mono', monospace",
-  tickLine: false,
+  tickLine: false
 } as const
 
 const TOOLTIP_STYLE = {
@@ -48,7 +44,7 @@ const TOOLTIP_STYLE = {
   borderRadius: 'var(--radius)',
   boxShadow: 'var(--shadow-sm)',
   fontFamily: "'JetBrains Mono', monospace",
-  fontSize: '11px',
+  fontSize: '11px'
 } as const
 
 function formatNum(v: number | undefined): string {
@@ -72,13 +68,9 @@ export function GrpoMetricsPanel() {
     step: m.step,
     reward: m.reward,
     rewardHigh:
-      m.reward !== undefined && m.rewardStd !== undefined
-        ? m.reward + m.rewardStd
-        : undefined,
+      m.reward !== undefined && m.rewardStd !== undefined ? m.reward + m.rewardStd : undefined,
     rewardLow:
-      m.reward !== undefined && m.rewardStd !== undefined
-        ? m.reward - m.rewardStd
-        : undefined,
+      m.reward !== undefined && m.rewardStd !== undefined ? m.reward - m.rewardStd : undefined
   }))
 
   const latest: GrpoMetric | undefined = grpoMetrics[grpoMetrics.length - 1]
@@ -98,14 +90,35 @@ export function GrpoMetricsPanel() {
         </div>
         {latest && (
           <div className="font-mono text-xs text-text-secondary flex gap-4">
-            <span>step <span className="text-text-primary">{latest.step}</span></span>
-            <span>kl <span className="text-text-primary">{formatNum(latest.kl)}</span></span>
-            <span>reward <span className="text-text-primary">{formatNum(latest.reward)}</span></span>
+            <span>
+              step <span className="text-text-primary">{latest.step}</span>
+            </span>
+            <span>
+              kl <span className="text-text-primary">{formatNum(latest.kl)}</span>
+            </span>
+            <span>
+              reward <span className="text-text-primary">{formatNum(latest.reward)}</span>
+            </span>
             {hasSamplingTelemetry ? (
               <>
-                <span>refills <span className="text-text-primary">{formatCount(latest.activeSamplingRefills)}</span></span>
-                <span>dropped <span className="text-text-primary">{formatCount(latest.zeroStdGroupsDropped)}</span></span>
-                <span>groups <span className="text-text-primary">{formatCount(latest.effectivePromptGroups)}</span></span>
+                <span>
+                  refills{' '}
+                  <span className="text-text-primary">
+                    {formatCount(latest.activeSamplingRefills)}
+                  </span>
+                </span>
+                <span>
+                  dropped{' '}
+                  <span className="text-text-primary">
+                    {formatCount(latest.zeroStdGroupsDropped)}
+                  </span>
+                </span>
+                <span>
+                  groups{' '}
+                  <span className="text-text-primary">
+                    {formatCount(latest.effectivePromptGroups)}
+                  </span>
+                </span>
               </>
             ) : null}
           </div>
@@ -121,7 +134,14 @@ export function GrpoMetricsPanel() {
               <XAxis dataKey="step" {...AXIS_STYLE} />
               <YAxis {...AXIS_STYLE} tickFormatter={(v) => v.toFixed(2)} />
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => v.toFixed(4)} />
-              <Line type="monotone" dataKey="loss" stroke="var(--accent)" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line
+                type="monotone"
+                dataKey="loss"
+                stroke="var(--accent)"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
             </LineChart>
           </ResponsiveContainer>
         </ChartShell>
@@ -133,7 +153,10 @@ export function GrpoMetricsPanel() {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
               <XAxis dataKey="step" {...AXIS_STYLE} />
               <YAxis {...AXIS_STYLE} tickFormatter={(v) => v.toFixed(2)} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => (Number.isFinite(v) ? v.toFixed(4) : '—')} />
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
+                formatter={(v: number) => (Number.isFinite(v) ? v.toFixed(4) : '—')}
+              />
               <Area
                 type="monotone"
                 dataKey="rewardHigh"
@@ -150,16 +173,20 @@ export function GrpoMetricsPanel() {
                 fillOpacity={1}
                 isAnimationActive={false}
               />
-              <Line type="monotone" dataKey="reward" stroke="var(--accent)" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line
+                type="monotone"
+                dataKey="reward"
+                stroke="var(--accent)"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
             </ComposedChart>
           </ResponsiveContainer>
         </ChartShell>
 
         {/* frac_reward_zero_std with red threshold */}
-        <ChartShell
-          title="Frac Reward Zero Std"
-          subtitle={formatNum(latest?.fracRewardZeroStd)}
-        >
+        <ChartShell title="Frac Reward Zero Std" subtitle={formatNum(latest?.fracRewardZeroStd)}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={grpoMetrics} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
@@ -170,7 +197,13 @@ export function GrpoMetricsPanel() {
                 y={0.95}
                 stroke="var(--status-error)"
                 strokeDasharray="4 4"
-                label={{ value: 'degenerate 0.95', position: 'insideTopRight', fill: 'var(--status-error)', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
+                label={{
+                  value: 'degenerate 0.95',
+                  position: 'insideTopRight',
+                  fill: 'var(--status-error)',
+                  fontSize: 10,
+                  fontFamily: "'JetBrains Mono', monospace"
+                }}
               />
               <Line
                 type="monotone"
@@ -192,7 +225,14 @@ export function GrpoMetricsPanel() {
               <XAxis dataKey="step" {...AXIS_STYLE} />
               <YAxis {...AXIS_STYLE} tickFormatter={(v) => v.toFixed(3)} />
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => v.toFixed(5)} />
-              <Line type="monotone" dataKey="kl" stroke="var(--accent)" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line
+                type="monotone"
+                dataKey="kl"
+                stroke="var(--accent)"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
             </LineChart>
           </ResponsiveContainer>
         </ChartShell>

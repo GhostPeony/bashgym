@@ -44,11 +44,7 @@ export function LossCurve({ data, smoothed = false }: LossCurveProps) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-        <CartesianGrid
-          strokeDasharray="3 3"
-          stroke="var(--border-subtle)"
-          vertical={false}
-        />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
         <XAxis
           dataKey="step"
           stroke="var(--text-muted)"
@@ -90,7 +86,14 @@ export function LossCurve({ data, smoothed = false }: LossCurveProps) {
           strokeOpacity={0.5}
         />
         {smoothed && (
-          <Line type="monotone" dataKey="loss" stroke="var(--accent)" strokeWidth={1} strokeOpacity={0.25} dot={false} />
+          <Line
+            type="monotone"
+            dataKey="loss"
+            stroke="var(--accent)"
+            strokeWidth={1}
+            strokeOpacity={0.25}
+            dot={false}
+          />
         )}
         <Line
           type="monotone"
@@ -114,7 +117,12 @@ export function LossCurve({ data, smoothed = false }: LossCurveProps) {
             strokeDasharray="5 3"
             dot={false}
             connectNulls
-            activeDot={{ r: 4, fill: 'var(--text-secondary)', stroke: 'var(--bg-card)', strokeWidth: 2 }}
+            activeDot={{
+              r: 4,
+              fill: 'var(--text-secondary)',
+              stroke: 'var(--bg-card)',
+              strokeWidth: 2
+            }}
           />
         )}
       </LineChart>

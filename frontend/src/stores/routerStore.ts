@@ -1,11 +1,7 @@
 import { create } from 'zustand'
 
 export type RoutingStrategy =
-  | 'teacher_only'
-  | 'student_only'
-  | 'confidence_based'
-  | 'round_robin'
-  | 'progressive_handoff'
+  'teacher_only' | 'student_only' | 'confidence_based' | 'round_robin' | 'progressive_handoff'
 
 export interface RoutingStats {
   totalRequests: number

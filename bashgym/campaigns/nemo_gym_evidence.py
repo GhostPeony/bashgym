@@ -47,9 +47,7 @@ class NemoGymBundleFile(FrozenContractModel):
 
 
 class NemoGymBundleIdentity(FrozenContractModel):
-    schema_version: Literal["bashgym_nemo_gym_bundle.v1"] = (
-        "bashgym_nemo_gym_bundle.v1"
-    )
+    schema_version: Literal["bashgym_nemo_gym_bundle.v1"] = "bashgym_nemo_gym_bundle.v1"
     bashgym_source_revision: GitObjectId
     dataset_digest: HexDigest
     dataset_license: str = Field(min_length=1, max_length=128)
@@ -70,9 +68,7 @@ class NemoGymBundleIdentity(FrozenContractModel):
 
     @field_validator("files")
     @classmethod
-    def canonical_files(
-        cls, value: tuple[NemoGymBundleFile, ...]
-    ) -> tuple[NemoGymBundleFile, ...]:
+    def canonical_files(cls, value: tuple[NemoGymBundleFile, ...]) -> tuple[NemoGymBundleFile, ...]:
         paths = tuple(item.path for item in value)
         if tuple(sorted(set(paths))) != paths:
             raise ValueError("NeMo Gym bundle files must be sorted and unique")
@@ -126,9 +122,7 @@ class NemoGymRolloutReceipt(FrozenContractModel):
     example_index: int = Field(ge=0)
     environment_id: Identifier
     environment_digest: HexDigest
-    message_tokens: tuple[NemoGymMessageTokenReceipt, ...] = Field(
-        min_length=1, max_length=4096
-    )
+    message_tokens: tuple[NemoGymMessageTokenReceipt, ...] = Field(min_length=1, max_length=4096)
     reward_components: dict[Identifier, float] = Field(min_length=1, max_length=100)
     total_reward: float
     refit: NemoGymRefitEvidence
@@ -161,9 +155,7 @@ class NemoGymRolloutReceipt(FrozenContractModel):
 class NemoGymCampaignEvidence(FrozenContractModel):
     """Replay-complete Gym evidence bound to one exact campaign attempt."""
 
-    schema_version: Literal["nemo_gym_campaign_evidence.v1"] = (
-        NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
-    )
+    schema_version: Literal["nemo_gym_campaign_evidence.v1"] = NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
     workspace_id: Identifier
     campaign_id: Identifier
     study_id: Identifier
@@ -214,9 +206,7 @@ class NemoGymCampaignEvidence(FrozenContractModel):
             expected_reward = environment.verifier.combine_reward_components(
                 rollout.reward_components
             )
-            if not math.isclose(
-                rollout.total_reward, expected_reward, rel_tol=1e-9, abs_tol=1e-9
-            ):
+            if not math.isclose(rollout.total_reward, expected_reward, rel_tol=1e-9, abs_tol=1e-9):
                 raise ValueError("NeMo Gym weighted reward total mismatch")
             if rollout.refit != refit:
                 raise ValueError("NeMo Gym rollout batch spans multiple refit receipts")
@@ -226,9 +216,7 @@ class NemoGymCampaignEvidence(FrozenContractModel):
         token_payload = [
             {
                 "example_index": rollout.example_index,
-                "message_tokens": [
-                    item.model_dump(mode="json") for item in rollout.message_tokens
-                ],
+                "message_tokens": [item.model_dump(mode="json") for item in rollout.message_tokens],
             }
             for rollout in self.rollouts
         ]
@@ -345,9 +333,7 @@ def build_nemo_gym_campaign_evidence(
     )
 
 
-def write_nemo_gym_campaign_evidence(
-    path: Path, evidence: NemoGymCampaignEvidence
-) -> Path:
+def write_nemo_gym_campaign_evidence(path: Path, evidence: NemoGymCampaignEvidence) -> Path:
     """Write canonical JSON without accepting an existing or symlinked destination."""
 
     destination = path.resolve()

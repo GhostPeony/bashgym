@@ -18,7 +18,7 @@ class TestSelectBackend:
         assert select_backend(GEMMA4, "auto", probe={"unsloth_ok": True}) == "unsloth"
 
     def test_auto_falls_back_to_plain_without_unsloth(self):
-        # The GB10/sm_121 reality: Unsloth not importable -> plain transformers+peft.
+        # On a newer compute capability, unavailable Unsloth falls back to transformers+peft.
         assert select_backend(GEMMA4, "auto", probe={"unsloth_ok": False}) == "plain"
 
 

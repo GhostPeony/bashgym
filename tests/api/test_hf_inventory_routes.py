@@ -133,9 +133,7 @@ def test_hf_inventory_returns_normalized_snapshot_without_token(client, monkeypa
     }
     assert data["models"][0]["id"] == "example-org/bashgym-model-a"
     assert data["models"][0]["local"]["model_id"] == "run-123"
-    assert data["datasets"][0]["url"].endswith(
-        "/datasets/example-org/bashgym-youtube-retrieval"
-    )
+    assert data["datasets"][0]["url"].endswith("/datasets/example-org/bashgym-youtube-retrieval")
     assert data["datasets"][0]["private"] is True
     assert data["datasets"][0]["used_storage"] == 2048
     assert data["trace_datasets"] == []

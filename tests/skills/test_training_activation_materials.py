@@ -29,27 +29,28 @@ def test_operator_and_router_require_target_specific_activation():
     assert "not just label provenance" in router
 
 
-def test_operator_skill_is_agent_agnostic_and_uses_guided_autoresearch_setup():
+def test_operator_skill_is_agent_agnostic_and_uses_coherent_autoresearch_onboarding():
     operator = (SKILLS / "bashgym-operator" / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "Codex, Claude Code, Hermes, or another compatible agent" in operator
+    assert "Codex, Cursor, Claude Code, Hermes, or another compatible agent" in operator
+    assert "describe the experiment loop first" in operator
+    assert "Do not lead with" in operator
     assert "from Hermes on Discord" not in operator
-    assert "bashgym campaign setup-context" in operator
-    assert "bashgym campaign setup-step" in operator
-    assert "bashgym campaign setup-doctor" in operator
-    assert "bashgym campaign setup-validate" in operator
-    assert "bashgym campaign setup-create" in operator
-    assert "zero registered choices" in operator
-    assert "multiple registered choices" in operator
+    assert "bashgym research prepare" in operator
+    assert "bashgym research onboard --contract <file> --json" in operator
+    assert "Apply the same contract by adding `--apply`" in operator
+    assert "bashgym research wait" in operator
+    assert "Never run `research start` in the preparation turn" in operator
 
 
 def test_operator_skill_requires_separate_explicit_start_confirmation():
     operator = (SKILLS / "bashgym-operator" / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "authorizes discovery and preparation only" in operator
-    assert "campaign ID, model, data, evaluation, compute, budget, and stop rules" in operator
-    assert "STOP and wait for a subsequent explicit Start confirmation" in operator
-    assert "Never run `bashgym campaign start` in the preparation turn" in operator
+    assert "authorizes preparation, not training" in operator
+    assert "campaign ID, model, data, evaluation, compute, budget," in operator
+    assert "stop rules, warnings," in operator
+    assert "Stop and wait for a later explicit Start confirmation" in operator
+    assert "Never run `research start` in the preparation turn" in operator
 
 
 def test_source_clone_agent_guides_route_autoresearch_through_the_shared_skill():
@@ -58,9 +59,9 @@ def test_source_clone_agent_guides_route_autoresearch_through_the_shared_skill()
 
     assert "bashgym operator skills install --host codex" in codex
     assert "assistant/workspace/skills/bashgym-operator/SKILL.md" in codex
-    assert "campaign setup-context" in codex
+    assert "research prepare" in codex
     assert "explicit Start" in codex
     assert "bashgym operator skills install --host claude" in claude
     assert "assistant/workspace/skills/bashgym-operator/SKILL.md" in claude
-    assert "campaign setup-context" in claude
+    assert "research prepare" in claude
     assert "explicit Start" in claude

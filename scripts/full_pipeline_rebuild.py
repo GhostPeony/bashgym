@@ -8,14 +8,16 @@ Full pipeline rebuild using bashgym's existing pipeline.
 4. Export via export_unsloth
 """
 
+import logging
 import sys
 import time
-import logging
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
+)
 logger = logging.getLogger(__name__)
 
 DESKTOP_CLAUDE = Path.home() / "desktop-home" / ".claude"
@@ -80,7 +82,9 @@ def main():
                 logger.warning(f"  Failed: {session_file.name}: {e}")
 
         if (i + 1) % 500 == 0:
-            logger.info(f"  [{i+1}/{len(all_sessions)}] imported={imported} skipped={skipped} failed={failed}")
+            logger.info(
+                f"  [{i+1}/{len(all_sessions)}] imported={imported} skipped={skipped} failed={failed}"
+            )
 
     logger.info(f"  Import done: {imported} imported, {skipped} skipped, {failed} failed")
 
@@ -140,6 +144,7 @@ def main():
     sys.path.insert(0, str(Path(__file__).parent))
     try:
         from export_unsloth import convert_file
+
         unsloth_dir = OUTPUT_DIR / "unsloth"
         unsloth_dir.mkdir(exist_ok=True)
 

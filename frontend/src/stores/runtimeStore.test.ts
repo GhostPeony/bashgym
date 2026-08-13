@@ -17,7 +17,7 @@ const observedJob: RuntimeJob = {
   pipeline: 'generate_dataset',
   artifacts: [],
   options: {},
-  source: 'process_observer',
+  source: 'process_observer'
 }
 
 test('confirms completion across three missing polls and retracts it on rediscovery', async () => {
@@ -25,7 +25,7 @@ test('confirms completion across three missing polls and retracts it on rediscov
   let activeJobs: RuntimeJob[] = []
   runtimeApi.listJobs = async () => ({
     ok: true,
-    data: { jobs: activeJobs, polled_at: '2026-07-09T20:01:00Z' },
+    data: { jobs: activeJobs, polled_at: '2026-07-09T20:01:00Z' }
   })
 
   useActivityStore.getState().clear()
@@ -45,7 +45,7 @@ test('confirms completion across three missing polls and retracts it on rediscov
     assert.equal(useRuntimeStore.getState().jobs[0].status, 'completed')
     assert.equal(
       useActivityStore.getState().events[0].key,
-      'designer:completed:runtime_designer_42',
+      'designer:completed:runtime_designer_42'
     )
 
     activeJobs = [observedJob]
@@ -68,13 +68,13 @@ test('does not republish or replace identical active runtime jobs', async () => 
     ok: true,
     data: {
       jobs: [{ ...observedJob }],
-      polled_at: `2026-07-09T20:0${pollNumber++}:00Z`,
-    },
+      polled_at: `2026-07-09T20:0${pollNumber++}:00Z`
+    }
   })
   useCanvasOrchestratorStore.setState({
     handleRuntimeJob: () => {
       handled += 1
-    },
+    }
   })
   useActivityStore.getState().clear()
   useRuntimeStore.getState().clear()
@@ -104,13 +104,13 @@ test('publishes and replaces runtime state when progress actually changes', asyn
     ok: true,
     data: {
       jobs: [{ ...observedJob, progress: { current, total: 100, unit: 'seeds' } }],
-      polled_at: '2026-07-09T20:01:00Z',
-    },
+      polled_at: '2026-07-09T20:01:00Z'
+    }
   })
   useCanvasOrchestratorStore.setState({
     handleRuntimeJob: () => {
       handled += 1
-    },
+    }
   })
   useRuntimeStore.getState().clear()
 
@@ -138,20 +138,22 @@ test('replaces stale process progress with a finalized manifest from the same ou
     status: 'completed',
     pid: 0,
     output_dir: 'C:/workspace/output/real_chunks',
-    progress: { current: 200, total: 200, unit: 'seeds' },
+    progress: { current: 200, total: 200, unit: 'seeds' }
   }
   runtimeApi.listJobs = async () => ({
     ok: true,
-    data: { jobs: [completedJob], polled_at: '2026-07-09T23:00:00Z' },
+    data: { jobs: [completedJob], polled_at: '2026-07-09T23:00:00Z' }
   })
   useActivityStore.getState().clear()
   useRuntimeStore.getState().clear()
   useRuntimeStore.setState({
-    jobs: [{
-      ...observedJob,
-      output_dir: 'C:\\workspace\\output\\real_chunks',
-      progress: { current: 192, total: 200, unit: 'seeds' },
-    }],
+    jobs: [
+      {
+        ...observedJob,
+        output_dir: 'C:\\workspace\\output\\real_chunks',
+        progress: { current: 192, total: 200, unit: 'seeds' }
+      }
+    ]
   })
 
   try {

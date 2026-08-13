@@ -11,20 +11,23 @@ Tests:
 Run with: pytest tests/test_hf_integration.py -v
 """
 
+import importlib.util
 import os
 import sys
-import pytest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent / "bashgym"))
 
 
 # =============================================================================
 # Test: HuggingFaceSettings
 # =============================================================================
+
 
 class TestHuggingFaceSettings:
     """Tests for HuggingFaceSettings dataclass in config.py."""
@@ -35,9 +38,16 @@ class TestHuggingFaceSettings:
 
         # Remove HF-related env vars entirely to test true defaults
         hf_env_keys = [
-            "HF_TOKEN", "HF_USERNAME", "HF_ORG", "HF_PRO_ENABLED",
-            "HF_STORAGE_REPO", "HF_MODELS_REPO", "HF_INFERENCE_PROVIDER",
-            "HF_INFERENCE_ROUTING", "HF_DEFAULT_HARDWARE", "HF_JOB_TIMEOUT_MINUTES",
+            "HF_TOKEN",
+            "HF_USERNAME",
+            "HF_ORG",
+            "HF_PRO_ENABLED",
+            "HF_STORAGE_REPO",
+            "HF_MODELS_REPO",
+            "HF_INFERENCE_PROVIDER",
+            "HF_INFERENCE_ROUTING",
+            "HF_DEFAULT_HARDWARE",
+            "HF_JOB_TIMEOUT_MINUTES",
         ]
 
         # Save and remove env vars
@@ -55,7 +65,7 @@ class TestHuggingFaceSettings:
                 assert settings.token == ""  # Empty when not set
                 assert settings.username == ""
                 assert settings.default_org == ""
-                assert settings.pro_enabled == False
+                assert not settings.pro_enabled
                 assert settings.storage_repo == ""
                 assert settings.models_repo == ""
                 assert settings.inference_provider == "serverless"
@@ -76,12 +86,12 @@ class TestHuggingFaceSettings:
             with patch.dict(os.environ, {"HF_TOKEN": ""}, clear=False):
                 # No token = disabled
                 settings = HuggingFaceSettings()
-                assert settings.enabled == False
+        assert not settings.enabled
 
         # With token = enabled
         with patch.dict(os.environ, {"HF_TOKEN": "hf_test_token"}, clear=False):
             settings_with_token = HuggingFaceSettings()
-            assert settings_with_token.enabled == True
+        assert settings_with_token.enabled
 
     def test_settings_namespace_property(self):
         """Test namespace falls back correctly."""
@@ -122,7 +132,7 @@ class TestHuggingFaceSettings:
             assert settings.token == "hf_test_token_123"
             assert settings.username == "testuser"
             assert settings.default_org == "testorg"
-            assert settings.pro_enabled == True
+            assert settings.pro_enabled
             assert settings.storage_repo == "testorg/storage"
             assert settings.models_repo == "testorg/models"
             assert settings.inference_provider == "dedicated"
@@ -165,6 +175,7 @@ class TestHuggingFaceSettings:
 # Test: HuggingFace Enums
 # =============================================================================
 
+
 class TestHuggingFaceEnums:
     """Tests for HuggingFace-related enums."""
 
@@ -200,6 +211,7 @@ class TestHuggingFaceEnums:
 # Test: HuggingFaceClient
 # =============================================================================
 
+
 class TestHuggingFaceClient:
     """Tests for HuggingFaceClient class."""
 
@@ -207,19 +219,18 @@ class TestHuggingFaceClient:
         """Test client behavior when huggingface_hub is not installed."""
         from bashgym.integrations.huggingface.client import (
             HuggingFaceClient,
-            HF_HUB_AVAILABLE,
-            HFAuthError,
             reset_hf_client,
         )
 
         reset_hf_client()
 
         # Mock the library as unavailable
-        with patch.dict("bashgym.integrations.huggingface.client.__dict__",
-                       {"HF_HUB_AVAILABLE": False}):
+        with patch.dict(
+            "bashgym.integrations.huggingface.client.__dict__", {"HF_HUB_AVAILABLE": False}
+        ):
             # Re-import to get patched version
-            import importlib
             from bashgym.integrations.huggingface import client as hf_client_module
+
             original_available = hf_client_module.HF_HUB_AVAILABLE
 
             try:
@@ -235,8 +246,8 @@ class TestHuggingFaceClient:
     def test_client_without_token(self):
         """Test client behavior with no token."""
         from bashgym.integrations.huggingface.client import (
-            HuggingFaceClient,
             HFAuthError,
+            HuggingFaceClient,
             reset_hf_client,
         )
 
@@ -260,7 +271,6 @@ class TestHuggingFaceClient:
         """Test client with mocked HfApi."""
         from bashgym.integrations.huggingface.client import (
             HuggingFaceClient,
-            HFUserInfo,
             reset_hf_client,
         )
 
@@ -282,14 +292,13 @@ class TestHuggingFaceClient:
 
                 assert client.is_enabled
                 assert client.username == "testuser"
-                assert client.is_pro == False
+                assert not client.is_pro
                 assert "testorg" in client.organizations
 
     def test_client_pro_detection(self):
         """Test Pro subscription detection from various response formats."""
         from bashgym.integrations.huggingface.client import (
             HuggingFaceClient,
-            HFUserInfo,
             reset_hf_client,
         )
 
@@ -305,7 +314,7 @@ class TestHuggingFaceClient:
         with patch("bashgym.integrations.huggingface.client.HfApi", return_value=mock_api):
             with patch("bashgym.integrations.huggingface.client.HF_HUB_AVAILABLE", True):
                 client = HuggingFaceClient(token="hf_test_token")
-                assert client.is_pro == True
+                assert client.is_pro
 
         reset_hf_client()
 
@@ -318,7 +327,7 @@ class TestHuggingFaceClient:
         with patch("bashgym.integrations.huggingface.client.HfApi", return_value=mock_api):
             with patch("bashgym.integrations.huggingface.client.HF_HUB_AVAILABLE", True):
                 client = HuggingFaceClient(token="hf_test_token")
-                assert client.is_pro == True
+                assert client.is_pro
 
         reset_hf_client()
 
@@ -331,13 +340,13 @@ class TestHuggingFaceClient:
         with patch("bashgym.integrations.huggingface.client.HfApi", return_value=mock_api):
             with patch("bashgym.integrations.huggingface.client.HF_HUB_AVAILABLE", True):
                 client = HuggingFaceClient(token="hf_test_token")
-                assert client.is_pro == True
+                assert client.is_pro
 
     def test_require_pro_raises(self):
         """Test require_pro raises when not Pro."""
         from bashgym.integrations.huggingface.client import (
-            HuggingFaceClient,
             HFProRequiredError,
+            HuggingFaceClient,
             reset_hf_client,
         )
 
@@ -486,6 +495,7 @@ class TestHuggingFaceClient:
 # Test: Singleton Access
 # =============================================================================
 
+
 class TestSingletonAccess:
     """Tests for get_hf_client singleton function."""
 
@@ -563,6 +573,7 @@ class TestSingletonAccess:
 # Test: Error Classes
 # =============================================================================
 
+
 class TestHFErrors:
     """Tests for HuggingFace error classes."""
 
@@ -584,7 +595,7 @@ class TestHFErrors:
 
     def test_hf_pro_required_error(self):
         """Test HFProRequiredError."""
-        from bashgym.integrations.huggingface import HFProRequiredError, HFError
+        from bashgym.integrations.huggingface import HFError, HFProRequiredError
 
         error = HFProRequiredError("Need Pro subscription")
         assert str(error) == "Need Pro subscription"
@@ -592,7 +603,7 @@ class TestHFErrors:
 
     def test_hf_quota_exceeded_error(self):
         """Test HFQuotaExceededError."""
-        from bashgym.integrations.huggingface import HFQuotaExceededError, HFError
+        from bashgym.integrations.huggingface import HFError, HFQuotaExceededError
 
         error = HFQuotaExceededError("Quota limit reached")
         assert str(error) == "Quota limit reached"
@@ -600,13 +611,9 @@ class TestHFErrors:
 
     def test_hf_job_failed_error(self):
         """Test HFJobFailedError with job details."""
-        from bashgym.integrations.huggingface import HFJobFailedError, HFError
+        from bashgym.integrations.huggingface import HFError, HFJobFailedError
 
-        error = HFJobFailedError(
-            "Training failed",
-            job_id="job_123",
-            logs="Error: OOM"
-        )
+        error = HFJobFailedError("Training failed", job_id="job_123", logs="Error: OOM")
         assert str(error) == "Training failed"
         assert error.job_id == "job_123"
         assert error.logs == "Error: OOM"
@@ -616,6 +623,7 @@ class TestHFErrors:
 # =============================================================================
 # Test: HFUserInfo
 # =============================================================================
+
 
 class TestHFUserInfo:
     """Tests for HFUserInfo dataclass."""
@@ -643,8 +651,8 @@ class TestHFUserInfo:
         assert info.fullname == "Test User"
         assert info.email == "test@example.com"
         assert info.orgs == ["org1", "org2"]
-        assert info.is_pro == True
-        assert info.can_pay == True
+        assert info.is_pro
+        assert info.can_pay
         assert info.avatar_url == "https://example.com/avatar.png"
 
     def test_user_info_minimal_response(self):
@@ -661,13 +669,14 @@ class TestHFUserInfo:
         assert info.fullname is None
         assert info.email is None
         assert info.orgs == []
-        assert info.is_pro == False
-        assert info.can_pay == False
+        assert not info.is_pro
+        assert not info.can_pay
 
 
 # =============================================================================
 # Test: Integration with Main Package
 # =============================================================================
+
 
 class TestPackageIntegration:
     """Tests for integration with main bashgym.integrations package."""
@@ -675,15 +684,10 @@ class TestPackageIntegration:
     def test_imports_from_integrations(self):
         """Test that HF classes are importable from integrations."""
         from bashgym.integrations import (
+            HF_HUB_AVAILABLE,
             HuggingFaceClient,
             get_hf_client,
             reset_hf_client,
-            HF_HUB_AVAILABLE,
-            HFError,
-            HFAuthError,
-            HFProRequiredError,
-            HFQuotaExceededError,
-            HFJobFailedError,
         )
 
         # All should be importable
@@ -697,11 +701,7 @@ class TestPackageIntegration:
         from bashgym.integrations.huggingface import HF_HUB_AVAILABLE
 
         # Check if huggingface_hub is installed
-        try:
-            import huggingface_hub
-            expected = True
-        except ImportError:
-            expected = False
+        expected = importlib.util.find_spec("huggingface_hub") is not None
 
         assert HF_HUB_AVAILABLE == expected
 
@@ -709,6 +709,7 @@ class TestPackageIntegration:
 # =============================================================================
 # Test: HFJobConfig
 # =============================================================================
+
 
 class TestHFJobConfig:
     """Tests for HFJobConfig dataclass."""
@@ -774,23 +775,24 @@ class TestHFJobConfig:
         errors = config.validate()
         assert any("at least 1" in e for e in errors)
 
-        # Too long
+        # Long jobs are accepted because the provider owns the current maximum.
         config = HFJobConfig(timeout_minutes=1000)
-        errors = config.validate()
-        assert any("cannot exceed 720" in e for e in errors)
+        assert config.validate() == []
 
 
 # =============================================================================
 # Test: HFJobInfo
 # =============================================================================
 
+
 class TestHFJobInfo:
     """Tests for HFJobInfo dataclass."""
 
     def test_job_info_creation(self):
         """Test creating HFJobInfo."""
-        from bashgym.integrations.huggingface.jobs import HFJobInfo, JobStatus
         from datetime import datetime, timezone
+
+        from bashgym.integrations.huggingface.jobs import HFJobInfo, JobStatus
 
         now = datetime.now(timezone.utc)
         info = HFJobInfo(
@@ -806,29 +808,31 @@ class TestHFJobInfo:
         assert info.created_at == now
         assert info.started_at is None
         assert info.completed_at is None
-        assert info.is_terminal == False
+        assert not info.is_terminal
 
     def test_job_info_terminal_states(self):
         """Test is_terminal property for different states."""
-        from bashgym.integrations.huggingface.jobs import HFJobInfo, JobStatus
         from datetime import datetime, timezone
+
+        from bashgym.integrations.huggingface.jobs import HFJobInfo, JobStatus
 
         now = datetime.now(timezone.utc)
 
         # Non-terminal states
         for status in [JobStatus.PENDING, JobStatus.RUNNING]:
             info = HFJobInfo(job_id="job", status=status, hardware="t4-small", created_at=now)
-            assert info.is_terminal == False
+            assert not info.is_terminal
 
         # Terminal states
         for status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
             info = HFJobInfo(job_id="job", status=status, hardware="t4-small", created_at=now)
-            assert info.is_terminal == True
+            assert info.is_terminal
 
     def test_job_info_to_dict(self):
         """Test to_dict serialization."""
-        from bashgym.integrations.huggingface.jobs import HFJobInfo, JobStatus
         from datetime import datetime, timezone
+
+        from bashgym.integrations.huggingface.jobs import HFJobInfo, JobStatus
 
         now = datetime.now(timezone.utc)
         info = HFJobInfo(
@@ -848,8 +852,8 @@ class TestHFJobInfo:
 
     def test_job_info_from_dict(self):
         """Test from_dict deserialization."""
+
         from bashgym.integrations.huggingface.jobs import HFJobInfo, JobStatus
-        from datetime import datetime, timezone
 
         data = {
             "job_id": "job_456",
@@ -867,8 +871,9 @@ class TestHFJobInfo:
 
     def test_job_info_duration(self):
         """Test duration_seconds property."""
+        from datetime import datetime, timedelta, timezone
+
         from bashgym.integrations.huggingface.jobs import HFJobInfo, JobStatus
-        from datetime import datetime, timezone, timedelta
 
         now = datetime.now(timezone.utc)
         started = now - timedelta(minutes=30)
@@ -896,6 +901,7 @@ class TestHFJobInfo:
 # Test: JobStatus Enum
 # =============================================================================
 
+
 class TestJobStatus:
     """Tests for JobStatus enum."""
 
@@ -921,13 +927,29 @@ class TestJobStatus:
 # Test: HFJobRunner
 # =============================================================================
 
+
+def _hf_provider_job(job_id: str, stage: str, hardware: str = "a10g-small"):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    return SimpleNamespace(
+        id=job_id,
+        status=SimpleNamespace(stage=stage, message=None),
+        flavor=hardware,
+        created_at=now,
+        started_at=now if stage != "SCHEDULING" else None,
+        finished_at=now if stage in {"COMPLETED", "ERROR", "CANCELED"} else None,
+        url=f"https://huggingface.co/jobs/testuser/{job_id}",
+    )
+
+
 class TestHFJobRunner:
     """Tests for HFJobRunner class."""
 
     def test_job_runner_without_pro(self):
         """Test job runner without Pro subscription."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner
         from bashgym.integrations.huggingface import HFProRequiredError, reset_hf_client
+        from bashgym.integrations.huggingface.jobs import HFJobRunner
 
         reset_hf_client()
 
@@ -936,10 +958,10 @@ class TestHFJobRunner:
 
         assert not runner.is_pro
 
-        # All operations should require Pro
-        with pytest.raises(HFProRequiredError):
-            runner.submit_training_job("train.py")
+        preflight = runner.preflight("train.py")
+        assert "jobs_access_not_confirmed" in preflight.reason_codes
 
+        # Provider observations require explicit eligible-plan confirmation.
         with pytest.raises(HFProRequiredError):
             runner.get_job_status("job_123")
 
@@ -954,8 +976,8 @@ class TestHFJobRunner:
 
     def test_job_runner_with_pro_override(self):
         """Test job runner with Pro override enabled."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.jobs import HFJobRunner
 
         reset_hf_client()
 
@@ -978,17 +1000,18 @@ class TestHFJobRunner:
         with patch("bashgym.integrations.huggingface.client.HfApi", return_value=mock_api):
             with patch("bashgym.integrations.huggingface.client.HF_HUB_AVAILABLE", True):
                 client = HuggingFaceClient(token="hf_test")
-                runner = HFJobRunner(client=client)
+                runner = HFJobRunner(client=client, jobs_access_confirmed=True)
 
                 assert runner.is_pro
                 assert runner.client is client
 
     def test_submit_job_validates_config(self):
         """Test that submit_training_job validates configuration."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner, HFJobConfig
-        from bashgym.integrations.huggingface import reset_hf_client
-        import tempfile
         import os
+        import tempfile
+
+        from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.jobs import HFJobConfig, HFJobRunner
 
         reset_hf_client()
 
@@ -1002,18 +1025,12 @@ class TestHFJobRunner:
         try:
             # Invalid hardware
             with pytest.raises(ValueError) as exc_info:
-                runner.submit_training_job(
-                    script_path,
-                    config=HFJobConfig(hardware="invalid")
-                )
+                runner.submit_training_job(script_path, config=HFJobConfig(hardware="invalid"))
             assert "Invalid hardware" in str(exc_info.value)
 
             # Invalid timeout
             with pytest.raises(ValueError) as exc_info:
-                runner.submit_training_job(
-                    script_path,
-                    config=HFJobConfig(timeout_minutes=0)
-                )
+                runner.submit_training_job(script_path, config=HFJobConfig(timeout_minutes=0))
             assert "at least 1" in str(exc_info.value)
 
         finally:
@@ -1021,8 +1038,8 @@ class TestHFJobRunner:
 
     def test_submit_job_requires_script_exists(self):
         """Test that submit_training_job requires existing script."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.jobs import HFJobRunner
 
         reset_hf_client()
 
@@ -1032,15 +1049,18 @@ class TestHFJobRunner:
             runner.submit_training_job("/nonexistent/script.py")
 
     def test_submit_job_success(self):
-        """Test successful job submission."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner, HFJobConfig, JobStatus
-        from bashgym.integrations.huggingface import reset_hf_client
-        import tempfile
+        """Test provider-backed job submission."""
         import os
+        import tempfile
+
+        from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.jobs import HFJobConfig, HFJobRunner, JobStatus
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
+        api = MagicMock()
+        api.run_uv_job.return_value = _hf_provider_job("provider-job-1", "SCHEDULING")
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         # Create temp script
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -1048,43 +1068,41 @@ class TestHFJobRunner:
             script_path = f.name
 
         try:
-            # Exercise the submit/tracking path without hitting the real `hf jobs` CLI.
-            with patch.object(HFJobRunner, "_submit_via_cli"):
-                job = runner.submit_training_job(
-                    script_path,
-                    repo_id="testuser/training-job",
-                    config=HFJobConfig(hardware="a10g-small", timeout_minutes=60),
-                )
+            job = runner.submit_training_job(
+                script_path,
+                repo_id="testuser/training-job",
+                config=HFJobConfig(
+                    hardware="a10g-small",
+                    timeout_minutes=60,
+                    secrets={"HF_TOKEN": "injected-at-launch"},
+                ),
+            )
 
-            assert job.job_id is not None
+            assert job.job_id == "provider-job-1"
             assert job.status == JobStatus.PENDING
             assert job.hardware == "a10g-small"
             assert job.logs_url is not None
-
-            # Job should be tracked
-            assert job.job_id in runner._jobs
+            api.run_uv_job.assert_called_once()
 
         finally:
             os.unlink(script_path)
 
     def test_get_job_status(self):
         """Test getting job status."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner, HFJobInfo, JobStatus
+
         from bashgym.integrations.huggingface import reset_hf_client
-        from datetime import datetime, timezone
+        from bashgym.integrations.huggingface.jobs import HFJobRunner, JobStatus
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate a job
-        job = HFJobInfo(
-            job_id="test_job_001",
-            status=JobStatus.RUNNING,
-            hardware="a10g-small",
-            created_at=datetime.now(timezone.utc),
-        )
-        runner._jobs["test_job_001"] = job
+        api = MagicMock()
+        not_found = RuntimeError("not found")
+        not_found.response = SimpleNamespace(status_code=404)
+        api.inspect_job.side_effect = [
+            _hf_provider_job("test_job_001", "RUNNING"),
+            not_found,
+        ]
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         # Get status
         result = runner.get_job_status("test_job_001")
@@ -1097,45 +1115,36 @@ class TestHFJobRunner:
 
     def test_get_job_logs(self):
         """Test getting job logs."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner, HFJobInfo, JobStatus
+
         from bashgym.integrations.huggingface import reset_hf_client
-        from datetime import datetime, timezone
+        from bashgym.integrations.huggingface.jobs import HFJobRunner
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate a job
-        job = HFJobInfo(
-            job_id="test_job_002",
-            status=JobStatus.RUNNING,
-            hardware="t4-small",
-            created_at=datetime.now(timezone.utc),
-        )
-        runner._jobs["test_job_002"] = job
+        api = MagicMock()
+        api.inspect_job.return_value = _hf_provider_job("test_job_002", "COMPLETED")
+        api.fetch_job_logs.return_value = ["test_job_002 training complete\n"]
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         logs = runner.get_job_logs("test_job_002")
         assert "test_job_002" in logs
-        assert "running" in logs.lower()
+        assert "complete" in logs.lower()
 
     def test_cancel_job(self):
         """Test cancelling a job."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner, HFJobInfo, JobStatus
+
         from bashgym.integrations.huggingface import HFJobFailedError, reset_hf_client
-        from datetime import datetime, timezone
+        from bashgym.integrations.huggingface.jobs import HFJobRunner, JobStatus
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate a running job
-        job = HFJobInfo(
-            job_id="test_job_003",
-            status=JobStatus.RUNNING,
-            hardware="a10g-small",
-            created_at=datetime.now(timezone.utc),
-        )
-        runner._jobs["test_job_003"] = job
+        api = MagicMock()
+        api.inspect_job.side_effect = [
+            _hf_provider_job("test_job_003", "RUNNING"),
+            _hf_provider_job("test_job_003", "CANCELED"),
+            _hf_provider_job("test_job_003", "CANCELED"),
+        ]
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         # Cancel job
         result = runner.cancel_job("test_job_003")
@@ -1148,22 +1157,15 @@ class TestHFJobRunner:
 
     def test_cancel_job_already_completed(self):
         """Test that cancelling a completed job fails."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner, HFJobInfo, JobStatus
+
         from bashgym.integrations.huggingface import HFJobFailedError, reset_hf_client
-        from datetime import datetime, timezone
+        from bashgym.integrations.huggingface.jobs import HFJobRunner
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate a completed job
-        job = HFJobInfo(
-            job_id="test_job_004",
-            status=JobStatus.COMPLETED,
-            hardware="a10g-small",
-            created_at=datetime.now(timezone.utc),
-        )
-        runner._jobs["test_job_004"] = job
+        api = MagicMock()
+        api.inspect_job.return_value = _hf_provider_job("test_job_004", "COMPLETED")
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         with pytest.raises(HFJobFailedError) as exc_info:
             runner.cancel_job("test_job_004")
@@ -1171,28 +1173,19 @@ class TestHFJobRunner:
 
     def test_list_jobs(self):
         """Test listing jobs."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner, HFJobInfo, JobStatus
+
         from bashgym.integrations.huggingface import reset_hf_client
-        from datetime import datetime, timezone, timedelta
+        from bashgym.integrations.huggingface.jobs import HFJobRunner, JobStatus
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate multiple jobs
-        now = datetime.now(timezone.utc)
-        runner._jobs["job_1"] = HFJobInfo(
-            job_id="job_1", status=JobStatus.COMPLETED,
-            hardware="t4-small", created_at=now - timedelta(hours=2)
-        )
-        runner._jobs["job_2"] = HFJobInfo(
-            job_id="job_2", status=JobStatus.RUNNING,
-            hardware="a10g-small", created_at=now - timedelta(hours=1)
-        )
-        runner._jobs["job_3"] = HFJobInfo(
-            job_id="job_3", status=JobStatus.PENDING,
-            hardware="a100-large", created_at=now
-        )
+        api = MagicMock()
+        api.list_jobs.return_value = [
+            _hf_provider_job("job_3", "SCHEDULING", "a100-large"),
+            _hf_provider_job("job_2", "RUNNING"),
+            _hf_provider_job("job_1", "COMPLETED", "t4-small"),
+        ]
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         # List all jobs (sorted by creation, newest first)
         jobs = runner.list_jobs()
@@ -1215,8 +1208,8 @@ class TestHFJobRunner:
 
     def test_job_runner_repr(self):
         """Test string representation of HFJobRunner."""
-        from bashgym.integrations.huggingface.jobs import HFJobRunner
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.jobs import HFJobRunner
 
         reset_hf_client()
 
@@ -1224,69 +1217,63 @@ class TestHFJobRunner:
         runner = HFJobRunner(token="hf_test", pro_enabled=False)
         repr_str = repr(runner)
         assert "HFJobRunner" in repr_str
-        assert "jobs=0" in repr_str
-        assert "[Pro]" not in repr_str
+        assert "jobs_access=unconfirmed" in repr_str
 
         # With Pro
         runner = HFJobRunner(token="hf_test", pro_enabled=True)
         repr_str = repr(runner)
-        assert "[Pro]" in repr_str
+        assert "jobs_access=confirmed" in repr_str
 
 
 # =============================================================================
 # Test: HARDWARE_SPECS
 # =============================================================================
 
+
 class TestHardwareSpecs:
-    """Tests for HARDWARE_SPECS constant."""
+    """Tests for the provider-derived hardware compatibility projection."""
 
     def test_hardware_specs_exists(self):
         """Test HARDWARE_SPECS has expected entries."""
-        from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
+        from bashgym.integrations.huggingface.jobs import (
+            HARDWARE_SPECS,
+            detect_hf_jobs_availability,
+        )
 
-        assert "cpu-basic" in HARDWARE_SPECS
-        assert "t4-small" in HARDWARE_SPECS
-        assert "a10g-small" in HARDWARE_SPECS
-        assert "a100-large" in HARDWARE_SPECS
-        assert "h100" in HARDWARE_SPECS
+        availability = detect_hf_jobs_availability()
+        assert set(HARDWARE_SPECS) == set(availability.hardware_flavors)
+        assert {"cpu-basic", "t4-small", "a10g-small", "a100-large"} <= set(HARDWARE_SPECS)
 
     def test_hardware_specs_structure(self):
         """Test HARDWARE_SPECS entry structure."""
         from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
 
-        for name, spec in HARDWARE_SPECS.items():
-            assert "gpu" in spec
-            assert "memory_gb" in spec
-            assert "pro_required" in spec
-            assert isinstance(spec["memory_gb"], (int, float))
-            assert isinstance(spec["pro_required"], bool)
+        for flavor, spec in HARDWARE_SPECS.items():
+            assert spec["provider_value"] == flavor
+            assert spec["source"] == "huggingface_hub.SpaceHardware"
+            assert spec["pro_required"] is True
+            assert spec["cost_per_hour"] is None
 
     def test_hardware_pro_requirements(self):
         """Test Pro requirements for hardware tiers."""
         from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
 
-        # CPU tiers should not require Pro
-        assert HARDWARE_SPECS["cpu-basic"]["pro_required"] == False
-        assert HARDWARE_SPECS["cpu-upgrade"]["pro_required"] == False
-
-        # GPU tiers should require Pro
-        assert HARDWARE_SPECS["t4-small"]["pro_required"] == True
-        assert HARDWARE_SPECS["a10g-small"]["pro_required"] == True
-        assert HARDWARE_SPECS["a100-large"]["pro_required"] == True
-        assert HARDWARE_SPECS["h100"]["pro_required"] == True
+        assert HARDWARE_SPECS
+        assert all(spec["pro_required"] is True for spec in HARDWARE_SPECS.values())
 
 
 # =============================================================================
 # Test: create_job_runner convenience function
 # =============================================================================
 
+
 class TestCreateJobRunner:
     """Tests for create_job_runner convenience function."""
 
     def test_create_job_runner(self):
         """Test creating job runner via convenience function."""
-        from bashgym.integrations.huggingface.jobs import create_job_runner
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.jobs import create_job_runner
 
         reset_hf_client()
 
@@ -1295,8 +1282,8 @@ class TestCreateJobRunner:
 
     def test_create_job_runner_no_pro(self):
         """Test creating job runner without Pro."""
-        from bashgym.integrations.huggingface.jobs import create_job_runner
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.jobs import create_job_runner
 
         reset_hf_client()
 
@@ -1308,17 +1295,18 @@ class TestCreateJobRunner:
 # Test: Integration with main integrations package
 # =============================================================================
 
+
 class TestJobsPackageIntegration:
     """Tests for job exports from main package."""
 
     def test_imports_from_huggingface_package(self):
         """Test job classes importable from huggingface package."""
         from bashgym.integrations.huggingface import (
-            HFJobRunner,
+            HARDWARE_SPECS,
             HFJobConfig,
             HFJobInfo,
+            HFJobRunner,
             JobStatus,
-            HARDWARE_SPECS,
             create_job_runner,
         )
 
@@ -1332,11 +1320,11 @@ class TestJobsPackageIntegration:
     def test_imports_from_integrations_package(self):
         """Test job classes importable from main integrations package."""
         from bashgym.integrations import (
-            HFJobRunner,
+            HARDWARE_SPECS,
             HFJobConfig,
             HFJobInfo,
+            HFJobRunner,
             JobStatus,
-            HARDWARE_SPECS,
             create_job_runner,
         )
 
@@ -1351,6 +1339,7 @@ class TestJobsPackageIntegration:
 # =============================================================================
 # Test: HFInferenceConfig
 # =============================================================================
+
 
 class TestHFInferenceConfig:
     """Tests for HFInferenceConfig dataclass."""
@@ -1421,6 +1410,7 @@ class TestHFInferenceConfig:
 # Test: InferenceUsage
 # =============================================================================
 
+
 class TestInferenceUsage:
     """Tests for InferenceUsage dataclass."""
 
@@ -1482,6 +1472,7 @@ class TestInferenceUsage:
 # =============================================================================
 # Test: Response Classes
 # =============================================================================
+
 
 class TestResponseClasses:
     """Tests for response dataclasses."""
@@ -1561,6 +1552,7 @@ class TestResponseClasses:
 # Test: Inference Provider Enums
 # =============================================================================
 
+
 class TestInferenceEnums:
     """Tests for inference-related enums."""
 
@@ -1586,6 +1578,7 @@ class TestInferenceEnums:
 # Test: HFInferenceClient
 # =============================================================================
 
+
 class TestHFInferenceClient:
     """Tests for HFInferenceClient class."""
 
@@ -1600,6 +1593,7 @@ class TestHFInferenceClient:
 
         # Mock the library as unavailable
         import bashgym.integrations.huggingface.inference as inf_module
+
         original_available = inf_module.HF_INFERENCE_AVAILABLE
 
         try:
@@ -1614,16 +1608,17 @@ class TestHFInferenceClient:
 
     def test_client_without_token(self):
         """Test client behavior with no token."""
+        from bashgym.integrations.huggingface import HFAuthError
         from bashgym.integrations.huggingface.inference import (
             HFInferenceClient,
             reset_inference_client,
         )
-        from bashgym.integrations.huggingface import HFAuthError
 
         reset_inference_client()
 
         # Create client without token and with mocked unavailable inference
         import bashgym.integrations.huggingface.inference as inf_module
+
         original_available = inf_module.HF_INFERENCE_AVAILABLE
 
         try:
@@ -1912,11 +1907,11 @@ class TestHFInferenceClient:
 
     def test_client_quota_error_detection(self):
         """Test that quota errors are properly detected and raised."""
+        from bashgym.integrations.huggingface import HFQuotaExceededError
         from bashgym.integrations.huggingface.inference import (
             HFInferenceClient,
             reset_inference_client,
         )
-        from bashgym.integrations.huggingface import HFQuotaExceededError
 
         reset_inference_client()
 
@@ -1932,11 +1927,11 @@ class TestHFInferenceClient:
 
     def test_client_quota_error_429(self):
         """Test that 429 errors are detected as quota errors."""
+        from bashgym.integrations.huggingface import HFQuotaExceededError
         from bashgym.integrations.huggingface.inference import (
             HFInferenceClient,
             reset_inference_client,
         )
-        from bashgym.integrations.huggingface import HFQuotaExceededError
 
         reset_inference_client()
 
@@ -1980,6 +1975,7 @@ class TestHFInferenceClient:
 # =============================================================================
 # Test: Singleton Access
 # =============================================================================
+
 
 class TestInferenceSingletonAccess:
     """Tests for get_inference_client singleton function."""
@@ -2034,6 +2030,7 @@ class TestInferenceSingletonAccess:
 # Test: Cost Estimation
 # =============================================================================
 
+
 class TestCostEstimation:
     """Tests for cost estimation functions."""
 
@@ -2077,21 +2074,22 @@ class TestCostEstimation:
 # Test: Inference Package Integration
 # =============================================================================
 
+
 class TestInferencePackageIntegration:
     """Tests for inference exports from packages."""
 
     def test_imports_from_huggingface_package(self):
         """Test inference classes importable from huggingface package."""
         from bashgym.integrations.huggingface import (
+            HF_INFERENCE_AVAILABLE,
+            ClassificationResponse,
+            EmbeddingResponse,
+            GenerationResponse,
             HFInferenceClient,
             HFInferenceConfig,
-            InferenceUsage,
-            GenerationResponse,
-            EmbeddingResponse,
-            ClassificationResponse,
             InferenceProvider,
+            InferenceUsage,
             RoutingStrategy,
-            HF_INFERENCE_AVAILABLE,
             get_inference_client,
             reset_inference_client,
         )
@@ -2114,14 +2112,7 @@ class TestInferencePackageIntegration:
             HFInferenceClient,
             HFInferenceConfig,
             InferenceUsage,
-            GenerationResponse,
-            EmbeddingResponse,
-            ClassificationResponse,
-            InferenceProvider,
-            RoutingStrategy,
-            HF_INFERENCE_AVAILABLE,
             get_inference_client,
-            reset_inference_client,
         )
 
         assert HFInferenceClient is not None
@@ -2134,6 +2125,7 @@ class TestInferencePackageIntegration:
 # Test: HF_INFERENCE_AVAILABLE Flag
 # =============================================================================
 
+
 class TestHFInferenceAvailable:
     """Tests for HF_INFERENCE_AVAILABLE flag."""
 
@@ -2142,11 +2134,7 @@ class TestHFInferenceAvailable:
         from bashgym.integrations.huggingface.inference import HF_INFERENCE_AVAILABLE
 
         # Check if InferenceClient is available
-        try:
-            from huggingface_hub import InferenceClient
-            expected = True
-        except ImportError:
-            expected = False
+        expected = importlib.util.find_spec("huggingface_hub") is not None
 
         assert HF_INFERENCE_AVAILABLE == expected
 
@@ -2154,6 +2142,7 @@ class TestHFInferenceAvailable:
 # =============================================================================
 # Test: SpaceConfig
 # =============================================================================
+
 
 class TestSpaceConfig:
     """Tests for SpaceConfig dataclass."""
@@ -2165,10 +2154,10 @@ class TestSpaceConfig:
         config = SpaceConfig(name="my-space")
         assert config.name == "my-space"
         assert config.hardware == "zero-gpu"
-        assert config.private == True
+        assert config.private
         assert config.sdk == "gradio"
         assert config.python_version == "3.10"
-        assert config.dev_mode == False
+        assert not config.dev_mode
 
     def test_config_custom(self):
         """Test custom configuration values."""
@@ -2185,10 +2174,10 @@ class TestSpaceConfig:
 
         assert config.name == "custom-space"
         assert config.hardware == "t4-small"
-        assert config.private == False
+        assert not config.private
         assert config.sdk == "streamlit"
         assert config.python_version == "3.11"
-        assert config.dev_mode == True
+        assert config.dev_mode
 
     def test_config_validation_valid(self):
         """Test validation passes for valid config."""
@@ -2221,6 +2210,7 @@ class TestSpaceConfig:
 # Test: SpaceStatus Enum
 # =============================================================================
 
+
 class TestSpaceStatus:
     """Tests for SpaceStatus enum."""
 
@@ -2247,6 +2237,7 @@ class TestSpaceStatus:
 # Test: SSHCredentials
 # =============================================================================
 
+
 class TestSSHCredentials:
     """Tests for SSHCredentials dataclass."""
 
@@ -2258,7 +2249,7 @@ class TestSSHCredentials:
             host="ssh.spaces.huggingface.co",
             port=22,
             username="user123",
-            key="-----BEGIN RSA PRIVATE KEY-----\n..."
+            key="-----BEGIN RSA PRIVATE KEY-----\n...",
         )
 
         assert creds.host == "ssh.spaces.huggingface.co"
@@ -2271,13 +2262,14 @@ class TestSSHCredentials:
 # Test: HFSpaceManager
 # =============================================================================
 
+
 class TestHFSpaceManager:
     """Tests for HFSpaceManager class."""
 
     def test_space_manager_without_pro(self):
         """Test space manager without Pro subscription."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceConfig
         from bashgym.integrations.huggingface import HFProRequiredError, reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceConfig
 
         reset_hf_client()
 
@@ -2295,8 +2287,8 @@ class TestHFSpaceManager:
 
     def test_space_manager_with_pro_override(self):
         """Test space manager with Pro override enabled."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager
 
         reset_hf_client()
 
@@ -2324,12 +2316,11 @@ class TestHFSpaceManager:
 
     def test_create_inference_space_success(self):
         """Test successful Space creation."""
+        from bashgym.integrations.huggingface import reset_hf_client
         from bashgym.integrations.huggingface.spaces import (
             HFSpaceManager,
             SpaceConfig,
-            SpaceStatus,
         )
-        from bashgym.integrations.huggingface import reset_hf_client
 
         reset_hf_client()
 
@@ -2356,8 +2347,8 @@ class TestHFSpaceManager:
 
     def test_create_inference_space_requires_pro(self):
         """Test that creating ZeroGPU Space requires Pro subscription."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceConfig
         from bashgym.integrations.huggingface import HFProRequiredError, reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceConfig
 
         reset_hf_client()
 
@@ -2374,8 +2365,8 @@ class TestHFSpaceManager:
 
     def test_get_space_status(self):
         """Test getting Space status."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceStatus
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceStatus
 
         reset_hf_client()
 
@@ -2395,8 +2386,8 @@ class TestHFSpaceManager:
 
     def test_get_space_status_building(self):
         """Test getting Space status when building."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceStatus
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceStatus
 
         reset_hf_client()
 
@@ -2416,8 +2407,8 @@ class TestHFSpaceManager:
 
     def test_delete_space(self):
         """Test deleting a Space."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager
 
         reset_hf_client()
 
@@ -2439,8 +2430,8 @@ class TestHFSpaceManager:
 
     def test_delete_space_requires_pro(self):
         """Test that deleting a Space requires Pro subscription."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager
         from bashgym.integrations.huggingface import HFProRequiredError, reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager
 
         reset_hf_client()
 
@@ -2451,8 +2442,8 @@ class TestHFSpaceManager:
 
     def test_update_space_model(self):
         """Test updating model in existing Space."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager
 
         reset_hf_client()
 
@@ -2473,8 +2464,8 @@ class TestHFSpaceManager:
 
     def test_space_manager_repr(self):
         """Test string representation of HFSpaceManager."""
-        from bashgym.integrations.huggingface.spaces import HFSpaceManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.spaces import HFSpaceManager
 
         reset_hf_client()
 
@@ -2493,6 +2484,7 @@ class TestHFSpaceManager:
 # =============================================================================
 # Test: GRADIO_APP_TEMPLATE
 # =============================================================================
+
 
 class TestGradioAppTemplate:
     """Tests for GRADIO_APP_TEMPLATE constant."""
@@ -2527,17 +2519,18 @@ class TestGradioAppTemplate:
 # Test: Spaces Package Integration
 # =============================================================================
 
+
 class TestSpacesPackageIntegration:
     """Tests for Spaces exports from packages."""
 
     def test_imports_from_huggingface_package(self):
         """Test Spaces classes importable from huggingface package."""
         from bashgym.integrations.huggingface import (
+            GRADIO_APP_TEMPLATE,
             HFSpaceManager,
             SpaceConfig,
             SpaceStatus,
             SSHCredentials,
-            GRADIO_APP_TEMPLATE,
         )
 
         assert HFSpaceManager is not None
@@ -2549,11 +2542,11 @@ class TestSpacesPackageIntegration:
     def test_imports_from_integrations_package(self):
         """Test Spaces classes importable from main integrations package."""
         from bashgym.integrations import (
+            GRADIO_APP_TEMPLATE,
             HFSpaceManager,
             SpaceConfig,
             SpaceStatus,
             SSHCredentials,
-            GRADIO_APP_TEMPLATE,
         )
 
         assert HFSpaceManager is not None
@@ -2567,6 +2560,7 @@ class TestSpacesPackageIntegration:
 # Test: DatasetConfig
 # =============================================================================
 
+
 class TestDatasetConfig:
     """Tests for DatasetConfig dataclass."""
 
@@ -2576,8 +2570,8 @@ class TestDatasetConfig:
 
         config = DatasetConfig(repo_name="my-dataset")
         assert config.repo_name == "my-dataset"
-        assert config.private == True
-        assert config.enable_viewer == True
+        assert config.private
+        assert config.enable_viewer
 
     def test_config_custom(self):
         """Test custom configuration values."""
@@ -2590,8 +2584,8 @@ class TestDatasetConfig:
         )
 
         assert config.repo_name == "custom-dataset"
-        assert config.private == False
-        assert config.enable_viewer == False
+        assert not config.private
+        assert not config.enable_viewer
 
     def test_config_validation_valid(self):
         """Test validation passes for valid config."""
@@ -2624,13 +2618,14 @@ class TestDatasetConfig:
 # Test: HFDatasetManager
 # =============================================================================
 
+
 class TestHFDatasetManager:
     """Tests for HFDatasetManager class."""
 
     def test_dataset_manager_creation(self):
         """Test dataset manager creation."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2657,9 +2652,10 @@ class TestHFDatasetManager:
 
     def test_upload_training_data_requires_train_file(self):
         """Test upload requires train.jsonl."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
-        from bashgym.integrations.huggingface import reset_hf_client
         import tempfile
+
+        from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2675,9 +2671,10 @@ class TestHFDatasetManager:
 
     def test_upload_training_data_success(self):
         """Test successful dataset upload."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager, DatasetConfig
-        from bashgym.integrations.huggingface import reset_hf_client
         import tempfile
+
+        from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import DatasetConfig, HFDatasetManager
 
         reset_hf_client()
 
@@ -2714,9 +2711,10 @@ class TestHFDatasetManager:
 
     def test_upload_training_data_with_metadata(self):
         """Test dataset upload with metadata."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
-        from bashgym.integrations.huggingface import reset_hf_client
         import tempfile
+
+        from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2748,9 +2746,10 @@ class TestHFDatasetManager:
 
     def test_download_dataset(self):
         """Test dataset download."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
-        from bashgym.integrations.huggingface import reset_hf_client
         import tempfile
+
+        from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2772,8 +2771,8 @@ class TestHFDatasetManager:
 
     def test_list_datasets(self):
         """Test listing datasets."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2798,8 +2797,8 @@ class TestHFDatasetManager:
 
     def test_delete_dataset(self):
         """Test deleting a dataset."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2813,13 +2812,13 @@ class TestHFDatasetManager:
 
         result = manager.delete_dataset("test-dataset")
 
-        assert result == True
+        assert result
         mock_api.delete_repo.assert_called_once()
 
     def test_delete_dataset_with_full_repo_id(self):
         """Test deleting a dataset with full repo ID."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2833,15 +2832,15 @@ class TestHFDatasetManager:
 
         result = manager.delete_dataset("otheruser/test-dataset")
 
-        assert result == True
+        assert result
         # Should use the full repo ID as provided
         call_args = mock_api.delete_repo.call_args
         assert call_args[1]["repo_id"] == "otheruser/test-dataset"
 
     def test_upload_traces(self):
         """Test uploading traces as dataset."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2869,9 +2868,10 @@ class TestHFDatasetManager:
 
     def test_count_lines(self):
         """Test line counting helper."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
-        from bashgym.integrations.huggingface import reset_hf_client
         import tempfile
+
+        from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2882,7 +2882,7 @@ class TestHFDatasetManager:
 
             # Test file with lines
             test_file = tmppath / "test.jsonl"
-            test_file.write_text('line1\nline2\nline3\n')
+            test_file.write_text("line1\nline2\nline3\n")
 
             count = manager._count_lines(test_file)
             assert count == 3
@@ -2893,8 +2893,8 @@ class TestHFDatasetManager:
 
     def test_get_size_category(self):
         """Test size category helper."""
-        from bashgym.integrations.huggingface.datasets import HFDatasetManager
         from bashgym.integrations.huggingface import reset_hf_client
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         reset_hf_client()
 
@@ -2910,6 +2910,7 @@ class TestHFDatasetManager:
 # =============================================================================
 # Test: DATASET_CARD_TEMPLATE
 # =============================================================================
+
 
 class TestDatasetCardTemplate:
     """Tests for DATASET_CARD_TEMPLATE."""
@@ -2944,15 +2945,16 @@ class TestDatasetCardTemplate:
 # Test: Dataset Package Integration
 # =============================================================================
 
+
 class TestDatasetPackageIntegration:
     """Tests for Dataset exports from packages."""
 
     def test_imports_from_huggingface_package(self):
         """Test Dataset classes importable from huggingface package."""
         from bashgym.integrations.huggingface import (
-            HFDatasetManager,
-            DatasetConfig,
             DATASET_CARD_TEMPLATE,
+            DatasetConfig,
+            HFDatasetManager,
         )
 
         assert HFDatasetManager is not None
@@ -2962,9 +2964,9 @@ class TestDatasetPackageIntegration:
     def test_imports_from_datasets_module(self):
         """Test Dataset classes importable from datasets module."""
         from bashgym.integrations.huggingface.datasets import (
-            HFDatasetManager,
-            DatasetConfig,
             DATASET_CARD_TEMPLATE,
+            DatasetConfig,
+            HFDatasetManager,
         )
 
         assert HFDatasetManager is not None
@@ -2975,6 +2977,7 @@ class TestDatasetPackageIntegration:
 # =============================================================================
 # Test: Secrets Module
 # =============================================================================
+
 
 class TestSecretsModule:
     """Tests for bashgym.secrets module."""
@@ -3040,8 +3043,9 @@ class TestSecretsModule:
 
     def test_secrets_file_operations(self, tmp_path):
         """Test save/load secrets from file."""
-        from bashgym.secrets import load_secrets, save_secrets, get_secrets_path
         from unittest.mock import patch
+
+        from bashgym.secrets import load_secrets, save_secrets
 
         # Mock the secrets path to use temp dir
         mock_path = tmp_path / "secrets.json"
@@ -3116,6 +3120,7 @@ class TestSecretsModule:
             assert "HF_TOKEN" not in load_secrets()
             assert delete_secret("HF_TOKEN") is True
             assert fake_keyring.values == {}
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

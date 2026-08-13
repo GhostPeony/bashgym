@@ -6,13 +6,11 @@ import {
   CheckCircle,
   AlertCircle,
   ShieldCheck,
-  Filter,
+  Filter
 } from 'lucide-react'
-import {
-  dataQualityApi,
-  type DataQualityDefaults,
-  type DecisionDpoJob,
-} from '../../services/api'
+import { dataQualityApi, type DecisionDpoJob } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import { dataQualityDefaultsResource } from '../../stores/factoryResources'
 
 interface QualityForm {
   gold_dir: string
@@ -29,7 +27,7 @@ const DEFAULT_FORM: QualityForm = {
   generate_decision_dpo: true,
   require_successful_verification: true,
   min_trace_steps: 2,
-  max_trace_steps: 50,
+  max_trace_steps: 50
 }
 
 function Toggle({
@@ -37,7 +35,7 @@ function Toggle({
   hint,
   checked,
   onChange,
-  icon: Icon,
+  icon: Icon
 }: {
   label: string
   hint: string
@@ -70,20 +68,18 @@ export function DecisionDpoPanel() {
   const [job, setJob] = useState<DecisionDpoJob | null>(null)
   const [error, setError] = useState('')
 
+  const { data: qualityDefaults } = useSessionResource(dataQualityDefaultsResource)
+
   useEffect(() => {
-    dataQualityApi.defaults().then((r) => {
-      if (r.ok && r.data) {
-        const d = r.data as DataQualityDefaults
-        setForm((f) => ({
-          ...f,
-          generate_decision_dpo: d.generate_decision_dpo,
-          require_successful_verification: d.require_successful_verification,
-          min_trace_steps: d.min_trace_steps,
-          max_trace_steps: d.max_trace_steps,
-        }))
-      }
-    })
-  }, [])
+    if (!qualityDefaults) return
+    setForm((f) => ({
+      ...f,
+      generate_decision_dpo: qualityDefaults.generate_decision_dpo,
+      require_successful_verification: qualityDefaults.require_successful_verification,
+      min_trace_steps: qualityDefaults.min_trace_steps,
+      max_trace_steps: qualityDefaults.max_trace_steps
+    }))
+  }, [qualityDefaults])
 
   const pollJob = async (jobId: string) => {
     const poll = async () => {
@@ -114,7 +110,7 @@ export function DecisionDpoPanel() {
       generate_decision_dpo: form.generate_decision_dpo,
       require_successful_verification: form.require_successful_verification,
       min_trace_steps: form.min_trace_steps,
-      max_trace_steps: form.max_trace_steps,
+      max_trace_steps: form.max_trace_steps
     })
     if (r.ok && r.data) {
       setJob(r.data)

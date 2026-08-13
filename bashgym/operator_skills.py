@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-HOSTS = ("codex", "claude", "hermes")
+HOSTS = ("codex", "claude", "hermes", "agents")
+AUTO_DETECTED_HOSTS = ("codex", "claude", "hermes")
 RECEIPT_NAME = ".bashgym-skill-bundle-receipt.json"
 LOCK_SCHEMA = "bashgym.operator-bundle-lock.v2"
 RECEIPT_SCHEMA = "bashgym.operator-skills-receipt.v1"
@@ -77,6 +78,12 @@ def _load_bundle(source_root: Path | None = None) -> SkillBundle:
 
 def _host_home(host: str) -> Path:
     home = Path.home()
+    if host == "agents":
+        current = Path.cwd().resolve()
+        for candidate in (current, *current.parents):
+            if (candidate / ".git").exists():
+                return candidate / ".agents"
+        return current / ".agents"
     if host == "codex":
         return Path(os.environ.get("CODEX_HOME", home / ".codex")).expanduser()
     if host == "claude":
@@ -91,7 +98,7 @@ def resolve_host(host: str | None) -> tuple[str, Path]:
     if host is not None:
         selected = host.casefold()
         if selected not in HOSTS:
-            raise ValueError("agent host must be codex, claude, or hermes")
+            raise ValueError("agent host must be codex, claude, hermes, or agents")
         return selected, _host_home(selected) / "skills"
 
     explicit = {
@@ -101,9 +108,11 @@ def resolve_host(host: str | None) -> tuple[str, Path]:
     }
     candidates = [name for name, configured in explicit.items() if configured]
     if not candidates:
-        candidates = [name for name in HOSTS if _host_home(name).is_dir()]
+        candidates = [name for name in AUTO_DETECTED_HOSTS if _host_home(name).is_dir()]
     if len(candidates) != 1:
-        raise ValueError("agent host detection is ambiguous; pass --host codex, claude, or hermes")
+        raise ValueError(
+            "agent host detection is ambiguous; pass --host codex, claude, hermes, or agents"
+        )
     selected = candidates[0]
     return selected, _host_home(selected) / "skills"
 

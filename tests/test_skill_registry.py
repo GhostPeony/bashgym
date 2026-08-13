@@ -1,8 +1,10 @@
 # tests/test_skill_registry.py
 import json
-import pytest
 import tempfile
 from pathlib import Path
+
+import pytest
+
 from bashgym.agent.skills.registry import SkillRegistry
 
 
@@ -11,40 +13,56 @@ def skills_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
         d = Path(tmpdir) / "hf"
         d.mkdir()
-        (d / "hf_cli.json").write_text(json.dumps({
-            "name": "hf_cli",
-            "description": "Hub operations",
-            "trigger_keywords": ["hub", "download", "upload", "repo", "cache", "login"],
-            "tools": [
+        (d / "hf_cli.json").write_text(
+            json.dumps(
                 {
-                    "name": "hf_download_model",
-                    "description": "Download a model from HuggingFace Hub",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {"model_id": {"type": "string"}},
-                        "required": ["model_id"],
-                    },
+                    "name": "hf_cli",
+                    "description": "Hub operations",
+                    "trigger_keywords": ["hub", "download", "upload", "repo", "cache", "login"],
+                    "tools": [
+                        {
+                            "name": "hf_download_model",
+                            "description": "Download a model from HuggingFace Hub",
+                            "input_schema": {
+                                "type": "object",
+                                "properties": {"model_id": {"type": "string"}},
+                                "required": ["model_id"],
+                            },
+                        }
+                    ],
+                    "knowledge": "The hf CLI provides hub operations.",
                 }
-            ],
-            "knowledge": "The hf CLI provides hub operations."
-        }))
-        (d / "hf_trainer.json").write_text(json.dumps({
-            "name": "hf_model_trainer",
-            "description": "Fine-tune models with TRL",
-            "trigger_keywords": ["train", "fine-tune", "finetune", "sft", "dpo", "grpo", "lora"],
-            "tools": [
+            )
+        )
+        (d / "hf_trainer.json").write_text(
+            json.dumps(
                 {
-                    "name": "hf_start_cloud_training",
-                    "description": "Submit cloud training job",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {"model_id": {"type": "string"}},
-                        "required": ["model_id"],
-                    },
+                    "name": "hf_model_trainer",
+                    "description": "Fine-tune models with TRL",
+                    "trigger_keywords": [
+                        "train",
+                        "fine-tune",
+                        "finetune",
+                        "sft",
+                        "dpo",
+                        "grpo",
+                        "lora",
+                    ],
+                    "tools": [
+                        {
+                            "name": "hf_start_cloud_training",
+                            "description": "Submit cloud training job",
+                            "input_schema": {
+                                "type": "object",
+                                "properties": {"model_id": {"type": "string"}},
+                                "required": ["model_id"],
+                            },
+                        }
+                    ],
+                    "knowledge": "TRL supports SFT, DPO, GRPO training.",
                 }
-            ],
-            "knowledge": "TRL supports SFT, DPO, GRPO training."
-        }))
+            )
+        )
         yield Path(tmpdir)
 
 

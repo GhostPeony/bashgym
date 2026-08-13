@@ -21,17 +21,21 @@ export interface TerminalOutputBatcherOptions {
   timerApi?: TerminalOutputTimerApi
 }
 
-const CLAUDE_BANNER_LINE = /(?:^|\n)\s*(?:[|│]\s*)?(?:(?:✻\s*)?Welcome(?:\s+to)?\s+Claude\s+Code!?|Claude\s+Code\s+v?\d[\w.-]*)\s*(?:[|│])?\s*$/im
-const CODEX_BANNER_LINE = /(?:^|\n)\s*(?:[|│]\s*)?(?:>[_ ]\s*)?OpenAI\s+Codex(?:\s+\(v[\w.-]+\)|\s+v?\d[\w.-]*)?\s*(?:[|│])?\s*$/im
+const CLAUDE_BANNER_LINE =
+  /(?:^|\n)\s*(?:[|│]\s*)?(?:(?:✻\s*)?Welcome(?:\s+to)?\s+Claude\s+Code!?|Claude\s+Code\s+v?\d[\w.-]*)\s*(?:[|│])?\s*$/im
+const CODEX_BANNER_LINE =
+  /(?:^|\n)\s*(?:[|│]\s*)?(?:>[_ ]\s*)?OpenAI\s+Codex(?:\s+\(v[\w.-]+\)|\s+v?\d[\w.-]*)?\s*(?:[|│])?\s*$/im
 const ACTIVITY_MARK_RE = /^[\s│┃┆┊]*(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏●•⏺✻✢✽✶])\s*/
 const COMPLETION_MARK_RE = /^[\s│┃┆┊]*[✓✗✔✘]/
 const INPUT_PROMPT_RE = /^\s*[>›❯]\s*$/
-const TOOL_RE = /^(Apply\s+Patch|NotebookEdit|WebSearch|WebFetch|Read|Edit|Write|Bash|Glob|Grep|Task|Shell|Command|Run|Ran|Search|Searching|Explore|Explored|Patch|Edited?)\b/i
-const ACTIVE_RE = /^(Thinking|Planning|Working|Reasoning|Analyzing|Searching|Reading|Writing|Editing|Running)\b/i
+const TOOL_RE =
+  /^(Apply\s+Patch|NotebookEdit|WebSearch|WebFetch|Read|Edit|Write|Bash|Glob|Grep|Task|Shell|Command|Run|Ran|Search|Searching|Explore|Explored|Patch|Edited?)\b/i
+const ACTIVE_RE =
+  /^(Thinking|Planning|Working|Reasoning|Analyzing|Searching|Reading|Writing|Editing|Running)\b/i
 
 const DEFAULT_TIMER_API: TerminalOutputTimerApi = {
   set: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
-  clear: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+  clear: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>)
 }
 
 /**
@@ -50,7 +54,7 @@ export class TerminalOutputBatcher {
 
   constructor(
     private readonly onFlush: (output: string) => void,
-    options: TerminalOutputBatcherOptions = {},
+    options: TerminalOutputBatcherOptions = {}
   ) {
     this.quietMs = options.quietMs ?? 80
     this.maxWaitMs = options.maxWaitMs ?? 250
@@ -110,11 +114,13 @@ function normalizeTool(raw: string): string {
 }
 
 function meaningfulLines(output: string): string[] {
-  return output
-    .split(/\r\n|\n|\r/)
-    // eslint-disable-next-line no-control-regex
-    .map((line) => line.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim())
-    .filter((line) => line.length > 0 && !/^[╭╰╮╯─━┄┈│┃┆┊\s]+$/.test(line))
+  return (
+    output
+      .split(/\r\n|\n|\r/)
+      // eslint-disable-next-line no-control-regex
+      .map((line) => line.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim())
+      .filter((line) => line.length > 0 && !/^[╭╰╮╯─━┄┈│┃┆┊\s]+$/.test(line))
+  )
 }
 
 /** Classifies the latest observable terminal state, favoring the newest line. */
@@ -144,12 +150,15 @@ export function detectTerminalActivity(output: string): TerminalActivityObservat
     sawActivityMark ||= hadActivityMark
     const toolMatch = summary.match(TOOL_RE)
     if (toolMatch && hadActivityMark) {
-      const target = summary.slice(toolMatch[0].length).replace(/^[\s(:-]+|\)\s*$/g, '').trim()
+      const target = summary
+        .slice(toolMatch[0].length)
+        .replace(/^[\s(:-]+|\)\s*$/g, '')
+        .trim()
       return {
         status: 'tool_calling',
         currentTool: normalizeTool(toolMatch[1]),
         summary,
-        ...(target ? { target: target.slice(0, 120) } : {}),
+        ...(target ? { target: target.slice(0, 120) } : {})
       }
     }
 

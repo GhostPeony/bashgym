@@ -83,9 +83,7 @@ def live_campaign_api(repository: CampaignRuntimeRepository):
 
 
 @pytest.mark.asyncio
-async def test_cli_and_mcp_use_the_authenticated_live_http_contract(
-    tmp_path, monkeypatch, capsys
-):
+async def test_cli_and_mcp_use_the_authenticated_live_http_contract(tmp_path, monkeypatch, capsys):
     repository = CampaignRuntimeRepository(tmp_path / "campaigns.sqlite3")
     repository.initialize()
     create(repository)
@@ -256,9 +254,7 @@ async def test_restart_safe_dry_campaign_is_consistent_across_rest_cli_and_mcp(
                 data_directory=tmp_path / "data-root",
                 worker_id=f"surface-worker-restart-{index}",
             )
-            results.append(
-                worker.run_once(now=START + timedelta(seconds=20 * (index + 1)))
-            )
+            results.append(worker.run_once(now=START + timedelta(seconds=20 * (index + 1))))
         assert results == ["completed"] * 6
 
         rest_studies = rest.request_json(

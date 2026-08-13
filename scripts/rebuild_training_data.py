@@ -23,10 +23,8 @@ import random
 import re
 import sys
 import time
-from collections import Counter, defaultdict
-from datetime import datetime
+from collections import Counter
 from pathlib import Path
-from typing import Any
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,12 +62,82 @@ You have access to these tools:
 Always explain your reasoning before taking action."""
 
 TOOL_SCHEMAS = [
-    {"type": "function", "function": {"name": "Bash", "description": "Execute a shell command", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
-    {"type": "function", "function": {"name": "Read", "description": "Read a file", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}}, "required": ["file_path"]}}},
-    {"type": "function", "function": {"name": "Write", "description": "Write to a file", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "content": {"type": "string"}}, "required": ["file_path", "content"]}}},
-    {"type": "function", "function": {"name": "Edit", "description": "Edit a file", "parameters": {"type": "object", "properties": {"file_path": {"type": "string"}, "old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["file_path", "old_string", "new_string"]}}},
-    {"type": "function", "function": {"name": "Grep", "description": "Search file contents", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}}},
-    {"type": "function", "function": {"name": "Glob", "description": "Find files by pattern", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}}},
+    {
+        "type": "function",
+        "function": {
+            "name": "Bash",
+            "description": "Execute a shell command",
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Read",
+            "description": "Read a file",
+            "parameters": {
+                "type": "object",
+                "properties": {"file_path": {"type": "string"}},
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Write",
+            "description": "Write to a file",
+            "parameters": {
+                "type": "object",
+                "properties": {"file_path": {"type": "string"}, "content": {"type": "string"}},
+                "required": ["file_path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Edit",
+            "description": "Edit a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "old_string": {"type": "string"},
+                    "new_string": {"type": "string"},
+                },
+                "required": ["file_path", "old_string", "new_string"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Grep",
+            "description": "Search file contents",
+            "parameters": {
+                "type": "object",
+                "properties": {"pattern": {"type": "string"}},
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Glob",
+            "description": "Find files by pattern",
+            "parameters": {
+                "type": "object",
+                "properties": {"pattern": {"type": "string"}},
+                "required": ["pattern"],
+            },
+        },
+    },
 ]
 
 
@@ -146,7 +214,6 @@ def parse_session(path: Path) -> list[dict]:
 
     # Build message sequence from events
     messages = []
-    pending_tool_uses = {}  # id -> tool_use dict
     user_prompts = []
 
     for event in events:
@@ -158,7 +225,11 @@ def parse_session(path: Path) -> list[dict]:
                 # Plain text user message
                 if msg_content.strip() and msg_content.strip() not in (
                     "[Request interrupted by user for tool use]",
-                    "y", "yes", "ok", "continue", "go ahead",
+                    "y",
+                    "yes",
+                    "ok",
+                    "continue",
+                    "go ahead",
                 ):
                     messages.append({"role": "user", "content": msg_content.strip()})
                     user_prompts.append(msg_content.strip())
@@ -172,12 +243,11 @@ def parse_session(path: Path) -> list[dict]:
                         if btype == "tool_result":
                             tool_use_id = block.get("tool_use_id", "")
                             content = block.get("content", "")
-                            is_error = block.get("is_error", False)
-
                             # Extract text from content blocks
                             if isinstance(content, list):
                                 content = "\n".join(
-                                    b.get("text", "") for b in content
+                                    b.get("text", "")
+                                    for b in content
                                     if isinstance(b, dict) and b.get("type") == "text"
                                 )
                             elif not isinstance(content, str):
@@ -187,17 +257,21 @@ def parse_session(path: Path) -> list[dict]:
                             if len(content) > 8000:
                                 content = content[:8000] + "\n... (truncated)"
 
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_use_id,
-                                "content": content,
-                            })
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_use_id,
+                                    "content": content,
+                                }
+                            )
 
                         elif btype == "text":
                             text = block.get("text", "").strip()
                             if text and text not in (
                                 "[Request interrupted by user for tool use]",
-                                "y", "yes", "ok",
+                                "y",
+                                "yes",
+                                "ok",
                             ):
                                 text_parts.append(text)
 
@@ -233,18 +307,26 @@ def parse_session(path: Path) -> list[dict]:
                             text_parts.append(text)
 
                     elif btype == "tool_use":
-                        tool_id = block.get("id", f"call_{hashlib.md5(json.dumps(block).encode()).hexdigest()[:8]}")
+                        tool_id = block.get(
+                            "id", f"call_{hashlib.md5(json.dumps(block).encode()).hexdigest()[:8]}"
+                        )
                         tool_name = block.get("name", "unknown")
                         tool_input = block.get("input", {})
 
-                        tool_calls.append({
-                            "id": tool_id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "arguments": json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input),
-                            },
-                        })
+                        tool_calls.append(
+                            {
+                                "id": tool_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": (
+                                        json.dumps(tool_input)
+                                        if isinstance(tool_input, dict)
+                                        else str(tool_input)
+                                    ),
+                                },
+                            }
+                        )
 
                 # Build content with optional thinking
                 content_parts = []
@@ -298,8 +380,7 @@ def _segment_messages(
 
         # Count tool calls in this segment
         tool_call_count = sum(
-            len(m.get("tool_calls", [])) for m in seg_msgs
-            if m.get("role") == "assistant"
+            len(m.get("tool_calls", [])) for m in seg_msgs if m.get("role") == "assistant"
         )
 
         if tool_call_count < MIN_TOOL_CALLS:
@@ -314,21 +395,25 @@ def _segment_messages(
             for m in example_msgs:
                 for tc in m.get("tool_calls", []):
                     tool_counts[tc["function"]["name"]] += 1
-            summary = "Task completed. " + ", ".join(
-                f"{c} {n}" for n, c in tool_counts.most_common(5)
-            ) + " operations."
+            summary = (
+                "Task completed. "
+                + ", ".join(f"{c} {n}" for n, c in tool_counts.most_common(5))
+                + " operations."
+            )
             example_msgs.append({"role": "assistant", "content": summary})
 
-        segments.append({
-            "messages": example_msgs,
-            "tools": TOOL_SCHEMAS,
-            "metadata": {
-                "source": str(source_path),
-                "project": project,
-                "tool_calls": tool_call_count,
-                "segment_index": seg_idx,
-            },
-        })
+        segments.append(
+            {
+                "messages": example_msgs,
+                "tools": TOOL_SCHEMAS,
+                "metadata": {
+                    "source": str(source_path),
+                    "project": project,
+                    "tool_calls": tool_call_count,
+                    "segment_index": seg_idx,
+                },
+            }
+        )
 
     return segments
 
@@ -383,14 +468,12 @@ def chunk_example(ex: dict, max_tokens: int, tokenizer=None) -> list[dict]:
     """Split oversized example into chunks that fit within max_tokens."""
     msgs = ex["messages"]
     header = [m for m in msgs if m["role"] in ("system", "user")][:2]
-    body = msgs[len(header):]
+    body = msgs[len(header) :]
 
     if not body:
         return [ex]
 
     header_tokens = estimate_tokens({"messages": header}, tokenizer)
-    budget = max_tokens - header_tokens - 200
-
     # Group into assistant+tool pairs
     pairs = []
     current = []
@@ -412,7 +495,9 @@ def chunk_example(ex: dict, max_tokens: int, tokenizer=None) -> list[dict]:
         if chunk_tokens + pair_tokens > max_tokens and len(chunk_msgs) > len(header):
             # Add closing message to chunk
             chunk_msgs.append({"role": "assistant", "content": "Continuing task..."})
-            chunks.append({"messages": chunk_msgs, "tools": ex.get("tools"), "metadata": ex.get("metadata")})
+            chunks.append(
+                {"messages": chunk_msgs, "tools": ex.get("tools"), "metadata": ex.get("metadata")}
+            )
             chunk_msgs = list(header)
             chunk_tokens = header_tokens
 
@@ -420,7 +505,9 @@ def chunk_example(ex: dict, max_tokens: int, tokenizer=None) -> list[dict]:
         chunk_tokens += pair_tokens
 
     if len(chunk_msgs) > len(header):
-        chunks.append({"messages": chunk_msgs, "tools": ex.get("tools"), "metadata": ex.get("metadata")})
+        chunks.append(
+            {"messages": chunk_msgs, "tools": ex.get("tools"), "metadata": ex.get("metadata")}
+        )
 
     return chunks if chunks else [ex]
 
@@ -491,6 +578,7 @@ def main():
     tokenizer = None
     try:
         from transformers import AutoTokenizer
+
         tok_path = Path.home() / ".unsloth/studio/outputs/unsloth_gemma-4-E4B-it_1775370273"
         if tok_path.exists():
             tokenizer = AutoTokenizer.from_pretrained(str(tok_path))
@@ -515,7 +603,8 @@ def main():
 
     # Filter out tiny examples (< 3 messages beyond system)
     filtered = [
-        ex for ex in chunked
+        ex
+        for ex in chunked
         if len(ex.get("messages", [])) >= 5  # system + user + at least one assistant+tool+closing
     ]
     logger.info(f"Filtered short examples: {len(chunked)} → {len(filtered)}")
@@ -531,9 +620,7 @@ def main():
     logger.info(f"Split: {len(train)} train / {len(val)} val")
 
     # Project distribution
-    train_projects = Counter(
-        ex.get("metadata", {}).get("project", "unknown") for ex in train
-    )
+    train_projects = Counter(ex.get("metadata", {}).get("project", "unknown") for ex in train)
     logger.info("  Train projects:")
     for proj, count in train_projects.most_common(10):
         logger.info(f"    {proj}: {count}")
@@ -561,6 +648,7 @@ def main():
     sys.path.insert(0, str(Path(__file__).parent))
     try:
         from export_unsloth import convert_file
+
         unsloth_dir = OUTPUT_DIR / "unsloth"
         unsloth_dir.mkdir(exist_ok=True)
         convert_file(train_path, unsloth_dir, ["chatml", "chatml_flat", "sharegpt"])
@@ -571,9 +659,7 @@ def main():
 
     # Final stats
     duration = time.time() - start_time
-    final_roles = Counter(
-        ex["messages"][-1]["role"] for ex in train if ex.get("messages")
-    )
+    final_roles = Counter(ex["messages"][-1]["role"] for ex in train if ex.get("messages"))
 
     logger.info("=" * 60)
     logger.info("REBUILD COMPLETE")

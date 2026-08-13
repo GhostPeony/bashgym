@@ -91,14 +91,18 @@ export function Modal({
           <div className="min-w-0">
             <h2
               id={titleId}
-              className={isCanvas ? 'modal-canvas-title' : 'text-lg font-brand font-normal text-text-primary'}
+              className={
+                isCanvas ? 'modal-canvas-title' : 'text-lg font-brand font-normal text-text-primary'
+              }
             >
               {title}
             </h2>
             {description && (
               <p
                 id={descriptionId}
-                className={isCanvas ? 'modal-canvas-description' : 'text-sm text-text-secondary mt-1'}
+                className={
+                  isCanvas ? 'modal-canvas-description' : 'text-sm text-text-secondary mt-1'
+                }
               >
                 {description}
               </p>
@@ -107,7 +111,11 @@ export function Modal({
           <button
             type="button"
             onClick={onClose}
-            className={isCanvas ? 'node-btn node-btn-danger h-8 w-8' : 'btn-icon w-8 h-8 text-text-muted hover:text-text-primary'}
+            className={
+              isCanvas
+                ? 'node-btn node-btn-danger h-8 w-8'
+                : 'btn-icon w-8 h-8 text-text-muted hover:text-text-primary'
+            }
             title="Close modal"
           >
             <X className="w-4 h-4" />
@@ -124,7 +132,13 @@ export function Modal({
         </div>
 
         {footer && (
-          <div className={isCanvas ? 'modal-canvas-footer' : 'flex items-center justify-end gap-3 px-6 py-4 border-t border-border'}>
+          <div
+            className={
+              isCanvas
+                ? 'modal-canvas-footer'
+                : 'flex items-center justify-end gap-3 px-6 py-4 border-t border-border'
+            }
+          >
             {footer}
           </div>
         )}

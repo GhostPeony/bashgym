@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bashgym.gym.remote_trainer import PreflightResult, RemoteTrainer, SSHConfig
+from bashgym.gym.trainer import Trainer, TrainerConfig, TrainingRun, TrainingStrategy
 
 
 class TestSSHConfig:
@@ -23,7 +24,7 @@ class TestPreflight:
     @pytest.fixture
     def trainer(self):
         config = SSHConfig(
-            host="192.168.1.100",
+            host="192.0.2.10",
             username="remote-user",
             port=22,
             key_path="~/.ssh/id_rsa",
@@ -71,7 +72,7 @@ class TestUploadAndExecute:
     @pytest.fixture
     def trainer(self):
         config = SSHConfig(
-            host="192.168.1.100",
+            host="192.0.2.10",
             username="remote-user",
             port=22,
             key_path="~/.ssh/id_rsa",
@@ -121,16 +122,25 @@ class TestUploadAndExecute:
             )
             assert pid == 12345
 
-    def test_stream_logs_calls_callback(self, trainer):
+    def test_wait_for_remote_training_streams_bounded_progress_without_downloading_logs(
+        self, trainer
+    ):
         mock_conn = AsyncMock()
-        log_lines = []
+        commands = []
+        observed = []
 
         async def mock_run(cmd, check=False):
-            if "tail" in cmd:
-                return MagicMock(stdout="epoch 1 loss 0.5\nepoch 2 loss 0.3\n", exit_status=0)
-            elif "kill -0" in cmd:
+            commands.append(cmd)
+            if "remote_log_chunk" in cmd:
+                return MagicMock(
+                    stdout='{"data":"ZXBvY2ggMSBsb3NzIDAuNQo=","offset":17}',
+                    exit_status=0,
+                )
+            if "kill -0" in cmd:
                 return MagicMock(exit_status=1)
-            return MagicMock(stdout="", exit_status=0)
+            if "test -f" in cmd:
+                return MagicMock(stdout="", exit_status=0)
+            return MagicMock(stdout='{"data":"","offset":17}', exit_status=0)
 
         mock_conn.run = mock_run
 
@@ -140,17 +150,19 @@ class TestUploadAndExecute:
                     mock_conn,
                     "run_123",
                     12345,
-                    log_callback=lambda line: log_lines.append(line),
+                    log_callback=observed.append,
                 )
             )
-            assert len(log_lines) >= 2
+            assert observed == ["epoch 1 loss 0.5"]
+            assert all("scp" not in command and "sftp" not in command for command in commands)
+            assert any("65536" in command for command in commands)
 
 
 class TestTrainRemote:
     @pytest.fixture
     def trainer(self):
         config = SSHConfig(
-            host="192.168.1.100",
+            host="192.0.2.10",
             username="remote-user",
             port=22,
             key_path="~/.ssh/id_rsa",
@@ -187,11 +199,19 @@ class TestTrainRemote:
         trainer._download_artifacts = mock_download
 
         conn = AsyncMock()
-        conn.run = AsyncMock(return_value=MagicMock(stdout=f"{exit_code}\n"))
+
+        async def run(command, check=False):
+            if "/exit_code" in command:
+                return MagicMock(stdout=f"{exit_code}\n", exit_status=0)
+            if "artifact_manifest" in command:
+                return MagicMock(stdout="final\nmerged\n", exit_status=0)
+            return MagicMock(stdout="", exit_status=0)
+
+        conn.run = AsyncMock(side_effect=run)
         trainer._connect = AsyncMock(return_value=conn)
 
-    def test_train_remote_orchestrates_full_flow(self, trainer, tmp_path):
-        """Verify train_remote calls preflight, upload, execute, stream, download."""
+    def test_train_remote_keeps_model_artifacts_on_the_compute_target(self, trainer, tmp_path):
+        """A private SSH run returns an opaque reference instead of downloading weights."""
         calls = []
         self._wire_mocks(trainer, calls, exit_code="0")
 
@@ -211,7 +231,44 @@ class TestTrainRemote:
 
         assert result["success"] is True
         assert result["remote_pid"] == 99999
-        assert calls == ["preflight", "upload", "start", "stream", "download"]
+        assert result["remote_run_ref"] == "ssh-run://run_test"
+        assert result["artifact_refs"] == [
+            "ssh-run://run_test/final",
+            "ssh-run://run_test/merged",
+        ]
+        assert calls == ["preflight", "upload", "start", "stream"]
+        assert not (tmp_path / "output" / "final").exists()
+        assert not (tmp_path / "output" / "merged").exists()
+
+    def test_train_remote_rejects_success_without_a_model_artifact(self, trainer, tmp_path):
+        calls = []
+        self._wire_mocks(trainer, calls, exit_code="0")
+        conn = trainer._connect.return_value
+
+        async def run(command, check=False):
+            if "/exit_code" in command:
+                return MagicMock(stdout="0\n", exit_status=0)
+            if "artifact_manifest" in command:
+                return MagicMock(stdout="", exit_status=0)
+            return MagicMock(stdout="", exit_status=0)
+
+        conn.run = AsyncMock(side_effect=run)
+        script = tmp_path / "train_sft.py"
+        dataset = tmp_path / "train.jsonl"
+        script.write_text("print('hello')")
+        dataset.write_text("{}")
+
+        result = asyncio.run(
+            trainer.train_remote(
+                run_id="run_missing_model",
+                script_path=script,
+                dataset_path=dataset,
+                local_output_dir=tmp_path / "output",
+            )
+        )
+
+        assert result["success"] is False
+        assert result["error"] == "Remote training produced no model artifact."
 
     def test_train_remote_fails_on_nonzero_exit_code(self, trainer, tmp_path):
         """A remote script that crashed must be reported as a failure, not success."""
@@ -234,6 +291,8 @@ class TestTrainRemote:
 
         assert result["success"] is False
         assert "exited with code 1" in result["error"]
+        assert "Last log lines" not in result["error"]
+        assert result["log_ref"] == "ssh-run://run_crash/training.log"
         assert "download" not in calls
 
     def test_resolve_work_dir_expands_tilde(self, trainer):
@@ -294,11 +353,61 @@ class TestTrainRemote:
         assert seen["require_unsloth"] is False
 
 
+def test_trainer_records_only_opaque_remote_artifact_references(tmp_path):
+    dataset = tmp_path / "train.jsonl"
+    dataset.write_text("{}\n", encoding="utf-8")
+    run = TrainingRun(
+        run_id="run_remote_resident",
+        strategy=TrainingStrategy.SFT,
+        base_model="registered-base-model",
+        dataset_path=dataset,
+        output_path=tmp_path / "controller-run",
+    )
+    trainer = Trainer(
+        TrainerConfig(
+            base_model="registered-base-model",
+            output_dir=str(tmp_path / "controller-runs"),
+        )
+    )
+    trainer.ssh_config = SSHConfig(host="research-host", username="research-user")
+
+    class FakeRemoteTrainer:
+        def __init__(self, _config):
+            pass
+
+        async def train_remote(self, **_kwargs):
+            return {
+                "success": True,
+                "remote_pid": 123,
+                "run_id": run.run_id,
+                "remote_run_ref": f"ssh-run://{run.run_id}",
+                "artifact_refs": [
+                    f"ssh-run://{run.run_id}/final",
+                    f"ssh-run://{run.run_id}/merged",
+                ],
+            }
+
+    with patch("bashgym.gym.remote_trainer.RemoteTrainer", FakeRemoteTrainer):
+        trainer._train_with_remote_ssh(run, None, None, None)
+
+    assert run.training_metadata["remote_execution"] == {
+        "schema_version": "bashgym.remote_training_reference.v1",
+        "run_ref": "ssh-run://run_remote_resident",
+        "artifact_refs": [
+            "ssh-run://run_remote_resident/final",
+            "ssh-run://run_remote_resident/merged",
+        ],
+    }
+    assert "research-host" not in str(run.training_metadata)
+    assert not (run.output_path / "final").exists()
+    assert not (run.output_path / "merged").exists()
+
+
 class TestRemoteProcessControl:
     @pytest.fixture
     def trainer(self):
         config = SSHConfig(
-            host="192.168.1.100",
+            host="192.0.2.10",
             username="remote-user",
             port=22,
             key_path="~/.ssh/id_rsa",

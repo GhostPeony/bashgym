@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import uuid
 from collections.abc import Callable
 from datetime import datetime
@@ -240,6 +241,44 @@ def _stop_desktop_campaign_worker(
     return stopped
 
 
+async def _build_trace_index(
+    cache: Any,
+    *,
+    tier_dirs: list[tuple[Path, TraceStatus]],
+    pending_dirs: list[Path],
+    parse_tiered_fn: Callable[..., Any],
+    parse_pending_fn: Callable[..., Any],
+) -> None:
+    """Build the trace index in a daemon thread managed by one async task."""
+
+    loop = asyncio.get_running_loop()
+    complete = loop.create_future()
+
+    def mark_complete() -> None:
+        if not complete.done():
+            complete.set_result(None)
+
+    def build() -> None:
+        try:
+            cache.build_index(
+                tier_dirs=tier_dirs,
+                pending_dirs=pending_dirs,
+                parse_tiered_fn=parse_tiered_fn,
+                parse_pending_fn=parse_pending_fn,
+            )
+        except Exception:
+            logger.exception("Failed to build trace index")
+        finally:
+            try:
+                loop.call_soon_threadsafe(mark_complete)
+            except RuntimeError:
+                # The API may finish shutting down before a long filesystem scan.
+                pass
+
+    threading.Thread(target=build, name="bashgym-trace-index", daemon=True).start()
+    await complete
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
 
@@ -293,6 +332,7 @@ def create_app() -> FastAPI:
     app.state.campaign_worker_supervisor = None
     app.state.campaign_worker_bootstrap_failure_code = None
     app.state.campaign_worker_managed = False
+    app.state.trace_index_task = None
     from bashgym.api.trace_cache import TraceIndexCache
 
     app.state.trace_cache = TraceIndexCache()
@@ -513,7 +553,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"Error recovering orphaned training runs: {e}")
 
-        # Build trace metadata index cache
+        # Build trace metadata index cache without delaying API readiness.
         try:
             from bashgym.config import get_bashgym_dir
             from bashgym.config import get_settings as _gs
@@ -542,24 +582,36 @@ def create_app() -> FastAPI:
                     return _parse_raw_trace_file(trace_file, data)
                 return None
 
-            app.state.trace_cache.build_index(
-                tier_dirs=_tier_dirs,
-                pending_dirs=_pending_dirs,
-                parse_tiered_fn=_parse_trace_file,
-                parse_pending_fn=_parse_pending_for_cache,
-            )
             # Store dir config for refresh calls
             app.state._trace_tier_dirs = _tier_dirs
             app.state._trace_pending_dirs = _pending_dirs
             app.state._trace_parse_pending = _parse_pending_for_cache
+            app.state.trace_index_task = asyncio.create_task(
+                _build_trace_index(
+                    app.state.trace_cache,
+                    tier_dirs=_tier_dirs,
+                    pending_dirs=_pending_dirs,
+                    parse_tiered_fn=_parse_trace_file,
+                    parse_pending_fn=_parse_pending_for_cache,
+                ),
+                name="bashgym-trace-index",
+            )
         except Exception as e:
-            logger.error(f"Failed to build trace index: {e}")
+            logger.error("Failed to schedule trace index: %s", type(e).__name__)
 
         await asyncio.to_thread(_start_desktop_campaign_worker, app, settings)
 
     @app.on_event("shutdown")
     async def shutdown():
         """Cleanup on shutdown."""
+        trace_index_task = getattr(app.state, "trace_index_task", None)
+        if trace_index_task is not None:
+            if not trace_index_task.done():
+                trace_index_task.cancel()
+            try:
+                await trace_index_task
+            except asyncio.CancelledError:
+                pass
         await asyncio.to_thread(_stop_desktop_campaign_worker, app)
         if app.state.mcp_workbench:
             await app.state.mcp_workbench.aclose()
@@ -587,8 +639,13 @@ def create_app() -> FastAPI:
     @app.get("/api/health", response_model=HealthCheck, tags=["System"])
     async def health_check():
         """Check API health status."""
+        from bashgym.config import state_root_digest
+
         return HealthCheck(
-            status="healthy", timestamp=datetime.utcnow().isoformat(), version="0.1.0"
+            status="healthy",
+            timestamp=datetime.utcnow().isoformat(),
+            version="0.1.0",
+            state_root_digest=state_root_digest(),
         )
 
     @app.get("/api/debug/traces", tags=["System"])
@@ -2517,6 +2574,10 @@ def create_app() -> FastAPI:
         """List traces with pagination (served from in-memory cache)."""
         cache = app.state.trace_cache
 
+        if not cache.initialized:
+            trace_index_task = getattr(app.state, "trace_index_task", None)
+            if trace_index_task is not None and not trace_index_task.done():
+                await asyncio.shield(trace_index_task)
         if not cache.initialized:
             return {
                 "traces": [],
@@ -5857,8 +5918,11 @@ def create_app() -> FastAPI:
     # Include curated public source library routes
     app.include_router(source_router)
 
-    # Include AutoResearch routes (hyperparameter search)
-    app.include_router(autoresearch_router)
+    # Legacy prototype AutoResearch routes (in-process hyperparameter/trace/
+    # data-recipe/schema search). Superseded by the durable campaign surface
+    # under /api/campaigns/*; hidden unless explicitly re-enabled.
+    if os.environ.get("BASHGYM_ENABLE_LEGACY_AUTORESEARCH", "").lower() in {"1", "true", "yes"}:
+        app.include_router(autoresearch_router)
 
     # Include Cascade RL routes (domain-by-domain sequential training)
     app.include_router(cascade_router)

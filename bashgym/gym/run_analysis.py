@@ -572,11 +572,10 @@ def build_training_analysis(
             }
         )
     if smoke_bundle_summary["present"]:
-        docs.append({"topic": "agent-cli", "path": "docs/training/agent-cli.md"})
         docs.append(
             {
-                "topic": "private-compute-checklist",
-                "path": "docs/training/private-compute-eval-checklist.md",
+                "topic": "terminal-rl-recipe",
+                "path": "docs/training/tmax-terminal-rl-recipe.md",
             }
         )
 

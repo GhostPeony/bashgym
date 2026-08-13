@@ -20,7 +20,14 @@ import {
   Eye
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import type { AttentionState, AgentStatus, AgentKind, PanelType, ToolHistoryItem, SessionMetrics } from '../../stores/terminalStore'
+import type {
+  AttentionState,
+  AgentStatus,
+  AgentKind,
+  PanelType,
+  ToolHistoryItem,
+  SessionMetrics
+} from '../../stores/terminalStore'
 import { ToolBreadcrumbs } from './ToolBreadcrumbs'
 import { AgentBadge } from '../sessions/AgentBadge'
 import { useCanvasControlStore } from '../../stores'
@@ -137,7 +144,10 @@ function formatCost(cost: number): string {
   return `$${cost.toFixed(2)}`
 }
 
-export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeProps<TerminalNodeType>) {
+export const TerminalNode = memo(function TerminalNode({
+  data,
+  selected
+}: NodeProps<TerminalNodeType>) {
   const {
     panelId,
     title,
@@ -175,15 +185,21 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
     onFocus?.(panelId)
   }, [panelId, onFocus])
 
-  const handleClose = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onClose?.(panelId)
-  }, [panelId, onClose])
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onClose?.(panelId)
+    },
+    [panelId, onClose]
+  )
 
-  const handleTogglePause = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onTogglePause?.(panelId)
-  }, [panelId, onTogglePause])
+  const handleTogglePause = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onTogglePause?.(panelId)
+    },
+    [panelId, onTogglePause]
+  )
 
   const relativeTime = formatRelativeTime(lastActivity)
   const repository = repositoryLabel(cwd)
@@ -223,7 +239,9 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
         <NodeFlowerMark
           variant={type}
           size="xl"
-          active={Boolean(!isPaused && (status === 'running' || status === 'tool_calling' || selected))}
+          active={Boolean(
+            !isPaused && (status === 'running' || status === 'tool_calling' || selected)
+          )}
           muted={Boolean(isPaused || !status || status === 'idle')}
           title={`${type} node`}
         />
@@ -290,51 +308,49 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
               {isPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
             </button>
           )}
-          <button
-            onClick={handleFocus}
-            className="node-btn node-btn-accent"
-            title="Focus panel"
-          >
+          <button onClick={handleFocus} className="node-btn node-btn-accent" title="Focus panel">
             <Maximize2 className="w-3 h-3" />
           </button>
-          <button
-            onClick={handleClose}
-            className="node-btn node-btn-danger"
-            title="Close"
-          >
+          <button onClick={handleClose} className="node-btn node-btn-danger" title="Close">
             <X className="w-3 h-3" />
           </button>
         </div>
       </div>
 
       {/* Status bar */}
-      <div className={clsx(
-        'flex items-center gap-2 px-3 py-1.5 text-xs border-b border-brutal border-border font-mono',
-        !isPaused && status === 'running' && 'bg-accent-light',
-        !isPaused && status === 'waiting_input' && 'bg-status-warning/10',
-        !isPaused && status === 'tool_calling' && 'bg-accent-light',
-        isPaused && 'bg-status-warning/10'
-      )}>
+      <div
+        className={clsx(
+          'flex items-center gap-2 px-3 py-1.5 text-xs border-b border-brutal border-border font-mono',
+          !isPaused && status === 'running' && 'bg-accent-light',
+          !isPaused && status === 'waiting_input' && 'bg-status-warning/10',
+          !isPaused && status === 'tool_calling' && 'bg-accent-light',
+          isPaused && 'bg-status-warning/10'
+        )}
+      >
         {getStatusIcon(status, isPaused)}
         <div className="flex-1 min-w-0">
-          <span className={clsx(
-            'font-semibold block',
-            isPaused && 'text-status-warning',
-            !isPaused && status === 'running' && 'text-accent-dark',
-            !isPaused && status === 'waiting_input' && 'text-status-warning',
-            !isPaused && status === 'tool_calling' && 'text-accent-dark',
-            !isPaused && (!status || status === 'idle') && 'text-text-muted'
-          )}>
-            {isPaused ? 'Paused' :
-             status === 'waiting_input' ? 'Waiting for input' :
-             status === 'tool_calling' ? 'Working' :
-             status === 'running' ? 'Thinking...' :
-             'Idle'}
+          <span
+            className={clsx(
+              'font-semibold block',
+              isPaused && 'text-status-warning',
+              !isPaused && status === 'running' && 'text-accent-dark',
+              !isPaused && status === 'waiting_input' && 'text-status-warning',
+              !isPaused && status === 'tool_calling' && 'text-accent-dark',
+              !isPaused && (!status || status === 'idle') && 'text-text-muted'
+            )}
+          >
+            {isPaused
+              ? 'Paused'
+              : status === 'waiting_input'
+                ? 'Waiting for input'
+                : status === 'tool_calling'
+                  ? 'Working'
+                  : status === 'running'
+                    ? 'Thinking...'
+                    : 'Idle'}
           </span>
           {currentTool && status === 'tool_calling' && !isPaused && (
-            <span className="text-[10px] text-accent-dark truncate block">
-              {currentTool}
-            </span>
+            <span className="text-[10px] text-accent-dark truncate block">{currentTool}</span>
           )}
         </div>
         {!isPaused && (status === 'running' || status === 'tool_calling') && (
@@ -345,7 +361,9 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
       {/* Error message */}
       {errorMessage && (
         <div className="px-3 py-1.5 bg-status-error/10 border-b border-brutal border-status-error">
-          <span className="text-[10px] text-status-error line-clamp-2 font-mono">{errorMessage}</span>
+          <span className="text-[10px] text-status-error line-clamp-2 font-mono">
+            {errorMessage}
+          </span>
         </div>
       )}
 
@@ -354,10 +372,10 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
         {/* Task summary */}
         {taskSummary && (
           <div className="border-brutal border-border-subtle rounded-brutal px-2 py-1.5 bg-background-secondary">
-            <div className="text-[10px] text-text-muted uppercase tracking-wider mb-0.5 font-mono font-semibold">Current Task</div>
-            <div className="text-xs text-text-primary line-clamp-2 font-mono">
-              {taskSummary}
+            <div className="text-[10px] text-text-muted uppercase tracking-wider mb-0.5 font-mono font-semibold">
+              Current Task
             </div>
+            <div className="text-xs text-text-primary line-clamp-2 font-mono">{taskSummary}</div>
           </div>
         )}
 
@@ -366,7 +384,10 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
           {repository && (
             <div className="flex min-w-0 items-center gap-1.5">
               <Folder className="w-3 h-3 text-text-muted flex-shrink-0" />
-              <span className="min-w-0 flex-1 truncate font-semibold text-text-secondary" title={cwd}>
+              <span
+                className="min-w-0 flex-1 truncate font-semibold text-text-secondary"
+                title={cwd}
+              >
                 {repository}
               </span>
             </div>

@@ -6,8 +6,12 @@ test('dismisses the chat surface without cancelling an active response', () => {
   let abortCount = 0
   let hideCount = 0
   const actions = createAgentChatSurfaceActions({
-    abort: () => { abortCount += 1 },
-    hide: () => { hideCount += 1 },
+    abort: () => {
+      abortCount += 1
+    },
+    hide: () => {
+      hideCount += 1
+    }
   })
 
   actions.dismiss()
@@ -20,8 +24,12 @@ test('keeps explicit Stop wired to stream cancellation', () => {
   let abortCount = 0
   let hideCount = 0
   const actions = createAgentChatSurfaceActions({
-    abort: () => { abortCount += 1 },
-    hide: () => { hideCount += 1 },
+    abort: () => {
+      abortCount += 1
+    },
+    hide: () => {
+      hideCount += 1
+    }
   })
 
   actions.stop()

@@ -850,14 +850,14 @@ class DataDesignerPipeline:
         val_path = out / "val.jsonl"
 
         # Convert to NeMo messages format
-        self._write_nemo_jsonl(train_df, train_path)
-        self._write_nemo_jsonl(val_df, val_path)
+        train_count = self._write_nemo_jsonl(train_df, train_path)
+        val_count = self._write_nemo_jsonl(val_df, val_path)
 
         result = {
             "train_path": str(train_path),
             "val_path": str(val_path),
-            "train_count": len(train_df),
-            "val_count": len(val_df),
+            "train_count": train_count,
+            "val_count": val_count,
             "filtered_out": filtered_out,
         }
         logger.info(
@@ -1087,16 +1087,17 @@ class DataDesignerPipeline:
     # NeMo Export
     # =========================================================================
 
-    def _write_nemo_jsonl(self, df: "pd.DataFrame", output_path: Path) -> None:
+    def _write_nemo_jsonl(self, df: "pd.DataFrame", output_path: Path) -> int:
         """Write DataFrame to NeMo-compatible messages JSONL.
 
         Expected DataFrame columns:
         - task_prompt: User instruction
-        - solution_text or solution: Assistant response
+        - solution_text, solution, or environment_draft: Assistant response
         - quality_score (optional): Judge scores for metadata
 
-        Falls back to using all string columns if expected columns missing.
+        Returns the number of rows actually written.
         """
+        written = 0
         with open(output_path, "w", encoding="utf-8") as f:
             for _, row in df.iterrows():
                 # Find the task prompt column
@@ -1108,11 +1109,19 @@ class DataDesignerPipeline:
 
                 # Find the response column
                 response = ""
-                for col in ["solution_text", "solution", "response", "assistant_response"]:
+                for col in [
+                    "solution_text",
+                    "solution",
+                    "response",
+                    "assistant_response",
+                    "environment_draft",
+                ]:
                     if col in row and row[col]:
                         val = row[col]
+                        if hasattr(val, "model_dump"):
+                            val = val.model_dump()
                         if isinstance(val, dict):
-                            response = json.dumps(val)
+                            response = json.dumps(val, sort_keys=True)
                         else:
                             response = str(val)
                         break
@@ -1128,6 +1137,8 @@ class DataDesignerPipeline:
                     ]
                 }
                 f.write(json.dumps(record) + "\n")
+                written += 1
+        return written
 
 
 SYSTEM_PROMPT = """You are an expert software development agent. You execute tasks by running bash commands, reading files, and making edits. You think step-by-step and verify your work.

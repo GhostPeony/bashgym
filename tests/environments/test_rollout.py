@@ -180,7 +180,9 @@ def test_run_local_environment_attempt_detects_tests_directory_tamper(tmp_path):
     plan = RolloutCommandPlan(
         environment=spec,
         attempt_index=0,
-        commands=[_py("from pathlib import Path; Path('tests/check.txt').write_text('changed\\n')")],
+        commands=[
+            _py("from pathlib import Path; Path('tests/check.txt').write_text('changed\\n')")
+        ],
     )
 
     result = run_local_environment_attempt(plan, tmp_path)
@@ -316,7 +318,7 @@ def test_run_local_model_environment_attempt_passes_verifier(tmp_path):
                                     }
                                 }
                             ]
-                        }
+                        },
                     }
                 ]
             },

@@ -6,7 +6,16 @@ export interface TaskNode {
   title: string
   description: string
   priority: 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW'
-  status: 'pending' | 'assigned' | 'running' | 'completed' | 'failed' | 'blocked' | 'cancelled' | 'retrying' | 'dispatched'
+  status:
+    | 'pending'
+    | 'assigned'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'blocked'
+    | 'cancelled'
+    | 'retrying'
+    | 'dispatched'
   dependencies: string[]
   files_touched: string[]
   estimated_turns: number
@@ -21,7 +30,14 @@ export interface TaskNode {
 
 export interface OrchestratorJob {
   jobId: string
-  status: 'decomposing' | 'awaiting_approval' | 'executing' | 'dispatched' | 'completed' | 'failed' | 'cancelled'
+  status:
+    | 'decomposing'
+    | 'awaiting_approval'
+    | 'executing'
+    | 'dispatched'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
   title: string
   tasks: Record<string, TaskNode>
   stats: { pending: number; in_progress: number; completed: number; failed: number }
@@ -51,9 +67,9 @@ interface OrchestratorState {
   jobs: Array<{ jobId: string; status: string; title: string; taskCount?: number }>
   providers: Array<{ provider: string; default_model: string; env_key: string; base_url?: string }>
   activeTab: 'submit' | 'active' | 'history'
-  taskAssignments: Record<string, string>   // taskId → terminalId
-  taskQueue: string[]                        // taskIds waiting for an idle terminal
-  editedPrompts: Record<string, string>      // taskId → user-edited prompt
+  taskAssignments: Record<string, string> // taskId → terminalId
+  taskQueue: string[] // taskIds waiting for an idle terminal
+  editedPrompts: Record<string, string> // taskId → user-edited prompt
 
   // Actions
   setActiveTab: (tab: 'submit' | 'active' | 'history') => void
@@ -117,17 +133,17 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
             limit_usd: spec.max_budget_usd || 10.0,
             spent_usd: 0,
             remaining_usd: spec.max_budget_usd || 10.0,
-            exceeded: false,
+            exceeded: false
           },
           totalCost: 0,
           totalTime: 0,
           mergeSuccesses: 0,
-          mergeFailures: 0,
+          mergeFailures: 0
         },
         activeTab: 'active',
         taskAssignments: {},
         taskQueue: [],
-        editedPrompts: {},
+        editedPrompts: {}
       })
       return jobId
     }
@@ -138,9 +154,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     const result = await orchestratorApi.approveJob(jobId)
     if (result.ok) {
       set((state) => ({
-        currentJob: state.currentJob
-          ? { ...state.currentJob, status: 'dispatched' }
-          : null,
+        currentJob: state.currentJob ? { ...state.currentJob, status: 'dispatched' } : null
       }))
       // Dispatch tasks to idle terminals
       get().dispatchToTerminals()
@@ -151,9 +165,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
     const result = await orchestratorApi.cancelJob(jobId)
     if (result.ok) {
       set((state) => ({
-        currentJob: state.currentJob
-          ? { ...state.currentJob, status: 'cancelled' }
-          : null,
+        currentJob: state.currentJob ? { ...state.currentJob, status: 'cancelled' } : null
       }))
     }
   },
@@ -164,7 +176,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   setEditedPrompt: (taskId, prompt) =>
     set((state) => ({
-      editedPrompts: { ...state.editedPrompts, [taskId]: prompt },
+      editedPrompts: { ...state.editedPrompts, [taskId]: prompt }
     })),
 
   resetEditedPrompt: (taskId) =>
@@ -226,7 +238,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
     set((state) => ({
       taskQueue: remaining,
-      taskAssignments: { ...state.taskAssignments, [nextTaskId]: terminalId },
+      taskAssignments: { ...state.taskAssignments, [nextTaskId]: terminalId }
     }))
   },
 
@@ -252,7 +264,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
             worker_id: t.worker_id,
             cost_usd: t.result?.cost_usd,
             duration_seconds: t.result?.duration_seconds,
-            error: t.result?.error,
+            error: t.result?.error
           }
         }
       }
@@ -261,7 +273,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         pending: rawStats.pending || 0,
         in_progress: rawStats.in_progress || rawStats.running || 0,
         completed: rawStats.completed || 0,
-        failed: rawStats.failed || 0,
+        failed: rawStats.failed || 0
       }
       set({
         currentJob: {
@@ -274,13 +286,13 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
             limit_usd: 10,
             spent_usd: data.total_cost || 0,
             remaining_usd: 10 - (data.total_cost || 0),
-            exceeded: false,
+            exceeded: false
           },
           totalCost: data.total_cost || 0,
           totalTime: data.total_time || 0,
           mergeSuccesses: data.synthesis?.merge_successes ?? 0,
-          mergeFailures: data.synthesis?.merge_failures ?? 0,
-        },
+          mergeFailures: data.synthesis?.merge_failures ?? 0
+        }
       })
     }
   },
@@ -293,8 +305,8 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           jobId: j.job_id,
           status: j.status,
           title: j.title || j.job_id,
-          taskCount: j.task_count,
-        })),
+          taskCount: j.task_count
+        }))
       })
     }
   },
@@ -316,12 +328,14 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   handleReady: (payload) => {
     const { job_id } = payload
-    get().fetchStatus(job_id).then(() => {
-      set((state) => {
-        if (!state.currentJob || state.currentJob.jobId !== job_id) return state
-        return { currentJob: { ...state.currentJob, status: 'awaiting_approval' } }
+    get()
+      .fetchStatus(job_id)
+      .then(() => {
+        set((state) => {
+          if (!state.currentJob || state.currentJob.jobId !== job_id) return state
+          return { currentJob: { ...state.currentJob, status: 'awaiting_approval' } }
+        })
       })
-    })
   },
 
   handleTaskStarted: (payload) => {
@@ -339,9 +353,9 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           stats: {
             ...state.currentJob.stats,
             in_progress: (state.currentJob.stats.in_progress || 0) + 1,
-            pending: Math.max(0, (state.currentJob.stats.pending || 0) - 1),
-          },
-        },
+            pending: Math.max(0, (state.currentJob.stats.pending || 0) - 1)
+          }
+        }
       }
     })
   },
@@ -356,7 +370,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           ...tasks[taskId],
           status: 'completed',
           cost_usd: payload.cost_usd,
-          duration_seconds: payload.duration_seconds,
+          duration_seconds: payload.duration_seconds
         }
       }
       return {
@@ -366,9 +380,9 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           stats: {
             ...state.currentJob.stats,
             completed: (state.currentJob.stats.completed || 0) + 1,
-            in_progress: Math.max(0, (state.currentJob.stats.in_progress || 0) - 1),
-          },
-        },
+            in_progress: Math.max(0, (state.currentJob.stats.in_progress || 0) - 1)
+          }
+        }
       }
     })
   },
@@ -388,9 +402,9 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           stats: {
             ...state.currentJob.stats,
             failed: (state.currentJob.stats.failed || 0) + 1,
-            in_progress: Math.max(0, (state.currentJob.stats.in_progress || 0) - 1),
-          },
-        },
+            in_progress: Math.max(0, (state.currentJob.stats.in_progress || 0) - 1)
+          }
+        }
       }
     })
   },
@@ -405,10 +419,11 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
             limit_usd: payload.budget_usd || state.currentJob.budget.limit_usd,
             spent_usd: payload.spent_usd || 0,
             remaining_usd: payload.remaining_usd || 0,
-            exceeded: (payload.spent_usd || 0) > (payload.budget_usd || state.currentJob.budget.limit_usd),
+            exceeded:
+              (payload.spent_usd || 0) > (payload.budget_usd || state.currentJob.budget.limit_usd)
           },
-          totalCost: payload.spent_usd || state.currentJob.totalCost,
-        },
+          totalCost: payload.spent_usd || state.currentJob.totalCost
+        }
       }
     })
   },
@@ -423,8 +438,8 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           totalCost: payload.total_cost_usd || state.currentJob.totalCost,
           totalTime: payload.total_time_seconds || state.currentJob.totalTime,
           mergeSuccesses: payload.merge_successes ?? state.currentJob.mergeSuccesses,
-          mergeFailures: payload.merge_failures ?? state.currentJob.mergeFailures,
-        },
+          mergeFailures: payload.merge_failures ?? state.currentJob.mergeFailures
+        }
       }
     })
   },
@@ -449,10 +464,10 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
             [payload.task_id]: {
               ...job.tasks[payload.task_id],
               status: 'retrying',
-              retry_count: (job.tasks[payload.task_id].retry_count || 0) + 1,
-            },
-          },
-        },
+              retry_count: (job.tasks[payload.task_id].retry_count || 0) + 1
+            }
+          }
+        }
       }
     })
   },
@@ -465,9 +480,9 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
         currentJob: {
           ...job,
           mergeSuccesses: job.mergeSuccesses + (payload.success ? 1 : 0),
-          mergeFailures: job.mergeFailures + (payload.success ? 0 : 1),
-        },
+          mergeFailures: job.mergeFailures + (payload.success ? 0 : 1)
+        }
       }
     })
-  },
+  }
 }))

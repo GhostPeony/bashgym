@@ -50,7 +50,12 @@ class LedgerTransitionError(LedgerPersistenceError):
 
 _RUN_TRANSITIONS: dict[str, frozenset[str]] = {
     RunStatus.QUEUED.value: frozenset(
-        {RunStatus.PREPARING.value, RunStatus.RUNNING.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
+        {
+            RunStatus.PREPARING.value,
+            RunStatus.RUNNING.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+        }
     ),
     RunStatus.PREPARING.value: frozenset(
         {RunStatus.RUNNING.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
@@ -68,7 +73,12 @@ _RUN_TRANSITIONS: dict[str, frozenset[str]] = {
         {RunStatus.RUNNING.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
     ),
     RunStatus.UNKNOWN.value: frozenset(
-        {RunStatus.RUNNING.value, RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
+        {
+            RunStatus.RUNNING.value,
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+        }
     ),
     RunStatus.COMPLETED.value: frozenset(),
     RunStatus.FAILED.value: frozenset(),
@@ -129,13 +139,10 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                     )
                 }
                 migration_rows = {
-                    int(row[0]): (str(row[1]), str(row[2]))
-                    for row in connection.execute(
-                        """
+                    int(row[0]): (str(row[1]), str(row[2])) for row in connection.execute("""
                         SELECT version, name, checksum
                         FROM campaign_schema_migrations
-                        """
-                    )
+                        """)
                 }
         except sqlite3.Error as exc:
             raise LedgerPersistenceError("ledger_schema_unavailable") from exc
@@ -183,9 +190,7 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
         return canonical_hash(payload)
 
     @staticmethod
-    def _replay_or_conflict(
-        row: sqlite3.Row | None, digest: str, *, entity: str
-    ) -> bool:
+    def _replay_or_conflict(row: sqlite3.Row | None, digest: str, *, entity: str) -> bool:
         if row is None:
             return False
         if row["identity_digest"] != digest:
@@ -330,11 +335,25 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
             ).fetchone()
             replayed = self._replay_or_conflict(existing, digest, entity=id_field)
             if not replayed:
-                all_columns = ("workspace_id", "project_id", id_field, *columns, "identity_digest", "created_at")
+                all_columns = (
+                    "workspace_id",
+                    "project_id",
+                    id_field,
+                    *columns,
+                    "identity_digest",
+                    "created_at",
+                )
                 placeholders = ", ".join("?" for _ in all_columns)
                 connection.execute(
                     f"INSERT INTO {table}({', '.join(all_columns)}) VALUES ({placeholders})",
-                    (spec.workspace_id, spec.project_id, id_value, *values, digest, _iso(spec.created_at)),
+                    (
+                        spec.workspace_id,
+                        spec.project_id,
+                        id_value,
+                        *values,
+                        digest,
+                        _iso(spec.created_at),
+                    ),
                 )
             row = connection.execute(
                 f"SELECT * FROM {table} WHERE workspace_id = ? AND project_id = ? AND {id_field} = ?",
@@ -381,7 +400,10 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                         _iso(spec.created_at),
                     ),
                 )
-        return self.get_model_version(spec.workspace_id, spec.project_id, spec.model_version_id), replayed
+        return (
+            self.get_model_version(spec.workspace_id, spec.project_id, spec.model_version_id),
+            replayed,
+        )
 
     def register_dataset_version(self, spec: DatasetVersionSpec) -> tuple[dict[str, Any], bool]:
         self._require_initialized()
@@ -422,7 +444,10 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                         _iso(spec.created_at),
                     ),
                 )
-        return self.get_dataset_version(spec.workspace_id, spec.project_id, spec.dataset_version_id), replayed
+        return (
+            self.get_dataset_version(spec.workspace_id, spec.project_id, spec.dataset_version_id),
+            replayed,
+        )
 
     def register_environment(self, spec: EnvironmentSpec) -> tuple[dict[str, Any], bool]:
         self._require_initialized()
@@ -460,7 +485,10 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                         _iso(spec.created_at),
                     ),
                 )
-        return self.get_environment(spec.workspace_id, spec.project_id, spec.environment_id), replayed
+        return (
+            self.get_environment(spec.workspace_id, spec.project_id, spec.environment_id),
+            replayed,
+        )
 
     def register_run(self, spec: RunSpec) -> tuple[dict[str, Any], bool]:
         self._require_initialized()
@@ -474,9 +502,24 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                 "ledger experiment not found",
             )
             for table, field, value, message in (
-                ("ledger_model_versions", "model_version_id", spec.model_version_id, "ledger model version not found"),
-                ("ledger_dataset_versions", "dataset_version_id", spec.dataset_version_id, "ledger dataset version not found"),
-                ("ledger_environments", "environment_id", spec.environment_id, "ledger environment not found"),
+                (
+                    "ledger_model_versions",
+                    "model_version_id",
+                    spec.model_version_id,
+                    "ledger model version not found",
+                ),
+                (
+                    "ledger_dataset_versions",
+                    "dataset_version_id",
+                    spec.dataset_version_id,
+                    "ledger dataset version not found",
+                ),
+                (
+                    "ledger_environments",
+                    "environment_id",
+                    spec.environment_id,
+                    "ledger environment not found",
+                ),
             ):
                 if value is not None:
                     self._require_row(
@@ -593,7 +636,10 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                     )
                 except sqlite3.IntegrityError as exc:
                     raise LedgerConflictError("attempt number is already assigned") from exc
-        return self.get_attempt_record(spec.workspace_id, spec.project_id, spec.attempt_id), replayed
+        return (
+            self.get_attempt_record(spec.workspace_id, spec.project_id, spec.attempt_id),
+            replayed,
+        )
 
     def transition_run(
         self,
@@ -673,7 +719,15 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                     updated_at = ?
                 WHERE workspace_id = ? AND project_id = ? AND {id_field} = ?
                 """,
-                (target, started_at, completed_at, _iso(moment), workspace_id, project_id, id_value),
+                (
+                    target,
+                    started_at,
+                    completed_at,
+                    _iso(moment),
+                    workspace_id,
+                    project_id,
+                    id_value,
+                ),
             )
             if table == "ledger_runs":
                 experiment_row = connection.execute(
@@ -772,14 +826,28 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
             id_field="artifact_id",
             id_value=spec.artifact_id,
             spec=spec,
-            columns=("attempt_id", "kind", "uri", "sha256", "size_bytes", "media_type", "metadata_json"),
-            values=(spec.attempt_id, spec.kind, spec.uri, spec.sha256, spec.size_bytes, spec.media_type, _json(spec.metadata)),
+            columns=(
+                "attempt_id",
+                "kind",
+                "uri",
+                "sha256",
+                "size_bytes",
+                "media_type",
+                "metadata_json",
+            ),
+            values=(
+                spec.attempt_id,
+                spec.kind,
+                spec.uri,
+                spec.sha256,
+                spec.size_bytes,
+                spec.media_type,
+                _json(spec.metadata),
+            ),
             json_fields=("metadata_json",),
         )
 
-    def register_evaluation_suite(
-        self, spec: EvaluationSuiteSpec
-    ) -> tuple[dict[str, Any], bool]:
+    def register_evaluation_suite(self, spec: EvaluationSuiteSpec) -> tuple[dict[str, Any], bool]:
         self._require_initialized()
         digest = self._identity_digest(spec, exclude={"created_at"})
         with self._connection(immediate=True) as connection:
@@ -818,11 +886,12 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                         _iso(spec.created_at),
                     ),
                 )
-        return self.get_evaluation_suite(spec.workspace_id, spec.project_id, spec.evaluation_suite_id), replayed
+        return (
+            self.get_evaluation_suite(spec.workspace_id, spec.project_id, spec.evaluation_suite_id),
+            replayed,
+        )
 
-    def record_evaluation_result(
-        self, spec: EvaluationResultSpec
-    ) -> tuple[dict[str, Any], bool]:
+    def record_evaluation_result(self, spec: EvaluationResultSpec) -> tuple[dict[str, Any], bool]:
         self._require_initialized()
         digest = self._identity_digest(spec)
         with self._connection(immediate=True) as connection:
@@ -874,7 +943,12 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                         _iso(utc_now()),
                     ),
                 )
-        return self.get_evaluation_result(spec.workspace_id, spec.project_id, spec.evaluation_result_id), replayed
+        return (
+            self.get_evaluation_result(
+                spec.workspace_id, spec.project_id, spec.evaluation_result_id
+            ),
+            replayed,
+        )
 
     def record_decision(self, spec: DecisionSpec) -> tuple[dict[str, Any], bool]:
         self._require_initialized()
@@ -1016,8 +1090,13 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
             replayed = self._replay_or_conflict(existing, digest, entity=id_field)
             if not replayed:
                 all_columns = (
-                    "workspace_id", "project_id", id_field, "run_id", *columns,
-                    "identity_digest", "created_at"
+                    "workspace_id",
+                    "project_id",
+                    id_field,
+                    "run_id",
+                    *columns,
+                    "identity_digest",
+                    "created_at",
                 )
                 placeholders = ", ".join("?" for _ in all_columns)
                 connection.execute(
@@ -1040,72 +1119,146 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
 
     def get_project(self, workspace_id: str, project_id: str) -> dict[str, Any]:
         return self._get_one(
-            "ledger_projects", "project_id", workspace_id, project_id, ("tags_json",), "ledger project not found"
+            "ledger_projects",
+            "project_id",
+            workspace_id,
+            project_id,
+            ("tags_json",),
+            "ledger project not found",
         )
 
-    def get_experiment(self, workspace_id: str, project_id: str, experiment_id: str) -> dict[str, Any]:
+    def get_experiment(
+        self, workspace_id: str, project_id: str, experiment_id: str
+    ) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_experiments", "experiment_id", workspace_id, project_id, experiment_id,
-            ("metadata_json",), "ledger experiment not found"
+            "ledger_experiments",
+            "experiment_id",
+            workspace_id,
+            project_id,
+            experiment_id,
+            ("metadata_json",),
+            "ledger experiment not found",
         )
 
-    def get_model_version(self, workspace_id: str, project_id: str, model_version_id: str) -> dict[str, Any]:
+    def get_model_version(
+        self, workspace_id: str, project_id: str, model_version_id: str
+    ) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_model_versions", "model_version_id", workspace_id, project_id, model_version_id,
-            ("metadata_json",), "ledger model version not found"
+            "ledger_model_versions",
+            "model_version_id",
+            workspace_id,
+            project_id,
+            model_version_id,
+            ("metadata_json",),
+            "ledger model version not found",
         )
 
     def get_dataset(self, workspace_id: str, project_id: str, dataset_id: str) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_datasets", "dataset_id", workspace_id, project_id, dataset_id,
-            ("metadata_json",), "ledger dataset not found"
+            "ledger_datasets",
+            "dataset_id",
+            workspace_id,
+            project_id,
+            dataset_id,
+            ("metadata_json",),
+            "ledger dataset not found",
         )
 
-    def get_dataset_version(self, workspace_id: str, project_id: str, dataset_version_id: str) -> dict[str, Any]:
+    def get_dataset_version(
+        self, workspace_id: str, project_id: str, dataset_version_id: str
+    ) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_dataset_versions", "dataset_version_id", workspace_id, project_id, dataset_version_id,
-            ("split_manifest_json", "row_counts_json", "metadata_json"), "ledger dataset version not found"
+            "ledger_dataset_versions",
+            "dataset_version_id",
+            workspace_id,
+            project_id,
+            dataset_version_id,
+            ("split_manifest_json", "row_counts_json", "metadata_json"),
+            "ledger dataset version not found",
         )
 
-    def get_environment(self, workspace_id: str, project_id: str, environment_id: str) -> dict[str, Any]:
+    def get_environment(
+        self, workspace_id: str, project_id: str, environment_id: str
+    ) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_environments", "environment_id", workspace_id, project_id, environment_id,
-            ("hardware_json", "metadata_json"), "ledger environment not found"
+            "ledger_environments",
+            "environment_id",
+            workspace_id,
+            project_id,
+            environment_id,
+            ("hardware_json", "metadata_json"),
+            "ledger environment not found",
         )
 
     def get_run(self, workspace_id: str, project_id: str, run_id: str) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_runs", "run_id", workspace_id, project_id, run_id,
-            ("config_json",), "ledger run not found"
+            "ledger_runs",
+            "run_id",
+            workspace_id,
+            project_id,
+            run_id,
+            ("config_json",),
+            "ledger run not found",
         )
 
-    def get_attempt_record(self, workspace_id: str, project_id: str, attempt_id: str) -> dict[str, Any]:
+    def get_attempt_record(
+        self, workspace_id: str, project_id: str, attempt_id: str
+    ) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_run_attempts", "attempt_id", workspace_id, project_id, attempt_id,
-            ("metadata_json",), "ledger attempt not found"
+            "ledger_run_attempts",
+            "attempt_id",
+            workspace_id,
+            project_id,
+            attempt_id,
+            ("metadata_json",),
+            "ledger attempt not found",
         )
 
-    def get_evaluation_suite(self, workspace_id: str, project_id: str, suite_id: str) -> dict[str, Any]:
+    def get_evaluation_suite(
+        self, workspace_id: str, project_id: str, suite_id: str
+    ) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_evaluation_suites", "evaluation_suite_id", workspace_id, project_id, suite_id,
-            ("metric_contract_json", "metadata_json"), "ledger evaluation suite not found"
+            "ledger_evaluation_suites",
+            "evaluation_suite_id",
+            workspace_id,
+            project_id,
+            suite_id,
+            ("metric_contract_json", "metadata_json"),
+            "ledger evaluation suite not found",
         )
 
-    def get_evaluation_result(self, workspace_id: str, project_id: str, result_id: str) -> dict[str, Any]:
+    def get_evaluation_result(
+        self, workspace_id: str, project_id: str, result_id: str
+    ) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_evaluation_results", "evaluation_result_id", workspace_id, project_id, result_id,
-            ("metrics_json", "slice_metrics_json"), "ledger evaluation result not found"
+            "ledger_evaluation_results",
+            "evaluation_result_id",
+            workspace_id,
+            project_id,
+            result_id,
+            ("metrics_json", "slice_metrics_json"),
+            "ledger evaluation result not found",
         )
 
     def get_decision(self, workspace_id: str, project_id: str, decision_id: str) -> dict[str, Any]:
         return self._get_project_one(
-            "ledger_decisions", "decision_id", workspace_id, project_id, decision_id,
-            ("evidence_refs_json",), "ledger decision not found"
+            "ledger_decisions",
+            "decision_id",
+            workspace_id,
+            project_id,
+            decision_id,
+            ("evidence_refs_json",),
+            "ledger decision not found",
         )
 
     def _get_one(
-        self, table: str, id_field: str, workspace_id: str, id_value: str,
-        json_fields: tuple[str, ...], message: str
+        self,
+        table: str,
+        id_field: str,
+        workspace_id: str,
+        id_value: str,
+        json_fields: tuple[str, ...],
+        message: str,
     ) -> dict[str, Any]:
         self._require_initialized()
         with self._connection() as connection:
@@ -1119,8 +1272,14 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
         return value
 
     def _get_project_one(
-        self, table: str, id_field: str, workspace_id: str, project_id: str, id_value: str,
-        json_fields: tuple[str, ...], message: str
+        self,
+        table: str,
+        id_field: str,
+        workspace_id: str,
+        project_id: str,
+        id_value: str,
+        json_fields: tuple[str, ...],
+        message: str,
     ) -> dict[str, Any]:
         self._require_initialized()
         with self._connection() as connection:
@@ -1203,13 +1362,9 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                    ORDER BY created_at DESC, environment_id""",
                 (workspace_id, project_id),
             ).fetchall()
-        return [
-            _decode_row(row, "hardware_json", "metadata_json") or {} for row in rows
-        ]
+        return [_decode_row(row, "hardware_json", "metadata_json") or {} for row in rows]
 
-    def list_evaluation_suites(
-        self, workspace_id: str, project_id: str
-    ) -> list[dict[str, Any]]:
+    def list_evaluation_suites(self, workspace_id: str, project_id: str) -> list[dict[str, Any]]:
         self.get_project(workspace_id, project_id)
         with self._connection() as connection:
             rows = connection.execute(
@@ -1218,9 +1373,7 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
                    ORDER BY created_at DESC, evaluation_suite_id""",
                 (workspace_id, project_id),
             ).fetchall()
-        return [
-            _decode_row(row, "metric_contract_json", "metadata_json") or {} for row in rows
-        ]
+        return [_decode_row(row, "metric_contract_json", "metadata_json") or {} for row in rows]
 
     def list_runs(
         self, workspace_id: str, project_id: str, *, limit: int = 100, status: str | None = None
@@ -1238,7 +1391,9 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
             rows = connection.execute(query, tuple(parameters)).fetchall()
         return [_decode_row(row, "config_json") or {} for row in rows]
 
-    def list_attempt_records(self, workspace_id: str, project_id: str, run_id: str) -> list[dict[str, Any]]:
+    def list_attempt_records(
+        self, workspace_id: str, project_id: str, run_id: str
+    ) -> list[dict[str, Any]]:
         self.get_run(workspace_id, project_id, run_id)
         with self._connection() as connection:
             rows = connection.execute(
@@ -1303,7 +1458,9 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
             rows = connection.execute(query, tuple(parameters)).fetchall()
         return [_decode_row(row, "metadata_json") or {} for row in rows]
 
-    def list_decisions(self, workspace_id: str, project_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    def list_decisions(
+        self, workspace_id: str, project_id: str, *, limit: int = 200
+    ) -> list[dict[str, Any]]:
         self.get_project(workspace_id, project_id)
         with self._connection() as connection:
             rows = connection.execute(

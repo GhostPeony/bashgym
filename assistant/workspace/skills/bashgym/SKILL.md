@@ -7,7 +7,16 @@ tags: [bashgym, training, evaluation, agents, artifacts]
 
 # BashGym
 
-BashGym is the shared ML workspace. It stores the authoritative operational record for datasets, model/config revisions, runs, metrics, evaluations, artifacts, budgets, and reports. Hermes, Codex, Claude Code, Discord, and canvas nodes are operator/interface choices over that workspace, not separate training systems.
+BashGym runs a repeatable model-improvement loop: evaluate a starting model on
+a fixed suite, inspect failures, change one declared part of the data or
+training process, train a candidate, evaluate it against the same suite, then
+keep, discard, iterate, or report. The host agent forms hypotheses and authors
+the next intervention; BashGym executes and records the experiment.
+
+The same experiment record contains dataset and model revisions, exact configs,
+runs, metrics, evaluations, artifacts, budgets, and reports. Codex, Cursor,
+Claude Code, terminals, and canvas nodes are interfaces to that loop rather
+than separate research systems.
 
 The project-isolated experiment ledger extends the existing campaign SQLite
 database. Every official run carries `workspace_id`, `project_id`,
@@ -25,7 +34,8 @@ project at a time; never infer a project from the most recent conversation.
 - For evidence and promotion gates, read [references/eval-capabilities.md](references/eval-capabilities.md).
 - For a multi-iteration baseline/hypothesis loop, use the durable campaign API,
   `bashgym campaign doctor`, and campaign ledger surfaces; do not start new
-  research on the prototype `/api/autoresearch/*` surface.
+  research on the prototype `/api/autoresearch/*` surface (hidden by default,
+  registered only when `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`).
 
 Do not treat this router as live run state. Inspect the API/CLI, run manifests, runtime processes, and current GBrain sources before stating what is active or what happened most recently.
 

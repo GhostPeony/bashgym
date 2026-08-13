@@ -10,5 +10,5 @@ export const FALLBACK_MODEL_OPTIONS: readonly ModelOption[] = [
   { value: 'Qwen/Qwen3.5-27B', label: 'Qwen3.5 27B' },
   { value: 'unsloth/gemma-4-12b-it', label: 'Gemma 4 12B' },
   { value: 'meta-llama/Llama-3.1-70B-Instruct', label: 'Llama 3.1 70B' },
-  { value: 'deepseek-ai/DeepSeek-Coder-V2-Instruct', label: 'DeepSeek Coder V2' },
+  { value: 'deepseek-ai/DeepSeek-Coder-V2-Instruct', label: 'DeepSeek Coder V2' }
 ]

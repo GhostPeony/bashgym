@@ -10,10 +10,10 @@ interface AgentChatSurfaceActionDependencies {
 
 export function createAgentChatSurfaceActions({
   abort,
-  hide,
+  hide
 }: AgentChatSurfaceActionDependencies): AgentChatSurfaceActions {
   return {
     dismiss: hide,
-    stop: abort,
+    stop: abort
   }
 }

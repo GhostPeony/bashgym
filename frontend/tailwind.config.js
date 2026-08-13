@@ -1,9 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   darkMode: 'class',
   theme: {
     extend: {
@@ -42,69 +39,55 @@ export default {
         }
       },
       fontFamily: {
-        brand: [
-          'DM Serif Display',
-          'Georgia',
-          'serif'
-        ],
-        sans: [
-          'Inter',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'system-ui',
-          'sans-serif'
-        ],
-        mono: [
-          'JetBrains Mono',
-          'Consolas',
-          'monospace'
-        ]
+        brand: ['DM Serif Display', 'Georgia', 'serif'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Consolas', 'monospace']
       },
       fontSize: {
-        'xs': ['12px', '16px'],
-        'sm': ['13px', '18px'],
-        'base': ['14px', '20px'],
-        'lg': ['16px', '24px'],
-        'xl': ['18px', '28px'],
+        xs: ['12px', '16px'],
+        sm: ['13px', '18px'],
+        base: ['14px', '20px'],
+        lg: ['16px', '24px'],
+        xl: ['18px', '28px'],
         '2xl': ['24px', '32px'],
         '3xl': ['30px', '36px'],
-        'display': ['36px', '44px']
+        display: ['36px', '44px']
       },
       boxShadow: {
-        'brutal': 'var(--shadow)',
+        brutal: 'var(--shadow)',
         'brutal-sm': 'var(--shadow-sm)',
         'brutal-hover': 'var(--shadow-sm)',
         'brutal-pressed': '1px 1px 0px var(--shadow-color)',
-        'soft': 'var(--shadow-soft)',
+        soft: 'var(--shadow-soft)',
         'soft-lg': 'var(--shadow-soft-lg)',
-        'none': 'none'
+        none: 'none'
       },
       borderWidth: {
-        'brutal': 'var(--border-weight)',
-        '2': '2px',
-        '3': '3px'
+        brutal: 'var(--border-weight)',
+        2: '2px',
+        3: '3px'
       },
       borderRadius: {
-        'brutal': 'var(--radius)',
-        'none': '0px',
-        'sm': '2px',
-        'DEFAULT': '4px',
-        'lg': '8px',
-        'xl': '12px',
-        'full': '9999px'
+        brutal: 'var(--radius)',
+        none: '0px',
+        sm: '2px',
+        DEFAULT: '4px',
+        lg: '8px',
+        xl: '12px',
+        full: '9999px'
       },
       spacing: {
-        '18': '4.5rem',
-        '88': '22rem',
-        '128': '32rem'
+        18: '4.5rem',
+        88: '22rem',
+        128: '32rem'
       },
       transitionDuration: {
-        '150': '150ms',
-        '250': '250ms',
-        '350': '350ms'
+        150: '150ms',
+        250: '250ms',
+        350: '350ms'
       },
       animation: {
-        'float': 'float 6s ease-in-out infinite',
+        float: 'float 6s ease-in-out infinite',
         'spin-slow': 'spin 20s linear infinite',
         'attention-pulse': 'attention-pulse 2s ease-in-out infinite'
       }

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import {
   achievementsApi,
   type LifetimeStatsResponse,
-  type AchievementStatusResponse,
+  type AchievementStatusResponse
 } from '../services/api'
 
 interface AchievementState {
@@ -44,7 +44,7 @@ export const useAchievementStore = create<AchievementState>((set, get) => ({
         achievements: result.data.achievements,
         earnedCount: result.data.earned_count,
         totalCount: result.data.total_count,
-        totalPoints: result.data.total_points,
+        totalPoints: result.data.total_points
       })
     }
     set({ loading: false })
@@ -57,7 +57,7 @@ export const useAchievementStore = create<AchievementState>((set, get) => ({
         recentUnlocks: result.data.recent,
         earnedCount: result.data.earned_count,
         totalCount: result.data.total_count,
-        totalPoints: result.data.total_points,
+        totalPoints: result.data.total_points
       })
     }
   },
@@ -68,7 +68,7 @@ export const useAchievementStore = create<AchievementState>((set, get) => ({
       set({
         earnedCount: result.data.earned_count,
         totalCount: result.data.total_count,
-        totalPoints: result.data.total_points,
+        totalPoints: result.data.total_points
       })
       // Re-fetch full lists after refresh
       get().fetchAchievements()
@@ -76,5 +76,5 @@ export const useAchievementStore = create<AchievementState>((set, get) => ({
       return result.data.newly_earned
     }
     return []
-  },
+  }
 }))

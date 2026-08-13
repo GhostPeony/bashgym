@@ -121,7 +121,9 @@ def test_session_distillation_script_uses_relative_paths_when_remote():
         base_model="tiny-local-model",
         strategy=TrainingStrategy.SESSION_DISTILLATION,
     )
-    run = _sd_run(config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out")
+    run = _sd_run(
+        config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out"
+    )
     script = Trainer(config)._generate_session_distillation_script(run, remote=True)
     ast.parse(script)
     assert 'DATASET_PATH = "records.jsonl"' in script
@@ -140,7 +142,9 @@ def test_remote_launch_spec_runs_session_distillation_script_without_unsloth():
     config = TrainerConfig(
         base_model="tiny-local-model", strategy=TrainingStrategy.SESSION_DISTILLATION
     )
-    run = _sd_run(config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out")
+    run = _sd_run(
+        config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out"
+    )
     content, script_name, require_unsloth = Trainer(config)._remote_launch_spec(run)
     assert script_name == "train_session_distillation.py"
     assert require_unsloth is False
@@ -172,13 +176,13 @@ def test_training_python_can_be_overridden_for_runtime_smokes(tmp_path, monkeypa
 
 
 def test_training_subprocess_env_strips_quoted_hf_cache_paths(monkeypatch):
-    monkeypatch.setenv("HF_HOME", r'"F:\huggingface"')
-    monkeypatch.setenv("TRANSFORMERS_CACHE", r'"F:\huggingface"')
+    monkeypatch.setenv("HF_HOME", r'"X:\fixture-cache"')
+    monkeypatch.setenv("TRANSFORMERS_CACHE", r'"X:\fixture-cache"')
 
     env = Trainer(TrainerConfig(base_model="tiny-local-model"))._training_subprocess_env()
 
-    assert env["HF_HOME"] == r"F:\huggingface"
-    assert env["TRANSFORMERS_CACHE"] == r"F:\huggingface"
+    assert env["HF_HOME"] == r"X:\fixture-cache"
+    assert env["TRANSFORMERS_CACHE"] == r"X:\fixture-cache"
 
 
 def test_parse_session_distillation_metrics_extracts_all_keys():
@@ -239,7 +243,7 @@ def test_session_distillation_script_emits_throughput_telemetry():
     assert "BashGymThroughputCallback" in script
     assert "include_num_input_tokens_seen" in script
     assert "[bashgym-metrics]" in script
-    # VRAM + GPU-util reads must be guarded so CPU smokes / GB10 degrade gracefully.
+    # VRAM + GPU-util reads must be guarded so CPU and unified-memory smokes degrade gracefully.
     assert "reset_peak_memory_stats" in script
     assert "pynvml" in script
 

@@ -115,9 +115,7 @@ def _full_bm25_ranking(
     )
     present = {chunk_id for chunk_id, _score in positive_scores}
     zero_scores = sorted(
-        (str(row["chunk_id"]), 0.0)
-        for row in corpus_rows
-        if str(row["chunk_id"]) not in present
+        (str(row["chunk_id"]), 0.0) for row in corpus_rows if str(row["chunk_id"]) not in present
     )
     return [*positive_scores, *zero_scores]
 
@@ -145,7 +143,9 @@ def _ndcg(ranked_ids: list[str], grades: dict[str, int], cutoff: int) -> float:
     def gain(grade: int, rank: int) -> float:
         return (2**grade - 1) / math.log2(rank + 1)
 
-    dcg = sum(gain(grades.get(chunk_id, 0), rank) for rank, chunk_id in enumerate(ranked_ids[:cutoff], 1))
+    dcg = sum(
+        gain(grades.get(chunk_id, 0), rank) for rank, chunk_id in enumerate(ranked_ids[:cutoff], 1)
+    )
     ideal = sorted(grades.values(), reverse=True)[:cutoff]
     idcg = sum(gain(grade, rank) for rank, grade in enumerate(ideal, 1))
     return dcg / idcg if idcg else 0.0
@@ -235,9 +235,7 @@ def evaluate_rankings(
 
         positive_video = str(query_row.get("positive_video_id") or "")
         top_video = (
-            str(corpus_by_id[ranked_ids[0]].get("youtube_video_id") or "")
-            if ranked_ids
-            else None
+            str(corpus_by_id[ranked_ids[0]].get("youtube_video_id") or "") if ranked_ids else None
         )
         wrong_top_video += int(top_video != positive_video)
         hard_negatives = {
@@ -287,9 +285,7 @@ def evaluate_rankings(
     metrics["wrong_top_video_rate"] = round(wrong_top_video / count, 6)
     metrics["hard_negative_queries"] = len(hard_negative_wins)
     metrics["hard_negative_win_rate"] = (
-        round(sum(hard_negative_wins) / len(hard_negative_wins), 6)
-        if hard_negative_wins
-        else None
+        round(sum(hard_negative_wins) / len(hard_negative_wins), 6) if hard_negative_wins else None
     )
     return metrics, evidence_rows
 
@@ -330,13 +326,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if min(
-        args.dimensions,
-        args.dense_candidate_depth,
-        args.bm25_candidate_depth,
-        args.rrf_k,
-        args.artifact_depth,
-    ) < 1:
+    if (
+        min(
+            args.dimensions,
+            args.dense_candidate_depth,
+            args.bm25_candidate_depth,
+            args.rrf_k,
+            args.artifact_depth,
+        )
+        < 1
+    ):
         raise ValueError("dimensions, depths, and RRF k must be positive")
     selected_splits = {value.strip() for value in args.splits.split(",") if value.strip()}
     query_rows = validate_query_split(
@@ -396,9 +395,7 @@ def main() -> int:
 
     lexical_index = build_lexical_index(corpus_rows)
     bm25_rankings = [
-        _full_bm25_ranking(
-            str(row.get("query") or ""), corpus_rows, lexical_index=lexical_index
-        )
+        _full_bm25_ranking(str(row.get("query") or ""), corpus_rows, lexical_index=lexical_index)
         for row in query_rows
     ]
     rrf_rankings: list[list[tuple[str, float]]] = []
@@ -510,7 +507,9 @@ def main() -> int:
         "counts": {"queries": len(query_rows), "corpus_chunks": len(corpus_rows)},
         "systems": systems,
         "contribution_deltas": {
-            "rrf_minus_dense": _metric_deltas(systems["dense"]["metrics"], systems["rrf"]["metrics"]),
+            "rrf_minus_dense": _metric_deltas(
+                systems["dense"]["metrics"], systems["rrf"]["metrics"]
+            ),
             "rrf_minus_bm25": _metric_deltas(systems["bm25"]["metrics"], systems["rrf"]["metrics"]),
         },
         "reranker": {

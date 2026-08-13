@@ -9,13 +9,10 @@ test('builds a readable repository slug from a designer job name', () => {
     status: 'completed',
     pipeline: 'generate_dd_train_pairs',
     num_records: 200,
-    job_name: 'dd-train-pairs-20260709 / real_chunks',
+    job_name: 'dd-train-pairs-20260709 / real_chunks'
   }
 
-  assert.equal(
-    datasetRepoNameForJob(job),
-    'bashgym-dd-train-pairs-20260709-real_chunks',
-  )
+  assert.equal(datasetRepoNameForJob(job), 'bashgym-dd-train-pairs-20260709-real_chunks')
 })
 
 test('falls back to the generated output directory', () => {
@@ -24,7 +21,7 @@ test('falls back to the generated output directory', () => {
     status: 'completed',
     pipeline: '',
     num_records: 200,
-    output_dir: 'C:\\workspace\\outputs\\fake_transcripts',
+    output_dir: 'C:\\workspace\\outputs\\fake_transcripts'
   }
 
   assert.equal(datasetRepoNameForJob(job), 'bashgym-fake_transcripts')

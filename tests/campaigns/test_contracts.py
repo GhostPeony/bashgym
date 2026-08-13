@@ -57,10 +57,7 @@ def test_codex_grants_generic_external_handoff_without_new_legacy_authority():
 
 def test_public_artifact_schemas_add_generic_v2_without_renaming_legacy_v1():
     assert "query_format_ablation_manifest.v2" in PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES
-    assert (
-        "memexai_query_format_ablation_manifest.v1"
-        in PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES
-    )
+    assert "memexai_query_format_ablation_manifest.v1" in PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES
 
 
 def test_authority_round_trip_preserves_prior_pause_intent():

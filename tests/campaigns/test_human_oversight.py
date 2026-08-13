@@ -75,18 +75,14 @@ def _seed(oversight, *, work_id="hw_0123456789abcdef", campaign_revision=1, repl
 
 
 def _prepare_ordinary_promotion_gate(repository):
-    unprotected_manifest = manifest().model_copy(
-        update={"protected_artifact_refs": ()}
-    )
+    unprotected_manifest = manifest().model_copy(update={"protected_artifact_refs": ()})
     with repository._connection(immediate=True) as connection:
-        connection.execute(
-            """
+        connection.execute("""
             UPDATE campaigns
             SET status = 'active', version = 2,
                 best_development_candidate_ref = 'candidate-reviewed'
             WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1'
-            """
-        )
+            """)
         connection.execute(
             """
             UPDATE campaign_manifest_revisions SET manifest_json = ?
@@ -153,9 +149,7 @@ def test_migration_and_bounded_public_queue_are_fail_closed(repository, oversigh
     with sqlite3.connect(repository.db_path) as connection:
         tables = {
             row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
     assert {
         "campaign_human_work",
@@ -165,7 +159,9 @@ def test_migration_and_bounded_public_queue_are_fail_closed(repository, oversigh
     } <= tables
 
 
-def test_internal_enqueue_is_idempotent_and_emits_one_payload_free_public_hint(repository, oversight):
+def test_internal_enqueue_is_idempotent_and_emits_one_payload_free_public_hint(
+    repository, oversight
+):
     first = _seed(oversight)
     replay = _seed(oversight)
     assert replay == first
@@ -243,18 +239,21 @@ def test_mutation_replay_rejects_tampered_stored_response(repository, oversight)
     seeded = _seed(oversight)
     reviewer = _principal(repository)
     request = dict(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-        expected_version=1, expected_state="pending", principal=reviewer,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
         correlation_id="corr-claim",
-        idempotency_key=seeded["items"][0]["claim_idempotency_key"], now=NOW,
+        idempotency_key=seeded["items"][0]["claim_idempotency_key"],
+        now=NOW,
     )
     oversight.claim(**request)
     with sqlite3.connect(repository.db_path) as connection:
         response = json.loads(
-            connection.execute(
-                "SELECT response_json FROM campaign_human_mutations"
-            ).fetchone()[0]
+            connection.execute("SELECT response_json FROM campaign_human_mutations").fetchone()[0]
         )
         response["private_path"] = "C:/restricted/REPLAY-SECRET-CANARY"
         connection.execute(
@@ -271,18 +270,21 @@ def test_mutation_replay_rejects_forged_response_with_recomputed_public_digest(
     seeded = _seed(oversight)
     reviewer = _principal(repository)
     request = dict(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-        expected_version=1, expected_state="pending", principal=reviewer,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
         correlation_id="corr-claim-forged-replay",
-        idempotency_key=seeded["items"][0]["claim_idempotency_key"], now=NOW,
+        idempotency_key=seeded["items"][0]["claim_idempotency_key"],
+        now=NOW,
     )
     oversight.claim(**request)
     with sqlite3.connect(repository.db_path) as connection:
         response = json.loads(
-            connection.execute(
-                "SELECT response_json FROM campaign_human_mutations"
-            ).fetchone()[0]
+            connection.execute("SELECT response_json FROM campaign_human_mutations").fetchone()[0]
         )
         response["event_id"] = "evt-human-forged-replay"
         connection.execute(
@@ -308,10 +310,16 @@ def test_concurrent_claim_race_has_exactly_one_winner(repository, oversight):
     def attempt(principal):
         try:
             result = oversight.claim(
-                workspace_id="workspace-a", campaign_id="campaign-1",
-                work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-                expected_version=1, expected_state="pending", principal=principal,
-                correlation_id=f"corr-{principal.actor_id}", idempotency_key=key, now=NOW,
+                workspace_id="workspace-a",
+                campaign_id="campaign-1",
+                work_id="hw_0123456789abcdef",
+                expected_campaign_revision=1,
+                expected_version=1,
+                expected_state="pending",
+                principal=principal,
+                correlation_id=f"corr-{principal.actor_id}",
+                idempotency_key=key,
+                now=NOW,
             )
             return result.queue["items"][0]["claimed_by_current_reviewer"]
         except HumanOversightConflictError:
@@ -320,13 +328,16 @@ def test_concurrent_claim_race_has_exactly_one_winner(repository, oversight):
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(attempt, (first, second)))
     assert sorted(outcomes) == [False, True]
-    assert len(
-        [
-            event
-            for _cursor, event in repository.list_events("workspace-a", "campaign-1")
-            if event.event_type == "campaign:human-work-claimed"
-        ]
-    ) == 1
+    assert (
+        len(
+            [
+                event
+                for _cursor, event in repository.list_events("workspace-a", "campaign-1")
+                if event.event_type == "campaign:human-work-claimed"
+            ]
+        )
+        == 1
+    )
 
 
 def test_expired_lease_reclaims_with_new_fence_and_stale_submit_fails(repository, oversight):
@@ -365,12 +376,18 @@ def test_expired_lease_reclaims_with_new_fence_and_stale_submit_fails(repository
     wrong_reviewer = _principal(repository, actor_id="other-desktop")
     with pytest.raises(HumanOversightConflictError):
         oversight.submit(
-            workspace_id="workspace-a", campaign_id="campaign-1",
-            work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-            expected_version=3, expected_rubric_version=1, decision="prefer_left",
-            rationale="Not my lease.", principal=wrong_reviewer,
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            work_id="hw_0123456789abcdef",
+            expected_campaign_revision=1,
+            expected_version=3,
+            expected_rubric_version=1,
+            decision="prefer_left",
+            rationale="Not my lease.",
+            principal=wrong_reviewer,
             correlation_id="corr-wrong-reviewer",
-            idempotency_key=reclaimed.queue["items"][0]["submit_idempotency_key"], now=later,
+            idempotency_key=reclaimed.queue["items"][0]["submit_idempotency_key"],
+            now=later,
         )
     with pytest.raises(HumanOversightConflictError):
         oversight.submit(
@@ -393,18 +410,30 @@ def test_submit_seals_stable_receipt_and_promotion_is_separate(repository, overs
     seeded = _seed(oversight)
     reviewer = _principal(repository)
     claimed = oversight.claim(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-        expected_version=1, expected_state="pending", principal=reviewer,
-        correlation_id="corr-claim", idempotency_key=seeded["items"][0]["claim_idempotency_key"], now=NOW,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
+        correlation_id="corr-claim",
+        idempotency_key=seeded["items"][0]["claim_idempotency_key"],
+        now=NOW,
     )
     submit_key = claimed.queue["items"][0]["submit_idempotency_key"]
     submit_request = dict(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-        expected_version=2, expected_rubric_version=1,
-        decision="prefer_left", rationale="A is materially stronger.",
-        principal=reviewer, correlation_id="corr-submit", idempotency_key=submit_key,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=2,
+        expected_rubric_version=1,
+        decision="prefer_left",
+        rationale="A is materially stronger.",
+        principal=reviewer,
+        correlation_id="corr-submit",
+        idempotency_key=submit_key,
         now=NOW + timedelta(minutes=1),
     )
     submitted = oversight.submit(**submit_request)
@@ -421,12 +450,19 @@ def test_submit_seals_stable_receipt_and_promotion_is_separate(repository, overs
 
     promotion_key = submitted.queue["promotion"]["idempotency_key"]
     held = oversight.decide_promotion(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        receipt_id=receipt["receipt_id"], work_id="hw_0123456789abcdef",
-        expected_campaign_revision=1, expected_item_version=3,
-        expected_rubric_version=1, expected_promotion_version=2,
-        expected_promotion_state="awaiting_human_decision", decision="hold",
-        principal=reviewer, correlation_id="corr-hold", idempotency_key=promotion_key,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        receipt_id=receipt["receipt_id"],
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_item_version=3,
+        expected_rubric_version=1,
+        expected_promotion_version=2,
+        expected_promotion_state="awaiting_human_decision",
+        decision="hold",
+        principal=reviewer,
+        correlation_id="corr-hold",
+        idempotency_key=promotion_key,
         now=NOW + timedelta(minutes=2),
     )
     assert held.queue["promotion"]["state"] == "blocked_by_review"
@@ -437,9 +473,13 @@ def test_incomplete_blocking_work_keeps_promotion_fail_closed(repository, oversi
     _seed(oversight, work_id="hw_fedcba9876543210")
     reviewer = _principal(repository)
     claimed = oversight.claim(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-        expected_version=1, expected_state="pending", principal=reviewer,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
         correlation_id="corr-first-claim",
         idempotency_key=next(
             item["claim_idempotency_key"]
@@ -449,10 +489,15 @@ def test_incomplete_blocking_work_keeps_promotion_fail_closed(repository, oversi
         now=NOW,
     )
     submitted = oversight.submit(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-        expected_version=2, expected_rubric_version=1, decision="prefer_left",
-        rationale="Only the first blocker is complete.", principal=reviewer,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=2,
+        expected_rubric_version=1,
+        decision="prefer_left",
+        rationale="Only the first blocker is complete.",
+        principal=reviewer,
         correlation_id="corr-first-submit",
         idempotency_key=next(
             item["submit_idempotency_key"]
@@ -472,16 +517,29 @@ def test_receipt_tampering_fails_closed(repository, oversight):
     seeded = _seed(oversight)
     reviewer = _principal(repository)
     claimed = oversight.claim(
-        workspace_id="workspace-a", campaign_id="campaign-1", work_id="hw_0123456789abcdef",
-        expected_campaign_revision=1, expected_version=1, expected_state="pending",
-        principal=reviewer, correlation_id="corr-claim",
-        idempotency_key=seeded["items"][0]["claim_idempotency_key"], now=NOW,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
+        correlation_id="corr-claim",
+        idempotency_key=seeded["items"][0]["claim_idempotency_key"],
+        now=NOW,
     )
     oversight.submit(
-        workspace_id="workspace-a", campaign_id="campaign-1", work_id="hw_0123456789abcdef",
-        expected_campaign_revision=1, expected_version=2, expected_rubric_version=1,
-        decision="prefer_left", rationale="Valid decision.", principal=reviewer,
-        correlation_id="corr-submit", idempotency_key=claimed.queue["items"][0]["submit_idempotency_key"],
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=2,
+        expected_rubric_version=1,
+        decision="prefer_left",
+        rationale="Valid decision.",
+        principal=reviewer,
+        correlation_id="corr-submit",
+        idempotency_key=claimed.queue["items"][0]["submit_idempotency_key"],
         now=NOW + timedelta(minutes=1),
     )
     with sqlite3.connect(repository.db_path) as connection:
@@ -507,7 +565,9 @@ def test_receipt_tampering_fails_closed(repository, oversight):
         oversight.read_queue("workspace-a", "campaign-1", reviewer, now=NOW + timedelta(minutes=2))
 
 
-def test_public_projection_rejects_stored_shape_tampering_before_serialization(repository, oversight):
+def test_public_projection_rejects_stored_shape_tampering_before_serialization(
+    repository, oversight
+):
     _seed(oversight)
     reviewer = _principal(repository)
     with sqlite3.connect(repository.db_path) as connection:
@@ -529,7 +589,9 @@ def test_public_projection_rejects_stored_shape_tampering_before_serialization(r
         oversight.read_queue("workspace-a", "campaign-1", reviewer, now=NOW)
 
 
-def test_revision_invalidation_requires_explicit_lineage_replacement_and_survives_restart(repository, oversight):
+def test_revision_invalidation_requires_explicit_lineage_replacement_and_survives_restart(
+    repository, oversight
+):
     _seed(oversight)
     with repository._connection(immediate=True) as connection:
         connection.execute(
@@ -542,10 +604,16 @@ def test_revision_invalidation_requires_explicit_lineage_replacement_and_survive
     assert invalidated["items"][0]["campaign_revision"] == 1
     with pytest.raises(HumanOversightConflictError):
         oversight.claim(
-            workspace_id="workspace-a", campaign_id="campaign-1", work_id="hw_0123456789abcdef",
-            expected_campaign_revision=1, expected_version=1, expected_state="pending",
-            principal=reviewer, correlation_id="corr-old-revision",
-            idempotency_key=invalidated["items"][0]["claim_idempotency_key"], now=NOW,
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            work_id="hw_0123456789abcdef",
+            expected_campaign_revision=1,
+            expected_version=1,
+            expected_state="pending",
+            principal=reviewer,
+            correlation_id="corr-old-revision",
+            idempotency_key=invalidated["items"][0]["claim_idempotency_key"],
+            now=NOW,
         )
 
     replaced = _seed(
@@ -564,44 +632,86 @@ def test_revision_invalidation_requires_explicit_lineage_replacement_and_survive
     recovered = HumanOversightRepository(
         restarted,
         sealer=ArtifactSealer(TEST_SEAL_KEY, key_version="human-test-v1"),
-    ).read_queue(
-        "workspace-a", "campaign-1", reviewer, now=NOW
-    )
+    ).read_queue("workspace-a", "campaign-1", reviewer, now=NOW)
     assert recovered == replaced
 
 
 def test_queue_limit_is_bounded(repository, oversight):
     for index in range(51):
         oversight.enqueue(
-            workspace_id="workspace-a", campaign_id="campaign-1",
-            work_id=f"hw_{index:016d}", campaign_revision=1, blocking=False,
-            rubric={"rubric_id": "rub_01234567", "version": 1, "instructions": "Choose.", "choices": [{"choice_id": "tie", "label": "Tie"}]},
-            sample={"prompt": "Prompt", "left": {"label": "A", "display": "Left"}, "right": {"label": "B", "display": "Right"}},
-            protected_context={"row": index}, now=NOW,
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            work_id=f"hw_{index:016d}",
+            campaign_revision=1,
+            blocking=False,
+            rubric={
+                "rubric_id": "rub_01234567",
+                "version": 1,
+                "instructions": "Choose.",
+                "choices": [{"choice_id": "tie", "label": "Tie"}],
+            },
+            sample={
+                "prompt": "Prompt",
+                "left": {"label": "A", "display": "Left"},
+                "right": {"label": "B", "display": "Right"},
+            },
+            protected_context={"row": index},
+            now=NOW,
         )
     reviewer = _principal(repository)
-    assert len(oversight.read_queue("workspace-a", "campaign-1", reviewer, now=NOW, limit=50)["items"]) == 50
+    assert (
+        len(oversight.read_queue("workspace-a", "campaign-1", reviewer, now=NOW, limit=50)["items"])
+        == 50
+    )
     with pytest.raises(ValueError, match="limit"):
         oversight.read_queue("workspace-a", "campaign-1", reviewer, now=NOW, limit=51)
     with pytest.raises(ValueError, match="protected context"):
         oversight.enqueue(
-            workspace_id="workspace-a", campaign_id="campaign-1",
-            work_id="hw_oversizedcontext1", campaign_revision=1, blocking=False,
-            rubric={"rubric_id": "rub_01234567", "version": 1, "instructions": "Choose.", "choices": [{"choice_id": "tie", "label": "Tie"}]},
-            sample={"prompt": "Prompt", "left": {"label": "A", "display": "Left"}, "right": {"label": "B", "display": "Right"}},
-            protected_context={"blob": "x" * 70_000}, now=NOW,
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            work_id="hw_oversizedcontext1",
+            campaign_revision=1,
+            blocking=False,
+            rubric={
+                "rubric_id": "rub_01234567",
+                "version": 1,
+                "instructions": "Choose.",
+                "choices": [{"choice_id": "tie", "label": "Tie"}],
+            },
+            sample={
+                "prompt": "Prompt",
+                "left": {"label": "A", "display": "Left"},
+                "right": {"label": "B", "display": "Right"},
+            },
+            protected_context={"blob": "x" * 70_000},
+            now=NOW,
         )
 
 
-def test_workspace_isolation_allows_same_work_identity_without_cross_scope_leakage(repository, oversight):
+def test_workspace_isolation_allows_same_work_identity_without_cross_scope_leakage(
+    repository, oversight
+):
     _seed(oversight)
     create(repository, campaign("workspace-b", "campaign-b"))
     oversight.enqueue(
-        workspace_id="workspace-b", campaign_id="campaign-b",
-        work_id="hw_0123456789abcdef", campaign_revision=1, blocking=True,
-        rubric={"rubric_id": "rub_01234567", "version": 1, "instructions": "Choose.", "choices": [{"choice_id": "tie", "label": "Tie"}]},
-        sample={"prompt": "Other workspace", "left": {"label": "A", "display": "Other left"}, "right": {"label": "B", "display": "Other right"}},
-        protected_context={"canary": "WORKSPACE-B-SECRET"}, now=NOW,
+        workspace_id="workspace-b",
+        campaign_id="campaign-b",
+        work_id="hw_0123456789abcdef",
+        campaign_revision=1,
+        blocking=True,
+        rubric={
+            "rubric_id": "rub_01234567",
+            "version": 1,
+            "instructions": "Choose.",
+            "choices": [{"choice_id": "tie", "label": "Tie"}],
+        },
+        sample={
+            "prompt": "Other workspace",
+            "left": {"label": "A", "display": "Other left"},
+            "right": {"label": "B", "display": "Other right"},
+        },
+        protected_context={"canary": "WORKSPACE-B-SECRET"},
+        now=NOW,
     )
     workspace_a_reviewer = _principal(repository)
     with pytest.raises(PermissionError, match="workspace"):
@@ -616,9 +726,7 @@ def test_workspace_isolation_allows_same_work_identity_without_cross_scope_leaka
     workspace_b_reviewer = auth.authenticate_access(
         auth.exchange_refresh(refresh.raw_token).raw_token
     )
-    queue_b = oversight.read_queue(
-        "workspace-b", "campaign-b", workspace_b_reviewer, now=NOW
-    )
+    queue_b = oversight.read_queue("workspace-b", "campaign-b", workspace_b_reviewer, now=NOW)
     assert queue_b["items"][0]["sample"]["prompt"] == "Other workspace"
     assert "WORKSPACE-B-SECRET" not in json.dumps(queue_b)
 
@@ -639,9 +747,7 @@ def test_pending_blocking_human_work_prevents_campaign_promotion(repository, ove
         )
 
 
-def test_pending_human_work_blocks_new_comparison_until_sealed_submission(
-    repository, oversight
-):
+def test_pending_human_work_blocks_new_comparison_until_sealed_submission(repository, oversight):
     queue = _seed(oversight)
     comparison = compare_development_evaluations(
         _artifact(digest="a" * 64, rows=_rows(count=18, videos=3, rank=1)),
@@ -649,24 +755,32 @@ def test_pending_human_work_blocks_new_comparison_until_sealed_submission(
         DevelopmentGateContract(bootstrap_samples=100),
     )
     with pytest.raises(CampaignPersistenceError, match="campaign_human_work_incomplete"):
-        repository.store_development_comparison(
-            "workspace-a", "campaign-1", comparison, now=NOW
-        )
+        repository.store_development_comparison("workspace-a", "campaign-1", comparison, now=NOW)
 
     reviewer = _principal(repository)
     claimed = oversight.claim(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-        expected_version=1, expected_state="pending", principal=reviewer,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
         correlation_id="corr-claim-comparison",
-        idempotency_key=queue["items"][0]["claim_idempotency_key"], now=NOW,
+        idempotency_key=queue["items"][0]["claim_idempotency_key"],
+        now=NOW,
     )
     oversight.submit(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id="hw_0123456789abcdef", expected_campaign_revision=1,
-        expected_version=2, expected_rubric_version=1,
-        decision="no_material_difference", rationale="Equivalent under the rubric.",
-        principal=reviewer, correlation_id="corr-submit-comparison",
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_0123456789abcdef",
+        expected_campaign_revision=1,
+        expected_version=2,
+        expected_rubric_version=1,
+        decision="no_material_difference",
+        rationale="Equivalent under the rubric.",
+        principal=reviewer,
+        correlation_id="corr-submit-comparison",
         idempotency_key=claimed.queue["items"][0]["submit_idempotency_key"],
         now=NOW + timedelta(minutes=1),
     )
@@ -696,9 +810,7 @@ def test_codex_override_cannot_bypass_pending_human_authority(repository, oversi
         )
 
 
-def test_bounded_queue_keeps_the_eligible_promotion_receipt_in_projection(
-    repository, oversight
-):
+def test_bounded_queue_keeps_the_eligible_promotion_receipt_in_projection(repository, oversight):
     for index in range(51):
         oversight.enqueue(
             workspace_id="workspace-a",
@@ -769,7 +881,5 @@ def test_bounded_queue_keeps_the_eligible_promotion_receipt_in_projection(
     eligible = submitted["promotion"]["eligible_receipt_id"]
     assert eligible is not None
     assert eligible in {
-        item["receipt"]["receipt_id"]
-        for item in submitted["items"]
-        if item["receipt"] is not None
+        item["receipt"]["receipt_id"] for item in submitted["items"] if item["receipt"] is not None
     }

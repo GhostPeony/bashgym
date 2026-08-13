@@ -5,7 +5,7 @@ import {
   trainingApi,
   type RunCardFinding,
   type RunCardSummary,
-  type RunCardValidationResponse,
+  type RunCardValidationResponse
 } from '../../services/api'
 
 type CardsState =
@@ -92,7 +92,8 @@ export function RunCardEvidencePanel() {
     void loadCards()
   }, [loadCards])
 
-  const findings = validationState.status === 'ready' ? validationState.validation.findings : EMPTY_FINDINGS
+  const findings =
+    validationState.status === 'ready' ? validationState.validation.findings : EMPTY_FINDINGS
   const counts = useMemo(() => findingCounts(findings), [findings])
   const blockingCount = counts.fail ?? 0
   const warningCount = counts.warn ?? 0
@@ -119,7 +120,9 @@ export function RunCardEvidencePanel() {
           className="btn-icon flex items-center justify-center"
           title="Refresh RunCards"
         >
-          <RefreshCw className={clsx('w-4 h-4', cardsState.status === 'loading' && 'animate-spin')} />
+          <RefreshCw
+            className={clsx('w-4 h-4', cardsState.status === 'loading' && 'animate-spin')}
+          />
         </button>
       </div>
 
@@ -174,7 +177,9 @@ export function RunCardEvidencePanel() {
           ))}
         </div>
       ) : cardsState.status === 'ready' ? (
-        <p className="mt-3 text-xs text-text-muted">No RunCards found in local BashGym data roots.</p>
+        <p className="mt-3 text-xs text-text-muted">
+          No RunCards found in local BashGym data roots.
+        </p>
       ) : null}
 
       {validationState.status === 'error' ? (
@@ -188,7 +193,8 @@ export function RunCardEvidencePanel() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="font-mono text-xs text-text-muted">
-                {validationState.validation.run_card.run_id} / {validationState.validation.run_card.claim_tier}
+                {validationState.validation.run_card.run_id} /{' '}
+                {validationState.validation.run_card.claim_tier}
               </p>
               <p className="text-sm text-text-secondary mt-1">
                 {validationState.validation.run_card.training_method} on{' '}
@@ -207,8 +213,12 @@ export function RunCardEvidencePanel() {
                   {blockingCount} blocker{blockingCount === 1 ? '' : 's'}
                 </span>
               )}
-              {warningCount > 0 ? <span className="text-status-warning">{warningCount} warn</span> : null}
-              {diagnosticCount > 0 ? <span className="text-accent-dark">{diagnosticCount} diag</span> : null}
+              {warningCount > 0 ? (
+                <span className="text-status-warning">{warningCount} warn</span>
+              ) : null}
+              {diagnosticCount > 0 ? (
+                <span className="text-accent-dark">{diagnosticCount} diag</span>
+              ) : null}
             </div>
           </div>
 
@@ -285,9 +295,14 @@ export function RunCardEvidencePanel() {
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {validationState.validation.artifact_status.slice(0, 6).map((artifact) => (
-                  <div key={`${artifact.field}-${artifact.path}`} className="text-xs text-text-secondary">
+                  <div
+                    key={`${artifact.field}-${artifact.path}`}
+                    className="text-xs text-text-secondary"
+                  >
                     <span className="font-mono text-text-primary">{artifact.field}</span>{' '}
-                    <span className={artifact.present ? 'text-status-success' : 'text-status-error'}>
+                    <span
+                      className={artifact.present ? 'text-status-success' : 'text-status-error'}
+                    >
                       {artifact.present ? 'present' : 'missing'}
                     </span>
                   </div>

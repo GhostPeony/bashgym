@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
 import {
   AlertTriangle,
@@ -9,34 +9,42 @@ import {
   RefreshCw,
   SlidersHorizontal,
   Square,
+  X
 } from 'lucide-react'
-import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { clsx } from 'clsx'
-import {
-  retainCampaignSafetyReconcile,
-  useCampaignStore,
-} from '../../../stores/campaignStore'
+import { retainCampaignSafetyReconcile, useCampaignStore } from '../../../stores/campaignStore'
 import { useTerminalStore } from '../../../stores/terminalStore'
 import { useWorkspaceStore } from '../../../stores/workspaceStore'
+import { describeCampaignDecision } from '../../../utils/campaignMeaning'
 import type {
-  CampaignAttempt,
   CampaignComparison,
-  CampaignControllerStatus,
   CampaignDetailState,
   CampaignRecord,
-  CampaignStatus,
+  CampaignStatus
 } from '../../../stores/campaignStore'
 import { DataNodeShell } from './DataNodeShell'
 import { projectCampaignResearch, type CampaignCanvasResearch } from './campaignCanvasModel'
 import { hueFor } from './dataPanels'
-import { ConfigPill, ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
+import {
+  ConfigPill,
+  ConfigRow,
+  ConfigRows,
+  ConfigSection,
+  NodeConfigModal
+} from './NodeConfigModal'
 import {
   hasLiveCampaignAuthority,
   openCampaignInAutoResearch,
-  shouldLoadCampaignDrillDown,
-  submitCampaignTransitionIfLive,
+  submitCampaignTransitionIfLive
 } from './campaignNodeActions'
 import type { DataNodeData } from './types'
+import {
+  CampaignEvidenceInspector,
+  CampaignEvidenceRow,
+  type CampaignEvidenceSelection
+} from '../../autoresearch/CampaignEvidenceInspector'
+import { CampaignOutcomeSummary } from '../../autoresearch/CampaignOutcomeSummary'
+import { projectCampaignOutcome } from '../../autoresearch/campaignOutcomeModel'
 
 export type CampaignNodeType = Node<DataNodeData, 'campaign'>
 
@@ -51,30 +59,27 @@ const STATUS_BAR: Record<CampaignStatus, string> = {
   completed: 'bg-status-success',
   exhausted: 'bg-status-success',
   failed: 'bg-status-error',
-  cancelled: 'bg-background-tertiary',
+  cancelled: 'bg-background-tertiary'
 }
 
 function tone(status?: CampaignStatus): 'neutral' | 'accent' | 'success' | 'warning' | 'error' {
   if (status === 'failed') return 'error'
   if (status === 'completed' || status === 'exhausted') return 'success'
-  if (status === 'paused' || status === 'awaiting_authority' || status === 'cancelling') return 'warning'
+  if (status === 'paused' || status === 'awaiting_authority' || status === 'cancelling')
+    return 'warning'
   if (status === 'active' || status === 'ready' || status === 'validating') return 'accent'
   return 'neutral'
 }
 
 function readable(value: string): string {
-  return value.replace(/^campaign:/, '').replaceAll('_', ' ').replaceAll(':', ' · ')
+  return value
+    .replace(/^campaign:/, '')
+    .replaceAll('_', ' ')
+    .replaceAll(':', ' · ')
 }
 
 function shortDigest(value?: string | null): string {
   return value ? `${value.slice(0, 10)}…${value.slice(-6)}` : '—'
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`
-  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
-  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`
-  return `${(value / 1024 ** 3).toFixed(1)} GB`
 }
 
 function compactNumber(value: number): string {
@@ -84,22 +89,40 @@ function compactNumber(value: number): string {
 
 function budgetSummary(research: CampaignCanvasResearch): string {
   return research.budget.length
-    ? research.budget.map((item) => `${readable(item.resource)} ${compactNumber(item.remaining)}`).join(' · ')
+    ? research.budget
+        .map((item) => `${readable(item.resource)} ${compactNumber(item.remaining)}`)
+        .join(' · ')
     : 'Not recorded'
 }
 
 function baselineSummary(research: CampaignCanvasResearch): string {
-  const metric = Object.entries(research.baseline.metrics).sort(([left], [right]) => left.localeCompare(right))[0]
+  const metric = Object.entries(research.baseline.metrics).sort(([left], [right]) =>
+    left.localeCompare(right)
+  )[0]
   const base = research.baseline.modelRef || 'Model not recorded'
   return metric ? `${base} · ${readable(metric[0])} ${compactNumber(metric[1])}` : base
 }
 
-export function CampaignResearchBrief({ research }: { research: CampaignCanvasResearch }) {
-  const nextLabel = research.nextAction.kind === 'current'
-    ? 'Current action'
-    : research.nextAction.kind === 'none'
-      ? 'Next action'
-      : 'Planned next'
+export function CampaignResearchBrief({
+  research,
+  density = 'compact'
+}: {
+  research: CampaignCanvasResearch
+  density?: 'compact' | 'comfortable'
+}) {
+  const comfortable = density === 'comfortable'
+  const eyebrowClass = comfortable
+    ? 'font-mono text-[11px] font-bold uppercase tracking-wide text-text-muted'
+    : 'font-mono text-[7px] font-bold uppercase tracking-wide text-text-muted'
+  const bodyClass = comfortable
+    ? 'text-xs leading-5 text-text-primary'
+    : 'text-[9px] leading-4 text-text-primary'
+  const nextLabel =
+    research.nextAction.kind === 'current'
+      ? 'Current action'
+      : research.nextAction.kind === 'none'
+        ? 'Next action'
+        : 'Planned next'
   return (
     <div
       className="rounded-brutal border-brutal border-border-subtle bg-background-secondary"
@@ -108,33 +131,47 @@ export function CampaignResearchBrief({ research }: { research: CampaignCanvasRe
     >
       <div className="grid grid-cols-2 gap-px bg-border-subtle">
         <div className="min-w-0 bg-background-card px-2 py-1.5">
-          <div className="font-mono text-[7px] font-bold uppercase tracking-wide text-text-muted">Baseline · {readable(research.baseline.status)}</div>
-          <div className="truncate text-[9px] text-text-primary" title={baselineSummary(research)}>{baselineSummary(research)}</div>
+          <div className={eyebrowClass}>Baseline · {readable(research.baseline.status)}</div>
+          <div className={clsx('truncate', bodyClass)} title={baselineSummary(research)}>
+            {baselineSummary(research)}
+          </div>
         </div>
         <div className="min-w-0 bg-background-card px-2 py-1.5">
-          <div className="font-mono text-[7px] font-bold uppercase tracking-wide text-text-muted">Budget remaining</div>
-          <div className="truncate text-[9px] text-text-primary" title={budgetSummary(research)}>{budgetSummary(research)}</div>
+          <div className={eyebrowClass}>Budget remaining</div>
+          <div className={clsx('truncate', bodyClass)} title={budgetSummary(research)}>
+            {budgetSummary(research)}
+          </div>
         </div>
       </div>
       <div className="border-t border-border-subtle px-2 py-1.5">
-        <div className="font-mono text-[7px] font-bold uppercase tracking-wide text-text-muted">Latest hypothesis</div>
-        <div className="line-clamp-2 text-[9px] leading-4 text-text-primary">
+        <div className={eyebrowClass}>Latest hypothesis</div>
+        <div className={clsx('line-clamp-2', bodyClass)}>
           {research.latestStudy?.hypothesis || 'No study hypothesis recorded'}
         </div>
         {research.latestStudy ? (
-          <div className="truncate font-mono text-[7px] text-text-muted">
-            {readable(research.latestStudy.status)} · {readable(research.latestStudy.plannedStage || 'complete')}
+          <div
+            className={clsx(
+              'truncate font-mono text-text-muted',
+              comfortable ? 'text-[11px]' : 'text-[7px]'
+            )}
+          >
+            {readable(research.latestStudy.status)} ·{' '}
+            {readable(research.latestStudy.plannedStage || 'complete')}
           </div>
         ) : null}
       </div>
       <div className="grid grid-cols-2 gap-px border-t border-border-subtle bg-border-subtle">
         <div className="min-w-0 bg-background-card px-2 py-1.5">
-          <div className="font-mono text-[7px] font-bold uppercase tracking-wide text-text-muted">Latest decision</div>
-          <div className="line-clamp-2 text-[9px] leading-4 text-text-primary">{research.latestDecision?.outcome || 'No decision recorded'}</div>
+          <div className={eyebrowClass}>Latest decision</div>
+          <div className={clsx('line-clamp-2', bodyClass)}>
+            {research.latestDecision?.outcome || 'No decision recorded'}
+          </div>
         </div>
         <div className="min-w-0 bg-background-card px-2 py-1.5">
-          <div className="font-mono text-[7px] font-bold uppercase tracking-wide text-text-muted">{nextLabel}</div>
-          <div className="line-clamp-2 text-[9px] leading-4 text-text-primary">{readable(research.nextAction.label)}</div>
+          <div className={eyebrowClass}>{nextLabel}</div>
+          <div className={clsx('line-clamp-2', bodyClass)}>
+            {readable(research.nextAction.label)}
+          </div>
         </div>
       </div>
     </div>
@@ -145,9 +182,6 @@ interface CampaignEvidencePanelProps {
   campaignId?: string
   campaigns: CampaignRecord[]
   detail?: CampaignDetailState
-  controller?: CampaignControllerStatus | null
-  chartData: Array<{ step: number; loss: number }>
-  latestAttempt?: CampaignAttempt
   latestComparison?: CampaignComparison
   mutating: boolean
   onSelect: (campaignId: string) => void
@@ -161,23 +195,24 @@ export function CampaignEvidencePanel({
   campaignId,
   campaigns,
   detail,
-  controller,
-  chartData,
-  latestAttempt,
   latestComparison,
   mutating,
   onSelect,
   onTransition,
   onRefresh,
-  onOpenAutoResearch,
+  onOpenAutoResearch
 }: CampaignEvidencePanelProps) {
   const research = detail ? projectCampaignResearch(detail) : undefined
+  const outcome = useMemo(() => (detail ? projectCampaignOutcome(detail) : null), [detail])
   const diagnostics = detail?.ledger?.autoresearch?.diagnostics
   const hasLifecycleAuthority = hasLiveCampaignAuthority(detail)
+  const [inspectedEvidence, setInspectedEvidence] = useState<CampaignEvidenceSelection | null>(null)
   return (
     <>
+      {outcome ? <CampaignOutcomeSummary model={outcome} /> : null}
+
       <ConfigSection title="Campaign">
-        <label className="block font-mono text-[10px] uppercase tracking-wide text-text-muted">
+        <label className="block font-mono text-[11px] uppercase tracking-wide text-text-muted">
           Workspace campaign
           <select
             aria-label="Workspace campaign"
@@ -186,91 +221,144 @@ export function CampaignEvidencePanel({
             className="nodrag mt-1 w-full rounded-brutal border-brutal border-border bg-background-card px-2 py-1.5 text-xs text-text-primary"
           >
             {campaigns.map((campaign) => (
-              <option key={campaign.campaign_id} value={campaign.campaign_id}>{campaign.title}</option>
+              <option key={campaign.campaign_id} value={campaign.campaign_id}>
+                {campaign.title}
+              </option>
             ))}
           </select>
         </label>
         {detail ? (
           <>
             <div className="mt-3 flex flex-wrap gap-1.5">
-              <ConfigPill tone={tone(detail.campaign.status)}>{readable(detail.campaign.status)}</ConfigPill>
-              <ConfigPill tone="neutral">revision {detail.campaign.manifest_revision}</ConfigPill>
-              <ConfigPill tone="neutral">version {detail.campaign.version}</ConfigPill>
+              <ConfigPill tone={tone(detail.campaign.status)}>
+                {readable(detail.campaign.status)}
+              </ConfigPill>
             </div>
             <ConfigRows>
               <ConfigRow label="Campaign ID" value={detail.campaign.campaign_id} />
               <ConfigRow label="Owner" value={detail.campaign.owner_actor_id} />
+              <ConfigRow label="Manifest revision" value={detail.campaign.manifest_revision} />
+              <ConfigRow label="Aggregate version" value={detail.campaign.version} />
               <ConfigRow label="Active study" value={detail.campaign.active_study_id} />
               <ConfigRow label="Active action" value={detail.campaign.active_action_id} />
-              <ConfigRow label="Champion" value={detail.campaign.champion_ref || 'Base model retained'} />
+              <ConfigRow
+                label="Champion"
+                value={detail.campaign.champion_ref || 'Base model retained'}
+              />
               <ConfigRow label="Stop reason" value={detail.campaign.stop_reason} />
             </ConfigRows>
-            <div className="mt-3 flex flex-wrap gap-2 nodrag" role="group" aria-label="Campaign controls">
+            <div
+              className="mt-3 flex flex-wrap gap-2 nodrag"
+              role="group"
+              aria-label="Campaign controls"
+            >
               {hasLifecycleAuthority && detail.campaign.status === 'ready' ? (
-                <button className="btn-primary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('start')}><Play className="h-3 w-3" />Start</button>
+                <button
+                  className="btn-primary !py-1.5 !text-xs"
+                  disabled={mutating}
+                  onClick={() => onTransition('start')}
+                >
+                  <Play className="h-3 w-3" />
+                  Start
+                </button>
               ) : null}
               {hasLifecycleAuthority && detail.campaign.status === 'active' ? (
-                <button className="btn-secondary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('pause')}><Pause className="h-3 w-3" />Pause</button>
+                <button
+                  className="btn-secondary !py-1.5 !text-xs"
+                  disabled={mutating}
+                  onClick={() => onTransition('pause')}
+                >
+                  <Pause className="h-3 w-3" />
+                  Pause
+                </button>
               ) : null}
               {hasLifecycleAuthority && detail.campaign.status === 'paused' ? (
-                <button className="btn-primary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('resume')}><Play className="h-3 w-3" />Resume</button>
+                <button
+                  className="btn-primary !py-1.5 !text-xs"
+                  disabled={mutating}
+                  onClick={() => onTransition('resume')}
+                >
+                  <Play className="h-3 w-3" />
+                  Resume
+                </button>
               ) : null}
-              {hasLifecycleAuthority && !['completed', 'exhausted', 'failed', 'cancelled', 'cancelling'].includes(detail.campaign.status) ? (
-                <button className="btn-secondary !py-1.5 !text-[10px] !text-status-error" disabled={mutating} onClick={() => onTransition('cancel')}><Square className="h-3 w-3" />Cancel</button>
+              {hasLifecycleAuthority &&
+              !['completed', 'exhausted', 'failed', 'cancelled', 'cancelling'].includes(
+                detail.campaign.status
+              ) ? (
+                <button
+                  className="btn-secondary !py-1.5 !text-xs !text-status-error"
+                  disabled={mutating}
+                  onClick={() => onTransition('cancel')}
+                >
+                  <Square className="h-3 w-3" />
+                  Cancel
+                </button>
               ) : null}
-              <button className="btn-ghost !py-1.5 !text-[10px]" disabled={detail.loading} onClick={onRefresh}><RefreshCw className={clsx('h-3 w-3', detail.loading && 'animate-spin')} />Refresh</button>
+              <button
+                className="btn-ghost !py-1.5 !text-xs"
+                disabled={detail.loading}
+                onClick={onRefresh}
+              >
+                <RefreshCw className={clsx('h-3 w-3', detail.loading && 'animate-spin')} />
+                Refresh
+              </button>
               {onOpenAutoResearch ? (
-                <button className="btn-secondary !py-1.5 !text-[10px]" onClick={onOpenAutoResearch}><ExternalLink className="h-3 w-3" />Open in AutoResearch</button>
+                <button className="btn-secondary !py-1.5 !text-xs" onClick={onOpenAutoResearch}>
+                  <ExternalLink className="h-3 w-3" />
+                  Open in AutoResearch
+                </button>
               ) : null}
             </div>
           </>
         ) : null}
       </ConfigSection>
 
-      {controller ? (
-        <ConfigSection title="Resident Controller">
-          <div role="status" aria-label={`Campaign controller ${controller.state}`}>
-            <div className="flex flex-wrap gap-1.5">
-              <ConfigPill tone={controller.state === 'online' ? 'success' : 'warning'}>
-                {readable(controller.state)}
-              </ConfigPill>
-              {controller.heartbeat_age_seconds != null ? (
-                <ConfigPill tone="neutral">heartbeat {compactNumber(controller.heartbeat_age_seconds)}s ago</ConfigPill>
-              ) : null}
-            </div>
-            {controller.guidance ? (
-              <div className="mt-2 text-[9px] leading-4 text-text-muted">{controller.guidance}</div>
-            ) : null}
-          </div>
-        </ConfigSection>
-      ) : null}
-
-      {research ? <CampaignResearchBrief research={research} /> : null}
+      {research ? <CampaignResearchBrief research={research} density="comfortable" /> : null}
 
       {diagnostics ? (
         <ConfigSection title="AutoResearch Diagnostics">
           <div className="space-y-3" role="group" aria-label="AutoResearch diagnostics">
-            <div className="flex flex-wrap gap-1.5">
-              <ConfigPill tone={diagnostics.low_signal ? 'warning' : 'success'}>
-                {diagnostics.low_signal ? 'low signal detected' : 'signal healthy'}
-              </ConfigPill>
-              <ConfigPill tone="neutral">
-                {diagnostics.checkpoint_comparisons.length} checkpoint comparisons
-              </ConfigPill>
-              <ConfigPill tone="neutral">{diagnostics.error_slices.length} error slices</ConfigPill>
-            </div>
+            <p
+              className={clsx(
+                'border-l-4 px-3 py-2 text-xs leading-5',
+                diagnostics.low_signal
+                  ? 'border-status-warning text-status-warning'
+                  : 'border-status-success text-status-success'
+              )}
+            >
+              {diagnostics.low_signal ? 'Low signal detected' : 'Signal healthy'} ·{' '}
+              {diagnostics.checkpoint_comparisons.length} checkpoint comparisons ·{' '}
+              {diagnostics.error_slices.length} error slices
+            </p>
 
             {diagnostics.signals.length ? (
               <div className="space-y-1" aria-label="Diagnostic signals">
                 {diagnostics.signals.slice(0, 8).map((signal) => (
-                  <div key={signal.code} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
+                  <div
+                    key={signal.code}
+                    className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5"
+                  >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-mono text-[9px] font-bold text-text-primary">{readable(signal.code)}</div>
-                      <ConfigPill tone={signal.severity === 'critical' ? 'error' : signal.severity === 'warning' ? 'warning' : 'neutral'}>
+                      <div className="font-mono text-[11px] font-bold text-text-primary">
+                        {readable(signal.code)}
+                      </div>
+                      <span
+                        className={clsx(
+                          'font-mono text-[11px] font-bold uppercase',
+                          signal.severity === 'critical'
+                            ? 'text-status-error'
+                            : signal.severity === 'warning'
+                              ? 'text-status-warning'
+                              : 'text-text-muted'
+                        )}
+                      >
                         {signal.severity}
-                      </ConfigPill>
+                      </span>
                     </div>
-                    <div className="mt-0.5 text-[9px] leading-4 text-text-muted">{signal.summary}</div>
+                    <div className="mt-1 text-xs leading-5 text-text-secondary">
+                      {signal.summary}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -278,16 +366,29 @@ export function CampaignEvidencePanel({
 
             {diagnostics.checkpoint_comparisons.length ? (
               <div>
-                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Checkpoint trajectory</div>
+                <div className="mb-1 font-mono text-[11px] font-bold uppercase tracking-wide text-text-muted">
+                  Checkpoint trajectory
+                </div>
                 <div className="space-y-1">
                   {diagnostics.checkpoint_comparisons.slice(0, 8).map((checkpoint) => (
-                    <div key={checkpoint.evaluation_result_id} className="grid grid-cols-[1fr_auto_auto] gap-2 rounded-brutal border-brutal border-border-subtle px-2 py-1 font-mono text-[8px] text-text-muted">
-                      <span className="truncate">{checkpoint.step != null ? `step ${checkpoint.step}` : checkpoint.role}</span>
+                    <div
+                      key={checkpoint.evaluation_result_id}
+                      className="grid grid-cols-[1fr_auto_auto] gap-2 rounded-brutal border-brutal border-border-subtle px-3 py-2 font-mono text-[11px] text-text-muted"
+                    >
+                      <span className="truncate">
+                        {checkpoint.step != null ? `step ${checkpoint.step}` : checkpoint.role}
+                      </span>
                       <span>{compactNumber(checkpoint.metric_value)}</span>
-                      <span className={clsx(
-                        checkpoint.improvement_from_baseline != null && checkpoint.improvement_from_baseline > 0 && 'text-status-success',
-                        checkpoint.improvement_from_baseline != null && checkpoint.improvement_from_baseline < 0 && 'text-status-error',
-                      )}>
+                      <span
+                        className={clsx(
+                          checkpoint.improvement_from_baseline != null &&
+                            checkpoint.improvement_from_baseline > 0 &&
+                            'text-status-success',
+                          checkpoint.improvement_from_baseline != null &&
+                            checkpoint.improvement_from_baseline < 0 &&
+                            'text-status-error'
+                        )}
+                      >
                         {checkpoint.improvement_from_baseline == null
                           ? 'no baseline delta'
                           : `${checkpoint.improvement_from_baseline >= 0 ? '+' : ''}${compactNumber(checkpoint.improvement_from_baseline)}`}
@@ -300,16 +401,23 @@ export function CampaignEvidencePanel({
 
             {diagnostics.error_slices.length ? (
               <div>
-                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Error slices</div>
+                <div className="mb-1 font-mono text-[11px] font-bold uppercase tracking-wide text-text-muted">
+                  Error slices
+                </div>
                 <div className="space-y-1">
                   {diagnostics.error_slices.slice(0, 8).map((slice) => (
-                    <div key={slice.slice_path} className="flex items-center justify-between gap-2 rounded-brutal border-brutal border-border-subtle px-2 py-1 font-mono text-[8px]">
+                    <div
+                      key={slice.slice_path}
+                      className="flex items-center justify-between gap-2 rounded-brutal border-brutal border-border-subtle px-3 py-2 font-mono text-[11px]"
+                    >
                       <span className="truncate text-text-muted">{readable(slice.slice_path)}</span>
-                      <span className={clsx(
-                        slice.status === 'improved' && 'text-status-success',
-                        slice.status === 'regressed' && 'text-status-error',
-                        !['improved', 'regressed'].includes(slice.status) && 'text-text-muted',
-                      )}>
+                      <span
+                        className={clsx(
+                          slice.status === 'improved' && 'text-status-success',
+                          slice.status === 'regressed' && 'text-status-error',
+                          !['improved', 'regressed'].includes(slice.status) && 'text-text-muted'
+                        )}
+                      >
                         {compactNumber(slice.candidate_value)} · {slice.status}
                       </span>
                     </div>
@@ -320,17 +428,32 @@ export function CampaignEvidencePanel({
 
             {diagnostics.ranked_hypotheses.length ? (
               <div aria-label="Ranked next hypotheses">
-                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Ranked next hypotheses · advisory only</div>
+                <div className="mb-1 font-mono text-[11px] font-bold uppercase tracking-wide text-text-muted">
+                  Ranked next hypotheses · advisory only
+                </div>
                 <div className="space-y-1">
                   {diagnostics.ranked_hypotheses.map((hypothesis) => (
-                    <div key={hypothesis.hypothesis_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
-                      <div className="flex items-center gap-1.5 font-mono text-[8px] text-text-muted">
+                    <div
+                      key={hypothesis.hypothesis_id}
+                      className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5"
+                    >
+                      <div className="flex items-center gap-2 font-mono text-[11px] text-text-muted">
                         <span className="font-bold text-text-primary">#{hypothesis.rank}</span>
-                        <ConfigPill tone={hypothesis.action_kind === 'candidate' ? 'accent' : 'neutral'}>{hypothesis.action_kind}</ConfigPill>
+                        <span
+                          className={
+                            hypothesis.action_kind === 'candidate' ? 'font-bold text-accent' : ''
+                          }
+                        >
+                          {readable(hypothesis.action_kind)}
+                        </span>
                         <span className="truncate">{hypothesis.changed_variable}</span>
                       </div>
-                      <div className="mt-1 text-[9px] leading-4 text-text-primary">{hypothesis.hypothesis}</div>
-                      <div className="mt-0.5 text-[8px] leading-3 text-text-muted">Falsify: {hypothesis.falsification_criterion}</div>
+                      <div className="mt-1 text-xs leading-5 text-text-primary">
+                        {hypothesis.hypothesis}
+                      </div>
+                      <div className="mt-1 text-[11px] leading-4 text-text-muted">
+                        Falsify: {hypothesis.falsification_criterion}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -340,33 +463,24 @@ export function CampaignEvidencePanel({
         </ConfigSection>
       ) : null}
 
-      {detail && chartData.length > 1 ? (
-        <ConfigSection title={`Loss · ${latestAttempt?.attempt_id || 'latest attempt'}`}>
-          <div
-            className="h-52 rounded-brutal border-brutal border-border bg-background-secondary p-3"
-            role="img"
-            aria-label={`Training loss curve, ${chartData.length} points, step ${chartData[0].step} loss ${chartData[0].loss.toFixed(4)} to step ${chartData.at(-1)!.step} loss ${chartData.at(-1)!.loss.toFixed(4)}`}
-          >
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <XAxis dataKey="step" tick={{ fontSize: 9 }} stroke="var(--text-muted)" />
-                <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9 }} stroke="var(--text-muted)" />
-                <Tooltip contentStyle={{ background: 'var(--background-card)', border: '2px solid var(--border)' }} />
-                <Line type="monotone" dataKey="loss" stroke="var(--accent)" dot={false} strokeWidth={2} isAnimationActive={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </ConfigSection>
-      ) : null}
-
       {detail?.evidence ? (
-        <div className="grid gap-4 lg:grid-cols-2" role="group" aria-label="Campaign policy evidence">
+        <div
+          className="grid gap-4 lg:grid-cols-2"
+          role="group"
+          aria-label="Campaign policy evidence"
+        >
           <ConfigSection title="Policy Boundary">
             <ConfigRows>
               <ConfigRow label="Compute profile" value={detail.evidence.compute_profile_id} />
-              <ConfigRow label="Approved data" value={detail.evidence.approved_data_scopes.join(', ')} />
+              <ConfigRow
+                label="Approved data"
+                value={detail.evidence.approved_data_scopes.join(', ')}
+              />
               <ConfigRow label="Executors" value={detail.evidence.available_executors.join(', ')} />
-              <ConfigRow label="Evidence digest" value={shortDigest(detail.evidence.snapshot_digest)} />
+              <ConfigRow
+                label="Evidence digest"
+                value={shortDigest(detail.evidence.snapshot_digest)}
+              />
             </ConfigRows>
           </ConfigSection>
           <ConfigSection title="Remaining Budget">
@@ -383,17 +497,36 @@ export function CampaignEvidencePanel({
         <ConfigSection title={`Studies (${detail.studies.length})`}>
           <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
             {detail.studies.map((study) => {
-              const activeStage = study.stage_plan.items[study.current_stage_index]?.stage || 'complete'
+              const activeStage =
+                study.stage_plan.items[study.current_stage_index]?.stage || 'complete'
               return (
-                <div key={study.study_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
+                <div
+                  key={study.study_id}
+                  className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5"
+                >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="truncate font-mono text-[10px] font-bold text-text-primary">{study.study_id}</div>
-                    <ConfigPill tone={study.status.includes('failed') ? 'error' : study.status.includes('passed') || study.status === 'promoted' ? 'success' : 'neutral'}>
+                    <div className="truncate font-mono text-xs font-bold text-text-primary">
+                      {study.study_id}
+                    </div>
+                    <span
+                      className={clsx(
+                        'font-mono text-[11px] font-bold uppercase',
+                        study.status.includes('failed') && 'text-status-error',
+                        (study.status.includes('passed') || study.status === 'promoted') &&
+                          'text-status-success',
+                        !study.status.includes('failed') &&
+                          !study.status.includes('passed') &&
+                          study.status !== 'promoted' &&
+                          'text-text-muted'
+                      )}
+                    >
                       {readable(study.status)}
-                    </ConfigPill>
+                    </span>
                   </div>
-                  <div className="font-mono text-[8px] text-text-muted">
-                    {readable(activeStage)} · stage {Math.min(study.current_stage_index + 1, study.stage_plan.items.length)} / {study.stage_plan.items.length}
+                  <div className="font-mono text-[11px] text-text-muted">
+                    {readable(activeStage)} · stage{' '}
+                    {Math.min(study.current_stage_index + 1, study.stage_plan.items.length)} /{' '}
+                    {study.stage_plan.items.length}
                   </div>
                 </div>
               )
@@ -406,13 +539,25 @@ export function CampaignEvidencePanel({
         <ConfigSection title="Latest Development Gate">
           <ConfigRows>
             <ConfigRow label="Verdict" value={readable(latestComparison.verdict)} />
-            <ConfigRow label="Sample" value={`${latestComparison.sample_count} queries / ${latestComparison.video_count} videos`} />
+            <ConfigRow
+              label="Sample"
+              value={`${latestComparison.sample_count} queries / ${latestComparison.video_count} videos`}
+            />
             <ConfigRow label="Candidate" value={shortDigest(latestComparison.candidate_digest)} />
             <ConfigRow label="Champion" value={shortDigest(latestComparison.champion_digest)} />
-            {Object.entries(latestComparison.metrics).slice(0, 10).map(([name, value]) => (
-              <ConfigRow key={name} label={readable(name)} value={typeof value === 'number' ? value.toFixed(6) : 'not measured'} />
-            ))}
-            <ConfigRow label="Blocking reasons" value={latestComparison.blocking_reasons.join('; ') || 'None'} />
+            {Object.entries(latestComparison.metrics)
+              .slice(0, 10)
+              .map(([name, value]) => (
+                <ConfigRow
+                  key={name}
+                  label={readable(name)}
+                  value={typeof value === 'number' ? value.toFixed(6) : 'not measured'}
+                />
+              ))}
+            <ConfigRow
+              label="Blocking reasons"
+              value={latestComparison.blocking_reasons.join('; ') || 'None'}
+            />
             <ConfigRow label="Warnings" value={latestComparison.warnings.join('; ') || 'None'} />
           </ConfigRows>
         </ConfigSection>
@@ -422,22 +567,31 @@ export function CampaignEvidencePanel({
         <ConfigSection title="Linked Experiment Ledger">
           <div className="space-y-2" role="group" aria-label="Linked experiment ledger evidence">
             {detail.ledger.projects.map((project) => (
-              <div key={project.project.project_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-2">
+              <div
+                key={project.project.project_id}
+                className="rounded-brutal border-brutal border-border-subtle px-2 py-2"
+              >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="truncate font-mono text-[10px] font-bold text-text-primary">
+                  <div className="truncate font-mono text-xs font-bold text-text-primary">
                     {project.project.display_name || project.project.project_id}
                   </div>
-                  <ConfigPill tone="neutral">{project.project.project_id}</ConfigPill>
+                  <span className="font-mono text-[11px] text-text-muted">
+                    {project.project.project_id}
+                  </span>
                 </div>
-                <div className="mt-1 grid grid-cols-4 gap-1 font-mono text-[8px] text-text-muted">
+                <div className="mt-2 grid grid-cols-2 gap-1 font-mono text-[11px] text-text-muted sm:grid-cols-4">
                   <span>{project.experiments.length} experiments</span>
                   <span>{project.runs.length} runs</span>
                   <span>{project.evaluations.length} evals</span>
                   <span>{project.decisions.length} decisions</span>
                 </div>
                 {project.evaluations.slice(0, 3).map((evaluation) => (
-                  <div key={evaluation.evaluation_result_id} className="mt-1 border-t border-border-subtle pt-1 font-mono text-[8px] text-text-muted">
-                    {evaluation.evaluation_result_id} · {evaluation.evaluation_suite_id} · {readable(evaluation.status)}
+                  <div
+                    key={evaluation.evaluation_result_id}
+                    className="mt-2 border-t border-border-subtle pt-2 font-mono text-[11px] text-text-muted"
+                  >
+                    {evaluation.evaluation_result_id} · {evaluation.evaluation_suite_id} ·{' '}
+                    {readable(evaluation.status)}
                   </div>
                 ))}
               </div>
@@ -449,13 +603,30 @@ export function CampaignEvidencePanel({
       {detail?.ledger?.projects.some((project) => project.decisions.length) ? (
         <ConfigSection title="Decisions">
           <div className="space-y-1" role="group" aria-label="Campaign decisions">
-            {detail.ledger.projects.flatMap((project) => project.decisions).slice(0, 12).map((decision) => (
-              <div key={decision.decision_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
-                <div className="font-mono text-[10px] font-bold text-text-primary">{readable(decision.decision_type)}</div>
-                <div className="text-[9px] leading-4 text-text-muted">{decision.outcome}</div>
-                <div className="font-mono text-[8px] text-text-muted">{decision.decision_id}</div>
-              </div>
-            ))}
+            {detail.ledger.projects
+              .flatMap((project) => project.decisions)
+              .slice(0, 12)
+              .map((decision) => {
+                const presentation = describeCampaignDecision(decision)
+                return (
+                  <div
+                    key={decision.decision_id}
+                    className="rounded-brutal border-brutal border-border-subtle px-3 py-2"
+                    title={presentation.forensic}
+                  >
+                    <div className="text-xs font-bold text-text-primary">
+                      {presentation.summary}
+                    </div>
+                    <div className="mt-1 text-xs leading-5 text-text-secondary">
+                      {presentation.detail}
+                    </div>
+                    <div className="mt-1 font-mono text-[11px] text-text-muted">
+                      {readable(decision.decision_type)} decision ·{' '}
+                      {new Date(decision.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                )
+              })}
           </div>
         </ConfigSection>
       ) : null}
@@ -463,32 +634,75 @@ export function CampaignEvidencePanel({
       {detail ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <ConfigSection title={`Recent Events (${detail.events.length})`}>
-            <div className="max-h-72 space-y-1 overflow-y-auto pr-1" role="group" aria-label="Recent campaign events">
-              {detail.events.slice(-12).reverse().map((item) => (
-                <div key={item.event.event_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
-                  <div className="font-mono text-[10px] font-bold text-text-primary">{readable(item.event.event_type)}</div>
-                  <div className="font-mono text-[8px] text-text-muted">cursor {item.cursor} · {new Date(item.event.created_at).toLocaleString()}</div>
-                </div>
-              ))}
+            <div
+              className="max-h-72 space-y-1 overflow-y-auto pr-1"
+              role="group"
+              aria-label="Recent campaign events"
+            >
+              {detail.events
+                .slice(-12)
+                .reverse()
+                .map((item) => {
+                  return (
+                    <CampaignEvidenceRow
+                      key={item.event.event_id}
+                      selection={{ kind: 'event', item }}
+                      onInspect={setInspectedEvidence}
+                    />
+                  )
+                })}
             </div>
           </ConfigSection>
           <ConfigSection title={`Sealed Evidence (${detail.artifacts.length})`}>
-            <div className="max-h-72 space-y-1 overflow-y-auto pr-1" role="group" aria-label="Sealed campaign evidence">
-              {detail.artifacts.slice(-12).reverse().map((artifact) => (
-                <div key={artifact.artifact_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
-                  <div className="truncate font-mono text-[10px] font-bold text-text-primary">{readable(artifact.schema_name)}</div>
-                  <div className="font-mono text-[8px] text-text-muted">{shortDigest(artifact.sha256)} · {formatBytes(artifact.size_bytes)}</div>
-                </div>
-              ))}
+            <div
+              className="max-h-72 space-y-1 overflow-y-auto pr-1"
+              role="group"
+              aria-label="Sealed campaign evidence"
+            >
+              {detail.artifacts
+                .slice(-12)
+                .reverse()
+                .map((artifact) => {
+                  return (
+                    <CampaignEvidenceRow
+                      key={artifact.artifact_id}
+                      selection={{ kind: 'artifact', artifact }}
+                      onInspect={setInspectedEvidence}
+                    />
+                  )
+                })}
             </div>
           </ConfigSection>
         </div>
+      ) : null}
+
+      {inspectedEvidence ? (
+        <ConfigSection
+          title={
+            <div className="flex items-center justify-between gap-3">
+              <span>Evidence detail</span>
+              <button
+                type="button"
+                className="node-btn nodrag"
+                onClick={() => setInspectedEvidence(null)}
+                aria-label="Close evidence detail"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          }
+        >
+          <CampaignEvidenceInspector selection={inspectedEvidence} />
+        </ConfigSection>
       ) : null}
     </>
   )
 }
 
-export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeProps<CampaignNodeType>) {
+export const CampaignNode = memo(function CampaignNode({
+  data,
+  selected
+}: NodeProps<CampaignNodeType>) {
   const workspaceId = useWorkspaceStore((state) => state.activeWorkspaceId)
   const workspace = useCampaignStore((state) => state.workspaces[workspaceId])
   const load = useCampaignStore((state) => state.load)
@@ -499,27 +713,30 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
   const updatePanelConfig = useTerminalStore((state) => state.updatePanelConfig)
   const [configOpen, setConfigOpen] = useState(false)
   const [mutating, setMutating] = useState(false)
-  const configuredCampaignId = typeof data.adapterConfig?.campaignId === 'string'
-    ? data.adapterConfig.campaignId
-    : undefined
+  const configuredCampaignId =
+    typeof data.adapterConfig?.campaignId === 'string' ? data.adapterConfig.campaignId : undefined
   const campaignId = configuredCampaignId || workspace?.selectedCampaignId || undefined
   const detail = campaignId ? workspace?.details[campaignId] : undefined
   const snapshotVersion = detail?.snapshot?.aggregate_version ?? null
+  const outcomeLoadKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     void load(workspaceId, configuredCampaignId)
   }, [configuredCampaignId, load, workspaceId])
 
   useEffect(() => {
-    if (!campaignId || !shouldLoadCampaignDrillDown(configOpen, snapshotVersion)) return
+    if (!campaignId || snapshotVersion == null) return
+    const loadKey = `${workspaceId}:${campaignId}:${snapshotVersion}`
+    if (outcomeLoadKeyRef.current === loadKey) return
+    outcomeLoadKeyRef.current = loadKey
     void loadLegacyDetail(workspaceId, campaignId)
-  }, [campaignId, configOpen, loadLegacyDetail, snapshotVersion, workspaceId])
+  }, [campaignId, loadLegacyDetail, snapshotVersion, workspaceId])
 
   useEffect(() => {
     if (!campaignId || configuredCampaignId === campaignId) return
     updatePanelConfig(data.panelId, {
       ...(data.adapterConfig || {}),
-      campaignId,
+      campaignId
     })
   }, [campaignId, configuredCampaignId, data.adapterConfig, data.panelId, updatePanelConfig])
 
@@ -530,24 +747,16 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
 
   const latestAttempt = detail?.attempts.at(-1)
   const loss = useMemo(
-    () => latestAttempt ? detail?.lossByAttempt[latestAttempt.attempt_id] || [] : [],
-    [detail?.lossByAttempt, latestAttempt],
+    () => (latestAttempt ? detail?.lossByAttempt[latestAttempt.attempt_id] || [] : []),
+    [detail?.lossByAttempt, latestAttempt]
   )
   const latestComparison = detail?.comparisons.at(-1)
-  const ledgerEvaluationCount = detail?.ledger?.projects.reduce(
-    (total, project) => total + project.evaluations.length, 0,
-  ) || 0
-  const ledgerDecisionCount = detail?.ledger?.projects.reduce(
-    (total, project) => total + project.decisions.length, 0,
-  ) || 0
-  const chartData = useMemo(
-    () => loss.map((point) => ({ step: point.step, loss: point.value })),
-    [loss],
-  )
-  const research = useMemo(
-    () => detail ? projectCampaignResearch(detail) : undefined,
-    [detail],
-  )
+  const ledgerEvaluationCount =
+    detail?.ledger?.projects.reduce((total, project) => total + project.evaluations.length, 0) || 0
+  const ledgerDecisionCount =
+    detail?.ledger?.projects.reduce((total, project) => total + project.decisions.length, 0) || 0
+  const research = useMemo(() => (detail ? projectCampaignResearch(detail) : undefined), [detail])
+  const outcome = useMemo(() => (detail ? projectCampaignOutcome(detail) : null), [detail])
 
   const handleSelect = async (nextId: string) => {
     updatePanelConfig(data.panelId, { ...(data.adapterConfig || {}), campaignId: nextId })
@@ -558,7 +767,13 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
     if (!hasLiveCampaignAuthority(detail) || !detail || mutating) return
     setMutating(true)
     try {
-      await submitCampaignTransitionIfLive({ detail, mutating: false, action, workspaceId, transition })
+      await submitCampaignTransitionIfLive({
+        detail,
+        mutating: false,
+        action,
+        workspaceId,
+        transition
+      })
     } finally {
       setMutating(false)
     }
@@ -576,30 +791,38 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
       `- manifest revision: ${campaign.manifest_revision}`,
       `- champion: ${campaign.champion_ref || 'base champion retained'}`,
       `- active study: ${campaign.active_study_id || 'none'}`,
-      `- active action: ${campaign.active_action_id || 'none'}`,
+      `- active action: ${campaign.active_action_id || 'none'}`
     ]
     if (research) {
       lines.push('', '### Research brief')
       lines.push(`- baseline status: ${research.baseline.status}`)
       lines.push(`- baseline model: ${research.baseline.modelRef || 'not recorded'}`)
       lines.push(`- baseline run: ${research.baseline.runId || 'not recorded'}`)
-      if (research.baseline.evaluationSuiteId) lines.push(`- baseline evaluation suite: ${research.baseline.evaluationSuiteId}`)
-      for (const [name, value] of Object.entries(research.baseline.metrics).sort(([left], [right]) => left.localeCompare(right))) {
+      if (research.baseline.evaluationSuiteId)
+        lines.push(`- baseline evaluation suite: ${research.baseline.evaluationSuiteId}`)
+      for (const [name, value] of Object.entries(research.baseline.metrics).sort(
+        ([left], [right]) => left.localeCompare(right)
+      )) {
         lines.push(`- baseline ${name}: ${value}`)
       }
       if (research.latestStudy) {
-        lines.push(`- latest study: ${research.latestStudy.studyId} (${research.latestStudy.status})`)
+        lines.push(
+          `- latest study: ${research.latestStudy.studyId} (${research.latestStudy.status})`
+        )
         lines.push(`- latest hypothesis: ${research.latestStudy.hypothesis || 'not recorded'}`)
         lines.push(`- primary variable: ${research.latestStudy.primaryVariable || 'not recorded'}`)
-        lines.push(`- falsification criterion: ${research.latestStudy.falsificationCriterion || 'not recorded'}`)
+        lines.push(
+          `- falsification criterion: ${research.latestStudy.falsificationCriterion || 'not recorded'}`
+        )
       }
       lines.push(`- budget remaining: ${budgetSummary(research)}`)
       lines.push(`- latest decision: ${research.latestDecision?.outcome || 'not recorded'}`)
-      const actionLabel = research.nextAction.kind === 'current'
-        ? 'current action'
-        : research.nextAction.kind === 'none'
-          ? 'next action'
-          : 'planned next action'
+      const actionLabel =
+        research.nextAction.kind === 'current'
+          ? 'current action'
+          : research.nextAction.kind === 'none'
+            ? 'next action'
+            : 'planned next action'
       lines.push(`- ${actionLabel}: ${research.nextAction.label}`)
     }
     if (detail.evidence) {
@@ -623,7 +846,9 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
       lines.push('', '### Studies')
       for (const study of detail.studies.slice(-12)) {
         const stage = study.stage_plan.items[study.current_stage_index]?.stage || 'complete'
-        lines.push(`- ${study.study_id}: ${study.status}; cursor ${study.current_stage_index}/${study.stage_plan.items.length}; stage ${stage}`)
+        lines.push(
+          `- ${study.study_id}: ${study.status}; cursor ${study.current_stage_index}/${study.stage_plan.items.length}; stage ${stage}`
+        )
       }
     }
     if (latestAttempt) {
@@ -631,13 +856,17 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
       lines.push(`- ${latestAttempt.attempt_id}: ${latestAttempt.stage} / ${latestAttempt.status}`)
       lines.push(`- candidate: ${latestAttempt.candidate_digest}`)
       if (loss.length) {
-        lines.push(`- loss: ${loss[0].value.toFixed(4)} @${loss[0].step} → ${loss.at(-1)!.value.toFixed(4)} @${loss.at(-1)!.step}`)
+        lines.push(
+          `- loss: ${loss[0].value.toFixed(4)} @${loss[0].step} → ${loss.at(-1)!.value.toFixed(4)} @${loss.at(-1)!.step}`
+        )
       }
     }
     if (latestComparison) {
       lines.push('', '### Latest development comparison')
       lines.push(`- verdict: ${latestComparison.verdict}`)
-      lines.push(`- sample: ${latestComparison.sample_count} queries / ${latestComparison.video_count} videos`)
+      lines.push(
+        `- sample: ${latestComparison.sample_count} queries / ${latestComparison.video_count} videos`
+      )
       for (const [name, value] of Object.entries(latestComparison.metrics)) {
         if (typeof value === 'number') lines.push(`- ${name}: ${value.toFixed(6)}`)
       }
@@ -650,7 +879,9 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
         lines.push(`- experiments: ${project.evidence.experiment_ids.join(', ') || 'none'}`)
         lines.push(`- runs: ${project.evidence.run_ids.join(', ') || 'none'}`)
         for (const evaluation of project.evaluations.slice(0, 12)) {
-          lines.push(`- evaluation ${evaluation.evaluation_result_id}: suite ${evaluation.evaluation_suite_id}; run ${evaluation.run_id}; ${evaluation.status}`)
+          lines.push(
+            `- evaluation ${evaluation.evaluation_result_id}: suite ${evaluation.evaluation_suite_id}; run ${evaluation.run_id}; ${evaluation.status}`
+          )
         }
         for (const decision of project.decisions.slice(0, 12)) {
           lines.push(`- decision ${decision.decision_id}: ${decision.outcome}`)
@@ -700,37 +931,63 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
         onClose={data.onClose}
       >
         {workspace?.loading && !detail ? (
-          <div className="flex justify-center py-5"><Loader2 className="h-4 w-4 animate-spin text-accent" /></div>
+          <div className="flex justify-center py-5">
+            <Loader2 className="h-4 w-4 animate-spin text-accent" />
+          </div>
         ) : workspace?.error && !detail ? (
-          <div className="py-3 text-center font-mono text-[10px] text-status-error">{workspace.error}</div>
+          <div className="py-3 text-center font-mono text-[10px] text-status-error">
+            {workspace.error}
+          </div>
         ) : !detail ? (
-          <div className="py-4 text-center font-mono text-[10px] text-text-muted">No campaigns in this workspace</div>
+          <div className="py-4 text-center font-mono text-[10px] text-text-muted">
+            No campaigns in this workspace
+          </div>
         ) : (
           <div className="space-y-2">
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[11px] font-bold text-text-primary">{detail.campaign.title}</div>
-                <div className="line-clamp-2 text-[10px] leading-4 text-text-muted">{detail.campaign.objective}</div>
+                <div className="truncate font-mono text-[11px] font-bold text-text-primary">
+                  {detail.campaign.title}
+                </div>
+                <div className="line-clamp-2 text-[10px] leading-4 text-text-muted">
+                  {detail.campaign.objective}
+                </div>
               </div>
-              <span className={clsx(
-                'border-brutal rounded-brutal px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase',
-                tone(detail.campaign.status) === 'error' && 'border-status-error/60 bg-status-error/10 text-status-error',
-                tone(detail.campaign.status) === 'success' && 'border-status-success/60 bg-status-success/10 text-status-success',
-                tone(detail.campaign.status) === 'warning' && 'border-status-warning/60 bg-status-warning/10 text-status-warning',
-                tone(detail.campaign.status) === 'accent' && 'border-accent/60 bg-accent/10 text-accent',
-                tone(detail.campaign.status) === 'neutral' && 'border-border-subtle text-text-muted',
-              )}>{readable(detail.campaign.status)}</span>
+              <span
+                className={clsx(
+                  'border-brutal rounded-brutal px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase',
+                  tone(detail.campaign.status) === 'error' &&
+                    'border-status-error/60 bg-status-error/10 text-status-error',
+                  tone(detail.campaign.status) === 'success' &&
+                    'border-status-success/60 bg-status-success/10 text-status-success',
+                  tone(detail.campaign.status) === 'warning' &&
+                    'border-status-warning/60 bg-status-warning/10 text-status-warning',
+                  tone(detail.campaign.status) === 'accent' &&
+                    'border-accent/60 bg-accent/10 text-accent',
+                  tone(detail.campaign.status) === 'neutral' &&
+                    'border-border-subtle text-text-muted'
+                )}
+              >
+                {readable(detail.campaign.status)}
+              </span>
             </div>
+
+            {outcome ? <CampaignOutcomeSummary model={outcome} density="compact" /> : null}
 
             <div className="grid grid-cols-3 gap-px overflow-hidden rounded-brutal border-brutal border-border-subtle bg-border-subtle">
               {[
                 ['studies', detail.snapshot?.collections.studies.count ?? detail.studies.length],
                 ['attempts', detail.snapshot?.collections.attempts.count ?? detail.attempts.length],
-                ['evidence', detail.snapshot?.collections.artifacts.count ?? detail.artifacts.length],
+                [
+                  'evidence',
+                  detail.snapshot?.collections.artifacts.count ?? detail.artifacts.length
+                ]
               ].map(([label, value]) => (
                 <div key={label} className="bg-background-card px-2 py-1 text-center">
                   <div className="font-mono text-[11px] font-bold text-text-primary">{value}</div>
-                  <div className="font-mono text-[7px] uppercase tracking-wide text-text-muted">{label}</div>
+                  <div className="font-mono text-[7px] uppercase tracking-wide text-text-muted">
+                    {label}
+                  </div>
                 </div>
               ))}
             </div>
@@ -741,7 +998,9 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
               <div
                 className={clsx(
                   'flex items-center gap-2 font-mono text-[9px]',
-                  workspace.controller.state === 'online' ? 'text-status-success' : 'text-status-warning',
+                  workspace.controller.state === 'online'
+                    ? 'text-status-success'
+                    : 'text-status-warning'
                 )}
                 role="status"
                 aria-label={`Campaign controller ${workspace.controller.state}`}
@@ -751,20 +1010,7 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
               </div>
             ) : null}
 
-            {chartData.length > 1 ? (
-              <div
-                className="h-16 rounded-brutal border-brutal border-border-subtle bg-background-secondary p-1"
-                role="img"
-                aria-label={`Training loss curve, ${chartData.length} points, step ${chartData[0].step} loss ${chartData[0].loss.toFixed(4)} to step ${chartData.at(-1)!.step} loss ${chartData.at(-1)!.loss.toFixed(4)}`}
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <YAxis hide domain={['auto', 'auto']} />
-                    <Line type="monotone" dataKey="loss" stroke="var(--accent)" dot={false} strokeWidth={2} isAnimationActive={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
+            {!outcome?.loss ? (
               <div className="rounded-brutal border-brutal border-border-subtle px-2 py-2 font-mono text-[9px] text-text-muted">
                 {latestAttempt
                   ? `${readable(latestAttempt.stage)} · ${readable(latestAttempt.status)}`
@@ -772,25 +1018,40 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
                     ? `${readable(detail.snapshot.active_work.stage)} · ${readable(detail.snapshot.active_work.process_identity?.state || 'observed')}`
                     : 'Waiting for the first study attempt'}
               </div>
-            )}
+            ) : null}
 
             {latestComparison ? (
               <div className="flex items-center gap-2 font-mono text-[9px]">
-                <span className={clsx(
-                  'font-bold uppercase',
-                  latestComparison.verdict === 'passed' ? 'text-status-success' : latestComparison.verdict === 'failed' ? 'text-status-error' : 'text-status-warning',
-                )}>{readable(latestComparison.verdict)}</span>
-                <span className="truncate text-text-muted">{latestComparison.sample_count} queries · {latestComparison.video_count} videos</span>
+                <span
+                  className={clsx(
+                    'font-bold uppercase',
+                    latestComparison.verdict === 'passed'
+                      ? 'text-status-success'
+                      : latestComparison.verdict === 'failed'
+                        ? 'text-status-error'
+                        : 'text-status-warning'
+                  )}
+                >
+                  {readable(latestComparison.verdict)}
+                </span>
+                <span className="truncate text-text-muted">
+                  {latestComparison.sample_count} queries · {latestComparison.video_count} videos
+                </span>
               </div>
             ) : null}
             {detail.ledger?.linked ? (
               <div className="flex items-center gap-2 font-mono text-[9px] text-text-muted">
                 <span className="font-bold text-text-primary">Ledger</span>
-                <span>{ledgerEvaluationCount} evals · {ledgerDecisionCount} decisions</span>
+                <span>
+                  {ledgerEvaluationCount} evals · {ledgerDecisionCount} decisions
+                </span>
               </div>
             ) : null}
             {detail.error ? (
-              <div className="flex items-start gap-1 text-[9px] text-status-error"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{detail.error}</div>
+              <div className="flex items-start gap-1 text-[9px] text-status-error">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                {detail.error}
+              </div>
             ) : null}
           </div>
         )}
@@ -807,20 +1068,20 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
           campaignId={campaignId}
           campaigns={workspace?.campaigns || []}
           detail={detail}
-          controller={workspace?.controller}
-          chartData={chartData}
-          latestAttempt={latestAttempt}
           latestComparison={latestComparison}
           mutating={mutating}
           onSelect={(nextId) => void handleSelect(nextId)}
           onTransition={(action) => void runTransition(action)}
           onRefresh={() => detail && void refresh(workspaceId, detail.campaign.campaign_id)}
-          onOpenAutoResearch={detail ? () => {
-            openCampaignInAutoResearch(workspaceId, detail.campaign.campaign_id)
-            setConfigOpen(false)
-          } : undefined}
+          onOpenAutoResearch={
+            detail
+              ? () => {
+                  openCampaignInAutoResearch(workspaceId, detail.campaign.campaign_id)
+                  setConfigOpen(false)
+                }
+              : undefined
+          }
         />
-
       </NodeConfigModal>
     </>
   )

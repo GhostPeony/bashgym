@@ -1,9 +1,17 @@
 """Tests for ModelRouter integration with ProviderRegistry."""
 
 import pytest
-from bashgym.gym.router import ModelRouter, RouterConfig, RoutingStrategy, ModelType, ModelConfig, ModelResponse
+
+from bashgym.gym.router import (
+    ModelConfig,
+    ModelResponse,
+    ModelRouter,
+    ModelType,
+    RouterConfig,
+    RoutingStrategy,
+)
+from bashgym.providers.base import HealthStatus, InferenceProvider, ProviderModel, ProviderResponse
 from bashgym.providers.registry import ProviderRegistry
-from bashgym.providers.base import InferenceProvider, ProviderResponse, HealthStatus, ProviderModel
 
 
 class FakeProvider(InferenceProvider):
@@ -12,17 +20,25 @@ class FakeProvider(InferenceProvider):
         self._content = content
 
     @property
-    def provider_type(self): return self._ptype
+    def provider_type(self):
+        return self._ptype
+
     @property
-    def requires_api_key(self): return False
+    def requires_api_key(self):
+        return False
+
     @property
-    def is_local(self): return self._ptype == "ollama"
+    def is_local(self):
+        return self._ptype == "ollama"
 
     async def generate(self, messages, model, **kwargs):
         return ProviderResponse(
-            content=self._content, model_name=model,
-            provider_type=self._ptype, latency_ms=10.0,
-            tokens_used=5, success=True,
+            content=self._content,
+            model_name=model,
+            provider_type=self._ptype,
+            latency_ms=10.0,
+            tokens_used=5,
+            success=True,
         )
 
     async def health_check(self):
@@ -61,10 +77,14 @@ class TestRouterWithRegistry:
         router = ModelRouter(config=config, registry=self.registry)
         # Remove any auto-loaded models so only our test model is present
         router.models.clear()
-        router.register_model(ModelConfig(
-            name="claude-sonnet", model_type=ModelType.TEACHER,
-            endpoint="", api_key="test",
-        ))
+        router.register_model(
+            ModelConfig(
+                name="claude-sonnet",
+                model_type=ModelType.TEACHER,
+                endpoint="",
+                api_key="test",
+            )
+        )
 
         response = await router.generate("Hello")
         assert response.success is True
@@ -77,10 +97,13 @@ class TestRouterWithRegistry:
         router = ModelRouter(config=config, registry=self.registry)
         # Remove any auto-loaded models so only our test model is present
         router.models.clear()
-        router.register_model(ModelConfig(
-            name="qwen2.5-coder:7b", model_type=ModelType.STUDENT,
-            endpoint="",
-        ))
+        router.register_model(
+            ModelConfig(
+                name="qwen2.5-coder:7b",
+                model_type=ModelType.STUDENT,
+                endpoint="",
+            )
+        )
 
         response = await router.generate("Simple fix")
         assert response.content == "student says"
@@ -96,9 +119,13 @@ class TestRouterBackwardCompat:
         config = RouterConfig(strategy=RoutingStrategy.TEACHER_ONLY)
         router = ModelRouter(config=config)
         # Register a model so routing doesn't fail
-        router.register_model(ModelConfig(
-            name="claude-sonnet", model_type=ModelType.TEACHER,
-            endpoint="https://api.anthropic.com/v1/messages", api_key="test",
-        ))
+        router.register_model(
+            ModelConfig(
+                name="claude-sonnet",
+                model_type=ModelType.TEACHER,
+                endpoint="https://api.anthropic.com/v1/messages",
+                api_key="test",
+            )
+        )
         decision = router.route("test prompt")
         assert decision.selected_model == "claude-sonnet"

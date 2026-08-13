@@ -8,7 +8,7 @@ calls are mocked — no GPU required.
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from bashgym.gym.prompt_evolver import (
     PromptEvolver,
@@ -124,6 +124,7 @@ class TestTrainingTrigger:
 
         # Block the heavy import so it raises ImportError instead of loading 2.5GB
         import sys
+
         fake_module = type(sys)("bashgym.factory.example_generator")
         fake_module.ExampleGenerator = None  # will cause AttributeError when used
         with patch.dict(sys.modules, {"bashgym.factory.example_generator": fake_module}):

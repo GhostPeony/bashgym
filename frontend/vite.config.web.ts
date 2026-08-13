@@ -6,7 +6,7 @@ import path from 'path'
 export default defineConfig({
   plugins: [react()],
   define: {
-    'import.meta.env.VITE_MODE': JSON.stringify('web'),
+    'import.meta.env.VITE_MODE': JSON.stringify('web')
   },
   resolve: {
     alias: {

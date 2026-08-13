@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from ._validation import first_text as _text
+from ._validation import load_json_records
+from ._validation import record_metadata as _metadata
+from ._validation import validation_level as _level
 
 REWARD_EXAMPLE_VALIDATION_SCHEMA_VERSION = "bashgym.reward_example_validation.v1"
 VALID_REWARD_TYPES = {
@@ -16,25 +20,8 @@ VALID_REWARD_TYPES = {
 }
 
 
-def _text(record: dict[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = record.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-    return ""
-
-
-def _metadata(record: dict[str, Any]) -> dict[str, Any]:
-    metadata = record.get("metadata")
-    return metadata if isinstance(metadata, dict) else {}
-
-
 def _metadata_text(metadata: dict[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-    return ""
+    return _text(metadata, *keys)
 
 
 def _metadata_any(metadata: dict[str, Any], *keys: str) -> Any:
@@ -60,10 +47,6 @@ def _finding(
         "index": index,
         "example_id": example_id,
     }
-
-
-def _level(strict: bool) -> str:
-    return "fail" if strict else "warn"
 
 
 def _example_id(record: dict[str, Any], metadata: dict[str, Any]) -> str:
@@ -338,31 +321,11 @@ def validate_reward_example_records(
 
 
 def _load_records(path: str | Path) -> list[dict[str, Any]]:
-    input_path = Path(path)
-    text = input_path.read_text(encoding="utf-8")
-    if input_path.suffix.lower() == ".json":
-        payload = json.loads(text)
-        if isinstance(payload, dict):
-            for key in ("examples", "records", "data"):
-                value = payload.get(key)
-                if isinstance(value, list):
-                    return value
-        if isinstance(payload, list):
-            return payload
-        raise ValueError("JSON reward artifact must be a list or contain examples/records/data")
-
-    records: list[dict[str, Any]] = []
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"line {line_number} is not valid JSON: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ValueError(f"line {line_number} must be a JSON object")
-        records.append(payload)
-    return records
+    return load_json_records(
+        path,
+        container_keys=("examples", "records", "data"),
+        artifact_name="reward",
+    )
 
 
 def validate_reward_examples_file(

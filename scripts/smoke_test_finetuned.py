@@ -2,7 +2,6 @@
 """Quick smoke test of the fine-tuned merged model."""
 
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -30,7 +29,7 @@ def main():
 
     # Load a few val examples
     with open(VAL_PATH) as f:
-        examples = [json.loads(l) for l in f if l.strip()]
+        examples = [json.loads(line) for line in f if line.strip()]
     print(f"Loaded {len(examples)} val examples")
     print()
 

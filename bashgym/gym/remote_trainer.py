@@ -1,13 +1,16 @@
 """
 Remote training execution via SSH.
 
-Uploads training scripts and datasets to a private compute target,
-executes training over SSH, streams logs back in real-time, and downloads
-model artifacts on completion.
+Uploads training scripts and datasets to a private compute target and executes
+training over SSH. Logs and model artifacts remain on the compute target;
+callers receive opaque run references instead of local copies.
 """
 
 import asyncio
+import base64
+import json
 import logging
+import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -353,34 +356,64 @@ class RemoteTrainer:
         poll_interval: float = 2.0,
         work_dir: str | None = None,
     ) -> None:
-        """Stream training logs from remote machine until process exits.
-
-        Callback errors are logged and swallowed — a failing log consumer
-        must not abort a training run that is still healthy on the remote.
-        """
+        """Stream bounded progress chunks while the complete log stays remote."""
         remote_dir = self._remote_run_dir(run_id, work_dir)
-        log_file = f"{remote_dir}/training.log"
-        lines_read = 0
         dead_polls = 0
+        offset = 0
+        partial = ""
+        log_file = f"{remote_dir}/training.log"
+        chunk_script = (
+            "import base64,json,pathlib,sys;"
+            "p=pathlib.Path(sys.argv[1]);o=int(sys.argv[2]);n=int(sys.argv[3]);"
+            "f=p.open('rb') if p.is_file() else None;"
+            "f.seek(o) if f else None;d=f.read(n) if f else b'';"
+            "print(json.dumps({'remote_log_chunk':True,'offset':f.tell() if f else o,"
+            "'data':base64.b64encode(d).decode('ascii')},separators=(',',':')))"
+        )
 
-        def _emit(line: str) -> None:
+        async def emit_chunk() -> bool:
+            nonlocal offset, partial
+            command = " ".join(
+                shlex.quote(value)
+                for value in (
+                    "python3",
+                    "-c",
+                    chunk_script,
+                    log_file,
+                    str(offset),
+                    "65536",
+                )
+            )
+            result = await conn.run(command, check=False)
+            if result.exit_status != 0:
+                return False
+            try:
+                payload = json.loads(result.stdout.strip())
+                data = base64.b64decode(payload["data"], validate=True)
+                next_offset = int(payload["offset"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return False
+            if next_offset < offset or next_offset - offset != len(data):
+                return False
+            offset = next_offset
+            if not data:
+                return False
+            text = partial + data.decode("utf-8", errors="replace")
+            lines = text.split("\n")
+            partial = lines.pop()
             if log_callback:
-                try:
-                    log_callback(line)
-                except Exception as exc:
-                    logger.warning(f"Log callback error: {exc}")
+                for line in lines:
+                    if line.endswith("\r"):
+                        line = line[:-1]
+                    if line:
+                        try:
+                            log_callback(line)
+                        except Exception as exc:
+                            logger.warning(f"Log callback error: {exc}")
+            return True
 
         while True:
-            result = await conn.run(
-                f"tail -n +{lines_read + 1} {log_file} 2>/dev/null",
-                check=False,
-            )
-            if result.exit_status == 0 and result.stdout.strip():
-                new_lines = result.stdout.strip().split("\n")
-                for line in new_lines:
-                    _emit(line)
-                lines_read += len(new_lines)
-
+            await emit_chunk()
             alive = await conn.run(f"kill -0 {remote_pid} 2>/dev/null", check=False)
             if alive.exit_status != 0:
                 # A failed kill -0 can be a transient channel error, not a dead
@@ -392,50 +425,17 @@ class RemoteTrainer:
                     if dead_polls < 5:
                         await asyncio.sleep(poll_interval)
                         continue
-                # Process exited — drain any remaining log lines
-                result = await conn.run(
-                    f"tail -n +{lines_read + 1} {log_file} 2>/dev/null",
-                    check=False,
-                )
-                if result.exit_status == 0 and result.stdout.strip():
-                    for line in result.stdout.strip().split("\n"):
-                        _emit(line)
+                while await emit_chunk():
+                    pass
+                if partial and log_callback:
+                    try:
+                        log_callback(partial.rstrip("\r"))
+                    except Exception as exc:
+                        logger.warning(f"Log callback error: {exc}")
                 break
 
             dead_polls = 0
             await asyncio.sleep(poll_interval)
-
-    async def _download_artifacts(
-        self,
-        conn,
-        run_id: str,
-        local_output_dir: Path,
-        work_dir: str | None = None,
-    ) -> None:
-        """Download trained model artifacts from remote to local."""
-        remote_dir = self._remote_run_dir(run_id, work_dir)
-        sftp = await conn.start_sftp_client()
-
-        local_output_dir.mkdir(parents=True, exist_ok=True)
-
-        for subdir in ["final", "merged"]:
-            remote_path = f"{remote_dir}/{subdir}"
-            try:
-                # listdir includes "." and ".." entries
-                entries = [e for e in await sftp.listdir(remote_path) if e not in (".", "..")]
-            except Exception as e:
-                logger.warning(f"Could not download {subdir}: {e}")
-                continue
-            local_subdir = local_output_dir / subdir
-            local_subdir.mkdir(parents=True, exist_ok=True)
-            for entry in entries:
-                remote_file = f"{remote_path}/{entry}"
-                local_file = str(local_subdir / entry)
-                try:
-                    logger.info(f"Downloading {remote_file} -> {local_file}")
-                    await sftp.get(remote_file, local_file)
-                except Exception as e:
-                    logger.warning(f"Could not download {remote_file}: {e}")
 
     async def pause_remote(self, remote_pid: int) -> bool:
         """Pause a remote training process."""
@@ -484,13 +484,14 @@ class RemoteTrainer:
         """Full remote training orchestration.
 
         Runs the complete flow: preflight check -> upload files -> start
-        training -> stream logs -> download artifacts.
+        training -> stream progress -> return remote-resident references.
 
         Args:
             run_id: Unique identifier for this training run.
             script_path: Local path to the training script.
             dataset_path: Local path to the training dataset.
-            local_output_dir: Local directory to download artifacts into.
+            local_output_dir: Controller-side run directory. It is retained for
+                API compatibility and is never populated with remote artifacts.
             log_callback: Optional callback invoked with each log line.
             pid_callback: Optional callback invoked with the remote PID once training starts.
             script_name: Name of the training script to execute on remote.
@@ -537,29 +538,45 @@ class RemoteTrainer:
             )
 
             # The training process has exited — verify it succeeded before
-            # downloading artifacts, so a crashed run is reported as a
-            # failure instead of a silent success.
+            # returning references, so a crashed run is never represented as a
+            # completed remote model.
             result = await conn.run(f"cat {remote_dir}/exit_code 2>/dev/null", check=False)
             exit_code = result.stdout.strip()
             if exit_code != "0":
-                tail = await conn.run(
-                    f"tail -n 15 {remote_dir}/training.log 2>/dev/null", check=False
-                )
                 return {
                     "success": False,
                     "remote_pid": remote_pid,
                     "run_id": run_id,
-                    "error": (
-                        f"Remote training exited with code {exit_code or 'unknown'}. "
-                        f"Last log lines:\n{tail.stdout.strip()}"
-                    ),
+                    "error": f"Remote training exited with code {exit_code or 'unknown'}.",
+                    "log_ref": f"ssh-run://{run_id}/training.log",
                 }
 
-            # Download artifacts
-            await self._download_artifacts(conn, run_id, local_output_dir, work_dir)
+            artifact_probe = await conn.run(
+                f"artifact_manifest=1; for name in final merged; do "
+                f"path={shlex.quote(remote_dir)}/$name; "
+                'test -d "$path" && test ! -L "$path" && '
+                'test -f "$path/config.json" && '
+                'find "$path" -type f '
+                "\\( -name '*.safetensors' -o -name 'pytorch_model*.bin' \\) "
+                "-print -quit | grep -q . && printf '%s\\n' \"$name\"; done",
+                check=False,
+            )
+            artifact_names = tuple(
+                name for name in artifact_probe.stdout.splitlines() if name in {"final", "merged"}
+            )
+            if artifact_probe.exit_status != 0 or not artifact_names:
+                return {
+                    "success": False,
+                    "remote_pid": remote_pid,
+                    "run_id": run_id,
+                    "error": "Remote training produced no model artifact.",
+                    "log_ref": f"ssh-run://{run_id}/training.log",
+                }
 
         return {
             "success": True,
             "remote_pid": remote_pid,
             "run_id": run_id,
+            "remote_run_ref": f"ssh-run://{run_id}",
+            "artifact_refs": [f"ssh-run://{run_id}/{name}" for name in artifact_names],
         }

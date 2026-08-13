@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from bashgym._compat import UTC
+from bashgym.campaigns import remote as remote_contracts
 from bashgym.campaigns.autoresearch import (
     AutoResearchStopRules,
     AutoResearchTemplateDefinition,
@@ -20,11 +21,13 @@ from bashgym.campaigns.contracts import (
     TargetModelContract,
     canonical_hash,
 )
+from bashgym.campaigns.nemo_rl_installation import bind_nemo_rl_profile
 from bashgym.campaigns.readiness import doctor_autoresearch_template
 from bashgym.campaigns.remote import (
     ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
+    RegisteredRemoteModelSource,
 )
 from bashgym.campaigns.worker_service import ControllerStatusProjection
 from bashgym.ledger.contracts import (
@@ -35,6 +38,7 @@ from bashgym.ledger.contracts import (
 )
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 from tests.campaigns.test_lineage import initialized_repository, source_profile
+from tests.campaigns.test_nemo_rl_installation import nemo_profile
 
 NOW = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
 WORKSPACE = "workspace-a"
@@ -173,7 +177,11 @@ def registered_profile(
     key.write_text("test-only-key\n", encoding="utf-8")
     data.write_text("{}\n", encoding="utf-8")
     stages = []
-    for stage_kind in (StageKind.FULL_TRAINING, StageKind.SMOKE_TRAINING):
+    for stage_kind in (
+        StageKind.DEVELOPMENT_EVALUATION,
+        StageKind.FULL_TRAINING,
+        StageKind.SMOKE_TRAINING,
+    ):
         script = tmp_path / f"{stage_kind.value}.py"
         script.write_text("print('training')\n", encoding="utf-8")
         stages.append(
@@ -181,8 +189,12 @@ def registered_profile(
                 stage=stage_kind,
                 script_path=script,
                 script_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
-                input_files=(data,),
-                input_sha256={data.name: hashlib.sha256(data.read_bytes()).hexdigest()},
+                input_files=(() if stage_kind == StageKind.DEVELOPMENT_EVALUATION else (data,)),
+                input_sha256=(
+                    {}
+                    if stage_kind == StageKind.DEVELOPMENT_EVALUATION
+                    else {data.name: hashlib.sha256(data.read_bytes()).hexdigest()}
+                ),
                 budget_unit="gpu_hours",
                 budget_reservation=0.25,
                 code_lineage_binding=ApprovedCodeLineageExecutionBinding(
@@ -203,8 +215,65 @@ def registered_profile(
         username="trainer",
         key_path=str(key),
         stages=tuple(stages),
+        registered_base_model=RegisteredRemoteModelSource(
+            source_id="registered-base-v1",
+            compute_profile_id=template.manifest.compute_profile_id,
+            target_contract_key=template.target_model.target_contract_key,
+            model_digest=canonical_hash(template.target_model.model_dump(mode="json")),
+            remote_model_path="/srv/bashgym/models/registered-base-v1",
+        ),
+        registered_evaluation_dataset=getattr(
+            remote_contracts, "RegisteredRemoteEvaluationDatasetSource"
+        )(
+            source_id="terminal-heldout-v1",
+            compute_profile_id=template.manifest.compute_profile_id,
+            dataset_version_id=DATASET_VERSION,
+            content_digest="b" * 64,
+            remote_dataset_path="/srv/bashgym/datasets/terminal-heldout-v1.jsonl",
+        ),
     )
     return profile, stages[0].script_path
+
+
+def nemo_bound_profile_with_data_build(
+    tmp_path: Path,
+    template: AutoResearchTemplateDefinition,
+) -> ApprovedRemoteExecutorProfile:
+    profile, _script = registered_profile(tmp_path, template)
+    data_build_script = tmp_path / "data_build.py"
+    data_build_script.write_text("print('build data')\n", encoding="utf-8")
+    installation_input = profile.stage_profile(StageKind.FULL_TRAINING).input_files[0]
+    data_build = PinnedRemoteStageProfile(
+        stage=StageKind.DATA_BUILD,
+        script_path=data_build_script,
+        script_sha256=hashlib.sha256(data_build_script.read_bytes()).hexdigest(),
+        input_files=(installation_input,),
+        input_sha256={
+            installation_input.name: hashlib.sha256(installation_input.read_bytes()).hexdigest()
+        },
+        budget_unit="gpu_hours",
+        budget_reservation=0.25,
+        code_lineage_binding=ApprovedCodeLineageExecutionBinding(
+            binding_id="bashgym-data-build-entrypoint-v1",
+            binding_revision=1,
+            source_repository_profile_id="bashgym-source-v1",
+            entrypoint_path="bashgym/gym/trainer.py",
+        ),
+    )
+    payload = profile.model_dump(mode="python", exclude={"profile_digest"})
+    payload["stages"] = (data_build, *profile.stages)
+    with_data_build = ApprovedRemoteExecutorProfile.model_validate(payload)
+    return bind_nemo_rl_profile(
+        with_data_build,
+        nemo_profile(
+            installation_input,
+            compute_profile_id=profile.compute_profile_id,
+            target_contract_key=profile.target_contract_key,
+            target_model_digest=profile.target_model_digest,
+        ),
+        replace=False,
+        allow_training_stage_replacement=True,
+    )
 
 
 def test_control_template_is_materializable_but_not_launch_ready_offline(tmp_path: Path):
@@ -266,6 +335,8 @@ def test_real_template_requires_exact_ledger_profile_and_material_hashes(tmp_pat
     assert ready.launch_ready is True
     assert ready.available is True
     assert ready.blocking_codes == ()
+    restored = ApprovedRemoteExecutorProfile.model_validate(profile.model_dump(mode="python"))
+    assert restored.registered_evaluation_dataset == profile.registered_evaluation_dataset
 
     missing_entrypoint_profile, _missing_script = registered_profile(
         tmp_path, template, entrypoint_path="scripts/missing.py"
@@ -298,24 +369,21 @@ def test_real_template_requires_exact_ledger_profile_and_material_hashes(tmp_pat
     assert stale.blocking_codes == ("compute_binding_unresolved",)
 
 
-def test_doctor_requires_declared_remote_evaluation_stage(tmp_path: Path):
-    configured = definition().model_dump(mode="python", exclude={"definition_digest"})
-    configured["manifest"]["evaluation_plan"]["required_compute_stages"] = [
-        "development_evaluation",
-        "full_training",
-        "smoke_training",
-    ]
-    template = AutoResearchTemplateDefinition.model_validate(configured)
+def test_doctor_requires_registered_base_model(tmp_path: Path):
+    template = definition()
     ledger = initialized_ledger(tmp_path)
     register_scientific_bindings(ledger)
     profile, _script = registered_profile(tmp_path, template)
+    unregistered = ApprovedRemoteExecutorProfile.model_validate(
+        profile.model_dump(mode="python", exclude={"profile_digest", "registered_base_model"})
+    )
 
     report = doctor_autoresearch_template(
         template,
         workspace_id=WORKSPACE,
         ledger=ledger,
         executor_profiles={
-            (profile.compute_profile_id, profile.target_contract_key): profile
+            (unregistered.compute_profile_id, unregistered.target_contract_key): unregistered
         },
         controller=offline_controller(),
         source_profiles={},
@@ -323,3 +391,79 @@ def test_doctor_requires_declared_remote_evaluation_stage(tmp_path: Path):
 
     compute = next(check for check in report.checks if check.check_id == "compute_binding")
     assert compute.ready is False
+
+
+def test_doctor_requires_registered_heldout_dataset(tmp_path: Path):
+    template = definition()
+    ledger = initialized_ledger(tmp_path)
+    register_scientific_bindings(ledger)
+    profile, _script = registered_profile(tmp_path, template)
+    unregistered = ApprovedRemoteExecutorProfile.model_validate(
+        profile.model_dump(
+            mode="python",
+            exclude={"profile_digest", "registered_evaluation_dataset"},
+        )
+    )
+
+    report = doctor_autoresearch_template(
+        template,
+        workspace_id=WORKSPACE,
+        ledger=ledger,
+        executor_profiles={
+            (unregistered.compute_profile_id, unregistered.target_contract_key): unregistered
+        },
+        controller=offline_controller(),
+        source_profiles={},
+    )
+
+    compute = next(check for check in report.checks if check.check_id == "compute_binding")
+    assert compute.ready is False
+
+
+def test_nemo_readiness_ignores_data_build_and_evaluation_contracts(tmp_path: Path) -> None:
+    configured = definition().model_dump(mode="python", exclude={"definition_digest"})
+    configured["manifest"]["evaluation_plan"]["required_compute_stages"] = [
+        StageKind.DATA_BUILD.value,
+        StageKind.FULL_TRAINING.value,
+    ]
+    template = AutoResearchTemplateDefinition.model_validate(configured)
+    ledger = initialized_ledger(tmp_path)
+    register_scientific_bindings(ledger)
+    profile = nemo_bound_profile_with_data_build(tmp_path, template)
+
+    report = doctor_autoresearch_template(
+        template,
+        workspace_id=WORKSPACE,
+        ledger=ledger,
+        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
+        controller=offline_controller(),
+        source_profiles={},
+    )
+
+    nemo_contract = next(
+        check for check in report.checks if check.check_id == "nemo_execution_contract"
+    )
+    assert nemo_contract.ready is True
+
+
+def test_nemo_readiness_requires_full_training_stage(tmp_path: Path) -> None:
+    configured = definition().model_dump(mode="python", exclude={"definition_digest"})
+    configured["manifest"]["evaluation_plan"]["required_compute_stages"] = []
+    template = AutoResearchTemplateDefinition.model_validate(configured)
+    ledger = initialized_ledger(tmp_path)
+    register_scientific_bindings(ledger)
+    profile = nemo_bound_profile_with_data_build(tmp_path, template)
+
+    report = doctor_autoresearch_template(
+        template,
+        workspace_id=WORKSPACE,
+        ledger=ledger,
+        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
+        controller=offline_controller(),
+        source_profiles={},
+    )
+
+    nemo_contract = next(
+        check for check in report.checks if check.check_id == "nemo_execution_contract"
+    )
+    assert nemo_contract.ready is False

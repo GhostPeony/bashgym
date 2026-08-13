@@ -12,7 +12,7 @@ import { clsx } from 'clsx'
 const tabs = [
   { id: 'submit' as const, label: 'Submit', icon: Send },
   { id: 'active' as const, label: 'Active Job', icon: Activity },
-  { id: 'history' as const, label: 'History', icon: Clock },
+  { id: 'history' as const, label: 'History', icon: Clock }
 ]
 
 export function OrchestratorDashboard() {
@@ -24,14 +24,15 @@ export function OrchestratorDashboard() {
 
   // Auto-switch to active tab if there's a running job
   useEffect(() => {
-    if (currentJob && (
-      currentJob.status === 'dispatched' ||
-      currentJob.status === 'decomposing' ||
-      currentJob.status === 'awaiting_approval'
-    )) {
+    if (
+      currentJob &&
+      (currentJob.status === 'dispatched' ||
+        currentJob.status === 'decomposing' ||
+        currentJob.status === 'awaiting_approval')
+    ) {
       setActiveTab('active')
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentJob?.jobId])
 
   // Queue watcher: dispatch next queued task when a terminal becomes idle
@@ -62,7 +63,9 @@ export function OrchestratorDashboard() {
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="font-brand text-2xl text-text-primary">Orchestrator</h1>
-                <span className="tag"><span>MULTI-AGENT</span></span>
+                <span className="tag">
+                  <span>MULTI-AGENT</span>
+                </span>
               </div>
               <p className="text-sm text-text-secondary mt-1">
                 Decompose specs into tasks & dispatch to terminal agents
@@ -72,27 +75,30 @@ export function OrchestratorDashboard() {
           <div className="flex items-center gap-2">
             {/* Status tag */}
             {currentJob && (
-              <span className={clsx(
-                'tag',
-                currentJob.status === 'dispatched' && 'bg-status-success/20 text-status-success border-status-success',
-                currentJob.status === 'completed' && 'bg-accent-light text-accent border-accent',
-                currentJob.status === 'failed' && 'bg-status-error/20 text-status-error border-status-error',
-                currentJob.status === 'decomposing' && 'bg-status-warning/20 text-status-warning border-status-warning',
-                currentJob.status === 'awaiting_approval' && 'bg-status-warning/20 text-status-warning border-status-warning',
-                currentJob.status === 'cancelled' && 'bg-background-secondary text-text-muted border-border',
-              )}>
+              <span
+                className={clsx(
+                  'tag',
+                  currentJob.status === 'dispatched' &&
+                    'bg-status-success/20 text-status-success border-status-success',
+                  currentJob.status === 'completed' && 'bg-accent-light text-accent border-accent',
+                  currentJob.status === 'failed' &&
+                    'bg-status-error/20 text-status-error border-status-error',
+                  currentJob.status === 'decomposing' &&
+                    'bg-status-warning/20 text-status-warning border-status-warning',
+                  currentJob.status === 'awaiting_approval' &&
+                    'bg-status-warning/20 text-status-warning border-status-warning',
+                  currentJob.status === 'cancelled' &&
+                    'bg-background-secondary text-text-muted border-border'
+                )}
+              >
                 <span>{currentJob.status.replace(/_/g, ' ')}</span>
               </span>
             )}
             {/* Contextual buttons for active tab */}
             {activeTab === 'active' && currentJob && (
               <>
-                {currentJob.status === 'awaiting_approval' && (
-                  <ActiveJobActions />
-                )}
-                {currentJob.status === 'dispatched' && (
-                  <CancelJobButton />
-                )}
+                {currentJob.status === 'awaiting_approval' && <ActiveJobActions />}
+                {currentJob.status === 'dispatched' && <CancelJobButton />}
               </>
             )}
           </div>
@@ -100,7 +106,7 @@ export function OrchestratorDashboard() {
 
         {/* Brutalist tab bar */}
         <div className="flex gap-1 mt-6">
-          {tabs.map(tab => {
+          {tabs.map((tab) => {
             const Icon = tab.icon
             const isActive = activeTab === tab.id
             const historyCount = tab.id === 'history' && jobs.length > 0 ? jobs.length : undefined
@@ -140,25 +146,23 @@ export function OrchestratorDashboard() {
           </div>
         )}
 
-        {activeTab === 'active' && (
-          currentJob ? (
+        {activeTab === 'active' &&
+          (currentJob ? (
             <ActiveJobView />
           ) : (
             <div className="flex flex-col items-center justify-center py-20 text-text-muted">
               <div className="w-16 h-16 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center mx-auto mb-4">
                 <Network className="w-8 h-8 text-text-muted" />
               </div>
-              <h3 className="font-brand text-xl text-text-primary mb-2">No active orchestration job</h3>
+              <h3 className="font-brand text-xl text-text-primary mb-2">
+                No active orchestration job
+              </h3>
               <p className="text-text-muted mb-4">Submit a spec to start multi-agent execution</p>
-              <button
-                onClick={() => setActiveTab('submit')}
-                className="btn-primary"
-              >
+              <button onClick={() => setActiveTab('submit')} className="btn-primary">
                 Submit a Spec
               </button>
             </div>
-          )
-        )}
+          ))}
 
         {activeTab === 'history' && (
           <div className="p-6 max-w-6xl mx-auto">
@@ -213,7 +217,7 @@ function ActiveJobView() {
       fetchStatus(currentJob.jobId)
     }, 5000)
     return () => clearInterval(interval)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentJob?.jobId, fetchStatus])
 
   if (!currentJob) return null
@@ -232,12 +236,18 @@ function ActiveJobView() {
           <div className="flex items-center gap-6">
             {[
               { label: 'Pending', value: currentJob.stats.pending, color: 'text-text-muted' },
-              { label: 'Running', value: currentJob.stats.in_progress, color: 'text-status-warning' },
+              {
+                label: 'Running',
+                value: currentJob.stats.in_progress,
+                color: 'text-status-warning'
+              },
               { label: 'Done', value: currentJob.stats.completed, color: 'text-status-success' },
-              { label: 'Failed', value: currentJob.stats.failed, color: 'text-status-error' },
-            ].map(stat => (
+              { label: 'Failed', value: currentJob.stats.failed, color: 'text-status-error' }
+            ].map((stat) => (
               <div key={stat.label} className="flex items-center gap-2">
-                <span className={clsx('font-mono text-lg font-bold', stat.color)}>{stat.value}</span>
+                <span className={clsx('font-mono text-lg font-bold', stat.color)}>
+                  {stat.value}
+                </span>
                 <span className="font-mono text-xs text-text-muted uppercase">{stat.label}</span>
               </div>
             ))}

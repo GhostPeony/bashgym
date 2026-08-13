@@ -58,18 +58,20 @@ export const useTutorialStore = create<TutorialState>()(
 
       setHasSeenIntro: (seen) => set({ hasSeenIntro: seen }),
 
-      startTutorial: () => set({
-        isTutorialActive: true,
-        hasSeenIntro: true,
-        currentStep: 'install_hooks',
-        completedSteps: ['welcome'],
-        showTooltip: true
-      }),
+      startTutorial: () =>
+        set({
+          isTutorialActive: true,
+          hasSeenIntro: true,
+          currentStep: 'install_hooks',
+          completedSteps: ['welcome'],
+          showTooltip: true
+        }),
 
-      skipTutorial: () => set({
-        hasSeenIntro: true,
-        isTutorialActive: false
-      }),
+      skipTutorial: () =>
+        set({
+          hasSeenIntro: true,
+          isTutorialActive: false
+        }),
 
       completeStep: (step) => {
         const { completedSteps, currentStep } = get()
@@ -87,27 +89,30 @@ export const useTutorialStore = create<TutorialState>()(
         })
       },
 
-      goToStep: (step) => set({
-        currentStep: step,
-        showTooltip: true
-      }),
+      goToStep: (step) =>
+        set({
+          currentStep: step,
+          showTooltip: true
+        }),
 
-      toggleChecklist: () => set((state) => ({
-        isChecklistMinimized: !state.isChecklistMinimized
-      })),
+      toggleChecklist: () =>
+        set((state) => ({
+          isChecklistMinimized: !state.isChecklistMinimized
+        })),
 
       dismissTooltip: () => set({ showTooltip: false }),
 
       showTooltipForStep: () => set({ showTooltip: true }),
 
-      resetTutorial: () => set({
-        hasSeenIntro: false,
-        isTutorialActive: false,
-        currentStep: 'welcome',
-        completedSteps: [],
-        isChecklistMinimized: false,
-        showTooltip: false
-      })
+      resetTutorial: () =>
+        set({
+          hasSeenIntro: false,
+          isTutorialActive: false,
+          currentStep: 'welcome',
+          completedSteps: [],
+          isChecklistMinimized: false,
+          showTooltip: false
+        })
     }),
     {
       name: 'bashgym-tutorial'

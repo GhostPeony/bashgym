@@ -6,7 +6,7 @@ import {
   buildHumanOversightModel,
   parseHumanWorkQueue,
   type HumanWorkQueuePublicV1,
-  type ParsedHumanWorkQueuePublicV1,
+  type ParsedHumanWorkQueuePublicV1
 } from './humanWorkModel'
 
 const NOW = '2026-07-16T20:00:00.000Z'
@@ -27,39 +27,41 @@ function rawQueue(): Record<string, unknown> {
     campaign_id: CAMPAIGN_ID,
     campaign_revision: 7,
     reviewer: { authenticated: true, review_capability: true },
-    items: [{
-      work_id: WORK_ID,
-      campaign_revision: 7,
-      version: 3,
-      state: 'pending',
-      blocking: true,
-      rubric: {
-        rubric_id: RUBRIC_ID,
-        version: 2,
-        instructions: 'Choose the response that better follows the rubric.',
-        choices: [
-          { choice_id: 'left', label: 'Sample A is stronger' },
-          { choice_id: 'right', label: 'Sample B is stronger' },
-          { choice_id: 'tie', label: 'No material difference' },
-        ],
-      },
-      sample: {
-        prompt: 'Assess the blinded samples against the rubric.',
-        left: { label: 'Sample A', display: 'Blinded response A.' },
-        right: { label: 'Sample B', display: 'Blinded response B.' },
-      },
-      lease_expires_at: null,
-      claimed_by_current_reviewer: false,
-      claim_idempotency_key: CLAIM_KEY,
-      submit_idempotency_key: SUBMIT_KEY,
-      receipt: null,
-    }],
+    items: [
+      {
+        work_id: WORK_ID,
+        campaign_revision: 7,
+        version: 3,
+        state: 'pending',
+        blocking: true,
+        rubric: {
+          rubric_id: RUBRIC_ID,
+          version: 2,
+          instructions: 'Choose the response that better follows the rubric.',
+          choices: [
+            { choice_id: 'left', label: 'Sample A is stronger' },
+            { choice_id: 'right', label: 'Sample B is stronger' },
+            { choice_id: 'tie', label: 'No material difference' }
+          ]
+        },
+        sample: {
+          prompt: 'Assess the blinded samples against the rubric.',
+          left: { label: 'Sample A', display: 'Blinded response A.' },
+          right: { label: 'Sample B', display: 'Blinded response B.' }
+        },
+        lease_expires_at: null,
+        claimed_by_current_reviewer: false,
+        claim_idempotency_key: CLAIM_KEY,
+        submit_idempotency_key: SUBMIT_KEY,
+        receipt: null
+      }
+    ],
     promotion: {
       state: 'blocked_by_review',
       version: 4,
       eligible_receipt_id: null,
-      idempotency_key: PROMOTION_KEY,
-    },
+      idempotency_key: PROMOTION_KEY
+    }
   }
 }
 
@@ -72,7 +74,7 @@ function claimedQueue(lease = '2026-07-16T20:30:00.000Z'): Record<string, unknow
   Object.assign(item(raw), {
     state: 'claimed',
     lease_expires_at: lease,
-    claimed_by_current_reviewer: true,
+    claimed_by_current_reviewer: true
   })
   return raw
 }
@@ -89,7 +91,7 @@ function receipt(overrides: Record<string, unknown> = {}): Record<string, unknow
     decision: 'prefer_left',
     sealed_at: '2026-07-16T19:59:00.000Z',
     receipt_digest: DIGEST,
-    ...overrides,
+    ...overrides
   }
 }
 
@@ -99,11 +101,11 @@ function submittedQueue(receiptOverrides: Record<string, unknown> = {}): Record<
     state: 'submitted',
     lease_expires_at: null,
     claimed_by_current_reviewer: false,
-    receipt: receipt(receiptOverrides),
+    receipt: receipt(receiptOverrides)
   })
   Object.assign(raw.promotion as Record<string, unknown>, {
     state: 'awaiting_human_decision',
-    eligible_receipt_id: RECEIPT_ID,
+    eligible_receipt_id: RECEIPT_ID
   })
   return raw
 }
@@ -121,7 +123,7 @@ function model(raw: unknown = rawQueue(), overrides: Record<string, unknown> = {
     freshness: 'live',
     error: null,
     now: NOW,
-    ...overrides,
+    ...overrides
   })
 }
 
@@ -135,14 +137,14 @@ test('C1 binds a canonical workspace and campaign to every claim request', () =>
     expectedCampaignRevision: 7,
     expectedVersion: 3,
     expectedState: 'pending',
-    idempotencyKey: CLAIM_KEY,
+    idempotencyKey: CLAIM_KEY
   })
 })
 
 test('C1 suppresses cross-workspace and cross-campaign replay against authoritative selection', () => {
   for (const authority of [
     { workspaceId: 'workspace:east', campaignId: CAMPAIGN_ID },
-    { workspaceId: WORKSPACE_ID, campaignId: 'campaign:beta' },
+    { workspaceId: WORKSPACE_ID, campaignId: 'campaign:beta' }
   ]) {
     const view = model(rawQueue(), { authority })
     assert.equal(view.scopeValid, false)
@@ -155,17 +157,22 @@ test('C1 distinguishes identical campaign IDs in different workspaces', () => {
   const west = model()
   const eastRaw = rawQueue()
   eastRaw.workspace_id = 'workspace:east'
-  const east = model(eastRaw, { authority: { workspaceId: 'workspace:east', campaignId: CAMPAIGN_ID } })
+  const east = model(eastRaw, {
+    authority: { workspaceId: 'workspace:east', campaignId: CAMPAIGN_ID }
+  })
   assert.notEqual(west.items[0]?.claim?.workspaceId, east.items[0]?.claim?.workspaceId)
 })
 
 test('C1 counts public string bounds by Unicode code point like the backend', () => {
   const atBoundary = rawQueue()
-  ;(((item(atBoundary).sample as Record<string, unknown>).left as Record<string, unknown>).label) = '🌸'.repeat(HUMAN_WORK_LIMITS.maxLabel)
+  ;((item(atBoundary).sample as Record<string, unknown>).left as Record<string, unknown>).label =
+    '🌸'.repeat(HUMAN_WORK_LIMITS.maxLabel)
   assert.ok(parseHumanWorkQueue(atBoundary))
 
   const beyondBoundary = rawQueue()
-  ;(((item(beyondBoundary).sample as Record<string, unknown>).left as Record<string, unknown>).label) = '🌸'.repeat(HUMAN_WORK_LIMITS.maxLabel + 1)
+  ;(
+    (item(beyondBoundary).sample as Record<string, unknown>).left as Record<string, unknown>
+  ).label = '🌸'.repeat(HUMAN_WORK_LIMITS.maxLabel + 1)
   assert.equal(parseHumanWorkQueue(beyondBoundary), null)
 })
 
@@ -205,7 +212,9 @@ test('C2 expires a lease exactly at the boundary and permits only a future lease
 test('C2 suppresses an explicitly expired lifecycle whose lease is still in the future', () => {
   const futureExpired = rawQueue()
   Object.assign(item(futureExpired), {
-    state: 'expired', lease_expires_at: '2026-07-16T20:00:00.001Z', claimed_by_current_reviewer: false,
+    state: 'expired',
+    lease_expires_at: '2026-07-16T20:00:00.001Z',
+    claimed_by_current_reviewer: false
   })
   const invalid = model(futureExpired)
   assert.equal(invalid.mutationsEnabled, false)
@@ -214,7 +223,9 @@ test('C2 suppresses an explicitly expired lifecycle whose lease is still in the 
 
   const pastExpired = rawQueue()
   Object.assign(item(pastExpired), {
-    state: 'expired', lease_expires_at: '2026-07-16T19:59:59.999Z', claimed_by_current_reviewer: false,
+    state: 'expired',
+    lease_expires_at: '2026-07-16T19:59:59.999Z',
+    claimed_by_current_reviewer: false
   })
   assert.equal(model(pastExpired).items[0]?.claim?.expectedState, 'expired')
 })
@@ -228,8 +239,9 @@ test('C4 rejects receipts not exactly bound to their submitted parent', () => {
     { item_version: 4 },
     { rubric_version: 3 },
     { decision: 'not_offered' },
-    { sealed_at: null },
-  ]) assert.equal(parseHumanWorkQueue(submittedQueue(override)), null)
+    { sealed_at: null }
+  ])
+    assert.equal(parseHumanWorkQueue(submittedQueue(override)), null)
 
   const wrongState = rawQueue()
   item(wrongState).receipt = receipt()
@@ -275,7 +287,7 @@ test('C4 exposes promotion only for one current valid sealed eligible receipt', 
     expectedRubricVersion: 2,
     expectedPromotionVersion: 4,
     expectedPromotionState: 'awaiting_human_decision',
-    idempotencyKey: PROMOTION_KEY,
+    idempotencyKey: PROMOTION_KEY
   })
 
   const missing = submittedQueue()
@@ -286,10 +298,17 @@ test('C4 exposes promotion only for one current valid sealed eligible receipt', 
 test('I1 globally suppresses claim, submit, and promotion while a mutation is unreconciled', () => {
   for (const state of ['pending', 'conflict', 'error']) {
     for (const raw of [rawQueue(), claimedQueue(), submittedQueue()]) {
-      raw.mutation = { action: 'submit', state, code: state === 'pending' ? 'in_flight' : 'version_conflict' }
+      raw.mutation = {
+        action: 'submit',
+        state,
+        code: state === 'pending' ? 'in_flight' : 'version_conflict'
+      }
       const view = model(raw)
       assert.equal(view.mutationsEnabled, false)
-      assert.equal(view.items.every((entry) => entry.claim === null && entry.submit === null), true)
+      assert.equal(
+        view.items.every((entry) => entry.claim === null && entry.submit === null),
+        true
+      )
       assert.equal(view.promotion, null)
     }
   }
@@ -307,7 +326,10 @@ test('I1 keeps a blocking submitted receipt blocked after campaign revision inva
   const raw = submittedQueue()
   item(raw).campaign_revision = 6
   ;(item(raw).receipt as Record<string, unknown>).campaign_revision = 6
-  Object.assign(raw.promotion as Record<string, unknown>, { state: 'blocked_by_review', eligible_receipt_id: null })
+  Object.assign(raw.promotion as Record<string, unknown>, {
+    state: 'blocked_by_review',
+    eligible_receipt_id: null
+  })
   const view = model(raw)
   assert.equal(view.mutationsEnabled, false)
   assert.equal(view.blocksComparison, true)
@@ -320,12 +342,13 @@ test('I2 enforces collection and public text bounds', () => {
     ...structuredClone(item(rawQueue())),
     work_id: `hw_${String(index).padStart(16, '0')}`,
     claim_idempotency_key: `idem_claim_${String(index).padStart(16, '0')}`,
-    submit_idempotency_key: `idem_submit_${String(index).padStart(16, '0')}`,
+    submit_idempotency_key: `idem_submit_${String(index).padStart(16, '0')}`
   }))
   assert.equal(parseHumanWorkQueue(tooMany), null)
 
   const longText = rawQueue()
-  ;((item(longText).sample as Record<string, unknown>).left as Record<string, unknown>).display = 'x'.repeat(HUMAN_WORK_LIMITS.maxSampleDisplay + 1)
+  ;((item(longText).sample as Record<string, unknown>).left as Record<string, unknown>).display =
+    'x'.repeat(HUMAN_WORK_LIMITS.maxSampleDisplay + 1)
   assert.equal(parseHumanWorkQueue(longText), null)
 })
 
@@ -336,21 +359,35 @@ test('I2 rejects duplicate work and rubric choice IDs', () => {
 
   const duplicateChoice = rawQueue()
   const rubric = item(duplicateChoice).rubric as Record<string, unknown>
-  rubric.choices = [{ choice_id: 'left', label: 'First' }, { choice_id: 'left', label: 'Second' }]
+  rubric.choices = [
+    { choice_id: 'left', label: 'First' },
+    { choice_id: 'left', label: 'Second' }
+  ]
   assert.equal(parseHumanWorkQueue(duplicateChoice), null)
 })
 
 test('I3 returns a deeply frozen parsed public projection', () => {
   const queue = parsed(submittedQueue({ sealed_at: '2026-07-16T19:59:00.000Z' }))
   const objects: object[] = [
-    queue, queue.reviewer, queue.items, queue.items[0]!, queue.items[0]!.rubric,
-    queue.items[0]!.rubric.choices, queue.items[0]!.rubric.choices[0]!,
-    queue.items[0]!.sample, queue.items[0]!.sample.left, queue.items[0]!.receipt!,
-    queue.promotion,
+    queue,
+    queue.reviewer,
+    queue.items,
+    queue.items[0]!,
+    queue.items[0]!.rubric,
+    queue.items[0]!.rubric.choices,
+    queue.items[0]!.rubric.choices[0]!,
+    queue.items[0]!.sample,
+    queue.items[0]!.sample.left,
+    queue.items[0]!.receipt!,
+    queue.promotion
   ]
   assert.equal(objects.every(Object.isFrozen), true)
-  assert.throws(() => { (queue.items[0] as unknown as { version: number }).version = 99 })
-  assert.throws(() => { (queue.items[0]!.sample.left as unknown as { display: string }).display = 'changed' })
+  assert.throws(() => {
+    ;(queue.items[0] as unknown as { version: number }).version = 99
+  })
+  assert.throws(() => {
+    ;(queue.items[0]!.sample.left as unknown as { display: string }).display = 'changed'
+  })
 })
 
 test('I3 freezes the optional mutation projection', () => {
@@ -362,10 +399,18 @@ test('I3 freezes the optional mutation projection', () => {
 test('I4 accepts durable colon IDs and rejects malformed type-specific references', () => {
   assert.ok(parseHumanWorkQueue(rawQueue()))
   for (const mutate of [
-    (raw: Record<string, unknown>) => { raw.workspace_id = '_workspace' },
-    (raw: Record<string, unknown>) => { item(raw).work_id = 'campaign:alpha' },
-    (raw: Record<string, unknown>) => { item(raw).claim_idempotency_key = 'short' },
-    (raw: Record<string, unknown>) => { (item(raw).rubric as Record<string, unknown>).rubric_id = 'not-rubric' },
+    (raw: Record<string, unknown>) => {
+      raw.workspace_id = '_workspace'
+    },
+    (raw: Record<string, unknown>) => {
+      item(raw).work_id = 'campaign:alpha'
+    },
+    (raw: Record<string, unknown>) => {
+      item(raw).claim_idempotency_key = 'short'
+    },
+    (raw: Record<string, unknown>) => {
+      ;(item(raw).rubric as Record<string, unknown>).rubric_id = 'not-rubric'
+    }
   ]) {
     const raw = rawQueue()
     mutate(raw)

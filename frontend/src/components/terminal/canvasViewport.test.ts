@@ -6,7 +6,9 @@ function memoryStorage(): ViewportStorage {
   const values = new Map<string, string>()
   return {
     getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => { values.set(key, value) },
+    setItem: (key, value) => {
+      values.set(key, value)
+    }
   }
 }
 

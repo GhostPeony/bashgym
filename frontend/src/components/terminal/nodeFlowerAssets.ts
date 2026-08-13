@@ -1,8 +1,5 @@
 import type { PanelType } from '../../stores/terminalStore'
-import {
-  ghostPeonyIconPath,
-  type GhostPeonyIconName
-} from '../common/ghostPeonyIconAssets'
+import { ghostPeonyIconPath, type GhostPeonyIconName } from '../common/ghostPeonyIconAssets'
 
 export type NodeFlowerVariant = PanelType | 'database' | 'integration' | 'supabase'
 

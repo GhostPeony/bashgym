@@ -29,7 +29,7 @@ export interface CanvasPreset {
 export const BUILTIN_PRESETS: CanvasPreset[] = [
   {
     id: 'training-mission',
-    name: 'Training Mission Control',
+    name: 'Training Experiment Loop',
     panels: [
       { type: 'terminal', title: 'Claude Code', launch: 'claude', position: { x: 60, y: 280 } },
       { type: 'training', title: 'Training Run', position: { x: 540, y: 40 } },
@@ -37,7 +37,11 @@ export const BUILTIN_PRESETS: CanvasPreset[] = [
       { type: 'designer', title: 'Data Designer', position: { x: 540, y: 580 } },
       { type: 'activity', title: 'Activity', position: { x: 60, y: 620 } }
     ],
-    links: [[0, 1], [0, 2], [0, 3]]
+    links: [
+      [0, 1],
+      [0, 2],
+      [0, 3]
+    ]
   },
   {
     id: 'new-project',
@@ -96,7 +100,16 @@ export function deleteCustomPreset(id: string): void {
 
 /** Panel types a captured preset can restore (terminals restart fresh, optionally with an agent) */
 const CAPTURABLE_TYPES: PanelType[] = [
-  'terminal', 'browser', 'activity', 'training', 'evals', 'designer', 'huggingface', 'context', 'neon', 'vercel'
+  'terminal',
+  'browser',
+  'activity',
+  'training',
+  'evals',
+  'designer',
+  'huggingface',
+  'context',
+  'neon',
+  'vercel'
 ]
 
 /** Snapshot the live canvas (panels, positions, edges) as a reusable preset */

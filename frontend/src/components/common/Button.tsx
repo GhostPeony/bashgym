@@ -28,18 +28,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       'inline-flex items-center justify-center font-mono font-semibold tracking-wide transition-press disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none'
 
     const variants = {
-      primary:
-        'btn-primary text-white',
-      secondary:
-        'btn-secondary',
-      ghost:
-        'btn-ghost',
+      primary: 'btn-primary text-white',
+      secondary: 'btn-secondary',
+      ghost: 'btn-ghost',
       danger:
         'bg-status-error text-white border-brutal border-border shadow-brutal-sm hover:brightness-95 active:translate-x-0.5 active:translate-y-0.5 active:shadow-brutal-pressed',
-      icon:
-        'btn-icon',
-      cta:
-        'btn-cta',
+      icon: 'btn-icon',
+      cta: 'btn-cta'
     }
 
     const sizes = {

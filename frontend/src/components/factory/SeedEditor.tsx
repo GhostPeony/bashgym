@@ -14,14 +14,21 @@ interface SeedEditorProps {
   onNavigateToCreate: () => void
 }
 
-export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNavigateToCreate }: SeedEditorProps) {
-  const llmColumns = columns.filter(c => c.type === 'llm')
+export function SeedEditor({
+  seed,
+  seedIndex,
+  columns,
+  onUpdate,
+  onDelete,
+  onNavigateToCreate
+}: SeedEditorProps) {
+  const llmColumns = columns.filter((c) => c.type === 'llm')
   const showSideBySide = llmColumns.length === 2 && columns.length === llmColumns.length
 
   const quality = useMemo(() => {
     const total = columns.length
     if (total === 0) return { filled: 0, total: 0, percent: 0 }
-    const filled = columns.filter(col => {
+    const filled = columns.filter((col) => {
       const val = seed.data[col.name]
       return val && val.trim().length > 0
     }).length
@@ -42,14 +49,22 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
       <div className="p-4 border-b-2 border-border flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="font-brand text-lg text-text-primary">Seed #{seedIndex + 1}</span>
-          <span className={clsx(
-            'tag',
-            seed.source === 'gold_trace' ? 'text-status-success' :
-            seed.source === 'imported' ? 'text-status-info' :
-            'text-text-muted'
-          )}>
+          <span
+            className={clsx(
+              'tag',
+              seed.source === 'gold_trace'
+                ? 'text-status-success'
+                : seed.source === 'imported'
+                  ? 'text-status-info'
+                  : 'text-text-muted'
+            )}
+          >
             <span>
-              {seed.source === 'gold_trace' ? 'Gold Trace' : seed.source === 'imported' ? 'Imported' : 'Manual'}
+              {seed.source === 'gold_trace'
+                ? 'Gold Trace'
+                : seed.source === 'imported'
+                  ? 'Imported'
+                  : 'Manual'}
             </span>
           </span>
         </div>
@@ -65,16 +80,16 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Tags */}
         <div>
-          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1.5">Tags</label>
+          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1.5">
+            Tags
+          </label>
           <TagEditor tags={seed.tags || []} onChange={handleTagsChange} />
         </div>
 
         {/* Column editors */}
         {columns.length > 0 ? (
-          <div className={clsx(
-            showSideBySide ? 'grid grid-cols-2 gap-4' : 'space-y-4'
-          )}>
-            {columns.map(col => {
+          <div className={clsx(showSideBySide ? 'grid grid-cols-2 gap-4' : 'space-y-4')}>
+            {columns.map((col) => {
               const value = seed.data[col.name] || ''
               const isCode = looksLikeCode(value)
 
@@ -119,7 +134,9 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
         {columns.length > 0 && (
           <div className="card p-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Completeness</span>
+              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">
+                Completeness
+              </span>
               <span className="text-xs text-text-muted font-mono">
                 {quality.filled}/{quality.total} fields
               </span>
@@ -128,9 +145,11 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
               <div
                 className={clsx(
                   'progress-fill',
-                  quality.percent === 100 ? '!bg-status-success' :
-                  quality.percent >= 50 ? '!bg-status-warning' :
-                  '!bg-status-error'
+                  quality.percent === 100
+                    ? '!bg-status-success'
+                    : quality.percent >= 50
+                      ? '!bg-status-warning'
+                      : '!bg-status-error'
                 )}
                 style={{ width: `${quality.percent}%` }}
               />
@@ -139,13 +158,16 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
               {quality.percent === 100 ? (
                 <>
                   <CheckCircle className="w-3.5 h-3.5 text-status-success" />
-                  <span className="text-xs text-status-success font-mono">All fields populated</span>
+                  <span className="text-xs text-status-success font-mono">
+                    All fields populated
+                  </span>
                 </>
               ) : (
                 <>
                   <AlertCircle className="w-3.5 h-3.5 text-text-muted" />
                   <span className="text-xs text-text-muted font-mono">
-                    {quality.total - quality.filled} empty field{quality.total - quality.filled !== 1 ? 's' : ''}
+                    {quality.total - quality.filled} empty field
+                    {quality.total - quality.filled !== 1 ? 's' : ''}
                   </span>
                 </>
               )}

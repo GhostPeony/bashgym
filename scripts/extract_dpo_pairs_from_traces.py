@@ -10,7 +10,6 @@ No LLM calls — uses real human-validated good vs bad data.
 Output: data/dpo_real/train.jsonl + val.jsonl
 """
 
-import hashlib
 import json
 import logging
 import random
@@ -20,7 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S"
+)
 logger = logging.getLogger(__name__)
 
 # Sources — desktop has the canonical data
@@ -55,11 +56,13 @@ def load_traces(directory: Path) -> list[dict]:
         if len(prompt) < 30:
             continue
 
-        traces.append({
-            "path": f,
-            "data": data,
-            "prompt": prompt,
-        })
+        traces.append(
+            {
+                "path": f,
+                "data": data,
+                "prompt": prompt,
+            }
+        )
     return traces
 
 
@@ -186,17 +189,19 @@ def main():
         rejected = serialize_trace_response(fail_t["data"])
         if not chosen or not rejected:
             continue
-        dpo_examples.append({
-            "prompt": gold_t["prompt"][:4000],
-            "chosen": chosen,
-            "rejected": rejected,
-            "metadata": {
-                "match_type": match_type,
-                "similarity": round(sim, 3),
-                "gold_path": str(gold_t["path"].name),
-                "rejected_path": str(fail_t["path"].name),
-            },
-        })
+        dpo_examples.append(
+            {
+                "prompt": gold_t["prompt"][:4000],
+                "chosen": chosen,
+                "rejected": rejected,
+                "metadata": {
+                    "match_type": match_type,
+                    "similarity": round(sim, 3),
+                    "gold_path": str(gold_t["path"].name),
+                    "rejected_path": str(fail_t["path"].name),
+                },
+            }
+        )
 
     logger.info(f"After serialization: {len(dpo_examples)} valid pairs")
 
@@ -222,11 +227,13 @@ def main():
 
     # Match type distribution
     from collections import Counter
+
     types = Counter(ex["metadata"]["match_type"] for ex in dpo_examples)
     logger.info(f"\nMatch types: {dict(types)}")
 
     # Validate against DPO contract
-    from bashgym.datasets.validator import validate_dataset, print_validation_report
+    from bashgym.datasets.validator import print_validation_report, validate_dataset
+
     result = validate_dataset(train_path, format="dpo", quiet=True)
     print_validation_report(result, max_issues=5)
 

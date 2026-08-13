@@ -4,8 +4,8 @@ import { folderNameFromPath } from './format'
 
 test('folderNameFromPath returns only the final folder for Windows and POSIX paths', () => {
   const paths = [
-    'F:\\File location\\repos\\bashgym',
-    'F:/File location/repos/bashgym/',
+    'X:\\fixtures\\repos\\bashgym',
+    'X:/fixtures/repos/bashgym/',
     '/home/developer/repos/bashgym/',
     '/Users/developer/repos/bashgym',
     'bashgym'

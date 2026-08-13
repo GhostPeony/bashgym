@@ -34,17 +34,11 @@ import {
   type SSHCandidate
 } from '../../../services/api'
 import { useTerminalStore, useWorkspaceStore } from '../../../stores'
-import {
-  registerHermesPromptSender,
-  useAgentStreamStore
-} from '../../../stores/agentStreamStore'
+import { registerHermesPromptSender, useAgentStreamStore } from '../../../stores/agentStreamStore'
 import { GhostPeonyIcon } from '../../common/GhostPeonyIcon'
 import { Modal } from '../../common/Modal'
 import { createAgentChatSurfaceActions } from './agentChatLifecycle'
-import {
-  composeAgentWorkspaceContext,
-  hermesWorkspaceSessionKey,
-} from './agentWorkspaceContext'
+import { composeAgentWorkspaceContext, hermesWorkspaceSessionKey } from './agentWorkspaceContext'
 import { DataNodeShell } from './DataNodeShell'
 import { hueFor } from './dataPanels'
 import { NodeConfigModal } from './NodeConfigModal'
@@ -86,9 +80,7 @@ interface AgentStreamCallbacks {
   onActivity: (label: string) => void
 }
 
-function createAgentSseParser(
-  onEvent: (event: string, payload: Record<string, unknown>) => void
-) {
+function createAgentSseParser(onEvent: (event: string, payload: Record<string, unknown>) => void) {
   let buffer = ''
 
   const parseFrame = (frame: string) => {
@@ -146,7 +138,8 @@ async function streamAgentChat(
   const parser = createAgentSseParser((event, data) => {
     if (event === 'delta' && typeof data.delta === 'string') callbacks.onDelta(data.delta)
     if (event === 'activity' && typeof data.label === 'string') callbacks.onActivity(data.label)
-    if (event === 'error') streamError = typeof data.error === 'string' ? data.error : 'Hermes stream failed'
+    if (event === 'error')
+      streamError = typeof data.error === 'string' ? data.error : 'Hermes stream failed'
     if (event === 'done') streamDone = true
   })
   const options: RequestInit = {
@@ -290,7 +283,11 @@ function discoveredModels(discovery: AgentEndpointDiscovery | null): string[] {
   const names: string[] = []
   for (const item of items) {
     if (typeof item === 'string') names.push(item)
-    else if (item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string') {
+    else if (
+      item &&
+      typeof item === 'object' &&
+      typeof (item as { id?: unknown }).id === 'string'
+    ) {
       names.push((item as { id: string }).id)
     }
   }
@@ -547,39 +544,42 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     return composeAgentWorkspaceContext(
       response.ok && typeof response.data === 'string' ? response.data : null,
       endpointDetails,
-      response.error,
+      response.error
     )
   }, [data, discovery, endpointId, form, workspaceId])
 
-  const persistProfile = useCallback(async (next: FormState) => {
-    if (!endpointId) return
-    setSaving(true)
-    setError(null)
-    try {
-      const res = await agentEndpointApi.save(endpointId, {
-        label: next.label,
-        kind: 'hermes',
-        base_url: next.baseUrl,
-        model: next.model,
-        model_options: next.modelOptions,
-        session_key: next.sessionKey || null,
-        enabled: next.enabled,
-        api_key: next.apiKey || null
-      })
-      if (!mountedRef.current) return
-      if (res.ok && res.data) {
-        setProfiles((prev) => {
-          const rest = prev.filter((profile) => profile.id !== res.data!.id)
-          return [...rest, res.data!].sort((a, b) => a.id.localeCompare(b.id))
+  const persistProfile = useCallback(
+    async (next: FormState) => {
+      if (!endpointId) return
+      setSaving(true)
+      setError(null)
+      try {
+        const res = await agentEndpointApi.save(endpointId, {
+          label: next.label,
+          kind: 'hermes',
+          base_url: next.baseUrl,
+          model: next.model,
+          model_options: next.modelOptions,
+          session_key: next.sessionKey || null,
+          enabled: next.enabled,
+          api_key: next.apiKey || null
         })
-        setForm(profileToForm(res.data))
-      } else {
-        setError(res.error || 'Unable to save endpoint')
+        if (!mountedRef.current) return
+        if (res.ok && res.data) {
+          setProfiles((prev) => {
+            const rest = prev.filter((profile) => profile.id !== res.data!.id)
+            return [...rest, res.data!].sort((a, b) => a.id.localeCompare(b.id))
+          })
+          setForm(profileToForm(res.data))
+        } else {
+          setError(res.error || 'Unable to save endpoint')
+        }
+      } finally {
+        if (mountedRef.current) setSaving(false)
       }
-    } finally {
-      if (mountedRef.current) setSaving(false)
-    }
-  }, [endpointId])
+    },
+    [endpointId]
+  )
 
   const saveProfile = useCallback(async () => {
     await persistProfile(form)
@@ -615,7 +615,8 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
         setSelectedId(res.data.status.profile.id)
         setForm(profileToForm(res.data.status.profile))
         setShowConfig(true)
-        if (res.data.status.profile.api_key_configured) void probeEndpoint(res.data.status.profile.id)
+        if (res.data.status.profile.api_key_configured)
+          void probeEndpoint(res.data.status.profile.id)
       } else {
         setError(res.error || 'Hermes quick setup failed')
       }
@@ -688,17 +689,21 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
   }, [endpointId])
 
   /** Requested model name; the served LLM is configured in the Hermes app itself */
-  const selectModel = useCallback(async (model: string) => {
-    const next = { ...form, model, modelOptions: uniqueModels([model], form.modelOptions) }
-    setForm(next)
-    if (selectedProfile) await persistProfile(next)
-  }, [form, persistProfile, selectedProfile])
+  const selectModel = useCallback(
+    async (model: string) => {
+      const next = { ...form, model, modelOptions: uniqueModels([model], form.modelOptions) }
+      setForm(next)
+      if (selectedProfile) await persistProfile(next)
+    },
+    [form, persistProfile, selectedProfile]
+  )
 
   const { dismiss: closeChat, stop: stopStreaming } = useMemo(
-    () => createAgentChatSurfaceActions({
-      abort: () => streamControllerRef.current?.abort(),
-      hide: () => setShowChatModal(false),
-    }),
+    () =>
+      createAgentChatSurfaceActions({
+        abort: () => streamControllerRef.current?.abort(),
+        hide: () => setShowChatModal(false)
+      }),
     []
   )
 
@@ -713,74 +718,88 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     setSending(false)
   }, [data.panelId])
 
-  const sendPrompt = useCallback(async (text: string = prompt) => {
-    const trimmed = text.trim()
-    if (!trimmed || sending) return
-    const context = await buildContext()
-    const history = messages.map((message) => ({ ...message }))
-    const controller = new AbortController()
-    const streamToken = streamTokenRef.current + 1
-    streamTokenRef.current = streamToken
-    streamControllerRef.current = controller
-    setPrompt('')
-    setSending(true)
-    setError(null)
-    setStreamActivity('Hermes is responding')
-    setMessages((prev) => [
-      ...prev,
-      { role: 'user', content: trimmed },
-      { role: 'assistant', content: '' }
-    ])
-    try {
-      await streamAgentChat(endpointId, {
-        message: trimmed,
-        context,
-        conversation: conversationRef.current,
-        session_key: hermesWorkspaceSessionKey(form.sessionKey, workspaceId),
-        workspace_id: workspaceId,
-        origin: {
-          panel_id: data.panelId,
-          agent: endpointId,
-        },
-        history
-      }, controller.signal, {
-        onDelta: (delta) => {
-          if (streamTokenRef.current !== streamToken) return
-          setStreamActivity(null)
+  const sendPrompt = useCallback(
+    async (text: string = prompt) => {
+      const trimmed = text.trim()
+      if (!trimmed || sending) return
+      const context = await buildContext()
+      const history = messages.map((message) => ({ ...message }))
+      const controller = new AbortController()
+      const streamToken = streamTokenRef.current + 1
+      streamTokenRef.current = streamToken
+      streamControllerRef.current = controller
+      setPrompt('')
+      setSending(true)
+      setError(null)
+      setStreamActivity('Hermes is responding')
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: trimmed },
+        { role: 'assistant', content: '' }
+      ])
+      try {
+        await streamAgentChat(
+          endpointId,
+          {
+            message: trimmed,
+            context,
+            conversation: conversationRef.current,
+            session_key: hermesWorkspaceSessionKey(form.sessionKey, workspaceId),
+            workspace_id: workspaceId,
+            origin: {
+              panel_id: data.panelId,
+              agent: endpointId
+            },
+            history
+          },
+          controller.signal,
+          {
+            onDelta: (delta) => {
+              if (streamTokenRef.current !== streamToken) return
+              setStreamActivity(null)
+              setMessages((prev) => {
+                const last = prev[prev.length - 1]
+                if (!last || last.role !== 'assistant') return prev
+                return [...prev.slice(0, -1), { ...last, content: last.content + delta }]
+              })
+            },
+            onActivity: (label) => {
+              if (streamTokenRef.current === streamToken) {
+                setStreamActivity(`Using ${label}`)
+              }
+            }
+          }
+        )
+      } catch (streamError) {
+        if (streamTokenRef.current !== streamToken) return
+        if (streamError instanceof DOMException && streamError.name === 'AbortError') {
           setMessages((prev) => {
             const last = prev[prev.length - 1]
-            if (!last || last.role !== 'assistant') return prev
-            return [
-              ...prev.slice(0, -1),
-              { ...last, content: last.content + delta }
-            ]
+            return last?.role === 'assistant' && !last.content ? prev.slice(0, -1) : prev
           })
-        },
-        onActivity: (label) => {
-          if (streamTokenRef.current === streamToken) {
-            setStreamActivity(`Using ${label}`)
-          }
+        } else {
+          setError(streamError instanceof Error ? streamError.message : String(streamError))
         }
-      })
-    } catch (streamError) {
-      if (streamTokenRef.current !== streamToken) return
-      if (streamError instanceof DOMException && streamError.name === 'AbortError') {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1]
-          return last?.role === 'assistant' && !last.content ? prev.slice(0, -1) : prev
-        })
-      } else {
-        setError(streamError instanceof Error ? streamError.message : String(streamError))
+      } finally {
+        if (mountedRef.current && streamTokenRef.current === streamToken) {
+          streamControllerRef.current = null
+          setStreamActivity(null)
+          setSending(false)
+          window.setTimeout(() => promptRef.current?.focus(), 0)
+        }
       }
-    } finally {
-      if (mountedRef.current && streamTokenRef.current === streamToken) {
-        streamControllerRef.current = null
-        setStreamActivity(null)
-        setSending(false)
-        window.setTimeout(() => promptRef.current?.focus(), 0)
-      }
-    }
-  }, [buildContext, data.panelId, endpointId, form.sessionKey, messages, prompt, sending, workspaceId])
+    },
+    [
+      buildContext,
+      data.panelId,
+      endpointId,
+      form.sessionKey,
+      messages,
+      prompt,
+      sending,
+      workspaceId
+    ]
+  )
 
   useEffect(() => registerHermesPromptSender(data.panelId, sendPrompt), [data.panelId, sendPrompt])
 
@@ -794,14 +813,29 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
       activity: streamActivity,
       error: shortError(error)
     })
-  }, [data.panelId, endpointId, error, form.label, messages, publishHermesStream, sending, streamActivity])
+  }, [
+    data.panelId,
+    endpointId,
+    error,
+    form.label,
+    messages,
+    publishHermesStream,
+    sending,
+    streamActivity
+  ])
 
-  useEffect(() => () => {
-    removeHermesStream(data.panelId)
-  }, [data.panelId, removeHermesStream])
+  useEffect(
+    () => () => {
+      removeHermesStream(data.panelId)
+    },
+    [data.panelId, removeHermesStream]
+  )
 
   const quickPrompts = [
-    { label: 'Evaluate a skill', prompt: 'Help me evaluate or improve a loaded skill in Skill Lab.' },
+    {
+      label: 'Evaluate a skill',
+      prompt: 'Help me evaluate or improve a loaded skill in Skill Lab.'
+    },
     { label: 'Training next step', prompt: 'Review active training and suggest next eval.' },
     { label: 'Canvas context', prompt: 'Explain what context this canvas gives you.' },
     { label: 'Run handoff', prompt: 'Help prepare a BashGym run handoff.' }
@@ -820,616 +854,679 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
   ]
   return (
     <>
-    <DataNodeShell
-      panelId={data.panelId}
-      title={data.title}
-      flowerVariant="agent"
-      selected={selected}
-      hasConnections={data.hasConnections}
-      buildContext={data.hasTerminalConnections ? buildContext : undefined}
-      statusBarClass={statusBarClass}
-      hue={hueFor('agent')}
-      onFocus={data.onFocus}
-      onClose={data.onClose}
-      headerRight={
-        <>
-          {testing || saving ? (
-            <Loader2 className="w-3 h-3 animate-spin text-text-muted" />
-          ) : discovery?.ok ? (
-            <CheckCircle2 className="w-3 h-3 text-status-success" />
-          ) : error ? (
-            <AlertCircle className="w-3 h-3 text-status-error" />
-          ) : (
-            <ShieldCheck className="w-3 h-3 text-text-muted" />
-          )}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              setShowConfig(true)
-            }}
-            className={clsx('nodrag node-btn', showConfig ? 'node-btn-success' : 'node-btn-accent')}
-            title="Configure endpoint"
-          >
-            <Settings2 className="w-3 h-3" />
-          </button>
-        </>
-      }
-    >
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 text-[10px] font-mono min-w-0">
-          <span className={clsx(
-            'w-1.5 h-1.5 rounded-full flex-shrink-0',
-            discovery?.ok ? 'bg-status-success' : hasSavedKey ? 'bg-status-warning' : 'bg-text-muted'
-          )} />
-          <span className="truncate text-text-secondary">{connectedLabel}</span>
-        </div>
-
-        {modelOptions.length > 0 ? (
-          <label className="nodrag node-field">
-            <span className="node-field-label">Hermes model</span>
-            <select
-              className="input-brutal text-[11px] font-mono min-h-9"
-              value={form.model}
-              onChange={(event) => void selectModel(event.target.value)}
-              title="Model used by this Hermes endpoint profile"
-            >
-              {modelOptions.map((model) => (
-                <option key={model} value={model}>{model}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-
-        <button
-          type="button"
-          className="nodrag node-btn node-btn-wide node-btn-accent w-full justify-center min-h-9"
-          onClick={(event) => {
-            event.stopPropagation()
-            setShowChatModal(true)
-          }}
-          title="Open Hermes chat"
-        >
-          <MessageCircle className="w-3 h-3" />
-          <span>Open Chat</span>
-          <Maximize2 className="w-3 h-3 ml-auto" />
-        </button>
-
-        {!hasSavedKey && loaded && (
-          <div className="text-[10px] font-mono text-text-muted">
-            Connect your Hermes API server: set an API key in
+      <DataNodeShell
+        panelId={data.panelId}
+        title={data.title}
+        flowerVariant="agent"
+        selected={selected}
+        hasConnections={data.hasConnections}
+        buildContext={data.hasTerminalConnections ? buildContext : undefined}
+        statusBarClass={statusBarClass}
+        hue={hueFor('agent')}
+        onFocus={data.onFocus}
+        onClose={data.onClose}
+        headerRight={
+          <>
+            {testing || saving ? (
+              <Loader2 className="w-3 h-3 animate-spin text-text-muted" />
+            ) : discovery?.ok ? (
+              <CheckCircle2 className="w-3 h-3 text-status-success" />
+            ) : error ? (
+              <AlertCircle className="w-3 h-3 text-status-error" />
+            ) : (
+              <ShieldCheck className="w-3 h-3 text-text-muted" />
+            )}
             <button
               type="button"
-              className="nodrag ml-1 text-accent hover:underline"
               onClick={(e) => {
                 e.stopPropagation()
                 setShowConfig(true)
               }}
+              className={clsx(
+                'nodrag node-btn',
+                showConfig ? 'node-btn-success' : 'node-btn-accent'
+              )}
+              title="Configure endpoint"
             >
-              endpoint config
-            </button>
-          </div>
-        )}
-
-        <NodeConfigModal
-          isOpen={showConfig}
-          onClose={() => setShowConfig(false)}
-          title={`${form.label || 'Hermes'} Endpoint Config`}
-          description={`Profile: ${endpointId}`}
-          size="xl"
-        >
-          <div className="grid gap-2">
-            <div className="node-section-title">
               <Settings2 className="w-3 h-3" />
-              <span>Endpoint</span>
-            </div>
-            <div className="nodrag node-config-action-row">
-              <button
-                type="button"
-                className="node-btn node-btn-wide node-btn-accent justify-center"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void runQuickSetup()
-                }}
-                disabled={setupBusy}
-                title="Save profile, verify Hermes API settings, and start the gateway if needed"
-              >
-                {setupBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                <span>{setupStatus?.gateway_healthy ? 'Refresh Setup' : 'Setup'}</span>
-              </button>
-              <div className="flex flex-wrap gap-1 justify-end">
-                {setupChecks.map((check) => (
-                  <span
-                    key={check.label}
-                    className={clsx(
-                      'border-brutal rounded-brutal px-1.5 py-1 text-[8px] font-mono uppercase',
-                      check.ok
-                        ? 'border-status-success/60 bg-status-success/10 text-status-success'
-                        : 'border-border-subtle bg-background-card text-text-muted'
-                    )}
-                    title={check.label}
-                  >
-                    {check.label}
-                  </span>
-                ))}
-              </div>
-            </div>
-            {(setupStatus?.setup_needed.length || setupActions.length) ? (
-              <div className="text-[9px] font-mono text-text-muted truncate" title={[...(setupActions || []), ...(setupStatus?.setup_needed || [])].join('\n')}>
-                {setupActions[0] || setupStatus?.setup_needed[0]}
-              </div>
-            ) : null}
-            <div className="nodrag grid grid-cols-2 gap-2">
-              <label className="node-field">
-                <span className="node-field-label">Profile</span>
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-[10px] font-mono min-w-0">
+            <span
+              className={clsx(
+                'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                discovery?.ok
+                  ? 'bg-status-success'
+                  : hasSavedKey
+                    ? 'bg-status-warning'
+                    : 'bg-text-muted'
+              )}
+            />
+            <span className="truncate text-text-secondary">{connectedLabel}</span>
+          </div>
+
+          {modelOptions.length > 0 ? (
+            <label className="nodrag node-field">
+              <span className="node-field-label">Hermes model</span>
               <select
                 className="input-brutal text-[11px] font-mono min-h-9"
-                value={selectedProfile ? selectedId : ''}
-                onChange={(event) => {
-                  const nextId = event.target.value
-                  if (!nextId) {
-                    setSelectedId('')
-                    setForm(DEFAULT_FORM)
-                    setDiscovery(null)
-                    return
-                  }
-                  const next = profiles.find((profile) => profile.id === nextId)
-                  setSelectedId(nextId)
-                  setForm(profileToForm(next || null))
-                  setDiscovery(null)
-                }}
-                title="Saved endpoint profile"
+                value={form.model}
+                onChange={(event) => void selectModel(event.target.value)}
+                title="Model used by this Hermes endpoint profile"
               >
-                <option value="">New profile</option>
-                {profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>{profile.label}</option>
+                {modelOptions.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
                 ))}
               </select>
-              </label>
-              <label className="node-field">
-                <span className="node-field-label">Id</span>
-              <input
-                className="input-brutal text-[11px] font-mono min-h-9"
-                value={selectedId}
-                onChange={(event) => {
-                  setSelectedId(event.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64))
-                  setDiscovery(null)
-                }}
-                placeholder="endpoint id"
-                title="Endpoint id"
-              />
-              </label>
-            </div>
-            <label className="nodrag node-field">
-              <span className="node-field-label">Label</span>
-            <input
-              className="input-brutal text-[11px] font-mono min-h-9"
-              value={form.label}
-              onChange={(event) => updateForm('label', event.target.value)}
-              placeholder="Hermes"
-              title="Endpoint label"
-            />
             </label>
-            <label className="nodrag node-field">
-              <span className="node-field-label">Model options</span>
-              <textarea
-                className="input-brutal nowheel text-[11px] font-mono min-h-[72px]"
-                value={modelOptions.join('\n')}
-                onChange={(event) => {
-                  const nextOptions = parseModelOptions(event.target.value, form.model)
-                  updateForm('modelOptions', nextOptions)
-                }}
-                placeholder="One model id per line"
-                title="Models you want this Hermes profile to cycle between"
-              />
-            </label>
-            <div className="nodrag node-section !p-2 space-y-2">
-              <button
-                type="button"
-                className="node-config-toggle"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setShowTunnelDetails((current) => !current)
-                }}
-                title={showTunnelDetails ? 'Hide remote tunnel' : 'Show remote tunnel'}
-              >
-                <span>Remote tunnel</span>
-                <span className={clsx(
-                  'ml-auto mr-2 text-[9px] font-mono',
-                  tunnelStatus?.active
-                    ? tunnelStatus.healthy
-                      ? 'text-status-success'
-                      : 'text-status-warning'
-                    : 'text-text-muted'
-                )}>
-                  {tunnelLabel}
-                </span>
-                <ChevronDown
-                  className={clsx(
-                    'w-3 h-3 transition-transform',
-                    showTunnelDetails && 'rotate-180'
-                  )}
-                />
-              </button>
-              {showTunnelDetails ? (
-                <div className="space-y-2">
-                  {sshCandidateOptions.length > 0 ? (
-                    <label className="node-field">
-                      <span className="node-field-label">SSH host</span>
-                      <select
-                        className="input-brutal text-[11px] font-mono min-h-9"
-                        value={sshTargetInOptions ? sshTarget : ''}
-                        onChange={(event) => setSshTarget(event.target.value)}
-                        title="SSH config host to forward remote Hermes through"
-                      >
-                        <option value="">Custom</option>
-                        {sshCandidateOptions.map((alias) => (
-                          <option key={alias} value={alias}>{alias}</option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  <label className="node-field">
-                    <span className="node-field-label">SSH alias</span>
-                    <input
-                      className="input-brutal text-[11px] font-mono min-h-9"
-                      value={sshTarget}
-                      onChange={(event) => setSshTarget(event.target.value)}
-                      placeholder="ssh config host"
-                      title="Any SSH config alias or user@host target"
-                    />
-                  </label>
-                  <div className="node-config-action-row">
-                    <button
-                      type="button"
-                      className="node-btn node-btn-wide node-btn-accent justify-center"
-                      onClick={() => void connectTunnel()}
-                      disabled={tunnelBusy || !sshTarget.trim()}
-                      title="Open an SSH port-forward to remote Hermes"
-                    >
-                      {tunnelBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                      <span>Connect</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="node-btn node-btn-wide justify-center"
-                      onClick={() => void disconnectTunnel()}
-                      disabled={tunnelBusy || !tunnelStatus?.active}
-                      title="Stop the BashGym-managed tunnel"
-                    >
-                      <span>Disconnect</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="node-btn"
-                      onClick={() => void loadTunnelStatus(endpointId)}
-                      disabled={tunnelBusy}
-                      title="Refresh tunnel status"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                    </button>
-                  </div>
-                  {tunnelStatus?.local_base_url ? (
-                    <div className="text-[9px] font-mono text-text-muted truncate" title={tunnelStatus.local_base_url}>
-                      Forward: {tunnelStatus.local_base_url}
-                    </div>
-                  ) : null}
-                  {tunnelStatus?.health_error ? (
-                    <div className="text-[9px] font-mono text-status-warning truncate" title={tunnelStatus.health_error}>
-                      {tunnelStatus.health_error}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-            <div className="nodrag node-section !p-2 space-y-2">
-              <button
-                type="button"
-                className="node-config-toggle"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setShowConnectionDetails((current) => !current)
-                }}
-                title={showConnectionDetails ? 'Hide connection details' : 'Show connection details'}
-              >
-                <span>Connection</span>
-                <ChevronDown
-                  className={clsx(
-                    'w-3 h-3 transition-transform',
-                    showConnectionDetails && 'rotate-180'
-                  )}
-                />
-              </button>
-              {showConnectionDetails ? (
-                <label className="node-field">
-                  <span className="node-field-label">API URL</span>
-                  <input
-                    className="input-brutal text-[11px] font-mono min-h-9"
-                    value={form.baseUrl}
-                    onChange={(event) => updateForm('baseUrl', event.target.value)}
-                    placeholder="http://127.0.0.1:8642/v1"
-                    title="Hermes API server URL"
-                  />
-                </label>
-              ) : null}
-            </div>
-            <div className="grid grid-cols-1 gap-2">
-              <label className="nodrag node-field">
-                <span className="node-field-label">Session key</span>
-              <input
-                className="input-brutal text-[11px] font-mono min-h-9"
-                value={form.sessionKey}
-                onChange={(event) => updateForm('sessionKey', event.target.value)}
-                placeholder="memory session key"
-                title="X-Hermes-Session-Key — scopes Hermes long-term memory for this canvas"
-              />
-              </label>
-              <label className="nodrag node-field">
-                <span className="node-field-label">API key</span>
-              <input
-                className="input-brutal text-[11px] font-mono min-h-9"
-                type="password"
-                value={form.apiKey}
-                onChange={(event) => updateForm('apiKey', event.target.value)}
-                placeholder={hasSavedKey ? 'key saved — blank keeps it' : 'API_SERVER_KEY'}
-                title="Bearer token matching API_SERVER_KEY on the Hermes side. Stored by BashGym, never echoed."
-              />
-              </label>
-            </div>
-            <div className="nodrag node-config-action-row">
-              <button
-                type="button"
-                className="node-btn node-btn-wide node-btn-accent justify-center"
-                onClick={() => void saveProfile()}
-                disabled={saving || !endpointId}
-                title="Save endpoint profile"
-              >
-                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                <span>Save</span>
-              </button>
-              <button
-                type="button"
-                className="node-btn node-btn-wide justify-center"
-                onClick={() => void probeEndpoint(endpointId)}
-                disabled={testing || !loaded || !endpointId}
-                title="Probe health, models, skills, and toolsets"
-              >
-                {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                <span>Test</span>
-              </button>
-            </div>
-            {discovery && (
-              <div className="grid grid-cols-3 gap-1.5">
-                {[
-                  { icon: Brain, label: 'Models', value: discovery.summary.models },
-                  { icon: Wrench, label: 'Skills', value: discovery.summary.skills },
-                  { icon: KeyRound, label: 'Auth', value: discovery.auth_configured ? 'set' : 'none' }
-                ].map(({ icon: Icon, label, value }) => (
-                  <div key={label} className="border-brutal border-border-subtle rounded-brutal px-2 py-1 min-w-0">
-                    <div className="flex items-center gap-1 text-[8px] font-mono text-text-muted uppercase">
-                      <Icon className="w-2.5 h-2.5" />
-                      <span>{label}</span>
-                    </div>
-                    <div className="text-[11px] font-mono font-semibold text-text-primary">{value}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {discovery?.warnings.length ? (
-              <div className="text-[9px] font-mono text-text-muted truncate" title={discovery.warnings.join('\n')}>
-                {discovery.warnings[0]}
-              </div>
-            ) : null}
-          </div>
-        </NodeConfigModal>
+          ) : null}
 
-        {shortError(error) && (
-          <div className="border-brutal border-status-error/50 bg-status-error/10 rounded-brutal px-2 py-1 text-[10px] font-mono text-status-error">
-            {shortError(error)}
-          </div>
-        )}
-
-        {messages.length > 0 ? (
           <button
             type="button"
-            className="nodrag w-full text-left border-t border-brutal border-border-subtle pt-2 text-[10px] font-mono text-text-muted hover:text-text-primary"
+            className="nodrag node-btn node-btn-wide node-btn-accent w-full justify-center min-h-9"
             onClick={(event) => {
               event.stopPropagation()
               setShowChatModal(true)
             }}
-            title={sending ? 'Hermes is responding — open chat to view progress' : 'Open latest Hermes reply'}
+            title="Open Hermes chat"
           >
-            <span className="text-accent">{sending ? 'Responding:' : 'Latest:'}</span>{' '}
-            <span className="break-words">
-              {sending
-                ? 'Hermes is continuing in the background…'
-                : messages[messages.length - 1]?.content.slice(0, 120)}
-            </span>
+            <MessageCircle className="w-3 h-3" />
+            <span>Open Chat</span>
+            <Maximize2 className="w-3 h-3 ml-auto" />
           </button>
-        ) : null}
-      </div>
-    </DataNodeShell>
-    <Modal
-      isOpen={showChatModal}
-      onClose={closeChat}
-      title={`${form.label || 'Hermes'} Chat`}
-      size="lg"
-      variant="canvas"
-    >
-      <div className="flex h-[62vh] min-h-[420px] max-h-[620px] flex-col">
-        <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle px-1 pb-2">
-          <label className="flex min-w-0 items-center gap-2">
-            <span className="node-field-label flex-shrink-0">Model</span>
-            <select
-              className="input-brutal min-h-8 max-w-full py-1.5 text-[10px] font-mono"
-              style={{ width: modelSelectWidth }}
-              value={form.model}
-              onChange={(event) => void selectModel(event.target.value)}
-              disabled={sending}
-            >
-              {modelOptions.map((model) => (
-                <option key={model} value={model}>{model}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="node-btn node-btn-wide ml-auto"
-            onClick={clearChat}
-            disabled={messages.length === 0 && !error}
-            title="Start a new conversation"
-          >
-            New chat
-          </button>
-        </div>
 
-        <div
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-3"
-          aria-live="polite"
-        >
-          {messages.length === 0 ? (
-            <div className="flex min-h-full flex-col items-center justify-center gap-3 py-6 text-center">
-              <div className="flex items-center gap-2 text-text-primary">
-                <GhostPeonyIcon name="app" tone="color" size="sm" />
-                <span className="font-mono text-xs font-bold uppercase tracking-wider">Ask Hermes</span>
-              </div>
-              <p className="max-w-md text-sm text-text-muted">
-                Chat with the canvas context already attached.
-              </p>
-              <div className="flex max-w-2xl flex-wrap justify-center gap-2">
-                {quickPrompts.map((quick) => (
-                  <button
-                    key={quick.label}
-                    type="button"
-                    className="node-btn node-btn-wide"
-                    onClick={() => void sendPrompt(quick.prompt)}
-                    disabled={sending}
-                    title={quick.prompt}
-                  >
-                    {quick.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={clsx(
-                  'flex items-start gap-2.5',
-                  message.role === 'user' ? 'flex-row-reverse justify-start' : 'justify-start'
-                )}
+          {!hasSavedKey && loaded && (
+            <div className="text-[10px] font-mono text-text-muted">
+              Connect your Hermes API server: set an API key in
+              <button
+                type="button"
+                className="nodrag ml-1 text-accent hover:underline"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowConfig(true)
+                }}
               >
-                <GhostPeonyIcon
-                  name="app"
-                  tone="color"
-                  size="lg"
-                  className="mt-3 flex-shrink-0"
-                  title={message.role === 'user' ? 'You' : 'Hermes'}
-                />
+                endpoint config
+              </button>
+            </div>
+          )}
+
+          <NodeConfigModal
+            isOpen={showConfig}
+            onClose={() => setShowConfig(false)}
+            title={`${form.label || 'Hermes'} Endpoint Config`}
+            description={`Profile: ${endpointId}`}
+            size="xl"
+          >
+            <div className="grid gap-2">
+              <div className="node-section-title">
+                <Settings2 className="w-3 h-3" />
+                <span>Endpoint</span>
+              </div>
+              <div className="nodrag node-config-action-row">
+                <button
+                  type="button"
+                  className="node-btn node-btn-wide node-btn-accent justify-center"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void runQuickSetup()
+                  }}
+                  disabled={setupBusy}
+                  title="Save profile, verify Hermes API settings, and start the gateway if needed"
+                >
+                  {setupBusy ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Zap className="w-3 h-3" />
+                  )}
+                  <span>{setupStatus?.gateway_healthy ? 'Refresh Setup' : 'Setup'}</span>
+                </button>
+                <div className="flex flex-wrap gap-1 justify-end">
+                  {setupChecks.map((check) => (
+                    <span
+                      key={check.label}
+                      className={clsx(
+                        'border-brutal rounded-brutal px-1.5 py-1 text-[8px] font-mono uppercase',
+                        check.ok
+                          ? 'border-status-success/60 bg-status-success/10 text-status-success'
+                          : 'border-border-subtle bg-background-card text-text-muted'
+                      )}
+                      title={check.label}
+                    >
+                      {check.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {setupStatus?.setup_needed.length || setupActions.length ? (
                 <div
+                  className="text-[9px] font-mono text-text-muted truncate"
+                  title={[...(setupActions || []), ...(setupStatus?.setup_needed || [])].join('\n')}
+                >
+                  {setupActions[0] || setupStatus?.setup_needed[0]}
+                </div>
+              ) : null}
+              <div className="nodrag grid grid-cols-2 gap-2">
+                <label className="node-field">
+                  <span className="node-field-label">Profile</span>
+                  <select
+                    className="input-brutal text-[11px] font-mono min-h-9"
+                    value={selectedProfile ? selectedId : ''}
+                    onChange={(event) => {
+                      const nextId = event.target.value
+                      if (!nextId) {
+                        setSelectedId('')
+                        setForm(DEFAULT_FORM)
+                        setDiscovery(null)
+                        return
+                      }
+                      const next = profiles.find((profile) => profile.id === nextId)
+                      setSelectedId(nextId)
+                      setForm(profileToForm(next || null))
+                      setDiscovery(null)
+                    }}
+                    title="Saved endpoint profile"
+                  >
+                    <option value="">New profile</option>
+                    {profiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="node-field">
+                  <span className="node-field-label">Id</span>
+                  <input
+                    className="input-brutal text-[11px] font-mono min-h-9"
+                    value={selectedId}
+                    onChange={(event) => {
+                      setSelectedId(event.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64))
+                      setDiscovery(null)
+                    }}
+                    placeholder="endpoint id"
+                    title="Endpoint id"
+                  />
+                </label>
+              </div>
+              <label className="nodrag node-field">
+                <span className="node-field-label">Label</span>
+                <input
+                  className="input-brutal text-[11px] font-mono min-h-9"
+                  value={form.label}
+                  onChange={(event) => updateForm('label', event.target.value)}
+                  placeholder="Hermes"
+                  title="Endpoint label"
+                />
+              </label>
+              <label className="nodrag node-field">
+                <span className="node-field-label">Model options</span>
+                <textarea
+                  className="input-brutal nowheel text-[11px] font-mono min-h-[72px]"
+                  value={modelOptions.join('\n')}
+                  onChange={(event) => {
+                    const nextOptions = parseModelOptions(event.target.value, form.model)
+                    updateForm('modelOptions', nextOptions)
+                  }}
+                  placeholder="One model id per line"
+                  title="Models you want this Hermes profile to cycle between"
+                />
+              </label>
+              <div className="nodrag node-section !p-2 space-y-2">
+                <button
+                  type="button"
+                  className="node-config-toggle"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setShowTunnelDetails((current) => !current)
+                  }}
+                  title={showTunnelDetails ? 'Hide remote tunnel' : 'Show remote tunnel'}
+                >
+                  <span>Remote tunnel</span>
+                  <span
+                    className={clsx(
+                      'ml-auto mr-2 text-[9px] font-mono',
+                      tunnelStatus?.active
+                        ? tunnelStatus.healthy
+                          ? 'text-status-success'
+                          : 'text-status-warning'
+                        : 'text-text-muted'
+                    )}
+                  >
+                    {tunnelLabel}
+                  </span>
+                  <ChevronDown
+                    className={clsx(
+                      'w-3 h-3 transition-transform',
+                      showTunnelDetails && 'rotate-180'
+                    )}
+                  />
+                </button>
+                {showTunnelDetails ? (
+                  <div className="space-y-2">
+                    {sshCandidateOptions.length > 0 ? (
+                      <label className="node-field">
+                        <span className="node-field-label">SSH host</span>
+                        <select
+                          className="input-brutal text-[11px] font-mono min-h-9"
+                          value={sshTargetInOptions ? sshTarget : ''}
+                          onChange={(event) => setSshTarget(event.target.value)}
+                          title="SSH config host to forward remote Hermes through"
+                        >
+                          <option value="">Custom</option>
+                          {sshCandidateOptions.map((alias) => (
+                            <option key={alias} value={alias}>
+                              {alias}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label className="node-field">
+                      <span className="node-field-label">SSH alias</span>
+                      <input
+                        className="input-brutal text-[11px] font-mono min-h-9"
+                        value={sshTarget}
+                        onChange={(event) => setSshTarget(event.target.value)}
+                        placeholder="ssh config host"
+                        title="Any SSH config alias or user@host target"
+                      />
+                    </label>
+                    <div className="node-config-action-row">
+                      <button
+                        type="button"
+                        className="node-btn node-btn-wide node-btn-accent justify-center"
+                        onClick={() => void connectTunnel()}
+                        disabled={tunnelBusy || !sshTarget.trim()}
+                        title="Open an SSH port-forward to remote Hermes"
+                      >
+                        {tunnelBusy ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Zap className="w-3 h-3" />
+                        )}
+                        <span>Connect</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="node-btn node-btn-wide justify-center"
+                        onClick={() => void disconnectTunnel()}
+                        disabled={tunnelBusy || !tunnelStatus?.active}
+                        title="Stop the BashGym-managed tunnel"
+                      >
+                        <span>Disconnect</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="node-btn"
+                        onClick={() => void loadTunnelStatus(endpointId)}
+                        disabled={tunnelBusy}
+                        title="Refresh tunnel status"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {tunnelStatus?.local_base_url ? (
+                      <div
+                        className="text-[9px] font-mono text-text-muted truncate"
+                        title={tunnelStatus.local_base_url}
+                      >
+                        Forward: {tunnelStatus.local_base_url}
+                      </div>
+                    ) : null}
+                    {tunnelStatus?.health_error ? (
+                      <div
+                        className="text-[9px] font-mono text-status-warning truncate"
+                        title={tunnelStatus.health_error}
+                      >
+                        {tunnelStatus.health_error}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <div className="nodrag node-section !p-2 space-y-2">
+                <button
+                  type="button"
+                  className="node-config-toggle"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setShowConnectionDetails((current) => !current)
+                  }}
+                  title={
+                    showConnectionDetails ? 'Hide connection details' : 'Show connection details'
+                  }
+                >
+                  <span>Connection</span>
+                  <ChevronDown
+                    className={clsx(
+                      'w-3 h-3 transition-transform',
+                      showConnectionDetails && 'rotate-180'
+                    )}
+                  />
+                </button>
+                {showConnectionDetails ? (
+                  <label className="node-field">
+                    <span className="node-field-label">API URL</span>
+                    <input
+                      className="input-brutal text-[11px] font-mono min-h-9"
+                      value={form.baseUrl}
+                      onChange={(event) => updateForm('baseUrl', event.target.value)}
+                      placeholder="http://127.0.0.1:8642/v1"
+                      title="Hermes API server URL"
+                    />
+                  </label>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                <label className="nodrag node-field">
+                  <span className="node-field-label">Session key</span>
+                  <input
+                    className="input-brutal text-[11px] font-mono min-h-9"
+                    value={form.sessionKey}
+                    onChange={(event) => updateForm('sessionKey', event.target.value)}
+                    placeholder="memory session key"
+                    title="X-Hermes-Session-Key — scopes Hermes long-term memory for this canvas"
+                  />
+                </label>
+                <label className="nodrag node-field">
+                  <span className="node-field-label">API key</span>
+                  <input
+                    className="input-brutal text-[11px] font-mono min-h-9"
+                    type="password"
+                    value={form.apiKey}
+                    onChange={(event) => updateForm('apiKey', event.target.value)}
+                    placeholder={hasSavedKey ? 'key saved — blank keeps it' : 'API_SERVER_KEY'}
+                    title="Bearer token matching API_SERVER_KEY on the Hermes side. Stored by BashGym, never echoed."
+                  />
+                </label>
+              </div>
+              <div className="nodrag node-config-action-row">
+                <button
+                  type="button"
+                  className="node-btn node-btn-wide node-btn-accent justify-center"
+                  onClick={() => void saveProfile()}
+                  disabled={saving || !endpointId}
+                  title="Save endpoint profile"
+                >
+                  {saving ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Save className="w-3 h-3" />
+                  )}
+                  <span>Save</span>
+                </button>
+                <button
+                  type="button"
+                  className="node-btn node-btn-wide justify-center"
+                  onClick={() => void probeEndpoint(endpointId)}
+                  disabled={testing || !loaded || !endpointId}
+                  title="Probe health, models, skills, and toolsets"
+                >
+                  {testing ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3 h-3" />
+                  )}
+                  <span>Test</span>
+                </button>
+              </div>
+              {discovery && (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { icon: Brain, label: 'Models', value: discovery.summary.models },
+                    { icon: Wrench, label: 'Skills', value: discovery.summary.skills },
+                    {
+                      icon: KeyRound,
+                      label: 'Auth',
+                      value: discovery.auth_configured ? 'set' : 'none'
+                    }
+                  ].map(({ icon: Icon, label, value }) => (
+                    <div
+                      key={label}
+                      className="border-brutal border-border-subtle rounded-brutal px-2 py-1 min-w-0"
+                    >
+                      <div className="flex items-center gap-1 text-[8px] font-mono text-text-muted uppercase">
+                        <Icon className="w-2.5 h-2.5" />
+                        <span>{label}</span>
+                      </div>
+                      <div className="text-[11px] font-mono font-semibold text-text-primary">
+                        {value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {discovery?.warnings.length ? (
+                <div
+                  className="text-[9px] font-mono text-text-muted truncate"
+                  title={discovery.warnings.join('\n')}
+                >
+                  {discovery.warnings[0]}
+                </div>
+              ) : null}
+            </div>
+          </NodeConfigModal>
+
+          {shortError(error) && (
+            <div className="border-brutal border-status-error/50 bg-status-error/10 rounded-brutal px-2 py-1 text-[10px] font-mono text-status-error">
+              {shortError(error)}
+            </div>
+          )}
+
+          {messages.length > 0 ? (
+            <button
+              type="button"
+              className="nodrag w-full text-left border-t border-brutal border-border-subtle pt-2 text-[10px] font-mono text-text-muted hover:text-text-primary"
+              onClick={(event) => {
+                event.stopPropagation()
+                setShowChatModal(true)
+              }}
+              title={
+                sending
+                  ? 'Hermes is responding — open chat to view progress'
+                  : 'Open latest Hermes reply'
+              }
+            >
+              <span className="text-accent">{sending ? 'Responding:' : 'Latest:'}</span>{' '}
+              <span className="break-words">
+                {sending
+                  ? 'Hermes is continuing in the background…'
+                  : messages[messages.length - 1]?.content.slice(0, 120)}
+              </span>
+            </button>
+          ) : null}
+        </div>
+      </DataNodeShell>
+      <Modal
+        isOpen={showChatModal}
+        onClose={closeChat}
+        title={`${form.label || 'Hermes'} Chat`}
+        size="lg"
+        variant="canvas"
+      >
+        <div className="flex h-[62vh] min-h-[420px] max-h-[620px] flex-col">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle px-1 pb-2">
+            <label className="flex min-w-0 items-center gap-2">
+              <span className="node-field-label flex-shrink-0">Model</span>
+              <select
+                className="input-brutal min-h-8 max-w-full py-1.5 text-[10px] font-mono"
+                style={{ width: modelSelectWidth }}
+                value={form.model}
+                onChange={(event) => void selectModel(event.target.value)}
+                disabled={sending}
+              >
+                {modelOptions.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="node-btn node-btn-wide ml-auto"
+              onClick={clearChat}
+              disabled={messages.length === 0 && !error}
+              title="Start a new conversation"
+            >
+              New chat
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-3" aria-live="polite">
+            {messages.length === 0 ? (
+              <div className="flex min-h-full flex-col items-center justify-center gap-3 py-6 text-center">
+                <div className="flex items-center gap-2 text-text-primary">
+                  <GhostPeonyIcon name="app" tone="color" size="sm" />
+                  <span className="font-mono text-xs font-bold uppercase tracking-wider">
+                    Ask Hermes
+                  </span>
+                </div>
+                <p className="max-w-md text-sm text-text-muted">
+                  Chat with the canvas context already attached.
+                </p>
+                <div className="flex max-w-2xl flex-wrap justify-center gap-2">
+                  {quickPrompts.map((quick) => (
+                    <button
+                      key={quick.label}
+                      type="button"
+                      className="node-btn node-btn-wide"
+                      onClick={() => void sendPrompt(quick.prompt)}
+                      disabled={sending}
+                      title={quick.prompt}
+                    >
+                      {quick.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              messages.map((message, index) => (
+                <div
+                  key={`${message.role}-${index}`}
                   className={clsx(
-                    'text-sm leading-relaxed',
-                    message.role === 'user'
-                      ? 'max-w-[76%]'
-                      : 'max-w-[92%]'
+                    'flex items-start gap-2.5',
+                    message.role === 'user' ? 'flex-row-reverse justify-start' : 'justify-start'
                   )}
                 >
+                  <GhostPeonyIcon
+                    name="app"
+                    tone="color"
+                    size="lg"
+                    className="mt-3 flex-shrink-0"
+                    title={message.role === 'user' ? 'You' : 'Hermes'}
+                  />
                   <div
                     className={clsx(
-                      'mb-1 font-mono text-[9px] font-bold uppercase tracking-wider',
-                      message.role === 'user' ? 'text-right text-text-muted' : 'text-accent-dark'
+                      'text-sm leading-relaxed',
+                      message.role === 'user' ? 'max-w-[76%]' : 'max-w-[92%]'
                     )}
                   >
-                    {message.role === 'user' ? 'You' : 'Hermes'}
-                  </div>
-                  <div
-                    className={clsx(
-                      'px-3 py-2',
-                      message.role === 'user'
-                        ? 'bg-background-secondary text-text-primary'
-                        : 'text-text-primary'
-                    )}
-                  >
-                    <div className="prose-brutal">
-                    {message.content ? (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-                    ) : (
-                      <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
-                        <span>{streamActivity || 'Hermes is responding'}</span>
+                    <div
+                      className={clsx(
+                        'mb-1 font-mono text-[9px] font-bold uppercase tracking-wider',
+                        message.role === 'user' ? 'text-right text-text-muted' : 'text-accent-dark'
+                      )}
+                    >
+                      {message.role === 'user' ? 'You' : 'Hermes'}
+                    </div>
+                    <div
+                      className={clsx(
+                        'px-3 py-2',
+                        message.role === 'user'
+                          ? 'bg-background-secondary text-text-primary'
+                          : 'text-text-primary'
+                      )}
+                    >
+                      <div className="prose-brutal">
+                        {message.content ? (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {message.content}
+                          </ReactMarkdown>
+                        ) : (
+                          <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+                            <span>{streamActivity || 'Hermes is responding'}</span>
+                          </div>
+                        )}
                       </div>
-                    )}
                     </div>
                   </div>
                 </div>
+              ))
+            )}
+            {sending && messages[messages.length - 1]?.content && streamActivity ? (
+              <div className="flex items-center gap-2 pl-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                <Loader2 className="h-3 w-3 animate-spin text-accent" />
+                {streamActivity}
               </div>
-            ))
-          )}
-          {sending && messages[messages.length - 1]?.content && streamActivity ? (
-            <div className="flex items-center gap-2 pl-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-              <Loader2 className="h-3 w-3 animate-spin text-accent" />
-              {streamActivity}
+            ) : null}
+            <div ref={transcriptEndRef} />
+          </div>
+
+          {shortError(error) ? (
+            <div className="mb-2 flex items-start gap-2 border-l-[3px] border-status-error bg-status-error/10 px-3 py-2 text-xs font-mono text-status-error">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <span>{shortError(error)}</span>
             </div>
           ) : null}
-          <div ref={transcriptEndRef} />
-        </div>
 
-        {shortError(error) ? (
-          <div className="mb-2 flex items-start gap-2 border-l-[3px] border-status-error bg-status-error/10 px-3 py-2 text-xs font-mono text-status-error">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-            <span>{shortError(error)}</span>
-          </div>
-        ) : null}
-
-        <div className="border-t border-border-subtle pt-2">
-          <div className="rounded-brutal border-brutal border-border bg-background-card px-2 py-1.5 shadow-brutal-sm transition-colors focus-within:border-text-primary">
-          <textarea
-            ref={promptRef}
-            className="nowheel w-full resize-none bg-transparent px-1 py-1 text-sm leading-relaxed text-text-primary outline-none placeholder:text-text-muted"
-            rows={2}
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                if (!sending) void sendPrompt()
-              }
-            }}
-            placeholder="Message Hermes…"
-            title="Enter to send · Shift+Enter for a new line"
-          />
-          <div className="flex items-center gap-3 px-1 pt-1">
-            <span className="min-w-0 flex-1 truncate font-mono text-[9px] uppercase tracking-wider text-text-muted">
-              {sending ? streamActivity || 'Streaming response' : 'Enter to send · Shift+Enter for new line'}
-            </span>
-            {sending ? (
-              <button
-                type="button"
-                className="node-btn node-btn-wide node-btn-danger"
-                onClick={stopStreaming}
-                title="Stop the current response"
-              >
-                <Square className="h-3 w-3 fill-current" />
-                Stop
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="node-btn node-btn-wide node-btn-accent"
-                onClick={() => void sendPrompt()}
-                disabled={!prompt.trim()}
-                title="Send message"
-              >
-                <Send className="h-3 w-3" />
-                Send
-              </button>
-            )}
-          </div>
+          <div className="border-t border-border-subtle pt-2">
+            <div className="rounded-brutal border-brutal border-border bg-background-card px-2 py-1.5 shadow-brutal-sm transition-colors focus-within:border-text-primary">
+              <textarea
+                ref={promptRef}
+                className="nowheel w-full resize-none bg-transparent px-1 py-1 text-sm leading-relaxed text-text-primary outline-none placeholder:text-text-muted"
+                rows={2}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault()
+                    if (!sending) void sendPrompt()
+                  }
+                }}
+                placeholder="Message Hermes…"
+                title="Enter to send · Shift+Enter for a new line"
+              />
+              <div className="flex items-center gap-3 px-1 pt-1">
+                <span className="min-w-0 flex-1 truncate font-mono text-[9px] uppercase tracking-wider text-text-muted">
+                  {sending
+                    ? streamActivity || 'Streaming response'
+                    : 'Enter to send · Shift+Enter for new line'}
+                </span>
+                {sending ? (
+                  <button
+                    type="button"
+                    className="node-btn node-btn-wide node-btn-danger"
+                    onClick={stopStreaming}
+                    title="Stop the current response"
+                  >
+                    <Square className="h-3 w-3 fill-current" />
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="node-btn node-btn-wide node-btn-accent"
+                    onClick={() => void sendPrompt()}
+                    disabled={!prompt.trim()}
+                    title="Send message"
+                  >
+                    <Send className="h-3 w-3" />
+                    Send
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </Modal>
+      </Modal>
     </>
   )
 })

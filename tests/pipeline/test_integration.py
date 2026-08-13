@@ -1,8 +1,6 @@
 """Integration test: file appears → import → classify → threshold check."""
 
 import json
-import pytest
-from pathlib import Path
 
 from bashgym.pipeline.config import PipelineConfig
 from bashgym.pipeline.orchestrator import Pipeline
@@ -44,21 +42,33 @@ class TestPipelineIntegration:
         session_events = [
             {"type": "user", "message": {"content": "fix it"}, "cwd": "/repo"},
             {
-                "type": "assistant", "timestamp": "2026-02-24T12:00:00Z",
+                "type": "assistant",
+                "timestamp": "2026-02-24T12:00:00Z",
                 "message": {
                     "model": "claude-sonnet-4-5",
                     "usage": {"input_tokens": 100, "output_tokens": 50},
                     "content": [
-                        {"type": "tool_use", "id": "t1", "name": "Bash",
-                         "input": {"command": "echo fix"}},
+                        {
+                            "type": "tool_use",
+                            "id": "t1",
+                            "name": "Bash",
+                            "input": {"command": "echo fix"},
+                        },
                     ],
                 },
             },
             {
-                "type": "user", "message": {"content": [
-                    {"type": "tool_result", "tool_use_id": "t1",
-                     "content": "fix", "is_error": False},
-                ]},
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": "fix",
+                            "is_error": False,
+                        },
+                    ]
+                },
             },
         ]
         with open(session_file, "w") as f:

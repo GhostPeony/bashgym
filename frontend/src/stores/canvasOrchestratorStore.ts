@@ -2,10 +2,7 @@ import { create } from 'zustand'
 import type { DesignerJobStatus, RuntimeJob } from '../services/api'
 import { useTerminalStore, type CanvasEdge, type Panel } from './terminalStore'
 import { useWorkspaceStore } from './workspaceStore'
-import {
-  selectDesignerPanelForJob,
-  type DesignerCanvasMetadata,
-} from './designerCanvasLifecycle'
+import { selectDesignerPanelForJob, type DesignerCanvasMetadata } from './designerCanvasLifecycle'
 import {
   recipeFromTrainingProgress,
   recipeFromTrainingQueued,
@@ -15,7 +12,7 @@ import {
   type CanvasNodeRecipe,
   type TrainingProgressPayload,
   type TrainingQueuedPayload,
-  type WorkspaceCanvasIntentPayload,
+  type WorkspaceCanvasIntentPayload
 } from '../components/terminal/canvasRecipes'
 import { findDynamicNodePosition } from '../components/terminal/canvasPlacement'
 
@@ -62,7 +59,9 @@ function findOriginPanel(recipe: CanvasNodeRecipe): Panel | undefined | typeof O
   }
   if (hasExplicitOrigin) return ORIGIN_ELSEWHERE
 
-  const sessions = Array.from(state.sessions.values()).sort((a, b) => b.lastActivity - a.lastActivity)
+  const sessions = Array.from(state.sessions.values()).sort(
+    (a, b) => b.lastActivity - a.lastActivity
+  )
   const activeAgent =
     sessions.find((session) => session.status === 'running' || session.status === 'tool_calling') ||
     sessions.find((session) => session.agentKind)
@@ -104,7 +103,7 @@ function upsertEdge(source: string | undefined, target: string): void {
   const edge: CanvasEdge = {
     id: `edge-${source}-${target}`,
     source,
-    target,
+    target
   }
   state.setCanvasEdges([...state.canvasEdges, edge])
 }
@@ -122,9 +121,8 @@ function materializeRecipe(recipe: CanvasNodeRecipe): string | null {
     return null
   }
   const originPanel = resolved === ORIGIN_ELSEWHERE ? undefined : resolved
-  const existing = matchingPanel ?? (
-    shouldReuseTrainingOrigin(recipe, originPanel) ? originPanel : undefined
-  )
+  const existing =
+    matchingPanel ?? (shouldReuseTrainingOrigin(recipe, originPanel) ? originPanel : undefined)
   const existingConfig = existing?.adapterConfig || {}
   const visual =
     recipe.type === 'training'
@@ -135,14 +133,16 @@ function materializeRecipe(recipe: CanvasNodeRecipe): string | null {
     ...existingConfig,
     ...recipe.config,
     originPanelId: recipe.config.originPanelId || originPanel?.id,
-    visual,
+    visual
   }
 
-  const panelId = existing?.id ?? state.addPanel({
-    type: recipe.type,
-    title: recipe.title,
-    adapterConfig: mergedConfig,
-  })
+  const panelId =
+    existing?.id ??
+    state.addPanel({
+      type: recipe.type,
+      title: recipe.title,
+      adapterConfig: mergedConfig
+    })
 
   if (existing) {
     state.updatePanelConfig(panelId, mergedConfig)
@@ -178,9 +178,11 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
   handleTrainingProgress: (payload) => {
     if (!payload.run_id) return
     const key = `training:${payload.run_id}`
-    const exists = useTerminalStore.getState().panels.some((panel) => (
-      panel.type === 'training' && panel.adapterConfig?.runId === payload.run_id
-    ))
+    const exists = useTerminalStore
+      .getState()
+      .panels.some(
+        (panel) => panel.type === 'training' && panel.adapterConfig?.runId === payload.run_id
+      )
     if (!exists) {
       if (materializeRecipe(recipeFromTrainingProgress(payload)) === null) return
     } else {
@@ -192,14 +194,14 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
   handleTrainingTerminalStatus: (runId, status) => {
     if (useWorkspaceStore.getState().switching) return
     const state = useTerminalStore.getState()
-    const panel = state.panels.find((candidate) => (
-      candidate.type === 'training' && candidate.adapterConfig?.runId === runId
-    ))
+    const panel = state.panels.find(
+      (candidate) => candidate.type === 'training' && candidate.adapterConfig?.runId === runId
+    )
     if (!panel) return
     const adapterConfig = {
       ...(panel.adapterConfig || {}),
       status,
-      visual: statusVisualForTraining(status),
+      visual: statusVisualForTraining(status)
     }
     state.updatePanelConfig(panel.id, adapterConfig)
   },
@@ -208,15 +210,13 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
     if (useWorkspaceStore.getState().switching) return
     const state = useTerminalStore.getState()
     const requestedOriginPanelId = metadata.originPanelId || job.origin?.panel_id
-    const originPanel = (
-      requestedOriginPanelId
+    const originPanel =
+      (requestedOriginPanelId
         ? state.panels.find((candidate) => candidate.id === requestedOriginPanelId)
-        : undefined
-    ) ?? (
-      job.origin?.terminal_id
+        : undefined) ??
+      (job.origin?.terminal_id
         ? state.panels.find((candidate) => candidate.terminalId === job.origin?.terminal_id)
-        : undefined
-    )
+        : undefined)
     const panel = selectDesignerPanelForJob(state.panels, job, originPanel?.id)
     const adapterConfig = {
       ...(panel?.adapterConfig || {}),
@@ -240,53 +240,58 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
       execution: job.execution,
       outputDir: job.output_dir,
       progress: job.progress ? { ...job.progress } : undefined,
-      error: job.error,
+      error: job.error
     }
-    const panelId = panel?.id ?? state.addPanel({
-      type: 'designer',
-      title: 'Data Designer',
-      adapterConfig,
-    })
+    const panelId =
+      panel?.id ??
+      state.addPanel({
+        type: 'designer',
+        title: 'Data Designer',
+        adapterConfig
+      })
     if (panel) state.updatePanelConfig(panelId, adapterConfig)
     else placeNearOrigin(panelId, originPanel, 'designer')
     upsertEdge(originPanel?.id, panelId)
     set((current) => ({
-      handledKeys: { ...current.handledKeys, [`designer:${job.job_id}`]: Date.now() },
+      handledKeys: { ...current.handledKeys, [`designer:${job.job_id}`]: Date.now() }
     }))
   },
 
   handleRuntimeJob: (job) => {
     if (useWorkspaceStore.getState().switching) return
-    const progress = job.progress
-      ? { ...job.progress }
-      : undefined
+    const progress = job.progress ? { ...job.progress } : undefined
     const summary = [
       `Observed ${job.script} (PID ${job.pid})`,
       progress?.total ? `${progress.current}/${progress.total} ${progress.unit}` : undefined,
-      job.artifacts.length ? `${job.artifacts.length} recent artifacts` : undefined,
-    ].filter(Boolean).join(' · ')
+      job.artifacts.length ? `${job.artifacts.length} recent artifacts` : undefined
+    ]
+      .filter(Boolean)
+      .join(' · ')
 
     if (job.kind === 'designer') {
-      get().handleDesignerJob({
-        job_id: job.job_id,
-        status: job.status,
-        pipeline: job.pipeline || job.script,
-        num_records: job.progress?.total ?? 0,
-        progress: job.progress?.total
-          ? { ...job.progress, total: job.progress.total }
-          : undefined,
-        job_name: job.job_name,
-        dataset: job.dataset,
-        model: job.model,
-        provider: job.provider,
-        execution: job.execution,
-        started_at: job.started_at,
-        output_dir: job.output_dir || undefined,
-      }, {
-        runtimePid: job.pid,
-        runtimeDiscovered: true,
-        config: { summary },
-      })
+      get().handleDesignerJob(
+        {
+          job_id: job.job_id,
+          status: job.status,
+          pipeline: job.pipeline || job.script,
+          num_records: job.progress?.total ?? 0,
+          progress: job.progress?.total
+            ? { ...job.progress, total: job.progress.total }
+            : undefined,
+          job_name: job.job_name,
+          dataset: job.dataset,
+          model: job.model,
+          provider: job.provider,
+          execution: job.execution,
+          started_at: job.started_at,
+          output_dir: job.output_dir || undefined
+        },
+        {
+          runtimePid: job.pid,
+          runtimeDiscovered: true,
+          config: { summary }
+        }
+      )
       return
     }
 
@@ -295,7 +300,7 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
       status: job.status,
       strategy: job.strategy || 'training',
       dataset_path: job.output_dir || undefined,
-      compute_target: 'local',
+      compute_target: 'local'
     })
     recipe.config = {
       ...recipe.config,
@@ -305,9 +310,9 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
       runtimeDiscovered: true,
       progress,
       summary,
-      status: job.status,
+      status: job.status
     }
     recipe.visual = statusVisualForTraining(job.status)
     materializeRecipe(recipe)
-  },
+  }
 }))

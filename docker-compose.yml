@@ -1,9 +1,7 @@
 # GhostWork Development Stack
 # Usage:
-#   docker compose up                    # Start API + assistant gateway
-#   docker compose up bashgym-api        # API only
-#   docker compose up peony-gateway   # Assistant only (needs API)
-#   docker compose run --rm peony-agent -m "system status"  # One-shot query
+#   docker compose up                    # Start the BashGym API
+#   docker compose up bashgym-api        # Explicit API service
 
 services:
   # ─────────────────────────────────────
@@ -24,52 +22,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  # ─────────────────────────────────────
-  # Peony Gateway (long-running bot)
-  # ─────────────────────────────────────
-  peony-gateway:
-    build:
-      context: ./assistant
-      dockerfile: Dockerfile
-    container_name: peony-gateway
-    profiles:
-      - assistant
-    depends_on:
-      bashgym-api:
-        condition: service_healthy
-    volumes:
-      - ./assistant/workspace:/home/peony/.peony/workspace
-      - ./assistant/config/config.json:/home/peony/.peony/config.json:ro
-    env_file: ./assistant/.env
-    environment:
-      - BASHGYM_API_URL=http://bashgym-api:8003/api
-      - BASHGYM_API_KEY
-    restart: unless-stopped
-    command: ["gateway"]
-
-  # ─────────────────────────────────────
-  # Peony Agent (one-shot query)
-  #   docker compose run --rm peony-agent -m "check system status"
-  # ─────────────────────────────────────
-  peony-agent:
-    build:
-      context: ./assistant
-      dockerfile: Dockerfile
-    container_name: peony-agent
-    profiles:
-      - assistant
-      - agent
-    depends_on:
-      bashgym-api:
-        condition: service_healthy
-    volumes:
-      - ./assistant/workspace:/home/peony/.peony/workspace
-      - ./assistant/config/config.json:/home/peony/.peony/config.json:ro
-    env_file: ./assistant/.env
-    environment:
-      - BASHGYM_API_URL=http://bashgym-api:8003/api
-      - BASHGYM_API_KEY
-    entrypoint: ["peony", "agent"]
-    stdin_open: true
-    tty: true

@@ -65,8 +65,7 @@ class CampaignExportSnapshot:
             "artifacts": artifacts,
             "comparisons": list(self.comparisons),
             "loss_by_attempt": {
-                key: list(value)
-                for key, value in sorted((self.loss_by_attempt or {}).items())
+                key: list(value) for key, value in sorted((self.loss_by_attempt or {}).items())
             },
             "flags": list(self.flags),
         }
@@ -96,7 +95,11 @@ def _write_csv(path: Path, fieldnames: tuple[str, ...], rows: list[dict[str, Any
         for row in rows:
             writer.writerow(
                 {
-                    key: json.dumps(value, sort_keys=True) if isinstance(value, (dict, list)) else value
+                    key: (
+                        json.dumps(value, sort_keys=True)
+                        if isinstance(value, (dict, list))
+                        else value
+                    )
                     for key, value in row.items()
                 }
             )
@@ -116,7 +119,9 @@ def _loss_svg(snapshot: dict[str, Any]) -> str:
             if "step" in item and "value" in item
         ]
         if points:
-            series.append((attempt_id, attempt_by_id.get(attempt_id, {}).get("stage", "unknown"), points))
+            series.append(
+                (attempt_id, attempt_by_id.get(attempt_id, {}).get("stage", "unknown"), points)
+            )
     max_step = max((step for _id, _stage, points in series for step, _value in points), default=1)
     losses = [value for _id, _stage, points in series for _step, value in points]
     min_loss = min(losses, default=0.0)
@@ -199,13 +204,23 @@ def _markdown(snapshot: dict[str, Any], source_digest: str) -> str:
     lines.append(f"- Smoke attempts: {len(smoke)} (runtime/semantics/memory evidence only)")
     lines.append(f"- Full-training attempts: {len(full)}")
     lines.append(f"- Persisted comparison records: {len(comparisons)}")
-    lines.extend(["", "## Attempts", "", "| Attempt | Stage | Status | Candidate digest |", "|---|---|---|---|"])
+    lines.extend(
+        [
+            "",
+            "## Attempts",
+            "",
+            "| Attempt | Stage | Status | Candidate digest |",
+            "|---|---|---|---|",
+        ]
+    )
     for item in attempts:
         digest = str(item.get("candidate_digest", ""))
         lines.append(
             f"| `{item.get('attempt_id', '')}` | {item.get('stage', '')} | {item.get('status', '')} | `{digest[:12]}` |"
         )
-    lines.extend(["", "## Sealed evidence", "", "| Schema | SHA-256 | Bytes | Valid |", "|---|---|---:|---|"])
+    lines.extend(
+        ["", "## Sealed evidence", "", "| Schema | SHA-256 | Bytes | Valid |", "|---|---|---:|---|"]
+    )
     for item in snapshot["artifacts"]:
         lines.append(
             f"| {item.get('schema_name', '')} | `{item.get('sha256', '')}` | {item.get('size_bytes', 0)} | {item.get('valid', False)} |"
@@ -243,17 +258,43 @@ def export_campaign_evidence(
     evidence_path.write_bytes(_json_bytes(snapshot) + b"\n")
     _write_csv(
         output_directory / "attempts.csv",
-        ("attempt_id", "study_id", "stage", "status", "candidate_digest", "created_at", "updated_at"),
+        (
+            "attempt_id",
+            "study_id",
+            "stage",
+            "status",
+            "candidate_digest",
+            "created_at",
+            "updated_at",
+        ),
         snapshot["attempts"],
     )
     _write_csv(
         output_directory / "artifacts.csv",
-        ("artifact_id", "producer_action_id", "schema_name", "sha256", "size_bytes", "sealed", "valid", "created_at"),
+        (
+            "artifact_id",
+            "producer_action_id",
+            "schema_name",
+            "sha256",
+            "size_bytes",
+            "sealed",
+            "valid",
+            "created_at",
+        ),
         snapshot["artifacts"],
     )
     _write_csv(
         output_directory / "comparisons.csv",
-        ("comparison_digest", "champion_digest", "candidate_digest", "sample_count", "verdict", "blocking_reasons", "warnings", "created_at"),
+        (
+            "comparison_digest",
+            "champion_digest",
+            "candidate_digest",
+            "sample_count",
+            "verdict",
+            "blocking_reasons",
+            "warnings",
+            "created_at",
+        ),
         snapshot["comparisons"],
     )
     (output_directory / "training_loss.svg").write_text(_loss_svg(snapshot), encoding="utf-8")
@@ -277,7 +318,9 @@ def export_campaign_evidence(
 
     files = []
     for path in sorted(output_directory.iterdir(), key=lambda item: item.name):
-        files.append({"name": path.name, "sha256": _sha256(path), "size_bytes": path.stat().st_size})
+        files.append(
+            {"name": path.name, "sha256": _sha256(path), "size_bytes": path.stat().st_size}
+        )
     manifest = {
         "schema_version": "campaign_export_manifest.v1",
         "campaign_id": snapshot["campaign"].get("campaign_id"),

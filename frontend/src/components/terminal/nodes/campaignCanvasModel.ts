@@ -6,7 +6,7 @@ import type {
   CampaignLedgerEvaluation,
   CampaignLedgerProject,
   CampaignProposalRecord,
-  CampaignStudy,
+  CampaignStudy
 } from '../../../stores/campaignStore'
 
 export interface CampaignBaselineSummary {
@@ -62,53 +62,69 @@ function stringField(record: Record<string, unknown>, key: string): string | nul
   return typeof value === 'string' && value.trim() ? value : null
 }
 
-function newestBy<T>(items: readonly T[], timestamp: (item: T) => string, tie: (item: T) => string): T | undefined {
-  return [...items].sort((left, right) => {
-    const byTime = timestamp(left).localeCompare(timestamp(right))
-    return byTime || tie(left).localeCompare(tie(right))
-  }).at(-1)
+function newestBy<T>(
+  items: readonly T[],
+  timestamp: (item: T) => string,
+  tie: (item: T) => string
+): T | undefined {
+  return [...items]
+    .sort((left, right) => {
+      const byTime = timestamp(left).localeCompare(timestamp(right))
+      return byTime || tie(left).localeCompare(tie(right))
+    })
+    .at(-1)
 }
 
 function latestStudy(detail: CampaignDetailState): CampaignStudy | undefined {
   const active = detail.campaign.active_study_id
     ? detail.studies.find((study) => study.study_id === detail.campaign.active_study_id)
     : undefined
-  return active || newestBy(detail.studies, (study) => study.updated_at, (study) => study.study_id)
+  return (
+    active ||
+    newestBy(
+      detail.studies,
+      (study) => study.updated_at,
+      (study) => study.study_id
+    )
+  )
 }
 
 function proposalFor(
   study: CampaignStudy | undefined,
-  proposals: readonly CampaignProposalRecord[],
+  proposals: readonly CampaignProposalRecord[]
 ): CampaignProposalRecord | undefined {
   if (!study) return undefined
   return proposals.find((record) => record.proposal.proposal_id === study.proposal_id)
 }
 
 function projectBaseline(detail: CampaignDetailState): CampaignBaselineSummary {
-  const baseModel = stringField(detail.campaign.target_model, 'base_model_ref')
-    || stringField(detail.campaign.target_model, 'base_model')
+  const baseModel =
+    stringField(detail.campaign.target_model, 'base_model_ref') ||
+    stringField(detail.campaign.target_model, 'base_model')
   const candidates: Array<{ project: CampaignLedgerProject; run: CampaignLedgerRun }> = []
   for (const project of detail.ledger?.projects || []) {
     for (const run of project.runs) {
-      if (run.run_kind === 'baseline' && run.is_simulation !== true) candidates.push({ project, run })
+      if (run.run_kind === 'baseline' && run.is_simulation !== true)
+        candidates.push({ project, run })
     }
   }
   const selected = newestBy(
     candidates,
     ({ run }) => run.queued_at || '',
-    ({ project, run }) => `${project.project.project_id}:${run.run_id}`,
+    ({ project, run }) => `${project.project.project_id}:${run.run_id}`
   )
   const autoresearchBaseline = newestBy(
-    (detail.ledger?.autoresearch?.outcomes || []).filter((item) =>
-      item.result.role === 'baseline'
-      && item.result.provenance === 'real'
-      && item.result.outcome === 'completed'
-      && item.decision.decision === 'baseline'
-      && item.decision.eligible_for_best
-      && typeof item.result.metric_value === 'number'
+    (detail.ledger?.autoresearch?.outcomes || []).filter(
+      (item) =>
+        item.result.role === 'baseline' &&
+        item.result.provenance === 'real' &&
+        item.result.outcome === 'completed' &&
+        item.decision.decision === 'baseline' &&
+        item.decision.eligible_for_best &&
+        typeof item.result.metric_value === 'number'
     ),
     (item: CampaignAutoResearchOutcome) => item.result.recorded_at,
-    (item: CampaignAutoResearchOutcome) => item.result.result_id,
+    (item: CampaignAutoResearchOutcome) => item.result.result_id
   )
   if (autoresearchBaseline) {
     return {
@@ -117,8 +133,8 @@ function projectBaseline(detail: CampaignDetailState): CampaignBaselineSummary {
       runId: null,
       evaluationSuiteId: null,
       metrics: {
-        [autoresearchBaseline.result.metric_name]: autoresearchBaseline.result.metric_value!,
-      },
+        [autoresearchBaseline.result.metric_name]: autoresearchBaseline.result.metric_value!
+      }
     }
   }
   if (!selected) {
@@ -127,20 +143,20 @@ function projectBaseline(detail: CampaignDetailState): CampaignBaselineSummary {
       modelRef: baseModel,
       runId: null,
       evaluationSuiteId: null,
-      metrics: {},
+      metrics: {}
     }
   }
   const evaluation = newestBy(
     selected.project.evaluations.filter((item) => item.run_id === selected.run.run_id),
     (item: CampaignLedgerEvaluation) => item.created_at,
-    (item: CampaignLedgerEvaluation) => item.evaluation_result_id,
+    (item: CampaignLedgerEvaluation) => item.evaluation_result_id
   )
   return {
     status: evaluation ? 'evaluated' : 'recorded',
     modelRef: baseModel || selected.run.model_version_id || null,
     runId: selected.run.run_id,
     evaluationSuiteId: evaluation?.evaluation_suite_id || null,
-    metrics: evaluation?.metrics || {},
+    metrics: evaluation?.metrics || {}
   }
 }
 
@@ -152,7 +168,7 @@ function projectDecision(detail: CampaignDetailState): CampaignDecisionSummary |
       type: decision.decision_type,
       outcome: decision.outcome,
       rationale: decision.rationale,
-      createdAt: decision.created_at,
+      createdAt: decision.created_at
     }))
   const autoresearchDecisions: CampaignDecisionSummary[] = (
     detail.ledger?.autoresearch?.outcomes || []
@@ -160,38 +176,41 @@ function projectDecision(detail: CampaignDetailState): CampaignDecisionSummary |
     decisionId: `autoresearch:${item.result.result_id}`,
     type: item.decision.decision,
     outcome: item.decision.reason_code,
-    rationale: item.decision.improvement == null
-      ? `${item.result.provenance} ${item.result.role} result`
-      : `Primary metric improvement ${item.decision.improvement}`,
-    createdAt: item.decision.decided_at,
+    rationale:
+      item.decision.improvement == null
+        ? `${item.result.provenance} ${item.result.role} result`
+        : `Primary metric improvement ${item.decision.improvement}`,
+    createdAt: item.decision.decided_at
   }))
-  return newestBy(
-    [...ledgerDecisions, ...autoresearchDecisions],
-    (item) => item.createdAt,
-    (item) => item.decisionId,
-  ) || null
+  return (
+    newestBy(
+      [...ledgerDecisions, ...autoresearchDecisions],
+      (item) => item.createdAt,
+      (item) => item.decisionId
+    ) || null
+  )
 }
 
 function projectNextAction(
   detail: CampaignDetailState,
-  study: CampaignStudy | undefined,
+  study: CampaignStudy | undefined
 ): CampaignNextActionSummary {
   if (detail.campaign.active_action_id) {
     const actionId = detail.campaign.active_action_id
     const attempt = newestBy(
       detail.attempts.filter((item) => item.action_id === actionId),
       (item: CampaignAttempt) => item.updated_at,
-      (item: CampaignAttempt) => item.attempt_id,
+      (item: CampaignAttempt) => item.attempt_id
     )
     return {
       kind: 'current',
       label: attempt ? `${attempt.stage} · ${attempt.status}` : actionId,
-      actionId,
+      actionId
     }
   }
   const codeLineage = study
     ? (detail.ledger?.autoresearch?.code_lineages || []).find(
-        (item) => item.proposal_id === study.proposal_id,
+        (item) => item.proposal_id === study.proposal_id
       )
     : undefined
   if (codeLineage?.state === 'required') {
@@ -217,7 +236,11 @@ function projectNextAction(
       case 'propose_candidate':
         return { kind: 'planned', label: 'propose one controlled candidate', actionId: null }
       case 'stop':
-        return { kind: 'attention', label: `enforce stop · ${autoresearch.reason_code}`, actionId: null }
+        return {
+          kind: 'attention',
+          label: `enforce stop · ${autoresearch.reason_code}`,
+          actionId: null
+        }
       case 'blocked':
         return { kind: 'attention', label: autoresearch.reason_code, actionId: null }
     }
@@ -254,19 +277,21 @@ export function projectCampaignResearch(detail: CampaignDetailState): CampaignCa
   return {
     objective: detail.campaign.objective,
     baseline: projectBaseline(detail),
-    latestStudy: study ? {
-      studyId: study.study_id,
-      proposalId: study.proposal_id,
-      status: study.status,
-      hypothesis: proposal?.proposal.hypothesis || null,
-      primaryVariable: proposal?.proposal.primary_variable || null,
-      falsificationCriterion: proposal?.proposal.falsification_criterion || null,
-      plannedStage: study.stage_plan.items[study.current_stage_index]?.stage || null,
-    } : null,
+    latestStudy: study
+      ? {
+          studyId: study.study_id,
+          proposalId: study.proposal_id,
+          status: study.status,
+          hypothesis: proposal?.proposal.hypothesis || null,
+          primaryVariable: proposal?.proposal.primary_variable || null,
+          falsificationCriterion: proposal?.proposal.falsification_criterion || null,
+          plannedStage: study.stage_plan.items[study.current_stage_index]?.stage || null
+        }
+      : null,
     budget: Object.entries(detail.evidence?.budget_remaining || {})
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([resource, remaining]) => ({ resource, remaining })),
     latestDecision: projectDecision(detail),
-    nextAction: projectNextAction(detail, study),
+    nextAction: projectNextAction(detail, study)
   }
 }

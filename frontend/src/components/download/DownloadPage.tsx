@@ -17,22 +17,22 @@ const PLATFORMS = {
     icon: Monitor,
     ext: '.exe',
     target: 'nsis',
-    requirements: 'Windows 10+ (64-bit)',
+    requirements: 'Windows 10+ (64-bit)'
   },
   mac: {
     label: 'macOS',
     icon: Apple,
     ext: '.dmg',
     target: 'dmg',
-    requirements: 'macOS 12+ (Apple Silicon & Intel)',
+    requirements: 'macOS 12+ (Apple Silicon & Intel)'
   },
   linux: {
     label: 'Linux',
     icon: Terminal,
     ext: '.AppImage',
     target: 'AppImage',
-    requirements: 'Ubuntu 20.04+ or equivalent',
-  },
+    requirements: 'Ubuntu 20.04+ or equivalent'
+  }
 } as const
 
 const FEATURES = [
@@ -42,7 +42,7 @@ const FEATURES = [
   'File browser with native filesystem access',
   'Browser pane for live preview',
   'One-click hook installation for trace capture',
-  'Integration nodes (Neon, Vercel, custom adapters)',
+  'Integration nodes (Neon, Vercel, custom adapters)'
 ]
 
 interface ReleaseInfo {
@@ -76,7 +76,9 @@ export function DownloadPage() {
             return
           }
         }
-      } catch { /* ignore corrupted cache */ }
+      } catch {
+        /* ignore corrupted cache */
+      }
 
       try {
         const res = await fetch('https://api.github.com/repos/ghost-peony/bashgym/releases/latest')
@@ -87,8 +89,8 @@ export function DownloadPage() {
             assets: (data.assets || []).map((a: any) => ({
               name: a.name,
               url: a.browser_download_url,
-              size: a.size,
-            })),
+              size: a.size
+            }))
           }
           setRelease(releaseData)
           sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data: releaseData, ts: Date.now() }))
@@ -105,12 +107,12 @@ export function DownloadPage() {
   const getDownloadUrl = (plat: 'windows' | 'mac' | 'linux') => {
     if (!release) return null
     const ext = PLATFORMS[plat].ext
-    const asset = release.assets.find(a => a.name.endsWith(ext))
+    const asset = release.assets.find((a) => a.name.endsWith(ext))
     return asset?.url ?? null
   }
 
   const primaryPlatform = platform !== 'unknown' ? platform : 'windows'
-  const otherPlatforms = (['windows', 'mac', 'linux'] as const).filter(p => p !== primaryPlatform)
+  const otherPlatforms = (['windows', 'mac', 'linux'] as const).filter((p) => p !== primaryPlatform)
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-12 space-y-12">
@@ -123,8 +125,8 @@ export function DownloadPage() {
           <span className="text-accent">/</span>BashGym Desktop
         </h1>
         <p className="text-lg text-text-secondary max-w-xl mx-auto">
-          The full development gym experience. Terminal workspace, orchestrator, agent chat,
-          and native integrations — all in one app.
+          The full development gym experience. Terminal workspace, orchestrator, agent chat, and
+          native integrations — all in one app.
         </p>
       </div>
 
@@ -159,7 +161,7 @@ export function DownloadPage() {
 
             {/* Other platforms */}
             <div className="flex items-center justify-center gap-6 pt-4 border-t border-accent/15">
-              {otherPlatforms.map(plat => {
+              {otherPlatforms.map((plat) => {
                 const url = getDownloadUrl(plat)
                 const info = PLATFORMS[plat]
                 const Icon = info.icon
@@ -173,7 +175,10 @@ export function DownloadPage() {
                     {info.label} ({info.ext})
                   </a>
                 ) : (
-                  <span key={plat} className="flex items-center gap-2 text-sm text-text-muted font-mono">
+                  <span
+                    key={plat}
+                    className="flex items-center gap-2 text-sm text-text-muted font-mono"
+                  >
                     <Icon className="w-4 h-4" />
                     {info.label} — coming soon
                   </span>
@@ -186,12 +191,10 @@ export function DownloadPage() {
             <p className="text-text-secondary">
               No releases available yet. Desktop builds are coming soon.
             </p>
-            <p className="text-sm text-text-muted">
-              In the meantime, you can build from source:
-            </p>
+            <p className="text-sm text-text-muted">In the meantime, you can build from source:</p>
             <div className="terminal-chrome max-w-md mx-auto">
               <pre className="p-4 text-left text-xs font-mono text-text-secondary">
-{`git clone https://github.com/ghost-peony/bashgym
+                {`git clone https://github.com/ghost-peony/bashgym
 cd bashgym/frontend
 npm install
 npm run build`}
@@ -203,12 +206,10 @@ npm run build`}
 
       {/* Desktop-only Features */}
       <div className="space-y-4">
-        <h2 className="font-brand text-2xl font-semibold text-text-primary">
-          Why Desktop?
-        </h2>
+        <h2 className="font-brand text-2xl font-semibold text-text-primary">Why Desktop?</h2>
         <p className="text-text-secondary text-sm">
-          The web version gives you traces, training, and analytics. The desktop app
-          adds everything that needs local access:
+          The web version gives you traces, training, and analytics. The desktop app adds everything
+          that needs local access:
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {FEATURES.map((feature, i) => (
@@ -229,17 +230,17 @@ npm run build`}
           Already have the desktop app?
         </h3>
         <p className="text-sm text-text-secondary">
-          Connect your local Claude Code traces to this web instance for remote
-          monitoring and training.
+          Connect your local Claude Code traces to this web instance for remote monitoring and
+          training.
         </p>
         <div className="terminal-chrome">
           <pre className="p-3 text-xs font-mono text-text-secondary">
-{`npx bashgym connect ${window.location.origin} --token YOUR_API_TOKEN`}
+            {`npx bashgym connect ${window.location.origin} --token YOUR_API_TOKEN`}
           </pre>
         </div>
         <p className="text-xs text-text-muted">
-          This configures your local Claude Code hooks to send traces to this server.
-          Run it on the machine where you use Claude Code.
+          This configures your local Claude Code hooks to send traces to this server. Run it on the
+          machine where you use Claude Code.
         </p>
       </div>
     </div>

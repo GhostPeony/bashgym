@@ -11,14 +11,35 @@ interface StepConfig {
 
 const STEPS: StepConfig[] = [
   { id: 'welcome', label: 'Welcome to Bash Gym', description: 'Introduction complete' },
-  { id: 'install_hooks', label: 'Install capture hooks', description: 'Enable automatic session capture' },
-  { id: 'import_traces', label: 'Import your traces', description: 'Bring in your Claude Code history' },
-  { id: 'generate_examples', label: 'Generate training examples', description: 'Transform traces into training data' },
-  { id: 'start_training', label: 'Start a training run', description: 'Fine-tune your first model' },
+  {
+    id: 'install_hooks',
+    label: 'Install capture hooks',
+    description: 'Enable automatic session capture'
+  },
+  {
+    id: 'import_traces',
+    label: 'Import your traces',
+    description: 'Bring in your Claude Code history'
+  },
+  {
+    id: 'generate_examples',
+    label: 'Generate training examples',
+    description: 'Transform traces into training data'
+  },
+  {
+    id: 'start_training',
+    label: 'Start a training run',
+    description: 'Fine-tune your first model'
+  },
   { id: 'view_model', label: 'View your trained model', description: 'See the results' }
 ]
 
-function ChecklistItem({ step, isCompleted, isCurrent, onClick }: {
+function ChecklistItem({
+  step,
+  isCompleted,
+  isCurrent,
+  onClick
+}: {
   step: StepConfig
   isCompleted: boolean
   isCurrent: boolean
@@ -37,15 +58,13 @@ function ChecklistItem({ step, isCompleted, isCurrent, onClick }: {
       <div className="flex-shrink-0 mt-0.5">
         {isCompleted ? (
           /* Triangle checkmark pointing up — success */
-          <div
-            className="w-5 h-5 flex items-center justify-center"
-          >
+          <div className="w-5 h-5 flex items-center justify-center">
             <div
               className="w-0 h-0"
               style={{
                 borderLeft: '6px solid transparent',
                 borderRight: '6px solid transparent',
-                borderBottom: '10px solid var(--status-success)',
+                borderBottom: '10px solid var(--status-success)'
               }}
             />
           </div>
@@ -57,7 +76,7 @@ function ChecklistItem({ step, isCompleted, isCurrent, onClick }: {
               style={{
                 borderTop: '6px solid transparent',
                 borderBottom: '6px solid transparent',
-                borderLeft: '10px solid var(--accent)',
+                borderLeft: '10px solid var(--accent)'
               }}
             />
           </div>
@@ -67,19 +86,23 @@ function ChecklistItem({ step, isCompleted, isCurrent, onClick }: {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className={clsx(
-          'text-sm font-mono',
-          isCompleted ? 'text-text-muted line-through' : isCurrent ? 'text-text-primary font-semibold' : 'text-text-secondary'
-        )}>
+        <p
+          className={clsx(
+            'text-sm font-mono',
+            isCompleted
+              ? 'text-text-muted line-through'
+              : isCurrent
+                ? 'text-text-primary font-semibold'
+                : 'text-text-secondary'
+          )}
+        >
           {step.label}
         </p>
         {isCurrent && !isCompleted && (
           <p className="text-xs text-text-muted mt-0.5">{step.description}</p>
         )}
       </div>
-      {isCurrent && !isCompleted && (
-        <ChevronRight className="w-4 h-4 text-accent flex-shrink-0" />
-      )}
+      {isCurrent && !isCompleted && <ChevronRight className="w-4 h-4 text-accent flex-shrink-0" />}
     </button>
   )
 }
@@ -142,7 +165,9 @@ export function TutorialChecklist() {
       <div className="flex items-center justify-between p-3 border-b border-border bg-background-secondary">
         <div>
           <h3 className="font-brand text-sm text-text-primary">Getting Started</h3>
-          <p className="text-xs font-mono text-text-muted">{completedCount} of {totalSteps} complete</p>
+          <p className="text-xs font-mono text-text-muted">
+            {completedCount} of {totalSteps} complete
+          </p>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -163,7 +188,10 @@ export function TutorialChecklist() {
       </div>
 
       {/* Progress bar */}
-      <div className="progress-bar" style={{ height: '8px', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
+      <div
+        className="progress-bar"
+        style={{ height: '8px', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}
+      >
         <div
           className="progress-fill"
           style={{ width: `${(completedCount / totalSteps) * 100}%` }}

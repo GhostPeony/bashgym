@@ -32,9 +32,7 @@ _THRESHOLD_ALIASES = {
     "min_recall": "min_routing_recall",
     "max_false_activation": "max_false_activation_rate",
 }
-_MARKER_RE = re.compile(
-    r"(?im)^\s*SKILL_LAB_SHOULD_INVOKE\s*:\s*(true|false)\s*$"
-)
+_MARKER_RE = re.compile(r"(?im)^\s*SKILL_LAB_SHOULD_INVOKE\s*:\s*(true|false)\s*$")
 _PROTECTED_SKILL_NAMES = frozenset({"bashgym", "bashgym-operator", "training"})
 
 
@@ -167,10 +165,7 @@ def _skill_or_404(skill_id: str) -> agent_routes.ToolkitSkill:
 def _skill_content(skill: agent_routes.ToolkitSkill) -> str:
     if not skill.path:
         tools = ", ".join(skill.allowed_tools) or "none declared"
-        return (
-            f"# {skill.name}\n\n{skill.description}\n\n"
-            f"Allowed tools: {tools}\n"
-        )
+        return f"# {skill.name}\n\n{skill.description}\n\n" f"Allowed tools: {tools}\n"
     try:
         return Path(skill.path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
@@ -213,9 +208,13 @@ def _complete_skill_document(name: str, description: str, content: str) -> str:
 
 def _editable_skill_path(skill: agent_routes.ToolkitSkill) -> Path:
     if not skill.path:
-        raise HTTPException(status_code=409, detail="Registry-backed skills cannot be edited as files")
+        raise HTTPException(
+            status_code=409, detail="Registry-backed skills cannot be edited as files"
+        )
     path = Path(skill.path).resolve()
-    allowed_roots = [root.resolve() for _label, root in agent_routes._toolkit_skill_root_candidates()]
+    allowed_roots = [
+        root.resolve() for _label, root in agent_routes._toolkit_skill_root_candidates()
+    ]
     if not any(path.is_relative_to(root) for root in allowed_roots):
         raise HTTPException(status_code=403, detail="Skill path is outside configured skill roots")
     if path.name != "SKILL.md":
@@ -454,9 +453,7 @@ def _wilson_interval(passed: int, total: int, z: float = 1.96) -> dict[str, floa
     proportion = passed / total
     denominator = 1 + (z * z / total)
     centre = proportion + (z * z / (2 * total))
-    margin = z * math.sqrt(
-        (proportion * (1 - proportion) / total) + (z * z / (4 * total * total))
-    )
+    margin = z * math.sqrt((proportion * (1 - proportion) / total) + (z * z / (4 * total * total)))
     return {
         "low": max(0.0, (centre - margin) / denominator),
         "high": min(1.0, (centre + margin) / denominator),
@@ -489,8 +486,7 @@ def _calculate_kpis(
         for arm, attempts_for_arm in scored_by_arm.items()
     }
     confidence = {
-        arm: _wilson_interval(passed_scored[arm], len(scored_by_arm[arm]))
-        for arm in scored_by_arm
+        arm: _wilson_interval(passed_scored[arm], len(scored_by_arm[arm])) for arm in scored_by_arm
     }
     positives = sum(1 for case in cases if case["should_invoke"])
     negatives = len(cases) - positives
@@ -512,8 +508,12 @@ def _calculate_kpis(
         else:
             true_negative += 1
 
-    precision = true_positive / (true_positive + false_positive) if true_positive + false_positive else 0.0
-    recall = true_positive / (true_positive + false_negative) if true_positive + false_negative else 0.0
+    precision = (
+        true_positive / (true_positive + false_positive) if true_positive + false_positive else 0.0
+    )
+    recall = (
+        true_positive / (true_positive + false_negative) if true_positive + false_negative else 0.0
+    )
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     false_activation = false_positive / negatives if negatives else 0.0
     uplift = rates["available"] - rates["baseline"]
@@ -534,8 +534,7 @@ def _calculate_kpis(
         "forced_pass_rate": rates["forced"] >= float(thresholds["min_forced_pass_rate"]),
         "routing_precision": precision >= float(thresholds["min_routing_precision"]),
         "routing_recall": recall >= float(thresholds["min_routing_recall"]),
-        "false_activation": false_activation
-        <= float(thresholds["max_false_activation_rate"]),
+        "false_activation": false_activation <= float(thresholds["max_false_activation_rate"]),
         "markers": invalid_markers == 0,
     }
     failed_checks = [name for name, passed in checks.items() if not passed]
@@ -667,9 +666,7 @@ async def _execute_run(
 @router.get("/skills", response_model=SkillLabSkillList)
 async def list_skill_lab_skills():
     skills = [
-        skill.model_dump()
-        for skill in _skill_inventory()
-        if skill.catalog_status == "active"
+        skill.model_dump() for skill in _skill_inventory() if skill.catalog_status == "active"
     ]
     return SkillLabSkillList(skills=skills, generated_at=_now())
 
@@ -682,7 +679,9 @@ async def create_skill_lab_skill(request: SkillLabSkillCreateRequest):
     root = agent_routes._repo_root() / "assistant" / "workspace" / "skills"
     skill_path = root / slug / "SKILL.md"
     if skill_path.exists():
-        raise HTTPException(status_code=409, detail="A workspace skill with this name already exists")
+        raise HTTPException(
+            status_code=409, detail="A workspace skill with this name already exists"
+        )
     document = _complete_skill_document(request.name, request.description, request.content)
     _atomic_write_text(skill_path, document)
     return _refreshed_skill(skill_path)
@@ -716,7 +715,7 @@ async def draft_skill_lab_plan(request: SkillLabPlanRequest):
         "expected_patterns, and forbidden_patterns. Patterns are short, robust, "
         "case-insensitive regular expressions checked against the answer. Target cases "
         "must test useful output, not merely mention the capability name. Non-target cases "
-        "may use [\".+\"] as expected_patterns. Avoid brittle full-sentence matching.\n\n"
+        'may use [".+"] as expected_patterns. Avoid brittle full-sentence matching.\n\n'
         f"Evaluation focus: {goal}\n\n"
         f"Capability name: {skill.name}\n"
         f"Capability description: {skill.description}\n\n"

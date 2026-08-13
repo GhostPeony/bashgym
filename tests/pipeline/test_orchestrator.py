@@ -1,8 +1,6 @@
 """Tests for Pipeline orchestrator."""
 
 import json
-import pytest
-from pathlib import Path
 
 from bashgym.pipeline.config import PipelineConfig
 from bashgym.pipeline.orchestrator import Pipeline
@@ -28,7 +26,12 @@ class TestPipeline:
                     "model": "claude-sonnet-4-5",
                     "usage": {"input_tokens": 100, "output_tokens": 50},
                     "content": [
-                        {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}},
+                        {
+                            "type": "tool_use",
+                            "id": "t1",
+                            "name": "Bash",
+                            "input": {"command": "ls"},
+                        },
                     ],
                 },
             },
@@ -36,7 +39,12 @@ class TestPipeline:
                 "type": "user",
                 "message": {
                     "content": [
-                        {"type": "tool_result", "tool_use_id": "t1", "content": "file.py", "is_error": False},
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": "file.py",
+                            "is_error": False,
+                        },
                     ]
                 },
             },

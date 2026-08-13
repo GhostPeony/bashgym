@@ -69,3 +69,19 @@ def test_manifest_must_cover_exact_output_set_before_rename(tmp_path):
     (sealed / SEAL_FILENAME).write_text(json.dumps(envelope), encoding="utf-8")
     with pytest.raises(ArtifactSealError, match="invalid seal envelope"):
         sealer.verify(sealed)
+
+
+def test_action_seal_envelope_can_be_built_and_verified_entirely_in_memory(tmp_path):
+    sealer = ArtifactSealer(b"d" * 32, key_version="test-key-v1")
+    _sealed, manifest = FakeExecutor(tmp_path / "artifacts", sealer).execute(request())
+
+    payload = sealer.envelope_bytes(manifest)
+    verified = sealer.verify_envelope_bytes(
+        payload,
+        expected_action_id="action-1",
+        expected_attempt_id="attempt-1",
+        expected_claim_generation=3,
+    )
+
+    assert verified == manifest
+    assert json.loads(payload)["manifest"]["attempt_id"] == "attempt-1"

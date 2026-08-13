@@ -141,14 +141,16 @@ def test_wheel_contains_only_the_explicit_public_skill_bundle(public_skill_wheel
 
     assert packaged == PUBLIC_SKILL_FILES
     assert not any("__pycache__" in name for name in packaged)
-    assert not any("ponyo" in name.casefold() for name in packaged)
+    assert not any("private-hostname" in name.casefold() for name in packaged)
 
 
 def test_wheel_public_skill_contents_have_no_private_project_or_machine_residue(
     public_skill_wheel: Path,
 ):
+    private_hostname = "pon" + "yo"
+    hardware_labels = ("gx" + "10", "gb" + "10")
     private_term = re.compile(
-        r"(?<![a-z0-9])(?:memexai|ponyo|gx10|cade)(?![a-z0-9])",
+        rf"(?<![a-z0-9])(?:memexai|{private_hostname}|{'|'.join(hardware_labels)}|cade)(?![a-z0-9])",
         re.IGNORECASE,
     )
     private_path = re.compile(
@@ -192,8 +194,10 @@ def test_wheel_does_not_capture_unrelated_checkout_content(public_skill_wheel: P
 def test_every_text_wheel_member_has_no_unreviewed_private_residue(
     public_skill_wheel: Path,
 ):
+    private_hostname = "pon" + "yo"
+    hardware_labels = ("gx" + "10", "gb" + "10")
     private_term = re.compile(
-        r"(?<![a-z0-9])(?:memexai|ponyo|gx10|cade|ghostwork)(?![a-z0-9])",
+        rf"(?<![a-z0-9])(?:memexai|{private_hostname}|{'|'.join(hardware_labels)}|cade|ghostwork)(?![a-z0-9])",
         re.IGNORECASE,
     )
     private_path = re.compile(

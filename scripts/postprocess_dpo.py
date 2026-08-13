@@ -39,6 +39,7 @@ def main():
         sys.exit(1)
 
     from datasets import Dataset
+
     ds = Dataset.from_parquet(str(RAW_PATH))
     logger.info(f"Loaded {len(ds)} raw records from {RAW_PATH}")
 
@@ -67,10 +68,18 @@ def main():
                 continue
             if verdict <= 2:
                 chosen, rejected = sol_a, sol_b
-                meta = {"verdict": verdict, "winner": "A", "strength": "clear" if verdict == 1 else "slight"}
+                meta = {
+                    "verdict": verdict,
+                    "winner": "A",
+                    "strength": "clear" if verdict == 1 else "slight",
+                }
             else:
                 chosen, rejected = sol_b, sol_a
-                meta = {"verdict": verdict, "winner": "B", "strength": "clear" if verdict == 5 else "slight"}
+                meta = {
+                    "verdict": verdict,
+                    "winner": "B",
+                    "strength": "clear" if verdict == 5 else "slight",
+                }
         elif independent_mode:
             score_a = extract_score(row.get("judge_a"))
             score_b = extract_score(row.get("judge_b"))
@@ -82,20 +91,30 @@ def main():
                 continue
             if score_a > score_b:
                 chosen, rejected = sol_a, sol_b
-                meta = {"score_chosen": score_a, "score_rejected": score_b, "score_diff": score_a - score_b}
+                meta = {
+                    "score_chosen": score_a,
+                    "score_rejected": score_b,
+                    "score_diff": score_a - score_b,
+                }
             else:
                 chosen, rejected = sol_b, sol_a
-                meta = {"score_chosen": score_b, "score_rejected": score_a, "score_diff": score_b - score_a}
+                meta = {
+                    "score_chosen": score_b,
+                    "score_rejected": score_a,
+                    "score_diff": score_b - score_a,
+                }
         else:
             logger.error(f"Unknown judge column format. Columns: {columns}")
             sys.exit(1)
 
-        dpo_examples.append({
-            "prompt": prompt,
-            "chosen": chosen,
-            "rejected": rejected,
-            "metadata": meta,
-        })
+        dpo_examples.append(
+            {
+                "prompt": prompt,
+                "chosen": chosen,
+                "rejected": rejected,
+                "metadata": meta,
+            }
+        )
 
     logger.info(f"Total raw: {len(ds)}")
     logger.info(f"Skipped (missing data): {skipped_missing}")
@@ -129,16 +148,18 @@ def main():
     if pairwise_mode:
         winners = [ex["metadata"].get("winner", "?") for ex in dpo_examples]
         from collections import Counter
+
         logger.info(f"\nWinner distribution: {dict(Counter(winners))}")
     elif independent_mode:
         score_diffs = [ex["metadata"].get("score_diff", 0) for ex in dpo_examples]
-        logger.info(f"\nScore differences (chosen - rejected):")
+        logger.info("\nScore differences (chosen - rejected):")
         for diff in sorted(set(score_diffs)):
             n = score_diffs.count(diff)
             logger.info(f"  diff={diff}: {n} pairs")
 
     # Validate against DPO contract
-    from bashgym.datasets.validator import validate_dataset, print_validation_report
+    from bashgym.datasets.validator import print_validation_report, validate_dataset
+
     result = validate_dataset(train_path, format="dpo", quiet=True)
     print_validation_report(result, max_issues=5)
 

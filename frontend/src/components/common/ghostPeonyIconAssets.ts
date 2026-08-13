@@ -59,6 +59,6 @@ export function ghostPeonyIconPath(
   tone: GhostPeonyIconTone = 'neutral'
 ): string {
   return tone === 'color'
-    ? ICON_ASSET[name] ?? ICON_ASSET.app!
-    : NEUTRAL_ICON_ASSET[name] ?? NEUTRAL_ICON_ASSET.app!
+    ? (ICON_ASSET[name] ?? ICON_ASSET.app!)
+    : (NEUTRAL_ICON_ASSET[name] ?? NEUTRAL_ICON_ASSET.app!)
 }

@@ -13,7 +13,7 @@ export function TagEditor({ tags, onChange }: TagEditorProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const suggestions = SEED_CATEGORY_TAGS.filter(
-    tag => !tags.includes(tag) && tag.toLowerCase().includes(input.toLowerCase())
+    (tag) => !tags.includes(tag) && tag.toLowerCase().includes(input.toLowerCase())
   )
 
   const addTag = (tag: string) => {
@@ -27,7 +27,7 @@ export function TagEditor({ tags, onChange }: TagEditorProps) {
   }
 
   const removeTag = (tag: string) => {
-    onChange(tags.filter(t => t !== tag))
+    onChange(tags.filter((t) => t !== tag))
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -42,11 +42,8 @@ export function TagEditor({ tags, onChange }: TagEditorProps) {
   return (
     <div className="relative">
       <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-background-secondary border-brutal border-border rounded-brutal focus-within:shadow-brutal-sm transition-shadow">
-        {tags.map(tag => (
-          <span
-            key={tag}
-            className="tag inline-flex items-center gap-1"
-          >
+        {tags.map((tag) => (
+          <span key={tag} className="tag inline-flex items-center gap-1">
             <span>{tag}</span>
             <button
               onClick={() => removeTag(tag)}
@@ -73,7 +70,7 @@ export function TagEditor({ tags, onChange }: TagEditorProps) {
 
       {showSuggestions && input && suggestions.length > 0 && (
         <div className="absolute z-10 mt-1 w-full bg-background-secondary border-brutal border-border rounded-brutal shadow-brutal overflow-hidden">
-          {suggestions.slice(0, 6).map(tag => (
+          {suggestions.slice(0, 6).map((tag) => (
             <button
               key={tag}
               onMouseDown={(e) => {

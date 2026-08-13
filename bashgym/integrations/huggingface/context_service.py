@@ -115,9 +115,7 @@ class HFContextService:
             raw_models = self.sources.discover_models(query, limit=3)
             models = [normalize_model(item, intent=query) for item in raw_models]
             evaluations = [
-                evaluation
-                for item in raw_models
-                for evaluation in normalize_model_card_evals(item)
+                evaluation for item in raw_models for evaluation in normalize_model_card_evals(item)
             ]
             evidence.extend(rank_evidence(models)[:5])
             evidence.extend(rank_evidence(evaluations)[:3])
@@ -125,9 +123,7 @@ class HFContextService:
                 SourceStatus(source="models", status="complete", result_count=len(models))
             )
             statuses.append(
-                SourceStatus(
-                    source="evaluations", status="complete", result_count=len(evaluations)
-                )
+                SourceStatus(source="evaluations", status="complete", result_count=len(evaluations))
             )
         except Exception:  # noqa: BLE001 - error text may contain credentials
             failed = True
@@ -219,7 +215,9 @@ class HFContextService:
             workspace_id=workspace_id,
             lifecycle=Lifecycle.READY,
             freshness=Freshness.FRESH,
-            completion_outcome=(CompletionOutcome.PARTIAL if failed else CompletionOutcome.COMPLETE),
+            completion_outcome=(
+                CompletionOutcome.PARTIAL if failed else CompletionOutcome.COMPLETE
+            ),
             intent=collecting.intent,
             task=collecting.task,
             target=collecting.target,
@@ -263,15 +261,11 @@ class HFContextService:
             origin=previous.origin,
         )
         return (
-            self.repository.create_collecting_version(
-                collecting, expected_head=expected_version
-            ),
+            self.repository.create_collecting_version(collecting, expected_head=expected_version),
             previous,
         )
 
-    def cancel(
-        self, workspace_id: str, bundle_id: str, version: int
-    ) -> HFContextBundle:
+    def cancel(self, workspace_id: str, bundle_id: str, version: int) -> HFContextBundle:
         return self.repository.cancel_version(workspace_id, bundle_id, version)
 
     @staticmethod
@@ -283,8 +277,7 @@ class HFContextService:
             default=bundle.ready_at or bundle.created_at,
         )
         has_short_ttl = any(
-            item.kind in {EvidenceKind.MODEL, EvidenceKind.DATASET}
-            for item in bundle.evidence
+            item.kind in {EvidenceKind.MODEL, EvidenceKind.DATASET} for item in bundle.evidence
         )
         ttl = timedelta(hours=6 if has_short_ttl else 24)
         freshness = Freshness.STALE if utc_now() - retrieved_at > ttl else Freshness.FRESH
@@ -378,9 +371,7 @@ class HFContextService:
             "execute": False,
             "model_id": bundle.target.get("model_id") or (models[0] if models else None),
             "tasks": tasks,
-            "unknowns": [
-                "Prompt template and harness version must be confirmed before execution."
-            ],
+            "unknowns": ["Prompt template and harness version must be confirmed before execution."],
         }
         action_hash = canonical_hash(preview)
         return self.repository.put_eval_preview(

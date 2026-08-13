@@ -16,7 +16,11 @@ export type {
 export { useWorkspaceStore } from './workspaceStore'
 export type { WorkspaceMeta } from './workspacePersistence'
 export { buildWorkspaceSessionIndex } from './workspaceSessionIndex'
-export type { WorkspaceSessionGroup, WorkspaceSessionRecord, SessionRuntimeState } from './workspaceSessionIndex'
+export type {
+  WorkspaceSessionGroup,
+  WorkspaceSessionRecord,
+  SessionRuntimeState
+} from './workspaceSessionIndex'
 export { useCanvasControlStore } from './canvasControlStore'
 export type { CanvasControlState } from './canvasControlStore'
 export { useFileStore, initializeFileStore } from './fileStore'
@@ -33,7 +37,7 @@ export type {
   CampaignComparison,
   CampaignEventItem,
   CampaignMetricValue,
-  CampaignDetailState,
+  CampaignDetailState
 } from './campaignStore'
 export { useCanvasOrchestratorStore } from './canvasOrchestratorStore'
 export { useRuntimeStore } from './runtimeStore'
@@ -54,7 +58,14 @@ export type {
 export { useRouterStore } from './routerStore'
 export type { RoutingStrategy, RoutingStats, RoutingDecision } from './routerStore'
 export { useTracesStore } from './tracesStore'
-export type { TraceStatus, TraceQualityTier, TraceStep, QualityMetrics, Trace, RepoInfo } from './tracesStore'
+export type {
+  TraceStatus,
+  TraceQualityTier,
+  TraceStep,
+  QualityMetrics,
+  Trace,
+  RepoInfo
+} from './tracesStore'
 export { useUIStore } from './uiStore'
 export type { ViewMode, PanelPresentationRequest } from './uiStore'
 export { useTutorialStore } from './tutorialStore'
@@ -69,7 +80,7 @@ export {
   WHITE_TERMINAL_FG_HUE,
   isTerminalFgHue,
   getTerminalFgColor,
-  getTerminalFgLabel,
+  getTerminalFgLabel
 } from './accentStore'
 export type { AccentPreset, TerminalFgPreset } from './accentStore'
 export { useOrchestratorStore } from './orchestratorStore'

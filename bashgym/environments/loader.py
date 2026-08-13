@@ -20,6 +20,7 @@ from bashgym.environments.contracts import (
 INSTRUCTION_FIELDS = (
     "instruction",
     "task_instruction",
+    "task_prompt",
     "task",
     "prompt",
     "question",
@@ -48,6 +49,16 @@ def _first_str(record: dict[str, Any], fields: Iterable[str], default: str = "")
         if isinstance(value, str) and value.strip():
             return value.strip()
     return default
+
+
+def _with_environment_draft(record: dict[str, Any]) -> dict[str, Any]:
+    """Expose generated draft fields while preserving explicit top-level values."""
+    draft = record.get("environment_draft")
+    if hasattr(draft, "model_dump"):
+        draft = draft.model_dump()
+    if not isinstance(draft, dict):
+        return record
+    return {**draft, **record}
 
 
 def _as_list(value: Any) -> list[str]:
@@ -84,6 +95,7 @@ def _extract_verifier(record: dict[str, Any]) -> VerifierSpec:
     command = (
         raw.get("command")
         or raw.get("cmd")
+        or record.get("verifier_command")
         or record.get("verify_command")
         or record.get("test_cmd")
         or record.get("checker_command")
@@ -100,7 +112,9 @@ def _extract_verifier(record: dict[str, Any]) -> VerifierSpec:
             **raw,
             "command": command,
             "kind": kind,
-            "path": raw.get("path", record.get("verify_path", "verify.sh")),
+            "path": raw.get(
+                "path", record.get("verifier_path", record.get("verify_path", "verify.sh"))
+            ),
         }
     )
 
@@ -182,16 +196,19 @@ def environment_from_record(
     preserve_raw: bool = True,
 ) -> EnvironmentSpec:
     """Normalize a TMax/Harbor/DataDesigner-like row into ``EnvironmentSpec``."""
+    normalized = _with_environment_draft(record)
     metadata = dict(record.get("metadata") or {})
     if preserve_raw:
         metadata.setdefault("raw_record", record)
-    instruction = _first_str(record, INSTRUCTION_FIELDS)
-    domain = _first_str(record, ("domain", "category", "task_domain"), "unknown")
-    skills = _as_list(record.get("skills") or record.get("skill") or record.get("skill_type"))
+    instruction = _first_str(normalized, INSTRUCTION_FIELDS)
+    domain = _first_str(normalized, ("domain", "category", "task_domain"), "unknown")
+    skills = _as_list(
+        normalized.get("skills") or normalized.get("skill") or normalized.get("skill_type")
+    )
     env_id = str(
-        record.get("id")
-        or record.get("task_id")
-        or record.get("name")
+        normalized.get("id")
+        or normalized.get("task_id")
+        or normalized.get("name")
         or stable_environment_id(source, instruction, record)
     )
     spec = EnvironmentSpec(
@@ -200,14 +217,14 @@ def environment_from_record(
         source=source,
         domain=domain,
         skills=skills,
-        axes=_extract_axes(record),
-        fixtures=_extract_fixtures(record),
-        verifier=_extract_verifier(record),
-        build=_extract_build(record),
-        rollout=_extract_rollout(record),
-        files=_extract_files(record),
-        source_uri=source_uri or record.get("source_uri"),
-        license=record.get("license"),
+        axes=_extract_axes(normalized),
+        fixtures=_extract_fixtures(normalized),
+        verifier=_extract_verifier(normalized),
+        build=_extract_build(normalized),
+        rollout=_extract_rollout(normalized),
+        files=_extract_files(normalized),
+        source_uri=source_uri or normalized.get("source_uri"),
+        license=normalized.get("license"),
         metadata=metadata,
     )
     return spec

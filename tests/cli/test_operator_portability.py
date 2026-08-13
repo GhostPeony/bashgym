@@ -271,7 +271,9 @@ def test_api_http_errors_do_not_echo_url_or_response_secrets(
         {},
         io.BytesIO(b'{"detail":"top-secret"}'),
     )
-    monkeypatch.setattr(cli.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
+    monkeypatch.setattr(
+        cli.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(error)
+    )
 
     with pytest.raises(RuntimeError) as exc_info:
         cli._workspace_http_json(
@@ -294,9 +296,7 @@ def test_api_requests_refuse_redirects_outside_the_configured_api_boundary(
     try:
         with pytest.raises(RuntimeError, match="HTTP 302") as exc_info:
             cli._workspace_http_json(
-                cli.argparse.Namespace(
-                    api_base=f"http://127.0.0.1:{redirect.server_port}/api"
-                ),
+                cli.argparse.Namespace(api_base=f"http://127.0.0.1:{redirect.server_port}/api"),
                 "/api/health",
             )
     finally:
@@ -445,12 +445,7 @@ def test_public_operator_preflight_docs_have_no_checkout_only_commands():
 
 def test_every_documented_training_plan_example_runs(capsys: pytest.CaptureFixture[str]):
     skill = (
-        Path(__file__).parents[2]
-        / "assistant"
-        / "workspace"
-        / "skills"
-        / "training"
-        / "SKILL.md"
+        Path(__file__).parents[2] / "assistant" / "workspace" / "skills" / "training" / "SKILL.md"
     ).read_text(encoding="utf-8")
     commands = [line for line in skill.splitlines() if line.startswith("bashgym training plan ")]
     assert commands

@@ -94,13 +94,13 @@ def _set_host_home(
 def test_operator_skills_parser_exposes_install_and_check_commands():
     parser = build_parser()
 
-    install = parser.parse_args(["operator", "skills", "install", "--host", "codex"])
+    install = parser.parse_args(["operator", "skills", "install", "--host", "agents"])
     check = parser.parse_args(["operator", "skills", "check", "--host", "hermes"])
 
     assert (install.operator_command, install.skills_command, install.host) == (
         "skills",
         "install",
-        "codex",
+        "agents",
     )
     assert (check.operator_command, check.skills_command, check.host) == (
         "skills",
@@ -121,6 +121,65 @@ def test_operator_skills_action_help_discloses_host_home_precedence(
     assert "CODEX_HOME, then ~/.codex" in help_text
     assert "CLAUDE_CONFIG_DIR, then CLAUDE_HOME, then ~/.claude" in help_text
     assert "HERMES_HOME, then ~/.hermes" in help_text
+    assert "--host agents for <current project>/.agents/skills" in help_text
+
+
+def test_shared_agents_install_is_project_local_idempotent_and_inspectable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.chdir(tmp_path)
+    for variable in ("CODEX_HOME", "CLAUDE_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"):
+        monkeypatch.delenv(variable, raising=False)
+    skills_root = tmp_path / ".agents" / "skills"
+    unrelated = skills_root / "my-unrelated-skill" / "SKILL.md"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_text("keep me", encoding="utf-8")
+
+    first = operator_skills.install_skills(host="agents")
+    second = operator_skills.install_skills(host="agents")
+
+    assert first == second
+    assert second["host"] == "agents"
+    assert second["skills_root"] == str(skills_root.resolve())
+    assert second["verified"] is True
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
+    receipt = json.loads((skills_root / operator_skills.RECEIPT_NAME).read_text(encoding="utf-8"))
+    assert receipt["host"] == "agents"
+    assert receipt["bundle_id"] == second["bundle_id"]
+    assert not list(skills_root.glob(".bashgym-skill-backup-*"))
+    assert not list(skills_root.glob(".bashgym-skills-stage-*"))
+
+
+def test_shared_agents_home_is_stable_from_a_project_subdirectory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    nested = project / "frontend" / "src"
+    (project / ".git").mkdir(parents=True)
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    host, skills_root = operator_skills.resolve_host("agents")
+
+    assert host == "agents"
+    assert skills_root == project / ".agents" / "skills"
+
+
+def test_shared_agents_host_is_never_selected_by_auto_detection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for variable in ("CODEX_HOME", "CLAUDE_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".agents" / "skills").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match=r"pass --host .*agents"):
+        operator_skills.resolve_host(None)
 
 
 @pytest.mark.parametrize("host", ["codex", "claude", "hermes"])

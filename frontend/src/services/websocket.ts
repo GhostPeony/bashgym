@@ -114,7 +114,7 @@ export const MessageTypes = {
   CASCADE_STAGE_FAILED: 'cascade:stage-failed',
   CASCADE_STAGE_SKIPPED: 'cascade:stage-skipped',
   CASCADE_COMPLETED: 'cascade:completed',
-  CASCADE_PROGRESS: 'cascade:progress',
+  CASCADE_PROGRESS: 'cascade:progress'
 } as const
 
 type LiveTicketResult = { ok: boolean; data?: { ticket?: string } }
@@ -130,7 +130,7 @@ interface WebSocketServiceOptions {
   handleSubscription?: (
     workspaceId: string,
     subscribed: boolean,
-    generation: number,
+    generation: number
   ) => void | Promise<void>
   addActivity?: (type: string, payload: Record<string, any>) => void
 }
@@ -157,10 +157,7 @@ export class WebSocketService {
   private pendingCampaignWorkspaces = new Set<string>()
   private subscribedCampaignWorkspaces = new Set<string>()
   private campaignSubscriptionRetryAttempts = new Map<string, number>()
-  private campaignSubscriptionRetryTimers = new Map<
-    string,
-    ReturnType<typeof setTimeout>
-  >()
+  private campaignSubscriptionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private socketFactory: (url: string) => WebSocket
   private liveTicket: (workspaceId: string) => Promise<LiveTicketResult>
   private scheduleReconnect: WebSocketServiceOptions['scheduleReconnect']
@@ -171,9 +168,12 @@ export class WebSocketService {
   private addActivity: NonNullable<WebSocketServiceOptions['addActivity']>
 
   constructor(options: WebSocketServiceOptions = {}) {
-    const env = (import.meta as ImportMeta & {
-      env?: { VITE_WS_URL?: string; VITE_MODE?: string }
-    }).env ?? {}
+    const env =
+      (
+        import.meta as ImportMeta & {
+          env?: { VITE_WS_URL?: string; VITE_MODE?: string }
+        }
+      ).env ?? {}
     if (options.url) {
       this.url = options.url
     } else if (typeof window !== 'undefined' && window.bashgym?.runtime?.webSocketUrl) {
@@ -189,24 +189,32 @@ export class WebSocketService {
     }
     this.socketFactory = options.socketFactory ?? ((url) => new WebSocket(url))
     this.liveTicket = options.liveTicket ?? ((workspaceId) => campaignApi.liveTicket(workspaceId))
-    this.scheduleReconnect = options.scheduleReconnect ?? ((callback, delay) => setTimeout(callback, delay))
-    this.clearScheduledReconnect = options.clearScheduledReconnect ?? ((timer) => clearTimeout(timer))
-    this.handleCampaignHint = options.handleCampaignHint
-      ?? ((hint) => useCampaignStore.getState().handleHint(hint))
-    this.handleConnection = options.handleConnection
-      ?? ((connected, generation) => useCampaignStore.getState().handleConnection(connected, generation))
-    this.handleSubscription = options.handleSubscription
-      ?? ((workspaceId, subscribed, generation) => useCampaignStore.getState().handleSubscription(
-        workspaceId, subscribed, generation,
-      ))
-    this.addActivity = options.addActivity
-      ?? ((type, payload) => useActivityStore.getState().addEvent(type, payload))
+    this.scheduleReconnect =
+      options.scheduleReconnect ?? ((callback, delay) => setTimeout(callback, delay))
+    this.clearScheduledReconnect =
+      options.clearScheduledReconnect ?? ((timer) => clearTimeout(timer))
+    this.handleCampaignHint =
+      options.handleCampaignHint ?? ((hint) => useCampaignStore.getState().handleHint(hint))
+    this.handleConnection =
+      options.handleConnection ??
+      ((connected, generation) =>
+        useCampaignStore.getState().handleConnection(connected, generation))
+    this.handleSubscription =
+      options.handleSubscription ??
+      ((workspaceId, subscribed, generation) =>
+        useCampaignStore.getState().handleSubscription(workspaceId, subscribed, generation))
+    this.addActivity =
+      options.addActivity ??
+      ((type, payload) => useActivityStore.getState().addEvent(type, payload))
   }
 
   retainCampaignWorkspace(workspaceId: string): () => void {
     const normalized = workspaceId.trim()
     if (!normalized) return () => {}
-    this.campaignWorkspaceRefs.set(normalized, (this.campaignWorkspaceRefs.get(normalized) ?? 0) + 1)
+    this.campaignWorkspaceRefs.set(
+      normalized,
+      (this.campaignWorkspaceRefs.get(normalized) ?? 0) + 1
+    )
     void this.syncCampaignSubscriptions()
     let released = false
     return () => {
@@ -227,20 +235,28 @@ export class WebSocketService {
 
   private async syncCampaignSubscriptions(
     socket = this.ws,
-    generation = this.connectionGeneration,
+    generation = this.connectionGeneration
   ) {
     if (!socket || socket !== this.ws || socket.readyState !== SOCKET_OPEN) return
     for (const workspaceId of this.campaignWorkspaceRefs.keys()) {
-      if (this.pendingCampaignWorkspaces.has(workspaceId)
-        || this.subscribedCampaignWorkspaces.has(workspaceId)) continue
+      if (
+        this.pendingCampaignWorkspaces.has(workspaceId) ||
+        this.subscribedCampaignWorkspaces.has(workspaceId)
+      )
+        continue
       this.pendingCampaignWorkspaces.add(workspaceId)
       let sent = false
       try {
         const response = await this.liveTicket(workspaceId)
         const ticket = response.ok ? response.data?.ticket : undefined
-        if (ticket && typeof ticket === 'string'
-          && socket === this.ws && generation === this.connectionGeneration
-          && socket.readyState === SOCKET_OPEN && this.campaignWorkspaceRefs.has(workspaceId)) {
+        if (
+          ticket &&
+          typeof ticket === 'string' &&
+          socket === this.ws &&
+          generation === this.connectionGeneration &&
+          socket.readyState === SOCKET_OPEN &&
+          this.campaignWorkspaceRefs.has(workspaceId)
+        ) {
           socket.send(JSON.stringify({ type: 'campaign:subscribe', payload: { ticket } }))
           sent = true
         }
@@ -273,14 +289,18 @@ export class WebSocketService {
   private scheduleCampaignSubscriptionRetry(
     workspaceId: string,
     socket: WebSocket,
-    generation: number,
+    generation: number
   ) {
-    if (this.campaignSubscriptionRetryTimers.has(workspaceId)
-      || !this.campaignWorkspaceRefs.has(workspaceId)
-      || socket !== this.ws || generation !== this.connectionGeneration) return
+    if (
+      this.campaignSubscriptionRetryTimers.has(workspaceId) ||
+      !this.campaignWorkspaceRefs.has(workspaceId) ||
+      socket !== this.ws ||
+      generation !== this.connectionGeneration
+    )
+      return
     const attempt = (this.campaignSubscriptionRetryAttempts.get(workspaceId) ?? 0) + 1
     this.campaignSubscriptionRetryAttempts.set(workspaceId, attempt)
-    const delay = Math.min(250 * (2 ** Math.max(0, attempt - 1)), 8_000)
+    const delay = Math.min(250 * 2 ** Math.max(0, attempt - 1), 8_000)
     const timer = this.scheduleReconnect!(() => {
       this.campaignSubscriptionRetryTimers.delete(workspaceId)
       void this.syncCampaignSubscriptions(socket, generation)
@@ -333,8 +353,12 @@ export class WebSocketService {
         if (this.ws !== socket || generation !== this.connectionGeneration) return
         try {
           const parsed: unknown = JSON.parse(event.data)
-          if (!isPlainRecord(parsed) || typeof parsed.type !== 'string'
-            || !isPlainRecord(parsed.payload)) return
+          if (
+            !isPlainRecord(parsed) ||
+            typeof parsed.type !== 'string' ||
+            !isPlainRecord(parsed.payload)
+          )
+            return
           const message = parsed as unknown as WebSocketMessage
           this.handleMessage(message)
         } catch (error) {
@@ -386,9 +410,10 @@ export class WebSocketService {
     }
 
     // Campaign frames are reconciliation transport, not user Activity.
-    const campaignControlFrame = type === MessageTypes.CAMPAIGN_HINT
-      || type === MessageTypes.CAMPAIGN_SUBSCRIBED
-      || type === MessageTypes.CAMPAIGN_SUBSCRIPTION_ERROR
+    const campaignControlFrame =
+      type === MessageTypes.CAMPAIGN_HINT ||
+      type === MessageTypes.CAMPAIGN_SUBSCRIBED ||
+      type === MessageTypes.CAMPAIGN_SUBSCRIPTION_ERROR
     if (!campaignControlFrame) this.addActivity(type, payload ?? {})
 
     // Handle built-in message types
@@ -439,14 +464,18 @@ export class WebSocketService {
 
       case MessageTypes.TRAINING_COMPLETE:
         if (payload.run_id) {
-          useCanvasOrchestratorStore.getState().handleTrainingTerminalStatus(payload.run_id, 'completed')
+          useCanvasOrchestratorStore
+            .getState()
+            .handleTrainingTerminalStatus(payload.run_id, 'completed')
         }
         useTrainingStore.getState().setStatus('completed')
         break
 
       case MessageTypes.TRAINING_FAILED:
         if (payload.run_id) {
-          useCanvasOrchestratorStore.getState().handleTrainingTerminalStatus(payload.run_id, 'failed')
+          useCanvasOrchestratorStore
+            .getState()
+            .handleTrainingTerminalStatus(payload.run_id, 'failed')
         }
         useTrainingStore.getState().setStatus('failed')
         break
@@ -614,17 +643,17 @@ export class WebSocketService {
         if (semanticType === 'skill_lab.prepared' || semanticType === 'skill_lab.inspected') {
           useActivityStore.getState().addEvent('skill-eval:prepared', {
             skill_name: (payload as any).entity?.skill_name,
-            skill_id: (payload as any).entity?.skill_id,
+            skill_id: (payload as any).entity?.skill_id
           })
         } else if (semanticType === 'skill_lab.skill.saved') {
           useActivityStore.getState().addEvent('skill-eval:skill-saved', {
             skill_name: (payload as any).entity?.skill_name,
-            skill_id: (payload as any).entity?.skill_id,
+            skill_id: (payload as any).entity?.skill_id
           })
         } else if (semanticType.startsWith('hf-context:')) {
           useActivityStore.getState().addEvent(semanticType, {
             ...(payload as any).entity,
-            ...(payload as any).payload,
+            ...(payload as any).payload
           })
           if (semanticType !== 'hf-context:discovery-started') {
             const workspaceId = intentWs || useWorkspaceStore.getState().activeWorkspaceId

@@ -93,9 +93,7 @@ def detect_training_alerts(
     alerts: list[TrainingAlert] = []
     prior_loss: float | None = None
     for point in sorted(points, key=lambda item: item.step):
-        loss_name = next(
-            (name for name in ("loss", "train_loss") if name in point.values), None
-        )
+        loss_name = next((name for name in ("loss", "train_loss") if name in point.values), None)
         if loss_name is None:
             continue
         loss = point.values[loss_name]

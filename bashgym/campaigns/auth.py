@@ -152,9 +152,7 @@ class CampaignAuthService:
     ) -> str:
         """Install one Electron-launch bootstrap without persisting its raw secret."""
 
-        credential_id, secret = _parse(
-            raw_bootstrap_token, CredentialKind.DESKTOP_BOOTSTRAP
-        )
+        credential_id, secret = _parse(raw_bootstrap_token, CredentialKind.DESKTOP_BOOTSTRAP)
         existing = self.repository.get_actor_credential(credential_id)
         now = utc_now()
         if existing is not None:

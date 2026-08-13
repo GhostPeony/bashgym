@@ -14,7 +14,6 @@ Tests cover:
 
 import json
 import os
-import platform
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,24 +21,27 @@ import pytest
 
 from bashgym.trace_capture.collectors.base import (
     BaseCollector,
-    CollectorRecord,
-    SubagentRecord,
-    EditRecord,
-    PlanRecord,
-    TodoRecord,
-    PromptRecord,
-    DebugRecord,
-    EnvironmentRecord,
-    CollectorScanResult,
     CollectorBatchResult,
+    CollectorRecord,
+    CollectorScanResult,
+    DebugRecord,
+    EditRecord,
+    EnvironmentRecord,
+    PlanRecord,
+    PromptRecord,
+    SubagentRecord,
+    TodoRecord,
     get_claude_dir,
     get_collected_dir,
 )
-
+from bashgym.trace_capture.collectors.edit import EditCollector
+from bashgym.trace_capture.collectors.plan import PlanCollector
+from bashgym.trace_capture.collectors.subagent import SubagentCollector
 
 # ---------------------------------------------------------------------------
 # 1. CollectorRecord basics
 # ---------------------------------------------------------------------------
+
 
 class TestCollectorRecord:
     """Tests for the base CollectorRecord dataclass."""
@@ -112,6 +114,7 @@ class TestCollectorRecord:
 # ---------------------------------------------------------------------------
 # 2. Specialized record types
 # ---------------------------------------------------------------------------
+
 
 class TestSpecializedRecords:
     """Tests for SubagentRecord, EditRecord, PlanRecord, etc."""
@@ -247,6 +250,7 @@ class TestSpecializedRecords:
 # 3. Result types
 # ---------------------------------------------------------------------------
 
+
 class TestResultTypes:
     """Tests for CollectorScanResult and CollectorBatchResult."""
 
@@ -267,9 +271,7 @@ class TestResultTypes:
 
     def test_batch_result_tracks_collected_and_errors(self):
         """CollectorBatchResult tracks successes, skips, and errors."""
-        record = CollectorRecord(
-            session_id="s1", timestamp="t1", source_type="test"
-        )
+        record = CollectorRecord(session_id="s1", timestamp="t1", source_type="test")
         result = CollectorBatchResult(
             source_type="test",
             collected=5,
@@ -299,6 +301,7 @@ class TestResultTypes:
 # 4. BaseCollector abstract class
 # ---------------------------------------------------------------------------
 
+
 class TestBaseCollector:
     """Tests for the BaseCollector abstract interface."""
 
@@ -312,6 +315,7 @@ class TestBaseCollector:
 
     def test_concrete_collector_requires_all_methods(self):
         """A subclass must implement all abstract methods to be instantiated."""
+
         # Missing collect_all
         class PartialCollector(BaseCollector):
             @property
@@ -332,6 +336,7 @@ class TestBaseCollector:
 
     def test_concrete_collector_can_be_instantiated(self, tmp_path):
         """A fully implemented subclass can be created."""
+
         class FullCollector(BaseCollector):
             @property
             def source_type(self) -> str:
@@ -365,6 +370,7 @@ class TestBaseCollector:
 
     def test_output_dir_property(self, tmp_path):
         """output_dir returns collected_dir / source_type."""
+
         class StubCollector(BaseCollector):
             @property
             def source_type(self) -> str:
@@ -372,8 +378,10 @@ class TestBaseCollector:
 
             def scan(self, since=None, project_filter=None):
                 return CollectorScanResult(
-                    source_type="mystuff", total_found=0,
-                    already_collected=0, new_available=0,
+                    source_type="mystuff",
+                    total_found=0,
+                    already_collected=0,
+                    new_available=0,
                 )
 
             def collect(self, session_id):
@@ -381,7 +389,9 @@ class TestBaseCollector:
 
             def collect_all(self, since=None, project_filter=None):
                 return CollectorBatchResult(
-                    source_type="mystuff", collected=0, skipped=0,
+                    source_type="mystuff",
+                    collected=0,
+                    skipped=0,
                 )
 
         collector = StubCollector(
@@ -395,11 +405,13 @@ class TestBaseCollector:
 # 5. Deduplication state
 # ---------------------------------------------------------------------------
 
+
 class TestDeduplicationState:
     """Tests for _load_collected_ids and _save_collected_id."""
 
     def _make_collector(self, tmp_path):
         """Create a minimal concrete collector for testing."""
+
         class StubCollector(BaseCollector):
             @property
             def source_type(self) -> str:
@@ -407,8 +419,10 @@ class TestDeduplicationState:
 
             def scan(self, since=None, project_filter=None):
                 return CollectorScanResult(
-                    source_type="stub", total_found=0,
-                    already_collected=0, new_available=0,
+                    source_type="stub",
+                    total_found=0,
+                    already_collected=0,
+                    new_available=0,
                 )
 
             def collect(self, session_id):
@@ -416,7 +430,9 @@ class TestDeduplicationState:
 
             def collect_all(self, since=None, project_filter=None):
                 return CollectorBatchResult(
-                    source_type="stub", collected=0, skipped=0,
+                    source_type="stub",
+                    collected=0,
+                    skipped=0,
                 )
 
         return StubCollector(
@@ -454,6 +470,7 @@ class TestDeduplicationState:
 # 6. Helper functions
 # ---------------------------------------------------------------------------
 
+
 class TestHelperFunctions:
     """Tests for get_claude_dir() and get_collected_dir()."""
 
@@ -472,14 +489,18 @@ class TestHelperFunctions:
 
     def test_get_claude_dir_uses_userprofile_on_windows(self, monkeypatch):
         """On Windows, get_claude_dir uses USERPROFILE."""
-        monkeypatch.setattr("bashgym.trace_capture.collectors.base.platform.system", lambda: "Windows")
+        monkeypatch.setattr(
+            "bashgym.trace_capture.collectors.base.platform.system", lambda: "Windows"
+        )
         monkeypatch.setenv("USERPROFILE", "C:\\Users\\TestUser")
         result = get_claude_dir()
         assert result == Path("C:\\Users\\TestUser") / ".claude"
 
     def test_get_claude_dir_uses_home_on_unix(self, monkeypatch):
         """On non-Windows, get_claude_dir uses Path.home()."""
-        monkeypatch.setattr("bashgym.trace_capture.collectors.base.platform.system", lambda: "Linux")
+        monkeypatch.setattr(
+            "bashgym.trace_capture.collectors.base.platform.system", lambda: "Linux"
+        )
         home = Path.home()
         result = get_claude_dir()
         assert result == home / ".claude"
@@ -488,8 +509,6 @@ class TestHelperFunctions:
 # ---------------------------------------------------------------------------
 # 7. SubagentCollector
 # ---------------------------------------------------------------------------
-
-from bashgym.trace_capture.collectors.subagent import SubagentCollector
 
 
 class TestSubagentCollector:
@@ -506,21 +525,40 @@ class TestSubagentCollector:
 
         subagent_file = subagents / "agent-a11b22c33d44e55f6.jsonl"
         lines = [
-            json.dumps({"parentUuid": None, "isSidechain": True, "userType": "external",
-                "cwd": "C:\\Users\\Developer\\projects\\myapp",
-                "sessionId": "abc12345-1234-5678-abcd-1234567890ab",
-                "version": "2.1.51", "gitBranch": "main",
-                "agentId": "a11b22c33d44e55f6",
-                "slug": "iridescent-wiggling-adleman", "type": "user",
-                "message": {"role": "user", "content": "Find all API endpoints"}}),
-            json.dumps({"type": "assistant", "message": {
-                "role": "assistant", "model": "claude-sonnet-4-5-20250929",
-                "content": [
-                    {"type": "text", "text": "I'll search for API endpoints."},
-                    {"type": "tool_use", "id": "toolu_01", "name": "Grep",
-                     "input": {"pattern": "@app\\.(get|post)", "path": "src/"}},
-                ],
-                "usage": {"input_tokens": 500, "output_tokens": 100}}}),
+            json.dumps(
+                {
+                    "parentUuid": None,
+                    "isSidechain": True,
+                    "userType": "external",
+                    "cwd": "C:\\Users\\Developer\\projects\\myapp",
+                    "sessionId": "abc12345-1234-5678-abcd-1234567890ab",
+                    "version": "2.1.51",
+                    "gitBranch": "main",
+                    "agentId": "a11b22c33d44e55f6",
+                    "slug": "iridescent-wiggling-adleman",
+                    "type": "user",
+                    "message": {"role": "user", "content": "Find all API endpoints"},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "model": "claude-sonnet-4-5-20250929",
+                        "content": [
+                            {"type": "text", "text": "I'll search for API endpoints."},
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_01",
+                                "name": "Grep",
+                                "input": {"pattern": "@app\\.(get|post)", "path": "src/"},
+                            },
+                        ],
+                        "usage": {"input_tokens": 500, "output_tokens": 100},
+                    },
+                }
+            ),
         ]
         subagent_file.write_text("\n".join(lines), encoding="utf-8")
 
@@ -641,9 +679,15 @@ class TestSubagentCollector:
 
         lines = [
             "not valid json at all",
-            json.dumps({"type": "user", "sessionId": "bad-session-id",
-                "agentId": "badagent1", "slug": "test-slug",
-                "message": {"role": "user", "content": "Hello"}}),
+            json.dumps(
+                {
+                    "type": "user",
+                    "sessionId": "bad-session-id",
+                    "agentId": "badagent1",
+                    "slug": "test-slug",
+                    "message": {"role": "user", "content": "Hello"},
+                }
+            ),
             "{incomplete json",
         ]
         (subagents / "agent-badagent1.jsonl").write_text("\n".join(lines), encoding="utf-8")
@@ -662,8 +706,6 @@ class TestSubagentCollector:
 # 8. EditCollector
 # ---------------------------------------------------------------------------
 
-from bashgym.trace_capture.collectors.edit import EditCollector
-
 
 class TestEditCollector:
     """Tests for EditCollector: scanning, parsing, and collecting file-history snapshots."""
@@ -674,7 +716,9 @@ class TestEditCollector:
         fh = tmp_path / "file-history" / "abc12345-1234-5678-abcd-1234567890ab"
         fh.mkdir(parents=True)
         (fh / "a1b2c3d4e5f6g7h8@v1").write_text("def hello():\n    pass\n", encoding="utf-8")
-        (fh / "a1b2c3d4e5f6g7h8@v2").write_text("def hello():\n    print('hello')\n", encoding="utf-8")
+        (fh / "a1b2c3d4e5f6g7h8@v2").write_text(
+            "def hello():\n    print('hello')\n", encoding="utf-8"
+        )
         (fh / "f0f0f0f0f0f0f0f0@v1").write_text("# old\n", encoding="utf-8")
         (fh / "f0f0f0f0f0f0f0f0@v2").write_text("# middle\n", encoding="utf-8")
         (fh / "f0f0f0f0f0f0f0f0@v3").write_text("# final\n", encoding="utf-8")
@@ -743,8 +787,6 @@ class TestEditCollector:
 # ---------------------------------------------------------------------------
 # 9. PlanCollector
 # ---------------------------------------------------------------------------
-
-from bashgym.trace_capture.collectors.plan import PlanCollector
 
 
 class TestPlanCollector:
@@ -825,6 +867,7 @@ class TestPlanCollector:
 
 try:
     from bashgym.trace_capture.collectors.todo import TodoCollector
+
     _has_todo_collector = True
 except ImportError:
     _has_todo_collector = False
@@ -840,15 +883,23 @@ class TestTodoCollector:
         todos = tmp_path / "todos"
         todos.mkdir()
         # Non-empty todo file: 2 tasks (1 completed, 1 pending)
-        (todos / "abc12345-1234-5678-abcd-1234567890ab-agent-abc12345-1234-5678-abcd-1234567890ab.json").write_text(
-            json.dumps([
-                {"subject": "Fix auth", "status": "completed"},
-                {"subject": "Add tests", "status": "pending"},
-            ]),
+        (
+            todos
+            / "abc12345-1234-5678-abcd-1234567890ab-agent-abc12345-1234-5678-abcd-1234567890ab.json"
+        ).write_text(
+            json.dumps(
+                [
+                    {"subject": "Fix auth", "status": "completed"},
+                    {"subject": "Add tests", "status": "pending"},
+                ]
+            ),
             encoding="utf-8",
         )
         # Empty todo file: should be skipped
-        (todos / "def67890-1234-5678-abcd-1234567890ab-agent-def67890-1234-5678-abcd-1234567890ab.json").write_text(
+        (
+            todos
+            / "def67890-1234-5678-abcd-1234567890ab-agent-def67890-1234-5678-abcd-1234567890ab.json"
+        ).write_text(
             "[]",
             encoding="utf-8",
         )
@@ -979,7 +1030,10 @@ class TestTodoCollector:
         """collect_all() handles malformed JSON files gracefully."""
         todos = tmp_path / "todos"
         todos.mkdir()
-        (todos / "abc12345-1234-5678-abcd-1234567890ab-agent-abc12345-1234-5678-abcd-1234567890ab.json").write_text(
+        (
+            todos
+            / "abc12345-1234-5678-abcd-1234567890ab-agent-abc12345-1234-5678-abcd-1234567890ab.json"
+        ).write_text(
             "{not valid json",
             encoding="utf-8",
         )
@@ -998,6 +1052,7 @@ class TestTodoCollector:
 
 try:
     from bashgym.trace_capture.collectors.prompt import PromptCollector
+
     _has_prompt_collector = True
 except ImportError:
     _has_prompt_collector = False
@@ -1012,8 +1067,22 @@ class TestPromptCollector:
         """Create mock .claude with history.jsonl and paste-cache/."""
         history = tmp_path / "history.jsonl"
         lines = [
-            json.dumps({"display": "Fix the auth bug", "pastedContents": {}, "timestamp": 1759817571796, "project": "C:\\Users\\Developer\\projects\\myapp"}),
-            json.dumps({"display": "Add dark mode", "pastedContents": {"abc123": True}, "timestamp": 1759817600000, "project": "C:\\Users\\Developer\\projects\\myapp"}),
+            json.dumps(
+                {
+                    "display": "Fix the auth bug",
+                    "pastedContents": {},
+                    "timestamp": 1759817571796,
+                    "project": "C:\\Users\\Developer\\projects\\myapp",
+                }
+            ),
+            json.dumps(
+                {
+                    "display": "Add dark mode",
+                    "pastedContents": {"abc123": True},
+                    "timestamp": 1759817600000,
+                    "project": "C:\\Users\\Developer\\projects\\myapp",
+                }
+            ),
         ]
         history.write_text("\n".join(lines), encoding="utf-8")
 
@@ -1118,12 +1187,14 @@ class TestPromptCollector:
         history = tmp_path / "history.jsonl"
         long_prompt = "x" * 6000
         long_paste_id = "longpaste1"
-        line = json.dumps({
-            "display": long_prompt,
-            "pastedContents": {long_paste_id: True},
-            "timestamp": 1759817571796,
-            "project": "C:\\Users\\Developer\\projects\\bigapp",
-        })
+        line = json.dumps(
+            {
+                "display": long_prompt,
+                "pastedContents": {long_paste_id: True},
+                "timestamp": 1759817571796,
+                "project": "C:\\Users\\Developer\\projects\\bigapp",
+            }
+        )
         history.write_text(line, encoding="utf-8")
 
         paste = tmp_path / "paste-cache"
@@ -1147,12 +1218,15 @@ class TestPromptCollector:
 
 try:
     from bashgym.trace_capture.collectors.environment import EnvironmentCollector
+
     _has_environment_collector = True
 except ImportError:
     _has_environment_collector = False
 
 
-@pytest.mark.skipif(not _has_environment_collector, reason="EnvironmentCollector not yet implemented")
+@pytest.mark.skipif(
+    not _has_environment_collector, reason="EnvironmentCollector not yet implemented"
+)
 class TestEnvironmentCollector:
     """Tests for EnvironmentCollector: scanning, parsing, and collecting session environments and shell snapshots."""
 
@@ -1264,18 +1338,18 @@ class TestClaudeDataScanner:
         # Plans
         plans_dir = claude_dir / "plans"
         plans_dir.mkdir()
-        (plans_dir / "test-plan.md").write_text(
-            "# Plan\nContent here.\n", encoding="utf-8"
-        )
+        (plans_dir / "test-plan.md").write_text("# Plan\nContent here.\n", encoding="utf-8")
 
         # History (prompts)
         (claude_dir / "history.jsonl").write_text(
-            json.dumps({
-                "display": "test prompt",
-                "pastedContents": {},
-                "timestamp": 1700000000000,
-                "project": "test",
-            }),
+            json.dumps(
+                {
+                    "display": "test prompt",
+                    "pastedContents": {},
+                    "timestamp": 1700000000000,
+                    "project": "test",
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -1384,6 +1458,7 @@ class TestPeonyToolIntegration:
     def test_import_traces_tool_definition_has_sources_param(self):
         """import_traces tool must define sources, days, project_filter, dry_run params."""
         from bashgym.agent.tools import ToolRegistry
+
         registry = ToolRegistry()
         tools = registry.build_tools()
         import_tool = [t for t in tools if t["name"] == "import_traces"][0]
@@ -1396,6 +1471,7 @@ class TestPeonyToolIntegration:
     def test_scan_claude_data_tool_exists(self):
         """scan_claude_data tool must be present in the tool registry."""
         from bashgym.agent.tools import ToolRegistry
+
         registry = ToolRegistry()
         tools = registry.build_tools()
         names = [t["name"] for t in tools]
@@ -1404,6 +1480,7 @@ class TestPeonyToolIntegration:
     def test_get_collection_status_tool_exists(self):
         """get_collection_status tool must be present in the tool registry."""
         from bashgym.agent.tools import ToolRegistry
+
         registry = ToolRegistry()
         tools = registry.build_tools()
         names = [t["name"] for t in tools]
@@ -1413,6 +1490,7 @@ class TestPeonyToolIntegration:
         """The sources enum should contain 'all' plus all source types from ALL_SOURCES."""
         from bashgym.agent.tools import ToolRegistry
         from bashgym.trace_capture.collectors.scanner import ALL_SOURCES
+
         registry = ToolRegistry()
         tools = registry.build_tools()
         import_tool = [t for t in tools if t["name"] == "import_traces"][0]
@@ -1426,14 +1504,17 @@ class TestPeonyToolIntegration:
     def test_execute_scan_claude_data_calls_scanner(self):
         """_execute_tool('scan_claude_data') calls scanner.scan_all() and returns JSON."""
         import asyncio
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         from bashgym.trace_capture.collectors.base import CollectorScanResult
 
         mock_scanner = MagicMock()
         mock_scanner.scan_all.return_value = {
             "plans": CollectorScanResult(
-                source_type="plans", total_found=5,
-                already_collected=2, new_available=3,
+                source_type="plans",
+                total_found=5,
+                already_collected=2,
+                new_available=3,
             ),
         }
 
@@ -1442,6 +1523,7 @@ class TestPeonyToolIntegration:
             return_value=mock_scanner,
         ):
             from bashgym.api.agent_routes import _execute_tool
+
             result = asyncio.run(_execute_tool("scan_claude_data", {}))
 
         data = json.loads(result)
@@ -1452,7 +1534,7 @@ class TestPeonyToolIntegration:
     def test_execute_get_collection_status_calls_scanner(self):
         """_execute_tool('get_collection_status') calls scanner.status() and returns JSON."""
         import asyncio
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         mock_scanner = MagicMock()
         mock_scanner.status.return_value = {
@@ -1464,6 +1546,7 @@ class TestPeonyToolIntegration:
             return_value=mock_scanner,
         ):
             from bashgym.api.agent_routes import _execute_tool
+
             result = asyncio.run(_execute_tool("get_collection_status", {}))
 
         data = json.loads(result)
@@ -1474,14 +1557,17 @@ class TestPeonyToolIntegration:
     def test_execute_import_traces_dry_run_calls_scan_all(self):
         """_execute_tool('import_traces', {dry_run: True}) calls scanner.scan_all()."""
         import asyncio
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         from bashgym.trace_capture.collectors.base import CollectorScanResult
 
         mock_scanner = MagicMock()
         mock_scanner.scan_all.return_value = {
             "plans": CollectorScanResult(
-                source_type="plans", total_found=3,
-                already_collected=1, new_available=2,
+                source_type="plans",
+                total_found=3,
+                already_collected=1,
+                new_available=2,
             ),
         }
 
@@ -1490,10 +1576,16 @@ class TestPeonyToolIntegration:
             return_value=mock_scanner,
         ):
             from bashgym.api.agent_routes import _execute_tool
-            result = asyncio.run(_execute_tool("import_traces", {
-                    "sources": ["plans"],
-                    "dry_run": True,
-                }))
+
+            result = asyncio.run(
+                _execute_tool(
+                    "import_traces",
+                    {
+                        "sources": ["plans"],
+                        "dry_run": True,
+                    },
+                )
+            )
 
         data = json.loads(result)
         assert "plans" in data
@@ -1505,13 +1597,15 @@ class TestPeonyToolIntegration:
 # CLI subcommand tests (scan, status, --source)
 # ---------------------------------------------------------------------------
 
+
 class TestCLICommands:
     """Tests for bashgym-setup CLI subcommands (scan, status, --source)."""
 
     def test_scan_subcommand_parses(self, monkeypatch):
         """The 'scan' subcommand is recognized by argparse and calls scanner.scan_all()."""
-        from bashgym.trace_capture.setup import main
         from unittest.mock import MagicMock
+
+        from bashgym.trace_capture.setup import main
 
         monkeypatch.setattr("sys.argv", ["bashgym-setup", "--quiet", "scan"])
 
@@ -1529,8 +1623,9 @@ class TestCLICommands:
 
     def test_status_subcommand_parses(self, monkeypatch):
         """The 'status' subcommand is recognized by argparse and calls scanner.status()."""
-        from bashgym.trace_capture.setup import main
         from unittest.mock import MagicMock
+
+        from bashgym.trace_capture.setup import main
 
         monkeypatch.setattr("sys.argv", ["bashgym-setup", "--quiet", "status"])
 
@@ -1548,8 +1643,9 @@ class TestCLICommands:
 
     def test_import_recent_source_argument_exists(self, monkeypatch):
         """import-recent accepts --source argument and routes to scanner.collect_all()."""
-        from bashgym.trace_capture.setup import main
         from unittest.mock import MagicMock
+
+        from bashgym.trace_capture.setup import main
 
         monkeypatch.setattr(
             "sys.argv",
@@ -1570,8 +1666,9 @@ class TestCLICommands:
 
     def test_import_recent_default_source_is_sessions(self, monkeypatch):
         """import-recent without --source defaults to sessions (original behavior)."""
-        from bashgym.trace_capture.setup import main
         from unittest.mock import MagicMock
+
+        from bashgym.trace_capture.setup import main
 
         monkeypatch.setattr(
             "sys.argv",
@@ -1594,8 +1691,9 @@ class TestCLICommands:
 
     def test_import_recent_source_all_routes_to_scanner(self, monkeypatch):
         """import-recent --source all passes sources=None to scanner.collect_all()."""
-        from bashgym.trace_capture.setup import main
         from unittest.mock import MagicMock
+
+        from bashgym.trace_capture.setup import main
 
         monkeypatch.setattr(
             "sys.argv",
@@ -1619,16 +1717,19 @@ class TestCLICommands:
 
     def test_scan_verbose_prints_table(self, monkeypatch, capsys):
         """The 'scan' subcommand prints a table when verbose (no --quiet)."""
-        from bashgym.trace_capture.setup import main
         from unittest.mock import MagicMock
+
+        from bashgym.trace_capture.setup import main
 
         monkeypatch.setattr("sys.argv", ["bashgym-setup", "scan"])
 
         mock_scanner = MagicMock()
         mock_scanner.scan_all.return_value = {
             "plans": CollectorScanResult(
-                source_type="plans", total_found=10,
-                already_collected=3, new_available=7,
+                source_type="plans",
+                total_found=10,
+                already_collected=3,
+                new_available=7,
             ),
         }
 
@@ -1645,8 +1746,9 @@ class TestCLICommands:
 
     def test_status_verbose_prints_table(self, monkeypatch, capsys):
         """The 'status' subcommand prints a table when verbose (no --quiet)."""
-        from bashgym.trace_capture.setup import main
         from unittest.mock import MagicMock
+
+        from bashgym.trace_capture.setup import main
 
         monkeypatch.setattr("sys.argv", ["bashgym-setup", "status"])
 
@@ -1749,10 +1851,13 @@ class TestDebugCollector:
         """scan() correctly counts debug log files."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "aaa-bbb-ccc": MOCK_DEBUG_LOG,
-            "ddd-eee-fff": MOCK_DEBUG_LOG_WITH_HAIKU,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "aaa-bbb-ccc": MOCK_DEBUG_LOG,
+                "ddd-eee-fff": MOCK_DEBUG_LOG_WITH_HAIKU,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         result = collector.scan()
 
@@ -1764,12 +1869,15 @@ class TestDebugCollector:
 
     def test_scan_respects_since_filter(self, tmp_path):
         """scan(since=...) only returns files modified after the given date."""
-        from bashgym.trace_capture.collectors.debug import DebugCollector
-        import time
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "old-session": MOCK_DEBUG_LOG,
-        })
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "old-session": MOCK_DEBUG_LOG,
+            },
+        )
         # Set the file modification time to the distant past
         old_file = claude_dir / "debug" / "old-session.txt"
         old_time = 1700000000  # 2023-11-14
@@ -1784,10 +1892,13 @@ class TestDebugCollector:
         """scan() subtracts already-collected sessions from new_available."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-001": MOCK_DEBUG_LOG,
-            "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-001": MOCK_DEBUG_LOG,
+                "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
 
         # Simulate sess-001 already collected
@@ -1816,9 +1927,12 @@ class TestDebugCollector:
         """collect() parses a single debug log and returns a DebugRecord."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
 
@@ -1831,9 +1945,12 @@ class TestDebugCollector:
         """collect() counts API calls from '[API:request]' lines."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -1845,9 +1962,12 @@ class TestDebugCollector:
         """collect() extracts unique model names from debug logs."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -1858,9 +1978,12 @@ class TestDebugCollector:
         """collect() sums token counts from autocompact lines."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -1874,9 +1997,12 @@ class TestDebugCollector:
         """collect() detects [SystemPrompt] entries."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -1889,9 +2015,12 @@ class TestDebugCollector:
         """collect() captures [ERROR] log lines."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -1905,9 +2034,12 @@ class TestDebugCollector:
         """collect() computes latency between API request and stream start."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -1930,10 +2062,13 @@ class TestDebugCollector:
         """collect_all() processes all debug log files and returns a batch result."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-001": MOCK_DEBUG_LOG,
-            "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-001": MOCK_DEBUG_LOG,
+                "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         result = collector.collect_all()
 
@@ -1947,10 +2082,13 @@ class TestDebugCollector:
         """collect_all() skips already-collected sessions."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-001": MOCK_DEBUG_LOG,
-            "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-001": MOCK_DEBUG_LOG,
+                "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
 
         # Pre-mark sess-001 as collected
@@ -1964,9 +2102,12 @@ class TestDebugCollector:
         """collect_all(since=...) respects time filter."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-old": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-old": MOCK_DEBUG_LOG,
+            },
+        )
         old_file = claude_dir / "debug" / "sess-old.txt"
         old_time = 1700000000  # 2023-11-14
         os.utime(old_file, (old_time, old_time))
@@ -1985,9 +2126,12 @@ class TestDebugCollector:
 2026-02-20T18:00:02.000Z [DEBUG] Tool search disabled for model 'claude-sonnet-4-5-20250929': not supported.
 2026-02-20T18:00:03.000Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': not supported.
 """
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-multi": mixed_log,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-multi": mixed_log,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-multi")
         record = records[0]
@@ -2002,9 +2146,12 @@ class TestDebugCollector:
         """DebugRecord produced by collect() is JSON-serializable."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -2018,9 +2165,12 @@ class TestDebugCollector:
         """collect() stores the first and last timestamps from the log."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -2035,9 +2185,12 @@ class TestDebugCollector:
         """collect() must NOT store raw debug log content (PII safety)."""
         from bashgym.trace_capture.collectors.debug import DebugCollector
 
-        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
-            "sess-abc": MOCK_DEBUG_LOG,
-        })
+        claude_dir, collected_dir = self._make_debug_dir(
+            tmp_path,
+            {
+                "sess-abc": MOCK_DEBUG_LOG,
+            },
+        )
         collector = DebugCollector(claude_dir, collected_dir)
         records = collector.collect("sess-abc")
         record = records[0]
@@ -2050,23 +2203,27 @@ class TestDebugCollector:
     def test_debug_in_scanner_all_sources(self):
         """'debug' should be in ALL_SOURCES list."""
         from bashgym.trace_capture.collectors.scanner import ALL_SOURCES
+
         assert "debug" in ALL_SOURCES
 
     def test_scanner_includes_debug_collector(self):
         """ClaudeDataScanner should include the DebugCollector."""
         from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+
         scanner = ClaudeDataScanner()
         assert "debug" in scanner._collectors
 
     def test_debug_collector_exported_from_init(self):
         """DebugCollector should be importable from the collectors package."""
         from bashgym.trace_capture.collectors import DebugCollector
+
         assert DebugCollector is not None
 
 
 # ---------------------------------------------------------------------------
 # 15. Cross-Reference Index
 # ---------------------------------------------------------------------------
+
 
 class TestCrossReferenceIndex:
     """Tests for cross-reference index building."""
@@ -2081,31 +2238,46 @@ class TestCrossReferenceIndex:
         # Subagent record
         sub_dir = collected / "subagents"
         sub_dir.mkdir(parents=True)
-        (sub_dir / "agent-abc.json").write_text(json.dumps({
-            "session_id": "session-001",
-            "timestamp": "2026-02-25T10:00:00Z",
-            "source_type": "subagents",
-            "agent_id": "abc",
-        }), encoding="utf-8")
+        (sub_dir / "agent-abc.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-001",
+                    "timestamp": "2026-02-25T10:00:00Z",
+                    "source_type": "subagents",
+                    "agent_id": "abc",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         # Plan record (no session_id -- should go under "_no_session")
         plan_dir = collected / "plans"
         plan_dir.mkdir(parents=True)
-        (plan_dir / "my-plan.json").write_text(json.dumps({
-            "session_id": "",
-            "timestamp": "2026-02-25T09:00:00Z",
-            "source_type": "plans",
-            "plan_name": "my-plan",
-        }), encoding="utf-8")
+        (plan_dir / "my-plan.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "",
+                    "timestamp": "2026-02-25T09:00:00Z",
+                    "source_type": "plans",
+                    "plan_name": "my-plan",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         # Edit record for same session
         edit_dir = collected / "edits"
         edit_dir.mkdir(parents=True)
-        (edit_dir / "session-001_file.json").write_text(json.dumps({
-            "session_id": "session-001",
-            "timestamp": "2026-02-25T10:05:00Z",
-            "source_type": "edits",
-        }), encoding="utf-8")
+        (edit_dir / "session-001_file.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-001",
+                    "timestamp": "2026-02-25T10:05:00Z",
+                    "source_type": "edits",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         index = build_cross_reference_index(collected)
 
@@ -2119,6 +2291,7 @@ class TestCrossReferenceIndex:
     def test_build_index_returns_empty_for_no_records(self, tmp_path):
         """build_cross_reference_index returns empty dict when no records exist."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
         collected.mkdir()
         index = build_cross_reference_index(collected)
@@ -2127,14 +2300,20 @@ class TestCrossReferenceIndex:
     def test_build_index_skips_empty_session_ids(self, tmp_path):
         """Records with empty session_id are grouped under _no_session key."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
         plans = collected / "plans"
         plans.mkdir(parents=True)
-        (plans / "some-plan.json").write_text(json.dumps({
-            "session_id": "",
-            "source_type": "plans",
-            "timestamp": "2026-02-25T09:00:00Z",
-        }), encoding="utf-8")
+        (plans / "some-plan.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "",
+                    "source_type": "plans",
+                    "timestamp": "2026-02-25T09:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         index = build_cross_reference_index(collected)
         # Empty session_id records should be under "_no_session" key
@@ -2143,14 +2322,20 @@ class TestCrossReferenceIndex:
     def test_build_index_includes_timestamps(self, tmp_path):
         """Index entries include the earliest timestamp for each session."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
         sub_dir = collected / "subagents"
         sub_dir.mkdir(parents=True)
-        (sub_dir / "agent-a.json").write_text(json.dumps({
-            "session_id": "session-002",
-            "timestamp": "2026-02-25T12:00:00Z",
-            "source_type": "subagents",
-        }), encoding="utf-8")
+        (sub_dir / "agent-a.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-002",
+                    "timestamp": "2026-02-25T12:00:00Z",
+                    "source_type": "subagents",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         index = build_cross_reference_index(collected)
         assert "session-002" in index
@@ -2159,6 +2344,7 @@ class TestCrossReferenceIndex:
     def test_build_index_writes_to_file(self, tmp_path):
         """build_cross_reference_index writes index.json to collected dir."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
         collected.mkdir()
 
@@ -2172,14 +2358,20 @@ class TestCrossReferenceIndex:
     def test_build_index_is_idempotent(self, tmp_path):
         """Calling build_cross_reference_index twice produces the same result."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
         sub_dir = collected / "subagents"
         sub_dir.mkdir(parents=True)
-        (sub_dir / "agent-x.json").write_text(json.dumps({
-            "session_id": "session-003",
-            "timestamp": "2026-02-25T14:00:00Z",
-            "source_type": "subagents",
-        }), encoding="utf-8")
+        (sub_dir / "agent-x.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-003",
+                    "timestamp": "2026-02-25T14:00:00Z",
+                    "source_type": "subagents",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         index1 = build_cross_reference_index(collected)
         index2 = build_cross_reference_index(collected)
@@ -2188,15 +2380,21 @@ class TestCrossReferenceIndex:
     def test_build_index_skips_invalid_json(self, tmp_path):
         """build_cross_reference_index skips files that are not valid JSON."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
         sub_dir = collected / "subagents"
         sub_dir.mkdir(parents=True)
         (sub_dir / "bad-file.json").write_text("not valid json {{{", encoding="utf-8")
-        (sub_dir / "good-file.json").write_text(json.dumps({
-            "session_id": "session-004",
-            "timestamp": "2026-02-25T15:00:00Z",
-            "source_type": "subagents",
-        }), encoding="utf-8")
+        (sub_dir / "good-file.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-004",
+                    "timestamp": "2026-02-25T15:00:00Z",
+                    "source_type": "subagents",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         index = build_cross_reference_index(collected)
         assert "session-004" in index
@@ -2205,6 +2403,7 @@ class TestCrossReferenceIndex:
     def test_build_index_handles_missing_directory(self, tmp_path):
         """build_cross_reference_index handles a non-existent collected dir gracefully."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "nonexistent"
         index = build_cross_reference_index(collected)
         assert index == {}
@@ -2214,23 +2413,34 @@ class TestCrossReferenceIndex:
     def test_build_index_uses_earliest_timestamp(self, tmp_path):
         """When multiple records exist for a session, use the earliest timestamp."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
 
         sub_dir = collected / "subagents"
         sub_dir.mkdir(parents=True)
-        (sub_dir / "agent-late.json").write_text(json.dumps({
-            "session_id": "session-005",
-            "timestamp": "2026-02-25T18:00:00Z",
-            "source_type": "subagents",
-        }), encoding="utf-8")
+        (sub_dir / "agent-late.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-005",
+                    "timestamp": "2026-02-25T18:00:00Z",
+                    "source_type": "subagents",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         edit_dir = collected / "edits"
         edit_dir.mkdir(parents=True)
-        (edit_dir / "session-005_edit.json").write_text(json.dumps({
-            "session_id": "session-005",
-            "timestamp": "2026-02-25T08:00:00Z",
-            "source_type": "edits",
-        }), encoding="utf-8")
+        (edit_dir / "session-005_edit.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-005",
+                    "timestamp": "2026-02-25T08:00:00Z",
+                    "source_type": "edits",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         index = build_cross_reference_index(collected)
         assert index["session-005"]["timestamp"] == "2026-02-25T08:00:00Z"
@@ -2238,14 +2448,20 @@ class TestCrossReferenceIndex:
     def test_build_index_file_paths_are_relative(self, tmp_path):
         """File paths in the index are relative to collected_dir."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
         sub_dir = collected / "subagents"
         sub_dir.mkdir(parents=True)
-        (sub_dir / "agent-z.json").write_text(json.dumps({
-            "session_id": "session-006",
-            "timestamp": "2026-02-25T10:00:00Z",
-            "source_type": "subagents",
-        }), encoding="utf-8")
+        (sub_dir / "agent-z.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-006",
+                    "timestamp": "2026-02-25T10:00:00Z",
+                    "source_type": "subagents",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         index = build_cross_reference_index(collected)
         paths = index["session-006"]["subagents"]
@@ -2258,6 +2474,7 @@ class TestCrossReferenceIndex:
     def test_build_index_ignores_index_json_itself(self, tmp_path):
         """build_cross_reference_index ignores the index.json file in collected root."""
         from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
         collected = tmp_path / "collected"
         collected.mkdir(parents=True)
         # Write a stale index.json at root
@@ -2265,11 +2482,16 @@ class TestCrossReferenceIndex:
         # Write a real record
         sub_dir = collected / "subagents"
         sub_dir.mkdir()
-        (sub_dir / "agent-q.json").write_text(json.dumps({
-            "session_id": "session-007",
-            "timestamp": "2026-02-25T10:00:00Z",
-            "source_type": "subagents",
-        }), encoding="utf-8")
+        (sub_dir / "agent-q.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "session-007",
+                    "timestamp": "2026-02-25T10:00:00Z",
+                    "source_type": "subagents",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         index = build_cross_reference_index(collected)
         assert "session-007" in index
@@ -2283,6 +2505,7 @@ class TestCrossReferenceIndex:
     def test_scanner_build_index_method(self, tmp_path):
         """ClaudeDataScanner has a build_index() method."""
         from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+
         scanner = ClaudeDataScanner()
         scanner.collected_dir = tmp_path / "collected"
         scanner.collected_dir.mkdir(parents=True)
@@ -2293,4 +2516,5 @@ class TestCrossReferenceIndex:
     def test_build_cross_reference_index_importable_from_package(self):
         """build_cross_reference_index is importable from collectors package."""
         from bashgym.trace_capture.collectors import build_cross_reference_index
+
         assert callable(build_cross_reference_index)

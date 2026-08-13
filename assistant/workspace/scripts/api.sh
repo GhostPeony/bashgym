@@ -1,5 +1,5 @@
 #!/bin/bash
-# BashGym API helper for peony skills
+# BashGym API helper for portable Agent Skills
 # Usage: api.sh METHOD ENDPOINT [JSON_BODY]
 # Examples:
 #   api.sh GET /api/health

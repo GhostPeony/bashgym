@@ -82,9 +82,7 @@ export function PreviewPane({ id, title, filePath, isActive: _isActive }: Previe
             <RefreshCw className="w-6 h-6 text-text-muted animate-spin" />
           </div>
         ) : content ? (
-          <pre className="text-sm font-mono text-text-primary whitespace-pre-wrap">
-            {content}
-          </pre>
+          <pre className="text-sm font-mono text-text-primary whitespace-pre-wrap">{content}</pre>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-16 h-16 border-brutal border-border rounded-brutal flex items-center justify-center mb-4 bg-background-secondary">

@@ -9,7 +9,10 @@ interface HealthBannerProps {
 }
 
 // Map the run-analysis verdict level to Botanical Brutalist status styling.
-const LEVEL_STYLE: Record<string, { border: string; text: string; label: string; icon: React.ReactNode }> = {
+const LEVEL_STYLE: Record<
+  string,
+  { border: string; text: string; label: string; icon: React.ReactNode }
+> = {
   ok: {
     border: 'border-status-success',
     text: 'text-status-success',

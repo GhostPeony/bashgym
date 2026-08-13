@@ -14,7 +14,7 @@ export const CUSTOM_NODE_TYPES = [
   'toolkit',
   'skilllab',
   'mcp',
-  'knowledge',
+  'knowledge'
 ] as const satisfies readonly PanelType[]
 
 export type CustomNodeType = (typeof CUSTOM_NODE_TYPES)[number]

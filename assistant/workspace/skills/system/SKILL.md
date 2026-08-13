@@ -10,6 +10,7 @@ Query BashGym system health and hardware information.
 ## Health Check
 
 Quick service health check:
+
 ```text
 bashgym api GET /api/health
 ```
@@ -19,6 +20,7 @@ Returns: `{"status": "ok", "version": "..."}`
 ## System Information
 
 Full hardware report (CPU, GPU, memory, disk):
+
 ```text
 bashgym api GET /api/system/info
 ```
@@ -28,6 +30,7 @@ Returns GPU utilization, CUDA availability, memory usage, disk space.
 ## GPU Details
 
 Dedicated GPU endpoint:
+
 ```text
 bashgym api GET /api/system/gpus
 ```
@@ -35,6 +38,7 @@ bashgym api GET /api/system/gpus
 ## Aggregate Statistics
 
 Cross-subsystem stats (trace counts, model counts, training runs):
+
 ```text
 bashgym api GET /api/stats
 ```
@@ -42,6 +46,7 @@ bashgym api GET /api/stats
 ## Model Recommendations
 
 System-recommended models based on available hardware:
+
 ```text
 bashgym api GET /api/system/recommendations
 ```

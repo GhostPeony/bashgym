@@ -15,7 +15,7 @@ import {
   reconciliationRetryDelay,
   snapshotSemanticIdentity,
   validateCampaignSnapshot,
-  type CampaignHintV1,
+  type CampaignHintV1
 } from './campaignFreshness'
 import { controlRoomSnapshot } from '../components/autoresearch/controlRoomFixtures'
 import { campaignApi, type CampaignControlRoomSnapshotV1 } from '../services/api'
@@ -31,7 +31,7 @@ const hint = (overrides: Partial<CampaignHintV1> = {}): CampaignHintV1 => ({
   event_type: 'campaign:created',
   correlation_id: 'correlation-a',
   emitted_at: '2026-07-16T18:00:00Z',
-  ...overrides,
+  ...overrides
 })
 
 const controller = {
@@ -39,11 +39,16 @@ const controller = {
   online: true,
   state: 'online' as const,
   code: 'controller_online' as const,
-  observed_at: '2026-07-16T18:00:00Z',
+  observed_at: '2026-07-16T18:00:00Z'
 }
 
 test('duplicate and out-of-order hints are semantic no-ops', () => {
-  const state = createCampaignFreshness({ eventCursor: 42, aggregateVersion: 7, hasSnapshot: true, connected: true })
+  const state = createCampaignFreshness({
+    eventCursor: 42,
+    aggregateVersion: 7,
+    hasSnapshot: true,
+    connected: true
+  })
   const duplicate = applyCampaignHint(state, hint())
   const older = applyCampaignHint(state, hint({ event_cursor: 41, aggregate_version: 6 }))
 
@@ -58,7 +63,7 @@ test('subscription acknowledgement is required before target coverage can become
     eventCursor: 0,
     aggregateVersion: 0,
     hasSnapshot: false,
-    connected: true,
+    connected: true
   })
   const request = beginCampaignReconciliation(initial)
   const coveredBeforeAck = finishCampaignReconciliation(request, {
@@ -66,7 +71,7 @@ test('subscription acknowledgement is required before target coverage can become
     eventCursor: 4,
     aggregateVersion: 2,
     semanticKey: 'snapshot-4-2',
-    verifiedAt: '2026-07-16T18:00:00Z',
+    verifiedAt: '2026-07-16T18:00:00Z'
   })
 
   assert.notEqual(coveredBeforeAck.freshness, 'live')
@@ -79,24 +84,33 @@ test('subscription acknowledgement is required before target coverage can become
     eventCursor: 4,
     aggregateVersion: 2,
     semanticKey: 'snapshot-4-2',
-    verifiedAt: '2026-07-16T18:00:01Z',
+    verifiedAt: '2026-07-16T18:00:01Z'
   })
   assert.equal(coveredAfterAck.freshness, 'live')
 })
 
 test('targets and applied authority are component-wise monotonic, including crossed hints', () => {
-  const subscribed = acknowledgeCampaignSubscription(createCampaignFreshness({
-    eventCursor: 40,
-    aggregateVersion: 7,
-    hasSnapshot: true,
-    connected: true,
-  }), 1)
-  const cursorAdvance = applyCampaignHint(subscribed, hint({ event_cursor: 50, aggregate_version: 6 }))
+  const subscribed = acknowledgeCampaignSubscription(
+    createCampaignFreshness({
+      eventCursor: 40,
+      aggregateVersion: 7,
+      hasSnapshot: true,
+      connected: true
+    }),
+    1
+  )
+  const cursorAdvance = applyCampaignHint(
+    subscribed,
+    hint({ event_cursor: 50, aggregate_version: 6 })
+  )
   assert.equal(cursorAdvance.reconcile, true)
   assert.equal(cursorAdvance.state.targetCursor, 50)
   assert.equal(cursorAdvance.state.targetVersion, 7)
 
-  const versionAdvance = applyCampaignHint(cursorAdvance.state, hint({ event_cursor: 39, aggregate_version: 9 }))
+  const versionAdvance = applyCampaignHint(
+    cursorAdvance.state,
+    hint({ event_cursor: 39, aggregate_version: 9 })
+  )
   assert.equal(versionAdvance.reconcile, true)
   assert.equal(versionAdvance.state.targetCursor, 50)
   assert.equal(versionAdvance.state.targetVersion, 9)
@@ -107,7 +121,7 @@ test('targets and applied authority are component-wise monotonic, including cros
     eventCursor: 39,
     aggregateVersion: 10,
     semanticKey: 'regressive-cursor',
-    verifiedAt: '2026-07-16T18:00:00Z',
+    verifiedAt: '2026-07-16T18:00:00Z'
   })
   assert.equal(lowerCursor.appliedCursor, 40)
   assert.equal(lowerCursor.appliedVersion, 7)
@@ -118,22 +132,53 @@ test('snapshot validator rejects schema and identity mismatches before store app
   const snapshot = controlRoomSnapshot({
     workspace_id: 'workspace-a',
     campaign_id: 'campaign-a',
-    campaign: { ...controlRoomSnapshot().campaign, campaign_id: 'campaign-a' },
+    campaign: { ...controlRoomSnapshot().campaign, campaign_id: 'campaign-a' }
   })
-  assert.equal(validateCampaignSnapshot(snapshot, 'workspace-a', 'campaign-a')?.campaign_id, 'campaign-a')
-  assert.equal(validateCampaignSnapshot({ ...snapshot, schema_version: 'control_room_snapshot.v2' }, 'workspace-a', 'campaign-a'), null)
-  assert.equal(validateCampaignSnapshot({ ...snapshot, workspace_id: 'workspace-b' }, 'workspace-a', 'campaign-a'), null)
-  assert.equal(validateCampaignSnapshot({ ...snapshot, campaign_id: 'campaign-b' }, 'workspace-a', 'campaign-a'), null)
-  assert.equal(validateCampaignSnapshot({
-    schema_version: 'control_room_snapshot.v1',
-    workspace_id: 'workspace-a',
-    campaign_id: 'campaign-a',
-    aggregate_version: 1,
-    latest_event_cursor: 1,
-    campaign: { campaign_id: 'campaign-a', aggregate_version: 1 },
-    controller: {},
-    readiness: {},
-  }, 'workspace-a', 'campaign-a'), null)
+  assert.equal(
+    validateCampaignSnapshot(snapshot, 'workspace-a', 'campaign-a')?.campaign_id,
+    'campaign-a'
+  )
+  assert.equal(
+    validateCampaignSnapshot(
+      { ...snapshot, schema_version: 'control_room_snapshot.v2' },
+      'workspace-a',
+      'campaign-a'
+    ),
+    null
+  )
+  assert.equal(
+    validateCampaignSnapshot(
+      { ...snapshot, workspace_id: 'workspace-b' },
+      'workspace-a',
+      'campaign-a'
+    ),
+    null
+  )
+  assert.equal(
+    validateCampaignSnapshot(
+      { ...snapshot, campaign_id: 'campaign-b' },
+      'workspace-a',
+      'campaign-a'
+    ),
+    null
+  )
+  assert.equal(
+    validateCampaignSnapshot(
+      {
+        schema_version: 'control_room_snapshot.v1',
+        workspace_id: 'workspace-a',
+        campaign_id: 'campaign-a',
+        aggregate_version: 1,
+        latest_event_cursor: 1,
+        campaign: { campaign_id: 'campaign-a', aggregate_version: 1 },
+        controller: {},
+        readiness: {}
+      },
+      'workspace-a',
+      'campaign-a'
+    ),
+    null
+  )
 })
 
 test('snapshot validator accepts backend-valid champion references through the 2000-character boundary', () => {
@@ -141,12 +186,13 @@ test('snapshot validator accepts backend-valid champion references through the 2
   const base = controlRoomSnapshot()
   const snapshot = controlRoomSnapshot({
     campaign: { ...base.campaign, champion_ref: championRef },
-    champion: { ...base.champion!, candidate_ref: championRef },
+    champion: { ...base.champion!, candidate_ref: championRef }
   })
 
   assert.equal(
-    validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id)?.campaign.champion_ref,
-    championRef,
+    validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id)?.campaign
+      .champion_ref,
+    championRef
   )
 })
 
@@ -156,38 +202,47 @@ test('snapshot validator accepts canonical budget Identifier units through 160 c
   const snapshot = controlRoomSnapshot({
     budget: {
       ...base.budget,
-      resources: [{ ...base.budget.resources[0], unit }],
-    },
+      resources: [{ ...base.budget.resources[0], unit }]
+    }
   })
 
   assert.equal(
-    validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id)?.budget.resources[0]?.unit,
-    unit,
+    validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id)?.budget
+      .resources[0]?.unit,
+    unit
   )
 })
 
 test('snapshot validator rejects budget units outside the canonical Identifier contract', () => {
   const base = controlRoomSnapshot()
-  const withUnit = (unit: string) => controlRoomSnapshot({
-    budget: {
-      ...base.budget,
-      resources: [{ ...base.budget.resources[0], unit }],
-    },
-  })
+  const withUnit = (unit: string) =>
+    controlRoomSnapshot({
+      budget: {
+        ...base.budget,
+        resources: [{ ...base.budget.resources[0], unit }]
+      }
+    })
 
-  assert.equal(validateCampaignSnapshot(withUnit('../gpu'), base.workspace_id, base.campaign_id), null)
-  assert.equal(validateCampaignSnapshot(withUnit(`u${'n'.repeat(160)}`), base.workspace_id, base.campaign_id), null)
+  assert.equal(
+    validateCampaignSnapshot(withUnit('../gpu'), base.workspace_id, base.campaign_id),
+    null
+  )
+  assert.equal(
+    validateCampaignSnapshot(withUnit(`u${'n'.repeat(160)}`), base.workspace_id, base.campaign_id),
+    null
+  )
 })
 
 test('snapshot validator does not invent a launch-ready materializability implication', () => {
   const base = controlRoomSnapshot()
   const snapshot = controlRoomSnapshot({
-    readiness: { ...base.readiness, materializable: false, launch_ready: true },
+    readiness: { ...base.readiness, materializable: false, launch_ready: true }
   })
 
   assert.equal(
-    validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id)?.readiness.launch_ready,
-    true,
+    validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id)?.readiness
+      .launch_ready,
+    true
   )
 })
 
@@ -206,7 +261,7 @@ test('snapshot validator accepts strings without renderer-only caps when the v1 
     code: 'campaign_blocked',
     summary: long,
     evidence_ids: [],
-    secondary_codes: [],
+    secondary_codes: []
   }
   snapshot.active_work!.hypothesis_summary = long
   snapshot.active_work!.primary_variable_summary = long
@@ -221,76 +276,135 @@ test('snapshot validator accepts strings without renderer-only caps when the v1 
 
   assert.equal(
     validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id),
-    snapshot,
+    snapshot
   )
 })
 
 test('snapshot validator rejects every wired Identifier boundary outside the backend grammar', () => {
   const invalidIdentifier = '../outside'
   const mutations: Array<(snapshot: CampaignControlRoomSnapshotV1) => void> = [
-    (snapshot) => { snapshot.campaign.active_study_id = invalidIdentifier },
-    (snapshot) => { snapshot.controller.controller_instance_id = invalidIdentifier },
-    (snapshot) => { snapshot.readiness.blocking_codes = [invalidIdentifier] },
-    (snapshot) => { snapshot.journey[0]!.next_action_ids = [invalidIdentifier] },
-    (snapshot) => { snapshot.active_work!.attempt_id = invalidIdentifier },
-    (snapshot) => { snapshot.candidate!.source_attempt_ids = [invalidIdentifier] },
-    (snapshot) => { snapshot.candidate!.latest_comparable_evaluation_id = invalidIdentifier },
-    (snapshot) => { snapshot.agents = [{
-      schema_version: 'attached_agent_summary.v1',
-      session_id: 'session-1', actor_id: 'actor-1', origin_id: 'origin-1', bundle_id: 'bundle-1',
-      capability_revision: 1, expires_at: '2026-07-16T18:00:00Z', liveness: 'active',
-      last_cursor: 0, last_request_id: invalidIdentifier,
-    }] },
-    (snapshot) => { snapshot.decision_surface.next_actions[0]!.action = invalidIdentifier },
-    (snapshot) => { snapshot.decision_surface.recovery_actions = [invalidIdentifier] },
+    (snapshot) => {
+      snapshot.campaign.active_study_id = invalidIdentifier
+    },
+    (snapshot) => {
+      snapshot.controller.controller_instance_id = invalidIdentifier
+    },
+    (snapshot) => {
+      snapshot.readiness.blocking_codes = [invalidIdentifier]
+    },
+    (snapshot) => {
+      snapshot.journey[0]!.next_action_ids = [invalidIdentifier]
+    },
+    (snapshot) => {
+      snapshot.active_work!.attempt_id = invalidIdentifier
+    },
+    (snapshot) => {
+      snapshot.candidate!.source_attempt_ids = [invalidIdentifier]
+    },
+    (snapshot) => {
+      snapshot.candidate!.latest_comparable_evaluation_id = invalidIdentifier
+    },
+    (snapshot) => {
+      snapshot.agents = [
+        {
+          schema_version: 'attached_agent_summary.v1',
+          session_id: 'session-1',
+          actor_id: 'actor-1',
+          origin_id: 'origin-1',
+          bundle_id: 'bundle-1',
+          capability_revision: 1,
+          expires_at: '2026-07-16T18:00:00Z',
+          liveness: 'active',
+          last_cursor: 0,
+          last_request_id: invalidIdentifier
+        }
+      ]
+    },
+    (snapshot) => {
+      snapshot.decision_surface.next_actions[0]!.action = invalidIdentifier
+    },
+    (snapshot) => {
+      snapshot.decision_surface.recovery_actions = [invalidIdentifier]
+    }
   ]
 
   for (const mutate of mutations) {
     const snapshot = structuredClone(controlRoomSnapshot())
     mutate(snapshot)
-    assert.equal(validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id), null)
+    assert.equal(
+      validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id),
+      null
+    )
   }
 
   const crossScope = structuredClone(controlRoomSnapshot())
   crossScope.workspace_id = invalidIdentifier
-  assert.equal(validateCampaignSnapshot(crossScope, invalidIdentifier, crossScope.campaign_id), null)
+  assert.equal(
+    validateCampaignSnapshot(crossScope, invalidIdentifier, crossScope.campaign_id),
+    null
+  )
 })
 
 test('snapshot validator rejects backend-invalid enum and digest values', () => {
   const mutations: Array<(snapshot: CampaignControlRoomSnapshotV1) => void> = [
     (snapshot) => {
-      snapshot.campaign.status = 'future_status' as CampaignControlRoomSnapshotV1['campaign']['status']
+      snapshot.campaign.status =
+        'future_status' as CampaignControlRoomSnapshotV1['campaign']['status']
     },
-    (snapshot) => { snapshot.metrics[0]!.comparability_key = 'not-a-digest' },
-    (snapshot) => { snapshot.decision_surface.next_actions[0]!.capability = 'campaign.future' },
+    (snapshot) => {
+      snapshot.metrics[0]!.comparability_key = 'not-a-digest'
+    },
+    (snapshot) => {
+      snapshot.decision_surface.next_actions[0]!.capability = 'campaign.future'
+    }
   ]
 
   for (const mutate of mutations) {
     const snapshot = structuredClone(controlRoomSnapshot())
     mutate(snapshot)
-    assert.equal(validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id), null)
+    assert.equal(
+      validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id),
+      null
+    )
   }
 })
 
 test('snapshot validator fails closed instead of throwing on malformed decision actions', () => {
   const snapshot = structuredClone(controlRoomSnapshot())
-  snapshot.decision_surface.next_actions = [null] as unknown as CampaignControlRoomSnapshotV1['decision_surface']['next_actions']
+  snapshot.decision_surface.next_actions = [
+    null
+  ] as unknown as CampaignControlRoomSnapshotV1['decision_surface']['next_actions']
 
-  assert.doesNotThrow(() => validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id))
-  assert.equal(validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id), null)
+  assert.doesNotThrow(() =>
+    validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id)
+  )
+  assert.equal(
+    validateCampaignSnapshot(snapshot, snapshot.workspace_id, snapshot.campaign_id),
+    null
+  )
 })
 
 test('canonical identifiers accept colons and reject leading punctuation', () => {
-  assert.equal(parseCampaignHint(hint({
-    workspace_id: 'workspace:a',
-    campaign_id: 'campaign:a',
-    correlation_id: 'correlation:a',
-  }))?.workspace_id, 'workspace:a')
+  assert.equal(
+    parseCampaignHint(
+      hint({
+        workspace_id: 'workspace:a',
+        campaign_id: 'campaign:a',
+        correlation_id: 'correlation:a'
+      })
+    )?.workspace_id,
+    'workspace:a'
+  )
   assert.equal(parseCampaignHint(hint({ workspace_id: '-workspace' })), null)
 })
 
 test('new hints advance targets and global cursor gaps remain ordinary wakeups', () => {
-  const state = createCampaignFreshness({ eventCursor: 40, aggregateVersion: 5, hasSnapshot: true, connected: true })
+  const state = createCampaignFreshness({
+    eventCursor: 40,
+    aggregateVersion: 5,
+    hasSnapshot: true,
+    connected: true
+  })
   const contiguous = applyCampaignHint(state, hint({ event_cursor: 41, aggregate_version: 6 }))
   const gap = applyCampaignHint(state, hint({ event_cursor: 44, aggregate_version: 7 }))
 
@@ -303,7 +417,12 @@ test('new hints advance targets and global cursor gaps remain ordinary wakeups',
 })
 
 test('expired event detail cursor marks authority stale until compact reconciliation starts', () => {
-  const state = createCampaignFreshness({ eventCursor: 42, aggregateVersion: 7, hasSnapshot: true, connected: true })
+  const state = createCampaignFreshness({
+    eventCursor: 42,
+    aggregateVersion: 7,
+    hasSnapshot: true,
+    connected: true
+  })
   const expired = expireCampaignCursor(state)
 
   assert.equal(expired.freshness, 'stale')
@@ -314,7 +433,12 @@ test('expired event detail cursor marks authority stale until compact reconcilia
 })
 
 test('disconnect, reconnect, and renderer reload preserve cached state without claiming authority', () => {
-  const reloaded = createCampaignFreshness({ eventCursor: 42, aggregateVersion: 7, hasSnapshot: true, connected: true })
+  const reloaded = createCampaignFreshness({
+    eventCursor: 42,
+    aggregateVersion: 7,
+    hasSnapshot: true,
+    connected: true
+  })
   assert.equal(reloaded.freshness, 'stale')
 
   const offline = markCampaignDisconnected(reloaded)
@@ -326,20 +450,25 @@ test('disconnect, reconnect, and renderer reload preserve cached state without c
 
 test('overlapping refresh completion cannot regress the newest generation', () => {
   const initial = acknowledgeCampaignSubscription(
-    createCampaignFreshness({ eventCursor: 40, aggregateVersion: 5, hasSnapshot: true, connected: true }),
-    1,
+    createCampaignFreshness({
+      eventCursor: 40,
+      aggregateVersion: 5,
+      hasSnapshot: true,
+      connected: true
+    }),
+    1
   )
   const first = beginCampaignReconciliation(initial)
   const second = beginCampaignReconciliation(first)
   const late = finishCampaignReconciliation(second, {
     generation: first.generation,
     eventCursor: 41,
-    aggregateVersion: 6,
+    aggregateVersion: 6
   })
   const current = finishCampaignReconciliation(late, {
     generation: second.generation,
     eventCursor: 42,
-    aggregateVersion: 7,
+    aggregateVersion: 7
   })
 
   assert.equal(late, second)
@@ -349,16 +478,41 @@ test('overlapping refresh completion cannot regress the newest generation', () =
 })
 
 test('failures classify stale, offline, and error with bounded exponential retry', () => {
-  const cached = beginCampaignReconciliation(createCampaignFreshness({ eventCursor: 42, aggregateVersion: 7, hasSnapshot: true, connected: true }))
-  assert.equal(failCampaignReconciliation(cached, { generation: cached.generation, connected: true }).freshness, 'stale')
-  assert.equal(failCampaignReconciliation(cached, { generation: cached.generation, connected: false }).freshness, 'offline')
+  const cached = beginCampaignReconciliation(
+    createCampaignFreshness({
+      eventCursor: 42,
+      aggregateVersion: 7,
+      hasSnapshot: true,
+      connected: true
+    })
+  )
+  assert.equal(
+    failCampaignReconciliation(cached, { generation: cached.generation, connected: true })
+      .freshness,
+    'stale'
+  )
+  assert.equal(
+    failCampaignReconciliation(cached, { generation: cached.generation, connected: false })
+      .freshness,
+    'offline'
+  )
 
-  const empty = beginCampaignReconciliation(createCampaignFreshness({ eventCursor: 0, aggregateVersion: 0, hasSnapshot: false, connected: true }))
-  assert.equal(failCampaignReconciliation(empty, {
-    generation: empty.generation,
-    connected: true,
-    exhausted: true,
-  }).freshness, 'error')
+  const empty = beginCampaignReconciliation(
+    createCampaignFreshness({
+      eventCursor: 0,
+      aggregateVersion: 0,
+      hasSnapshot: false,
+      connected: true
+    })
+  )
+  assert.equal(
+    failCampaignReconciliation(empty, {
+      generation: empty.generation,
+      connected: true,
+      exhausted: true
+    }).freshness,
+    'error'
+  )
   assert.deepEqual([0, 1, 2, 10].map(reconciliationRetryDelay), [250, 500, 1_000, 8_000])
 })
 
@@ -373,8 +527,14 @@ test('campaign hint parser fails closed on extra or unsafe fields', () => {
 })
 
 test('campaign hint parser accepts only the backend canonical UTC timestamp form', () => {
-  assert.equal(parseCampaignHint(hint({ emitted_at: '2026-07-16T18:00:00Z' }))?.emitted_at, '2026-07-16T18:00:00Z')
-  assert.equal(parseCampaignHint(hint({ emitted_at: '2026-07-16T18:00:00.123456Z' }))?.emitted_at, '2026-07-16T18:00:00.123456Z')
+  assert.equal(
+    parseCampaignHint(hint({ emitted_at: '2026-07-16T18:00:00Z' }))?.emitted_at,
+    '2026-07-16T18:00:00Z'
+  )
+  assert.equal(
+    parseCampaignHint(hint({ emitted_at: '2026-07-16T18:00:00.123456Z' }))?.emitted_at,
+    '2026-07-16T18:00:00.123456Z'
+  )
   assert.equal(parseCampaignHint(hint({ emitted_at: '2026-07-16T11:00:00-07:00' })), null)
   assert.equal(parseCampaignHint(hint({ emitted_at: '2026-07-16 18:00:00Z' })), null)
   assert.equal(parseCampaignHint(hint({ emitted_at: '2026-07-16T18:00:00.123Z' })), null)
@@ -389,23 +549,29 @@ test('semantic identity mirrors stable authoritative snapshot fields and ignores
       ...snapshot,
       snapshot_at: '2026-07-16T19:00:00Z',
       controller: { ...snapshot.controller, observed_at: '2026-07-16T19:00:00Z' },
-      readiness: { ...snapshot.readiness, checked_at: '2026-07-16T19:00:00Z' },
+      readiness: { ...snapshot.readiness, checked_at: '2026-07-16T19:00:00Z' }
     }),
-    key,
+    key
   )
   assert.notEqual(
-    snapshotSemanticIdentity({ ...snapshot, controller: {
-      ...snapshot.controller,
-      controller_observation_version: snapshot.controller.controller_observation_version + 1,
-    } }),
-    key,
+    snapshotSemanticIdentity({
+      ...snapshot,
+      controller: {
+        ...snapshot.controller,
+        controller_observation_version: snapshot.controller.controller_observation_version + 1
+      }
+    }),
+    key
   )
   assert.notEqual(
-    snapshotSemanticIdentity({ ...snapshot, readiness: {
-      ...snapshot.readiness,
-      blocking_codes: [...snapshot.readiness.blocking_codes, 'new_blocker'],
-    } }),
-    key,
+    snapshotSemanticIdentity({
+      ...snapshot,
+      readiness: {
+        ...snapshot.readiness,
+        blocking_codes: [...snapshot.readiness.blocking_codes, 'new_blocker']
+      }
+    }),
+    key
   )
 })
 
@@ -423,7 +589,7 @@ function campaign(id: string, title = id): CampaignRecord {
     status: 'active',
     version: 1,
     created_at: '2026-07-16T18:00:00Z',
-    updated_at: '2026-07-16T18:00:00Z',
+    updated_at: '2026-07-16T18:00:00Z'
   }
 }
 
@@ -432,7 +598,7 @@ test('store ignores duplicate hints and reconciles a gap from the compact snapsh
   useCampaignStore.setState({ workspaces: {} })
   campaignApi.list = async () => ({
     ok: true,
-    data: { campaigns: [campaign('campaign-a')], controller },
+    data: { campaigns: [campaign('campaign-a')], controller }
   })
   let snapshots = 0
   campaignApi.snapshot = async () => {
@@ -448,9 +614,9 @@ test('store ignores duplicate hints and reconciles a gap from the compact snapsh
         campaign: {
           ...controlRoomSnapshot().campaign,
           campaign_id: 'campaign-a',
-          aggregate_version: advanced ? 8 : 7,
-        },
-      }),
+          aggregate_version: advanced ? 8 : 7
+        }
+      })
     }
   }
   try {
@@ -479,10 +645,10 @@ test('campaign-created hint materializes only after authoritative fleet state co
     data: {
       campaigns: [
         campaign('campaign-a'),
-        ...(includeCreated ? [campaign('campaign-new', 'Authoritative New Campaign')] : []),
+        ...(includeCreated ? [campaign('campaign-new', 'Authoritative New Campaign')] : [])
       ],
-      controller,
-    },
+      controller
+    }
   })
   campaignApi.snapshot = async (workspaceId, campaignId) => ({
     ok: true,
@@ -493,26 +659,32 @@ test('campaign-created hint materializes only after authoritative fleet state co
       campaign: {
         ...controlRoomSnapshot().campaign,
         campaign_id: campaignId,
-        title: campaignId === 'campaign-new'
-          ? 'Authoritative New Campaign'
-          : controlRoomSnapshot().campaign.title,
-      },
-    }),
+        title:
+          campaignId === 'campaign-new'
+            ? 'Authoritative New Campaign'
+            : controlRoomSnapshot().campaign.title
+      }
+    })
   })
   try {
     await useCampaignStore.getState().load('workspace-a', 'campaign-a')
     await useCampaignStore.getState().handleSubscription('workspace-a', true, 1)
     includeCreated = true
-    await useCampaignStore.getState().handleHint(hint({
-      campaign_id: 'campaign-new',
-      event_cursor: 43,
-      aggregate_version: 1,
-      event_type: 'campaign:created',
-    }))
+    await useCampaignStore.getState().handleHint(
+      hint({
+        campaign_id: 'campaign-new',
+        event_cursor: 43,
+        aggregate_version: 1,
+        event_type: 'campaign:created'
+      })
+    )
 
     const campaigns = useCampaignStore.getState().workspaces['workspace-a']?.campaigns || []
     const missing = campaignsMissingPanels(campaigns, [])
-    assert.equal(missing.find((item) => item.campaign_id === 'campaign-new')?.title, 'Authoritative New Campaign')
+    assert.equal(
+      missing.find((item) => item.campaign_id === 'campaign-new')?.title,
+      'Authoritative New Campaign'
+    )
   } finally {
     Object.assign(campaignApi, originals)
     useCampaignStore.setState({ workspaces: {} })
@@ -525,7 +697,7 @@ test('retry exhaustion keeps an unsatisfied pending target and becomes error', a
   useCampaignStore.setState({ workspaces: {} })
   campaignApi.list = async () => ({
     ok: true,
-    data: { campaigns: [campaign('campaign-a')], controller },
+    data: { campaigns: [campaign('campaign-a')], controller }
   })
   let snapshots = 0
   campaignApi.snapshot = async () => {
@@ -537,8 +709,8 @@ test('retry exhaustion keeps an unsatisfied pending target and becomes error', a
         campaign_id: 'campaign-a',
         aggregate_version: 7,
         latest_event_cursor: 42,
-        campaign: { ...controlRoomSnapshot().campaign, campaign_id: 'campaign-a' },
-      }),
+        campaign: { ...controlRoomSnapshot().campaign, campaign_id: 'campaign-a' }
+      })
     }
   }
   globalThis.setTimeout = ((callback: (...args: unknown[]) => void) => {
@@ -568,7 +740,7 @@ test('coalesced hint reconciliation honors the highest pending target', async ()
   useCampaignStore.setState({ workspaces: {} })
   campaignApi.list = async () => ({
     ok: true,
-    data: { campaigns: [campaign('campaign-a')], controller },
+    data: { campaigns: [campaign('campaign-a')], controller }
   })
   campaignApi.snapshot = async () => ({
     ok: true,
@@ -577,8 +749,8 @@ test('coalesced hint reconciliation honors the highest pending target', async ()
       campaign_id: 'campaign-a',
       aggregate_version: 7,
       latest_event_cursor: 42,
-      campaign: { ...controlRoomSnapshot().campaign, campaign_id: 'campaign-a' },
-    }),
+      campaign: { ...controlRoomSnapshot().campaign, campaign_id: 'campaign-a' }
+    })
   })
   globalThis.setTimeout = ((callback: (...args: unknown[]) => void) => {
     queueMicrotask(callback)
@@ -588,7 +760,9 @@ test('coalesced hint reconciliation honors the highest pending target', async ()
     await useCampaignStore.getState().load('workspace-a', 'campaign-a')
     await useCampaignStore.getState().handleSubscription('workspace-a', true, 1)
     let release!: (cursor: number) => void
-    const firstSnapshot = new Promise<number>((resolve) => { release = resolve })
+    const firstSnapshot = new Promise<number>((resolve) => {
+      release = resolve
+    })
     let liveCalls = 0
     campaignApi.snapshot = async () => {
       liveCalls += 1
@@ -604,15 +778,19 @@ test('coalesced hint reconciliation honors the highest pending target', async ()
           campaign: {
             ...controlRoomSnapshot().campaign,
             campaign_id: 'campaign-a',
-            aggregate_version: aggregateVersion,
-          },
-        }),
+            aggregate_version: aggregateVersion
+          }
+        })
       }
     }
 
-    const first = useCampaignStore.getState().handleHint(hint({ event_cursor: 43, aggregate_version: 8 }))
+    const first = useCampaignStore
+      .getState()
+      .handleHint(hint({ event_cursor: 43, aggregate_version: 8 }))
     await Promise.resolve()
-    const second = useCampaignStore.getState().handleHint(hint({ event_cursor: 45, aggregate_version: 9 }))
+    const second = useCampaignStore
+      .getState()
+      .handleHint(hint({ event_cursor: 45, aggregate_version: 9 }))
     release(43)
     await Promise.all([first, second])
 

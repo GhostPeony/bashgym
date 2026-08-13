@@ -7,10 +7,11 @@ import os
 import re
 import subprocess
 import tarfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import Field, field_validator
@@ -24,6 +25,53 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+
+
+def _model_artifact_relative_path(artifact: Any) -> str:
+    """Return the checkpoint-relative identity used by evaluator manifests."""
+
+    remote_relative_path = getattr(artifact, "remote_relative_path", None)
+    if isinstance(remote_relative_path, str) and remote_relative_path.startswith("model/"):
+        explicit = remote_relative_path.removeprefix("model/")
+    else:
+        metadata = getattr(artifact, "metadata", {})
+        explicit = metadata.get("relative_path")
+    if isinstance(explicit, str) and explicit:
+        relative = PurePosixPath(explicit)
+    else:
+        parts = Path(artifact.uri).parts
+        try:
+            final_index = len(parts) - 1 - tuple(reversed(parts)).index("final")
+        except ValueError as exc:
+            raise ValueError("model artifact is not beneath a final checkpoint directory") from exc
+        relative = PurePosixPath(*parts[final_index + 1 :])
+    normalized = relative.as_posix()
+    if (
+        relative.is_absolute()
+        or not normalized
+        or normalized == "."
+        or ".." in relative.parts
+        or "\\" in normalized
+    ):
+        raise ValueError("model artifact relative path is unsafe")
+    return normalized
+
+
+def canonical_model_manifest_digest(artifacts: Iterable[Any]) -> str:
+    """Digest all checkpoint files as sorted path/hash/size triples."""
+
+    entries = sorted(
+        (
+            _model_artifact_relative_path(artifact),
+            str(artifact.sha256),
+            int(artifact.size_bytes),
+        )
+        for artifact in artifacts
+    )
+    if not entries or len({entry[0] for entry in entries}) != len(entries):
+        raise ValueError("model artifact manifest must be non-empty with unique paths")
+    return canonical_hash([list(entry) for entry in entries])
+
 
 _CODE_VARIABLE_PREFIXES = (
     (("trainer.", "algorithm."), CodeMutationKind.TRAINER),
@@ -740,5 +788,6 @@ __all__ = [
     "CodeLineageWorkspaceReceipt",
     "GitHypothesisLineageManager",
     "GitLineageError",
+    "canonical_model_manifest_digest",
     "code_mutation_kind_for_variable",
 ]

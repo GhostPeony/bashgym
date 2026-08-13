@@ -10,8 +10,8 @@ test('keeps the panels reference when a panel config update is unchanged', () =>
     title: 'Data Designer',
     adapterConfig: {
       status: 'running',
-      progress: { current: 20, total: 100, unit: 'seeds' },
-    },
+      progress: { current: 20, total: 100, unit: 'seeds' }
+    }
   }
   useTerminalStore.setState({ panels: [panel] })
 
@@ -19,7 +19,7 @@ test('keeps the panels reference when a panel config update is unchanged', () =>
     const before = useTerminalStore.getState().panels
     useTerminalStore.getState().updatePanelConfig('designer-panel', {
       status: 'running',
-      progress: { current: 20, total: 100, unit: 'seeds' },
+      progress: { current: 20, total: 100, unit: 'seeds' }
     })
 
     assert.equal(useTerminalStore.getState().panels, before)
@@ -34,7 +34,7 @@ test('replaces the panels reference when a panel config actually changes', () =>
     id: 'designer-panel',
     type: 'designer',
     title: 'Data Designer',
-    adapterConfig: { status: 'running' },
+    adapterConfig: { status: 'running' }
   }
   useTerminalStore.setState({ panels: [panel] })
 
@@ -43,10 +43,7 @@ test('replaces the panels reference when a panel config actually changes', () =>
     useTerminalStore.getState().updatePanelConfig('designer-panel', { status: 'completed' })
 
     assert.notEqual(useTerminalStore.getState().panels, before)
-    assert.equal(
-      useTerminalStore.getState().panels[0].adapterConfig?.status,
-      'completed',
-    )
+    assert.equal(useTerminalStore.getState().panels[0].adapterConfig?.status, 'completed')
   } finally {
     useTerminalStore.setState({ panels: originalPanels })
   }

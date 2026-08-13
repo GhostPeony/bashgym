@@ -26,7 +26,13 @@ interface Props {
  * Ollama) sourced from the live provider catalog, so it never goes stale, with
  * free-text fallback for any model id. Replaces raw text inputs.
  */
-export function ModelSelect({ value, onChange, placeholder, className, catalogOnly = false }: Props) {
+export function ModelSelect({
+  value,
+  onChange,
+  placeholder,
+  className,
+  catalogOnly = false
+}: Props) {
   const [options, setOptions] = useState<{ value: string; label: string }[]>([])
   const mergedOptions = useMemo(
     () => mergeModelOptions(options, catalogOnly),

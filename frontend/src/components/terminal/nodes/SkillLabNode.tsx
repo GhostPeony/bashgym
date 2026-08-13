@@ -15,7 +15,7 @@ import {
   SquareTerminal,
   Trash2,
   WandSparkles,
-  XCircle,
+  XCircle
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
@@ -25,12 +25,18 @@ import {
   type SkillLabContract,
   type SkillLabRun,
   type ToolkitInventoryResponse,
-  type ToolkitSkill,
+  type ToolkitSkill
 } from '../../../services/api'
 import { useSkillLabStore, useTerminalStore, useWorkspaceStore } from '../../../stores'
 import { DataNodeShell } from './DataNodeShell'
 import { hueFor } from './dataPanels'
-import { ConfigPill, ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
+import {
+  ConfigPill,
+  ConfigRow,
+  ConfigRows,
+  ConfigSection,
+  NodeConfigModal
+} from './NodeConfigModal'
 import {
   buildSkillLabTerminalPrompt,
   defaultSkillContract,
@@ -42,7 +48,7 @@ import {
   skillLabPlanScope,
   skillIdFor,
   skillSourceLabel,
-  validateSkillContract,
+  validateSkillContract
 } from './skillLabModel'
 import type { DataNodeData } from './types'
 
@@ -52,11 +58,14 @@ const ACTIVE_POLL_MS = 3_000
 const IDLE_POLL_MS = 15_000
 
 function RunStatus({ run, onClick }: { run: SkillLabRun; onClick?: () => void }) {
-  const tone = run.status === 'failed'
-    ? 'text-status-error'
-    : run.status === 'completed'
-      ? run.kpis?.verdict === 'effective' ? 'text-status-success' : 'text-status-warning'
-      : 'text-accent'
+  const tone =
+    run.status === 'failed'
+      ? 'text-status-error'
+      : run.status === 'completed'
+        ? run.kpis?.verdict === 'effective'
+          ? 'text-status-success'
+          : 'text-status-warning'
+        : 'text-accent'
   const content = (
     <>
       {run.status === 'running' || run.status === 'queued' ? (
@@ -73,10 +82,16 @@ function RunStatus({ run, onClick }: { run: SkillLabRun; onClick?: () => void })
     </>
   )
   return onClick ? (
-    <button type="button" className="flex w-full min-w-0 items-center gap-2 rounded-brutal px-1 py-0.5 text-left font-mono text-[10px] hover:bg-background-secondary" onClick={onClick}>
+    <button
+      type="button"
+      className="flex w-full min-w-0 items-center gap-2 rounded-brutal px-1 py-0.5 text-left font-mono text-[10px] hover:bg-background-secondary"
+      onClick={onClick}
+    >
       {content}
     </button>
-  ) : <div className="flex min-w-0 items-center gap-2 font-mono text-[10px]">{content}</div>
+  ) : (
+    <div className="flex min-w-0 items-center gap-2 font-mono text-[10px]">{content}</div>
+  )
 }
 
 function KpiTile({ label, value }: { label: string; value: string }) {
@@ -92,7 +107,7 @@ function CaseEditor({
   item,
   index,
   onChange,
-  onRemove,
+  onRemove
 }: {
   item: SkillLabCase
   index: number
@@ -102,7 +117,9 @@ function CaseEditor({
   return (
     <div className="border-b border-border-subtle pb-3 last:border-b-0 last:pb-0">
       <div className="mb-2 flex items-center gap-2">
-        <span className="font-mono text-[10px] font-bold uppercase text-text-secondary">Case {index + 1}</span>
+        <span className="font-mono text-[10px] font-bold uppercase text-text-secondary">
+          Case {index + 1}
+        </span>
         <label className="ml-auto flex items-center gap-2 font-mono text-[9px] uppercase text-text-muted">
           <input
             type="checkbox"
@@ -111,7 +128,12 @@ function CaseEditor({
           />
           Should invoke
         </label>
-        <button type="button" className="node-btn node-btn-danger" onClick={onRemove} title="Remove case">
+        <button
+          type="button"
+          className="node-btn node-btn-danger"
+          onClick={onRemove}
+          title="Remove case"
+        >
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
@@ -138,7 +160,9 @@ function CaseEditor({
           <textarea
             className="input-brutal min-h-16 font-mono text-[11px]"
             value={item.expected_patterns.join('\n')}
-            onChange={(event) => onChange({ ...item, expected_patterns: normalizePatternList(event.target.value) })}
+            onChange={(event) =>
+              onChange({ ...item, expected_patterns: normalizePatternList(event.target.value) })
+            }
             placeholder="One deterministic pattern per line"
           />
         </label>
@@ -147,7 +171,9 @@ function CaseEditor({
           <textarea
             className="input-brutal min-h-16 font-mono text-[11px]"
             value={item.forbidden_patterns.join('\n')}
-            onChange={(event) => onChange({ ...item, forbidden_patterns: normalizePatternList(event.target.value) })}
+            onChange={(event) =>
+              onChange({ ...item, forbidden_patterns: normalizePatternList(event.target.value) })
+            }
             placeholder="Patterns that make the attempt fail"
           />
         </label>
@@ -156,7 +182,10 @@ function CaseEditor({
   )
 }
 
-export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeProps<SkillLabNodeType>) {
+export const SkillLabNode = memo(function SkillLabNode({
+  data,
+  selected
+}: NodeProps<SkillLabNodeType>) {
   const workspaceId = useWorkspaceStore((state) => state.activeWorkspaceId)
   const runMap = useSkillLabStore((state) => state.runsByWorkspace)
   const runErrors = useSkillLabStore((state) => state.errorByWorkspace)
@@ -201,7 +230,9 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
   useEffect(() => {
     mountedRef.current = true
     void loadInventory(false)
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+    }
   }, [loadInventory])
 
   useEffect(() => {
@@ -221,13 +252,14 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
       if (response.ok && response.data) {
         setContract({
           ...response.data,
-          endpoint_id: response.data.endpoint_id || endpoint,
+          endpoint_id: response.data.endpoint_id || endpoint
         })
-      }
-      else setContract(defaultSkillContract(workspaceId, selectedSkillId, endpoint))
+      } else setContract(defaultSkillContract(workspaceId, selectedSkillId, endpoint))
     }
     void load()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [inventory?.endpoint_capabilities, selectedSkillId, workspaceId])
 
   useEffect(() => {
@@ -260,11 +292,11 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
   const endpoints = inventory?.endpoint_capabilities.filter((item) => item.enabled) || []
   const preferredEndpointId = endpoints.find((item) => item.ok)?.endpoint_id || ''
   const agentTerminals = Array.from(terminalSessions.values()).filter(
-    (session) => session.agentKind === 'claude' || session.agentKind === 'codex',
+    (session) => session.agentKind === 'claude' || session.agentKind === 'codex'
   )
-  const hermesSkillCount = skills.filter((skill) => (
+  const hermesSkillCount = skills.filter((skill) =>
     [skill.source, ...(skill.available_sources || [])].includes('hermes')
-  )).length
+  ).length
   const isTerminalTarget = runnerTarget.startsWith('terminal:') || runnerTarget.startsWith('new:')
   const validationErrors = contract ? validateSkillContract(contract) : ['Choose a skill']
 
@@ -277,16 +309,19 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
     if (agentTerminals[0]) setRunnerTarget(`terminal:${agentTerminals[0].id}`)
   }, [agentTerminals, preferredEndpointId, runnerTarget])
 
-  const selectSkill = useCallback((skill: ToolkitSkill) => {
-    const skillId = skillIdFor(skill)
-    setContract(defaultSkillContract(workspaceId, skillId, preferredEndpointId))
-    useTerminalStore.getState().updatePanelConfig(data.panelId, {
-      ...(data.adapterConfig || {}),
-      selectedSkillId: skillId,
-      selectedSkillName: skill.name,
-      selectedSkillRevision: skill.revision,
-    })
-  }, [data.adapterConfig, data.panelId, preferredEndpointId, workspaceId])
+  const selectSkill = useCallback(
+    (skill: ToolkitSkill) => {
+      const skillId = skillIdFor(skill)
+      setContract(defaultSkillContract(workspaceId, skillId, preferredEndpointId))
+      useTerminalStore.getState().updatePanelConfig(data.panelId, {
+        ...(data.adapterConfig || {}),
+        selectedSkillId: skillId,
+        selectedSkillName: skill.name,
+        selectedSkillRevision: skill.revision
+      })
+    },
+    [data.adapterConfig, data.panelId, preferredEndpointId, workspaceId]
+  )
 
   const saveContract = async (nextContract = contract) => {
     if (!nextContract) return false
@@ -319,7 +354,7 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
       skill_id: selectedSkillId,
       endpoint_id: endpointId,
       goal: goal.trim() || undefined,
-      depth,
+      depth
     })
     setPlanning(false)
     if (!response.ok || !response.data) {
@@ -344,12 +379,12 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
         skill_id: runnableContract.skill_id,
         endpoint_id: runnableContract.endpoint_id || '',
         cases: runnableContract.cases,
-        thresholds: runnableContract.thresholds,
+        thresholds: runnableContract.thresholds
       })
       useTerminalStore.getState().updatePanelConfig(data.panelId, {
         ...(data.adapterConfig || {}),
         selectedSkillId: runnableContract.skill_id,
-        latestRunId: run.run_id,
+        latestRunId: run.run_id
       })
       setOpen(false)
     } catch (caught) {
@@ -377,11 +412,13 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
         : ''
       const requestedKind = runnerTarget === 'new:codex' ? 'codex' : 'claude'
       if (!terminalId) {
-        terminalId = useTerminalStore.getState().createTerminal(
-          undefined,
-          requestedKind === 'claude' ? 'Claude Code' : 'Codex',
-          requestedKind,
-        )
+        terminalId = useTerminalStore
+          .getState()
+          .createTerminal(
+            undefined,
+            requestedKind === 'claude' ? 'Claude Code' : 'Codex',
+            requestedKind
+          )
         const deadline = Date.now() + 30_000
         while (Date.now() < deadline) {
           const session = useTerminalStore.getState().sessions.get(terminalId)
@@ -389,7 +426,9 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
           await new Promise((resolve) => window.setTimeout(resolve, 400))
         }
         if (useTerminalStore.getState().sessions.get(terminalId)?.agentKind !== requestedKind) {
-          throw new Error(`${requestedKind === 'claude' ? 'Claude' : 'Codex'} did not become ready in time`)
+          throw new Error(
+            `${requestedKind === 'claude' ? 'Claude' : 'Codex'} did not become ready in time`
+          )
         }
       }
 
@@ -397,13 +436,14 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
         skill: selectedSkill,
         workspaceId,
         goal,
-        depth,
+        depth
       })
       await window.bashgym.terminal.write(terminalId, `${prompt}\r`)
       const terminalStore = useTerminalStore.getState()
       terminalStore.setActiveTerminal(terminalId)
-      const panel = terminalPanels.find((item) => item.terminalId === terminalId)
-        || terminalStore.panels.find((item) => item.terminalId === terminalId)
+      const panel =
+        terminalPanels.find((item) => item.terminalId === terminalId) ||
+        terminalStore.panels.find((item) => item.terminalId === terminalId)
       if (panel) terminalStore.setActivePanel(panel.id)
       setOpen(false)
     } catch (caught) {
@@ -413,28 +453,30 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
     }
   }
 
-  const startEvaluation = () => isTerminalTarget ? handoffToTerminal() : startRun()
+  const startEvaluation = () => (isTerminalTarget ? handoffToTerminal() : startRun())
 
-  const buildContext = () => [
-    '## Skill Lab',
-    `- selected skill: ${selectedSkill?.name || 'none'}`,
-    `- skill id: ${selectedSkillId || 'none'}`,
-    `- revision: ${selectedSkill?.revision || 'unknown'}`,
-    `- linked endpoint: ${contract?.endpoint_id || 'none'}`,
-    `- latest verdict: ${latestRun?.kpis?.verdict || latestRun?.status || 'untested'}`,
-    `- success uplift: ${formatSkillPercent(latestRun?.kpis?.success_uplift, true)}`,
-    `- routing F1: ${formatSkillPercent(latestRun?.kpis?.routing_f1)}`,
-  ].join('\n')
+  const buildContext = () =>
+    [
+      '## Skill Lab',
+      `- selected skill: ${selectedSkill?.name || 'none'}`,
+      `- skill id: ${selectedSkillId || 'none'}`,
+      `- revision: ${selectedSkill?.revision || 'unknown'}`,
+      `- linked endpoint: ${contract?.endpoint_id || 'none'}`,
+      `- latest verdict: ${latestRun?.kpis?.verdict || latestRun?.status || 'untested'}`,
+      `- success uplift: ${formatSkillPercent(latestRun?.kpis?.success_uplift, true)}`,
+      `- routing F1: ${formatSkillPercent(latestRun?.kpis?.routing_f1)}`
+    ].join('\n')
 
-  const statusBarClass = latestRun?.status === 'failed'
-    ? 'bg-status-error'
-    : latestRun?.status === 'running' || latestRun?.status === 'queued'
-      ? 'bg-accent animate-pulse'
-      : latestRun?.kpis?.verdict === 'effective'
-        ? 'bg-status-success'
-        : latestRun?.kpis
-          ? 'bg-status-warning'
-          : 'bg-background-tertiary'
+  const statusBarClass =
+    latestRun?.status === 'failed'
+      ? 'bg-status-error'
+      : latestRun?.status === 'running' || latestRun?.status === 'queued'
+        ? 'bg-accent animate-pulse'
+        : latestRun?.kpis?.verdict === 'effective'
+          ? 'bg-status-success'
+          : latestRun?.kpis
+            ? 'bg-status-warning'
+            : 'bg-background-tertiary'
   const planScope = skillLabPlanScope(depth)
   const footerIssue = isTerminalTarget
     ? !selectedSkillId
@@ -443,12 +485,12 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
         ? 'Terminal handoff requires the desktop app'
         : error
     : advanced
-    ? validationErrors[0] || error
-    : !selectedSkillId
-      ? 'Choose a skill'
-      : !preferredEndpointId
-        ? 'Connect a healthy agent in Settings'
-        : error
+      ? validationErrors[0] || error
+      : !selectedSkillId
+        ? 'Choose a skill'
+        : !preferredEndpointId
+          ? 'Connect a healthy agent in Settings'
+          : error
 
   return (
     <>
@@ -463,16 +505,30 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
         hue={hueFor('skilllab')}
         onFocus={data.onFocus}
         onClose={data.onClose}
-        headerRight={(
+        headerRight={
           <>
-            <button type="button" className="node-btn" onClick={() => void loadInventory(true)} title="Refresh skills">
-              {loadingInventory ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+            <button
+              type="button"
+              className="node-btn"
+              onClick={() => void loadInventory(true)}
+              title="Refresh skills"
+            >
+              {loadingInventory ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
             </button>
-            <button type="button" className="node-btn node-btn-accent" onClick={() => setOpen(true)} title="Open Skill Lab">
+            <button
+              type="button"
+              className="node-btn node-btn-accent"
+              onClick={() => setOpen(true)}
+              title="Open Skill Lab"
+            >
               <Settings2 className="h-3 w-3" />
             </button>
           </>
-        )}
+        }
       >
         <div className="space-y-2">
           {selectedSkill ? (
@@ -480,12 +536,17 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
               <div className="flex min-w-0 items-center gap-2">
                 <BrainCircuit className="h-4 w-4 flex-shrink-0 text-accent" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-mono text-xs font-bold text-text-primary">{selectedSkill.name}</div>
+                  <div className="truncate font-mono text-xs font-bold text-text-primary">
+                    {selectedSkill.name}
+                  </div>
                   <div className="truncate font-mono text-[9px] text-text-muted">
-                    {skillSourceLabel(selectedSkill)} · {selectedSkill.revision?.slice(0, 8) || 'unversioned'}
+                    {skillSourceLabel(selectedSkill)} ·{' '}
+                    {selectedSkill.revision?.slice(0, 8) || 'unversioned'}
                   </div>
                 </div>
-                <ConfigPill tone={kpiTone(latestRun?.kpis)}>{latestRun?.kpis?.verdict || 'untested'}</ConfigPill>
+                <ConfigPill tone={kpiTone(latestRun?.kpis)}>
+                  {latestRun?.kpis?.verdict || 'untested'}
+                </ConfigPill>
               </div>
             </div>
           ) : (
@@ -496,7 +557,10 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
                   key={skillIdFor(skill)}
                   type="button"
                   className="node-config-toggle justify-start"
-                  onClick={() => { selectSkill(skill); setOpen(true) }}
+                  onClick={() => {
+                    selectSkill(skill)
+                    setOpen(true)
+                  }}
                 >
                   <BrainCircuit className="h-3 w-3" />
                   <span className="truncate">{skill.name}</span>
@@ -506,15 +570,22 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
           )}
 
           <div className="grid grid-cols-3 gap-1.5">
-            <KpiTile label="Uplift" value={formatSkillPercent(latestRun?.kpis?.success_uplift, true)} />
+            <KpiTile
+              label="Uplift"
+              value={formatSkillPercent(latestRun?.kpis?.success_uplift, true)}
+            />
             <KpiTile label="Route F1" value={formatSkillPercent(latestRun?.kpis?.routing_f1)} />
             <KpiTile label="Forced" value={formatSkillPercent(latestRun?.kpis?.forced_pass_rate)} />
           </div>
 
-          {latestRun ? <RunStatus run={latestRun} onClick={() => setSelectedRunId(latestRun.run_id)} /> : (
-            <div className="py-1 text-center font-mono text-[10px] text-text-muted">No skill evals yet</div>
+          {latestRun ? (
+            <RunStatus run={latestRun} onClick={() => setSelectedRunId(latestRun.run_id)} />
+          ) : (
+            <div className="py-1 text-center font-mono text-[10px] text-text-muted">
+              No skill evals yet
+            </div>
           )}
-          {(error || runErrors[workspaceId]) ? (
+          {error || runErrors[workspaceId] ? (
             <div className="flex items-start gap-1.5 font-mono text-[9px] text-status-error">
               <AlertCircle className="mt-0.5 h-3 w-3 flex-shrink-0" />
               <span className="line-clamp-2">{error || runErrors[workspaceId]}</span>
@@ -529,13 +600,18 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
         title="Skill Lab"
         description="Evaluate a loaded skill"
         size="xl"
-        footer={(
+        footer={
           <div className="flex w-full items-center gap-3">
             <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-status-error">
               {footerIssue}
             </span>
             {advanced ? (
-              <button type="button" className="btn-secondary" disabled={!contract || saving} onClick={() => void saveContract()}>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={!contract || saving}
+                onClick={() => void saveContract()}
+              >
                 {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                 Save criteria
               </button>
@@ -544,20 +620,24 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
               type="button"
               className="btn-primary"
               disabled={
-                !selectedSkillId
-                || (!isTerminalTarget && !advanced && !preferredEndpointId)
-                || (!isTerminalTarget && advanced && (!contract || validationErrors.length > 0))
-                || (isTerminalTarget && !window.bashgym?.terminal)
-                || launching
-                || planning
+                !selectedSkillId ||
+                (!isTerminalTarget && !advanced && !preferredEndpointId) ||
+                (!isTerminalTarget && advanced && (!contract || validationErrors.length > 0)) ||
+                (isTerminalTarget && !window.bashgym?.terminal) ||
+                launching ||
+                planning
               }
               onClick={() => void startEvaluation()}
             >
-              {launching || planning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+              {launching || planning ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Play className="h-3 w-3" />
+              )}
               {planning ? 'Building plan' : isTerminalTarget ? 'Send to agent' : 'Run evaluation'}
             </button>
           </div>
-        )}
+        }
       >
         <ConfigSection title="Evaluation">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -574,7 +654,8 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
                 <option value="">Choose skill</option>
                 {skills.map((skill) => (
                   <option key={skillIdFor(skill)} value={skillIdFor(skill)}>
-                    {skill.name} · {skillSourceLabel(skill)} · {skill.revision?.slice(0, 7) || 'unversioned'}
+                    {skill.name} · {skillSourceLabel(skill)} ·{' '}
+                    {skill.revision?.slice(0, 7) || 'unversioned'}
                   </option>
                 ))}
               </select>
@@ -587,7 +668,9 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
           ) : null}
           <div className="flex flex-wrap items-center gap-2 font-mono text-[9px] text-text-muted">
             <ConfigPill tone="neutral">{skills.length} loaded</ConfigPill>
-            <ConfigPill tone={hermesSkillCount ? 'accent' : 'neutral'}>{hermesSkillCount} in Hermes</ConfigPill>
+            <ConfigPill tone={hermesSkillCount ? 'accent' : 'neutral'}>
+              {hermesSkillCount} in Hermes
+            </ConfigPill>
           </div>
           <label className="node-field mt-3">
             <span className="node-field-label">Test with</span>
@@ -612,9 +695,15 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
             </div>
             <span className="flex items-center gap-1.5 font-mono text-[9px] leading-relaxed text-text-muted">
               {isTerminalTarget ? (
-                <><SquareTerminal className="h-3 w-3 flex-shrink-0" /> The agent receives this skill through BashGym's Skill Lab tools.</>
+                <>
+                  <SquareTerminal className="h-3 w-3 flex-shrink-0" /> The agent receives this skill
+                  through BashGym's Skill Lab tools.
+                </>
               ) : (
-                <><Bot className="h-3 w-3 flex-shrink-0" /> Hermes records baseline, available, and forced-skill results.</>
+                <>
+                  <Bot className="h-3 w-3 flex-shrink-0" /> Hermes records baseline, available, and
+                  forced-skill results.
+                </>
               )}
             </span>
           </label>
@@ -648,14 +737,18 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
                   type="button"
                   className={clsx(
                     'node-config-toggle min-h-14 items-start justify-center px-3 text-left',
-                    depth === option && '!border-accent !bg-accent/10',
+                    depth === option && '!border-accent !bg-accent/10'
                   )}
                   aria-pressed={depth === option}
                   onClick={() => setDepth(option)}
                 >
                   <span className="min-w-0">
-                    <span className="block font-mono text-[10px] font-bold uppercase text-text-primary">{option}</span>
-                    <span className="mt-0.5 block font-mono text-[9px] text-text-muted">{cases} examples · {cases * 3 + 1} calls</span>
+                    <span className="block font-mono text-[10px] font-bold uppercase text-text-primary">
+                      {option}
+                    </span>
+                    <span className="mt-0.5 block font-mono text-[9px] text-text-muted">
+                      {cases} examples · {cases * 3 + 1} calls
+                    </span>
                   </span>
                 </button>
               )
@@ -664,14 +757,23 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
           <div className="mt-3 flex items-center gap-3 border-t border-border-subtle pt-3">
             <WandSparkles className="h-4 w-4 flex-shrink-0 text-accent" />
             <div className="min-w-0 flex-1">
-              <div className="font-mono text-[10px] font-bold uppercase text-text-primary">Generated at launch</div>
+              <div className="font-mono text-[10px] font-bold uppercase text-text-primary">
+                Generated at launch
+              </div>
               <div className="font-mono text-[9px] text-text-muted">
                 {planScope.cases} held-out examples · {planScope.totalCalls} total model calls
               </div>
             </div>
             {isTerminalTarget ? (
-              <ConfigPill tone="accent"><Code2 className="mr-1 inline h-3 w-3" />Terminal</ConfigPill>
-            ) : preferredEndpointId ? <ConfigPill tone="success">Hermes ready</ConfigPill> : <ConfigPill tone="error">No agent</ConfigPill>}
+              <ConfigPill tone="accent">
+                <Code2 className="mr-1 inline h-3 w-3" />
+                Terminal
+              </ConfigPill>
+            ) : preferredEndpointId ? (
+              <ConfigPill tone="success">Hermes ready</ConfigPill>
+            ) : (
+              <ConfigPill tone="error">No agent</ConfigPill>
+            )}
           </div>
         </ConfigSection>
 
@@ -685,7 +787,9 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
             <Settings2 className="h-3.5 w-3.5" />
             Advanced
           </span>
-          <ChevronDown className={clsx('h-3.5 w-3.5 transition-transform', advanced && 'rotate-180')} />
+          <ChevronDown
+            className={clsx('h-3.5 w-3.5 transition-transform', advanced && 'rotate-180')}
+          />
         </button>
 
         {advanced ? (
@@ -697,12 +801,15 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
                   className="input-brutal min-h-9 font-mono text-[11px]"
                   value={contract?.endpoint_id || ''}
                   disabled={!contract}
-                  onChange={(event) => contract && setContract({ ...contract, endpoint_id: event.target.value })}
+                  onChange={(event) =>
+                    contract && setContract({ ...contract, endpoint_id: event.target.value })
+                  }
                 >
                   <option value="">Choose endpoint</option>
                   {endpoints.map((endpoint) => (
                     <option key={endpoint.endpoint_id} value={endpoint.endpoint_id}>
-                      {endpoint.label}{endpoint.ok ? '' : ' · unavailable'}
+                      {endpoint.label}
+                      {endpoint.ok ? '' : ' · unavailable'}
                     </option>
                   ))}
                 </select>
@@ -710,8 +817,14 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
               {selectedSkill ? (
                 <ConfigRows>
                   <ConfigRow label="Revision" value={selectedSkill.revision?.slice(0, 12)} />
-                  <ConfigRow label="Allowed tools" value={selectedSkill.allowed_tools?.join(', ') || 'not declared'} />
-                  <ConfigRow label="Shadowed copies" value={selectedSkill.shadowed_paths?.length || 0} />
+                  <ConfigRow
+                    label="Allowed tools"
+                    value={selectedSkill.allowed_tools?.join(', ') || 'not declared'}
+                  />
+                  <ConfigRow
+                    label="Shadowed copies"
+                    value={selectedSkill.shadowed_paths?.length || 0}
+                  />
                 </ConfigRows>
               ) : null}
             </ConfigSection>
@@ -723,14 +836,22 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
                     key={item.case_id}
                     item={item}
                     index={index}
-                    onChange={(next) => setContract({
-                      ...contract,
-                      cases: contract.cases.map((candidate) => candidate.case_id === item.case_id ? next : candidate),
-                    })}
-                    onRemove={() => setContract({
-                      ...contract,
-                      cases: contract.cases.filter((candidate) => candidate.case_id !== item.case_id),
-                    })}
+                    onChange={(next) =>
+                      setContract({
+                        ...contract,
+                        cases: contract.cases.map((candidate) =>
+                          candidate.case_id === item.case_id ? next : candidate
+                        )
+                      })
+                    }
+                    onRemove={() =>
+                      setContract({
+                        ...contract,
+                        cases: contract.cases.filter(
+                          (candidate) => candidate.case_id !== item.case_id
+                        )
+                      })
+                    }
                   />
                 ))}
                 <div className="flex flex-wrap gap-2">
@@ -740,14 +861,23 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
                     disabled={!selectedSkillId || planning}
                     onClick={() => void buildPlan()}
                   >
-                    {planning ? <Loader2 className="h-3 w-3 animate-spin" /> : <WandSparkles className="h-3 w-3" />}
+                    {planning ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <WandSparkles className="h-3 w-3" />
+                    )}
                     Generate cases
                   </button>
                   {contract ? (
                     <button
                       type="button"
                       className="node-btn node-btn-wide"
-                      onClick={() => setContract({ ...contract, cases: [...contract.cases, emptySkillCase(contract.cases.length + 1)] })}
+                      onClick={() =>
+                        setContract({
+                          ...contract,
+                          cases: [...contract.cases, emptySkillCase(contract.cases.length + 1)]
+                        })
+                      }
                     >
                       <Plus className="h-3 w-3" />
                       Add case
@@ -760,13 +890,15 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
             <ConfigSection title="Release gate">
               {contract ? (
                 <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-                  {([
-                    ['min_uplift', 'Min uplift'],
-                    ['min_forced_pass_rate', 'Forced pass'],
-                    ['min_routing_precision', 'Route precision'],
-                    ['min_routing_recall', 'Route recall'],
-                    ['max_false_activation_rate', 'Max false activation'],
-                  ] as const).map(([key, label]) => (
+                  {(
+                    [
+                      ['min_uplift', 'Min uplift'],
+                      ['min_forced_pass_rate', 'Forced pass'],
+                      ['min_routing_precision', 'Route precision'],
+                      ['min_routing_recall', 'Route recall'],
+                      ['max_false_activation_rate', 'Max false activation']
+                    ] as const
+                  ).map(([key, label]) => (
                     <label className="node-field" key={key}>
                       <span className="node-field-label">{label}</span>
                       <input
@@ -776,10 +908,15 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
                         max="1"
                         step="0.05"
                         value={contract.thresholds[key]}
-                        onChange={(event) => setContract({
-                          ...contract,
-                          thresholds: { ...contract.thresholds, [key]: Number(event.target.value) },
-                        })}
+                        onChange={(event) =>
+                          setContract({
+                            ...contract,
+                            thresholds: {
+                              ...contract.thresholds,
+                              [key]: Number(event.target.value)
+                            }
+                          })
+                        }
                       />
                     </label>
                   ))}
@@ -794,7 +931,11 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
             {runs.slice(0, 8).map((run) => (
               <RunStatus key={run.run_id} run={run} onClick={() => setSelectedRunId(run.run_id)} />
             ))}
-            {!runs.length && <p className="py-3 text-center font-mono text-xs text-text-muted">No runs in this workspace</p>}
+            {!runs.length && (
+              <p className="py-3 text-center font-mono text-xs text-text-muted">
+                No runs in this workspace
+              </p>
+            )}
           </div>
         </ConfigSection>
       </NodeConfigModal>
@@ -805,38 +946,85 @@ export const SkillLabNode = memo(function SkillLabNode({ data, selected }: NodeP
         title={selectedRun?.skill_name || 'Skill eval'}
         description={selectedRun ? `${selectedRun.endpoint_id} · ${selectedRun.status}` : undefined}
         size="lg"
-        footer={(
-          <button type="button" className="btn-secondary" onClick={() => setSelectedRunId(null)}>Close</button>
-        )}
+        footer={
+          <button type="button" className="btn-secondary" onClick={() => setSelectedRunId(null)}>
+            Close
+          </button>
+        }
       >
         {selectedRun ? (
           <>
             <ConfigSection title="KPI summary">
               <div className="mb-2 flex flex-wrap gap-1.5">
-                <ConfigPill tone={kpiTone(selectedRun.kpis)}>{selectedRun.kpis?.verdict || selectedRun.status}</ConfigPill>
-                <ConfigPill tone="neutral">{selectedRun.kpis?.evaluated_cases || 0} cases</ConfigPill>
+                <ConfigPill tone={kpiTone(selectedRun.kpis)}>
+                  {selectedRun.kpis?.verdict || selectedRun.status}
+                </ConfigPill>
+                <ConfigPill tone="neutral">
+                  {selectedRun.kpis?.evaluated_cases || 0} cases
+                </ConfigPill>
               </div>
               <ConfigRows>
-                <ConfigRow label="Success uplift" value={formatSkillPercent(selectedRun.kpis?.success_uplift, true)} />
-                <ConfigRow label="Baseline pass@1" value={formatSkillPercent(selectedRun.kpis?.baseline_pass_rate)} />
-                <ConfigRow label="Available pass@1" value={formatSkillPercent(selectedRun.kpis?.available_pass_rate)} />
-                <ConfigRow label="Forced pass@1" value={formatSkillPercent(selectedRun.kpis?.forced_pass_rate)} />
-                <ConfigRow label="Routing precision" value={formatSkillPercent(selectedRun.kpis?.routing_precision)} />
-                <ConfigRow label="Routing recall" value={formatSkillPercent(selectedRun.kpis?.routing_recall)} />
-                <ConfigRow label="False activation" value={formatSkillPercent(selectedRun.kpis?.false_activation_rate)} />
-                <ConfigRow label="Average latency" value={selectedRun.kpis?.average_duration_ms != null ? `${Math.round(selectedRun.kpis.average_duration_ms)} ms` : undefined} />
+                <ConfigRow
+                  label="Success uplift"
+                  value={formatSkillPercent(selectedRun.kpis?.success_uplift, true)}
+                />
+                <ConfigRow
+                  label="Baseline pass@1"
+                  value={formatSkillPercent(selectedRun.kpis?.baseline_pass_rate)}
+                />
+                <ConfigRow
+                  label="Available pass@1"
+                  value={formatSkillPercent(selectedRun.kpis?.available_pass_rate)}
+                />
+                <ConfigRow
+                  label="Forced pass@1"
+                  value={formatSkillPercent(selectedRun.kpis?.forced_pass_rate)}
+                />
+                <ConfigRow
+                  label="Routing precision"
+                  value={formatSkillPercent(selectedRun.kpis?.routing_precision)}
+                />
+                <ConfigRow
+                  label="Routing recall"
+                  value={formatSkillPercent(selectedRun.kpis?.routing_recall)}
+                />
+                <ConfigRow
+                  label="False activation"
+                  value={formatSkillPercent(selectedRun.kpis?.false_activation_rate)}
+                />
+                <ConfigRow
+                  label="Average latency"
+                  value={
+                    selectedRun.kpis?.average_duration_ms != null
+                      ? `${Math.round(selectedRun.kpis.average_duration_ms)} ms`
+                      : undefined
+                  }
+                />
               </ConfigRows>
             </ConfigSection>
             <ConfigSection title={`Attempts (${selectedRun.attempts?.length || 0})`}>
               <div className="space-y-2">
                 {selectedRun.attempts?.map((attempt, index) => (
-                  <div key={`${attempt.case_id}-${attempt.arm}-${index}`} className="border-b border-border-subtle pb-2 last:border-b-0">
+                  <div
+                    key={`${attempt.case_id}-${attempt.arm}-${index}`}
+                    className="border-b border-border-subtle pb-2 last:border-b-0"
+                  >
                     <div className="flex items-center gap-2 font-mono text-[10px]">
-                      {attempt.passed ? <CheckCircle2 className="h-3 w-3 text-status-success" /> : <XCircle className="h-3 w-3 text-status-error" />}
-                      <span className="min-w-0 flex-1 truncate text-text-primary">{attempt.case_name || attempt.case_id}</span>
+                      {attempt.passed ? (
+                        <CheckCircle2 className="h-3 w-3 text-status-success" />
+                      ) : (
+                        <XCircle className="h-3 w-3 text-status-error" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-text-primary">
+                        {attempt.case_name || attempt.case_id}
+                      </span>
                       <span className="uppercase text-text-muted">{attempt.arm}</span>
                     </div>
-                    {attempt.error ? <div className="mt-1 font-mono text-[9px] text-status-error">{attempt.error}</div> : null}
+                    {attempt.error ? (
+                      <div className="mt-1 font-mono text-[9px] text-status-error">
+                        {attempt.error}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>

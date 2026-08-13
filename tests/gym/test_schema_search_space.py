@@ -324,7 +324,7 @@ class TestGemmaJudge:
 
     def test_loss_to_score_monotonic(self):
         # Higher loss should give lower score
-        scores = [GemmaJudge._loss_to_score(l) for l in [1.0, 2.0, 3.0, 4.0]]
+        scores = [GemmaJudge._loss_to_score(loss) for loss in [1.0, 2.0, 3.0, 4.0]]
         assert scores == sorted(scores, reverse=True)
 
     def test_score_examples_empty(self):

@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   recipeFromTrainingQueued,
   recipeFromWorkspaceIntent,
-  shouldReuseTrainingOrigin,
+  shouldReuseTrainingOrigin
 } from './canvasRecipes'
 
 test('turns an agent Skill Lab intent into a linked singleton recipe', () => {
@@ -12,10 +12,12 @@ test('turns an agent Skill Lab intent into a linked singleton recipe', () => {
     workspace_id: 'main',
     source: { panel_id: 'agent-panel', terminal_id: 'terminal-1', agent: 'codex' },
     entity: { kind: 'skill_lab', skill_id: 'skill-1' },
-    suggested_nodes: [{
-      recipe: 'skill_lab',
-      config: { selectedSkillId: 'skill-1', selectedSkillName: 'factory' },
-    }],
+    suggested_nodes: [
+      {
+        recipe: 'skill_lab',
+        config: { selectedSkillId: 'skill-1', selectedSkillName: 'factory' }
+      }
+    ]
   })
 
   assert.equal(recipe?.type, 'skilllab')
@@ -29,12 +31,12 @@ test('reuses an unbound training origin for the run it launches', () => {
   const recipe = recipeFromTrainingQueued({
     run_id: 'run_123',
     strategy: 'sft',
-    origin: { panel_id: 'training-panel' },
+    origin: { panel_id: 'training-panel' }
   })
 
   assert.equal(
     shouldReuseTrainingOrigin(recipe, { type: 'training', adapterConfig: { strategy: 'sft' } }),
-    true,
+    true
   )
 })
 
@@ -44,8 +46,8 @@ test('does not overwrite a training origin already bound to a run', () => {
   assert.equal(
     shouldReuseTrainingOrigin(recipe, {
       type: 'training',
-      adapterConfig: { runId: 'run_existing' },
+      adapterConfig: { runId: 'run_existing' }
     }),
-    false,
+    false
   )
 })

@@ -1,7 +1,7 @@
 import path from 'node:path'
 import {
   createMainOwnedCampaignAgentIdentity,
-  type MainOwnedCampaignAgentIdentity,
+  type MainOwnedCampaignAgentIdentity
 } from './campaignAgentHost'
 import type { CampaignAgentMcpLaunch } from './campaignAgentMcpHost'
 
@@ -12,35 +12,26 @@ const MCP_LAUNCH_SECRET = /^[A-Za-z0-9_-]{43}$/
 const MCP_LAUNCH_HEADER = 'X-BashGym-MCP-Launch'
 const CONTROL_CHARACTER = /[\0\r\n]/
 
-const SAFE_ENVIRONMENT_KEYS = process.platform === 'win32'
-  ? [
-      'APPDATA',
-      'COLORTERM',
-      'COMSPEC',
-      'HOMEDRIVE',
-      'HOMEPATH',
-      'LANG',
-      'LC_ALL',
-      'LOCALAPPDATA',
-      'NO_COLOR',
-      'PATHEXT',
-      'TEMP',
-      'TERM',
-      'TMP',
-      'USERPROFILE',
-      'WINDIR',
-    ]
-  : [
-      'COLORTERM',
-      'HOME',
-      'LANG',
-      'LC_ALL',
-      'NO_COLOR',
-      'TEMP',
-      'TERM',
-      'TMP',
-      'TMPDIR',
-    ]
+const SAFE_ENVIRONMENT_KEYS =
+  process.platform === 'win32'
+    ? [
+        'APPDATA',
+        'COLORTERM',
+        'COMSPEC',
+        'HOMEDRIVE',
+        'HOMEPATH',
+        'LANG',
+        'LC_ALL',
+        'LOCALAPPDATA',
+        'NO_COLOR',
+        'PATHEXT',
+        'TEMP',
+        'TERM',
+        'TMP',
+        'USERPROFILE',
+        'WINDIR'
+      ]
+    : ['COLORTERM', 'HOME', 'LANG', 'LC_ALL', 'NO_COLOR', 'TEMP', 'TERM', 'TMP', 'TMPDIR']
 
 export interface CodexCampaignAgentLaunchIntent {
   workspaceId: string
@@ -81,7 +72,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function hasExactKeys(
   value: Record<string, unknown>,
   required: readonly string[],
-  optional: readonly string[] = [],
+  optional: readonly string[] = []
 ): boolean {
   const allowed = new Set([...required, ...optional])
   const keys = Object.keys(value)
@@ -103,12 +94,16 @@ function validateInputShape(value: unknown): asserts value is CodexCampaignAgent
   if (!hasExactKeys(value, ['intent', 'terminalId', 'generation', 'hostInstanceId', 'mcpLaunch'])) {
     throw new Error('Codex campaign launch contains an unsupported launch field')
   }
-  if (!isRecord(value.intent)
-    || !hasExactKeys(value.intent, ['workspaceId', 'campaignId'], ['cwd'])) {
+  if (
+    !isRecord(value.intent) ||
+    !hasExactKeys(value.intent, ['workspaceId', 'campaignId'], ['cwd'])
+  ) {
     throw new Error('Codex campaign launch intent contains an unsupported launch field')
   }
-  if (!isRecord(value.mcpLaunch)
-    || !hasExactKeys(value.mcpLaunch, ['url', 'headers', 'terminalId', 'generation'])) {
+  if (
+    !isRecord(value.mcpLaunch) ||
+    !hasExactKeys(value.mcpLaunch, ['url', 'headers', 'terminalId', 'generation'])
+  ) {
     throw new Error('Codex campaign launch MCP input is invalid')
   }
 }
@@ -116,7 +111,7 @@ function validateInputShape(value: unknown): asserts value is CodexCampaignAgent
 function validateMcpLaunch(
   launch: CampaignAgentMcpLaunch,
   terminalId: string,
-  generation: string,
+  generation: string
 ): { url: string; launchSecret: string } {
   if (launch.terminalId !== terminalId || launch.generation !== generation) {
     throw new Error('Campaign agent MCP terminal identity does not match the PTY generation')
@@ -130,21 +125,22 @@ function validateMcpLaunch(
   } catch {
     throw new Error('Campaign agent MCP loopback URL is invalid')
   }
-  if (url.protocol !== 'http:'
-    || url.hostname !== '127.0.0.1'
-    || !url.port
-    || Number(url.port) < 1
-    || Number(url.port) > 65_535
-    || url.username
-    || url.password
-    || url.search
-    || url.hash
-    || !MCP_ROUTE.test(url.pathname)
-    || url.href !== launch.url) {
+  if (
+    url.protocol !== 'http:' ||
+    url.hostname !== '127.0.0.1' ||
+    !url.port ||
+    Number(url.port) < 1 ||
+    Number(url.port) > 65_535 ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    !MCP_ROUTE.test(url.pathname) ||
+    url.href !== launch.url
+  ) {
     throw new Error('Campaign agent MCP loopback URL is invalid')
   }
-  if (!isRecord(launch.headers)
-    || !hasExactKeys(launch.headers, [MCP_LAUNCH_HEADER])) {
+  if (!isRecord(launch.headers) || !hasExactKeys(launch.headers, [MCP_LAUNCH_HEADER])) {
     throw new Error('Campaign agent MCP launch header is invalid')
   }
   const launchSecret = launch.headers[MCP_LAUNCH_HEADER]
@@ -156,12 +152,10 @@ function validateMcpLaunch(
 
 function resolveWorkingDirectory(
   requested: string | undefined,
-  dependencies: CodexCampaignAgentLaunchDependencies,
+  dependencies: CodexCampaignAgentLaunchDependencies
 ): string {
   const cwd = requested ?? dependencies.defaultCwd ?? process.cwd()
-  if (typeof cwd !== 'string'
-    || CONTROL_CHARACTER.test(cwd)
-    || !path.isAbsolute(cwd)) {
+  if (typeof cwd !== 'string' || CONTROL_CHARACTER.test(cwd) || !path.isAbsolute(cwd)) {
     throw new Error('Codex campaign launch working directory must be absolute')
   }
   if (!dependencies.pathExists(cwd)) {
@@ -175,20 +169,23 @@ function resolveExecutable(dependencies: CodexCampaignAgentLaunchDependencies): 
   if (typeof executable !== 'string' || CONTROL_CHARACTER.test(executable)) {
     throw new Error('Resolved Codex executable is invalid')
   }
-  const acceptedBasenames = process.platform === 'win32'
-    ? new Set(['codex', 'codex.exe'])
-    : new Set(['codex'])
+  const acceptedBasenames =
+    process.platform === 'win32' ? new Set(['codex', 'codex.exe']) : new Set(['codex'])
   const basename = path.basename(executable).toLowerCase()
   const isBare = executable === path.basename(executable)
-  if (!acceptedBasenames.has(basename)
-    || (!isBare && !path.isAbsolute(executable))
-    || (!isBare && !dependencies.pathExists(executable))) {
+  if (
+    !acceptedBasenames.has(basename) ||
+    (!isBare && !path.isAbsolute(executable)) ||
+    (!isBare && !dependencies.pathExists(executable))
+  ) {
     throw new Error('Resolved Codex executable is invalid')
   }
   return executable
 }
 
-function safeEnvironment(source: Readonly<Record<string, string | undefined>>): Readonly<Record<string, string>> {
+function safeEnvironment(
+  source: Readonly<Record<string, string | undefined>>
+): Readonly<Record<string, string>> {
   const environment: Record<string, string> = {}
   const pathValue = source.PATH ?? source.Path
   if (pathValue !== undefined) {
@@ -212,7 +209,7 @@ function safeEnvironment(source: Readonly<Record<string, string | undefined>>): 
  */
 export function buildCodexCampaignAgentLaunch(
   input: CodexCampaignAgentLaunchInput,
-  dependencies: CodexCampaignAgentLaunchDependencies,
+  dependencies: CodexCampaignAgentLaunchDependencies
 ): CodexCampaignAgentLaunch {
   validateInputShape(input)
   const workspaceId = identifier(input.intent.workspaceId, 'workspace')
@@ -235,13 +232,13 @@ export function buildCodexCampaignAgentLaunch(
     terminalId,
     generation,
     family: 'codex',
-    hostInstanceId: input.hostInstanceId,
+    hostInstanceId: input.hostInstanceId
   })
   const args = Object.freeze([
     '-c',
     `mcp_servers.bashgym_campaign.url="${mcp.url}"`,
     '-c',
-    `mcp_servers.bashgym_campaign.http_headers={"${MCP_LAUNCH_HEADER}"="${mcp.launchSecret}"}`,
+    `mcp_servers.bashgym_campaign.http_headers={"${MCP_LAUNCH_HEADER}"="${mcp.launchSecret}"}`
   ])
   return Object.freeze({
     executableFamily: 'codex' as const,
@@ -249,6 +246,6 @@ export function buildCodexCampaignAgentLaunch(
     args,
     cwd,
     env,
-    identity: Object.freeze(identity),
+    identity: Object.freeze(identity)
   })
 }

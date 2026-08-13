@@ -76,6 +76,21 @@ def test_operator_paths_use_the_portable_cli_api_base_environment(monkeypatch, t
     assert paths.api_base_url == "http://127.0.0.1:9000/api"
 
 
+def test_operator_paths_discover_the_source_checkout_without_a_fixed_home_name(
+    monkeypatch, tmp_path
+):
+    """A source-installed agent should not require the repository to be ~/bashgym."""
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("BASHGYM_ROOT", raising=False)
+
+    paths = operator.OperatorPaths.from_environment()
+
+    assert paths.bashgym_root == operator._source_checkout_root()
+    assert (paths.bashgym_root / "bashgym" / "cli.py").is_file()
+
+
 def test_operator_paths_reject_secret_bearing_api_base_without_echoing(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -95,8 +110,7 @@ def test_operator_health_and_workspace_reads_refuse_api_redirects(tmp_path):
         f"http://127.0.0.1:{target.server_port}/not-api?token=redirect-secret"
     )
     threads = [
-        threading.Thread(target=server.serve_forever, daemon=True)
-        for server in (target, source)
+        threading.Thread(target=server.serve_forever, daemon=True) for server in (target, source)
     ]
     for thread in threads:
         thread.start()
@@ -429,14 +443,12 @@ def test_public_operator_bundle_has_no_private_project_or_machine_residue():
     bundle_root = SCRIPT.parents[1]
     lock = json.loads((bundle_root / "bundle.lock.json").read_text(encoding="utf-8"))
     public_files = [
-        bundle_root / relative
-        for relative in lock["files"]
-        if not relative.startswith("..")
+        bundle_root / relative for relative in lock["files"] if not relative.startswith("..")
     ]
     public_files.append(bundle_root / "bundle.lock.json")
 
     private_term = re.compile(
-        r"(?<![a-z0-9])(?:memexai|ponyo|gx10|cade)(?![a-z0-9])",
+        r"(?<![a-z0-9])(?:memexai|private-hostname|device-model|cade)(?![a-z0-9])",
         re.IGNORECASE,
     )
     private_path = re.compile(

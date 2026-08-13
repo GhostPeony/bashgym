@@ -99,9 +99,7 @@ def test_shared_metric_contract_scores_rank_and_hard_negative_failures() -> None
     assert evidence[0]["hard_negative_win"] is False
 
 
-def test_cli_writes_dense_bm25_rrf_and_explicit_reranker_status(
-    tmp_path, monkeypatch
-) -> None:
+def test_cli_writes_dense_bm25_rrf_and_explicit_reranker_status(tmp_path, monkeypatch) -> None:
     queries_path = tmp_path / "heldout-dev.jsonl"
     corpus_path = tmp_path / "corpus.jsonl"
     ids_path = tmp_path / "chunk-ids.json"

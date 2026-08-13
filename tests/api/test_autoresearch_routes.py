@@ -1,14 +1,36 @@
-"""Tests for AutoResearch API routes -- schema research endpoints."""
+"""Tests for the legacy AutoResearch API routes -- schema research endpoints."""
 
 import json
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from bashgym.api.routes import app
+from bashgym.api.autoresearch_routes import router as autoresearch_router
+
+# The shared app hides the legacy router unless BASHGYM_ENABLE_LEGACY_AUTORESEARCH
+# is set, so these tests mount the router on a dedicated app.
+app = FastAPI()
+app.include_router(autoresearch_router)
 
 client = TestClient(app)
+
+
+class TestLegacyRouterVisibility:
+    def test_shared_app_hides_legacy_routes_by_default(self, monkeypatch):
+        monkeypatch.delenv("BASHGYM_ENABLE_LEGACY_AUTORESEARCH", raising=False)
+        from bashgym.api.routes import create_app
+
+        shared_client = TestClient(create_app())
+        assert shared_client.get("/api/autoresearch/status").status_code == 404
+
+    def test_flag_reexposes_legacy_routes(self, monkeypatch):
+        monkeypatch.setenv("BASHGYM_ENABLE_LEGACY_AUTORESEARCH", "1")
+        from bashgym.api.routes import create_app
+
+        shared_client = TestClient(create_app())
+        assert shared_client.get("/api/autoresearch/status").status_code == 200
 
 
 def _environment_payload(
@@ -235,9 +257,7 @@ class TestHyperparamResearchStatus:
         )
 
         assert response.status_code == 422
-        assert response.json()["detail"]["code"] == (
-            "autoresearch_real_prerequisites_missing"
-        )
+        assert response.json()["detail"]["code"] == ("autoresearch_real_prerequisites_missing")
         assert not hasattr(app.state, "autoresearcher")
 
     def test_invalid_mode_is_rejected(self):

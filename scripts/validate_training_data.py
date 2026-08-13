@@ -8,8 +8,7 @@ and train/val overlap for the bashgym training data.
 
 import json
 import logging
-import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -104,9 +103,7 @@ def validate_structure(examples: list[dict], name: str) -> dict:
             "The model never sees a final assistant text response during training."
         )
     if final_roles.get("assistant", 0) == 0 and stats["total"] > 0:
-        issues.append(
-            f"WARNING: Zero {name} examples end with 'assistant' role."
-        )
+        issues.append(f"WARNING: Zero {name} examples end with 'assistant' role.")
 
     stats["issues"] = issues
     return stats
@@ -140,8 +137,10 @@ def analyze_distributions(examples: list[dict], name: str) -> dict:
                 pass
 
             # Capture first user message for task classification
-            if role == "user" and not first_user_msgs or (
-                first_user_msgs and first_user_msgs[-1] is None
+            if (
+                role == "user"
+                and not first_user_msgs
+                or (first_user_msgs and first_user_msgs[-1] is None)
             ):
                 if role == "user":
                     content = msg.get("content", "")
@@ -170,19 +169,17 @@ def analyze_distributions(examples: list[dict], name: str) -> dict:
             "mean": round(sum(msg_lengths) / len(msg_lengths), 1) if msg_lengths else 0,
         },
         "msg_length_histogram": {
-            "1-10": sum(1 for l in msg_lengths if 1 <= l <= 10),
-            "11-25": sum(1 for l in msg_lengths if 11 <= l <= 25),
-            "26-50": sum(1 for l in msg_lengths if 26 <= l <= 50),
-            "51-100": sum(1 for l in msg_lengths if 51 <= l <= 100),
-            "100+": sum(1 for l in msg_lengths if l > 100),
+            "1-10": sum(1 for length in msg_lengths if 1 <= length <= 10),
+            "11-25": sum(1 for length in msg_lengths if 11 <= length <= 25),
+            "26-50": sum(1 for length in msg_lengths if 26 <= length <= 50),
+            "51-100": sum(1 for length in msg_lengths if 51 <= length <= 100),
+            "100+": sum(1 for length in msg_lengths if length > 100),
         },
         "first_user_messages_sample": first_user_msgs[:5],
     }
 
 
-def analyze_token_lengths(
-    examples: list[dict], max_seq_length: int = 4096, tokenizer=None
-) -> dict:
+def analyze_token_lengths(examples: list[dict], max_seq_length: int = 4096, tokenizer=None) -> dict:
     """Analyze token lengths using the actual model tokenizer."""
     if tokenizer is None:
         # Fall back to character-based estimation
@@ -212,9 +209,7 @@ def analyze_token_lengths(
     n = len(token_estimates)
 
     exceeds_max = sum(1 for t in token_estimates if t > max_seq_length)
-    truncation_amounts = [
-        max(0, t - max_seq_length) for t in token_estimates
-    ]
+    truncation_amounts = [max(0, t - max_seq_length) for t in token_estimates]
 
     return {
         "max_seq_length": max_seq_length,
@@ -229,9 +224,7 @@ def analyze_token_lengths(
         "truncation": {
             "exceeds_max_count": exceeds_max,
             "exceeds_max_pct": round(exceeds_max / n * 100, 1) if n else 0,
-            "avg_truncation_tokens": round(
-                sum(truncation_amounts) / n, 1
-            ) if n else 0,
+            "avg_truncation_tokens": round(sum(truncation_amounts) / n, 1) if n else 0,
             "max_truncation_tokens": max(truncation_amounts) if truncation_amounts else 0,
         },
         "length_buckets": {
@@ -245,17 +238,14 @@ def analyze_token_lengths(
         "pct_seen_by_model": {
             "100%": sum(1 for t in token_estimates if t <= max_seq_length),
             "75-99%": sum(
-                1 for t in token_estimates
-                if t > max_seq_length and max_seq_length / t >= 0.75
+                1 for t in token_estimates if t > max_seq_length and max_seq_length / t >= 0.75
             ),
             "50-74%": sum(
-                1 for t in token_estimates
+                1
+                for t in token_estimates
                 if max_seq_length / t >= 0.50 and max_seq_length / t < 0.75
             ),
-            "<50%": sum(
-                1 for t in token_estimates
-                if t > 0 and max_seq_length / t < 0.50
-            ),
+            "<50%": sum(1 for t in token_estimates if t > 0 and max_seq_length / t < 0.50),
         },
     }
 
@@ -293,13 +283,15 @@ def check_overlap(train: list[dict], val: list[dict]) -> dict:
                 continue
             sim = jaccard(vp, tp)
             if sim > 0.8:
-                near_duplicates.append({
-                    "val_idx": vi,
-                    "train_idx": ti,
-                    "similarity": round(sim, 3),
-                    "val_prompt": vp[:200],
-                    "train_prompt": tp[:200],
-                })
+                near_duplicates.append(
+                    {
+                        "val_idx": vi,
+                        "train_idx": ti,
+                        "similarity": round(sim, 3),
+                        "val_prompt": vp[:200],
+                        "train_prompt": tp[:200],
+                    }
+                )
 
     return {
         "exact_overlaps": len(exact_overlaps),
@@ -360,9 +352,7 @@ def main():
     report["distributions"] = {"train": train_dist, "val": val_dist}
 
     logger.info("  Tool usage (train):")
-    for tool, count in sorted(
-        train_dist["tool_usage"].items(), key=lambda x: -x[1]
-    )[:10]:
+    for tool, count in sorted(train_dist["tool_usage"].items(), key=lambda x: -x[1])[:10]:
         logger.info(f"    {tool:20s} {count:5d}")
 
     logger.info(f"\n  Message lengths (train): {train_dist['msg_length_stats']}")
@@ -379,10 +369,8 @@ def main():
     tokenizer = None
     try:
         from transformers import AutoTokenizer
-        tokenizer_path = (
-            Path.home()
-            / ".unsloth/studio/outputs/unsloth_gemma-4-E4B-it_1775370273"
-        )
+
+        tokenizer_path = Path.home() / ".unsloth/studio/outputs/unsloth_gemma-4-E4B-it_1775370273"
         if tokenizer_path.exists():
             tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_path))
             logger.info("  Using actual Gemma 4 tokenizer for token counts")
@@ -417,8 +405,7 @@ def main():
     if overlap["near_duplicates"]:
         for nd in overlap["near_duplicates"][:3]:
             logger.info(
-                f"    sim={nd['similarity']}: "
-                f"val[{nd['val_idx']}] vs train[{nd['train_idx']}]"
+                f"    sim={nd['similarity']}: " f"val[{nd['val_idx']}] vs train[{nd['train_idx']}]"
             )
             logger.info(f"      val:   {nd['val_prompt'][:100]}...")
             logger.info(f"      train: {nd['train_prompt'][:100]}...")
@@ -446,9 +433,7 @@ def main():
             "— majority of examples are truncated during training"
         )
     elif trunc_pct > 20:
-        warnings.append(
-            f"{trunc_pct}% of training data exceeds max_seq_length"
-        )
+        warnings.append(f"{trunc_pct}% of training data exceeds max_seq_length")
 
     if overlap["exact_overlaps"] > 0:
         critical.append(

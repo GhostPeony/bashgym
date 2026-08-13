@@ -154,7 +154,11 @@ def normalize_model(info: Any, *, intent: str | None = None) -> EvidenceRecord:
             confidence=round(confidence, 2),
             rationale=("Matches the requested task metadata." if relevance else None),
         ),
-        cautions=(("Gated or private resource; access must be rechecked.",) if _visibility(info) is Visibility.WORKSPACE_PRIVATE else ()),
+        cautions=(
+            ("Gated or private resource; access must be rechecked.",)
+            if _visibility(info) is Visibility.WORKSPACE_PRIVATE
+            else ()
+        ),
     )
 
 
@@ -246,7 +250,11 @@ def normalize_model_card_evals(info: Any) -> list[EvidenceRecord]:
 
 def _dataset_configs(card: Mapping[str, Any]) -> list[dict[str, Any]]:
     raw_info = card.get("dataset_info")
-    values = raw_info if isinstance(raw_info, list) else [raw_info] if isinstance(raw_info, Mapping) else []
+    values = (
+        raw_info
+        if isinstance(raw_info, list)
+        else [raw_info] if isinstance(raw_info, Mapping) else []
+    )
     configs: list[dict[str, Any]] = []
     for index, raw in enumerate(values):
         info = _mapping(raw)
@@ -258,7 +266,11 @@ def _dataset_configs(card: Mapping[str, Any]) -> list[dict[str, Any]]:
                     {
                         "name": value["name"],
                         "type": value.get("dtype")
-                        or ("list" if "list" in value else "sequence" if "sequence" in value else "unknown"),
+                        or (
+                            "list"
+                            if "list" in value
+                            else "sequence" if "sequence" in value else "unknown"
+                        ),
                     }
                 )
         splits = []
@@ -274,7 +286,8 @@ def _dataset_configs(card: Mapping[str, Any]) -> list[dict[str, Any]]:
                 )
         configs.append(
             {
-                "name": info.get("config_name") or ("default" if index == 0 else f"config-{index + 1}"),
+                "name": info.get("config_name")
+                or ("default" if index == 0 else f"config-{index + 1}"),
                 "features": features,
                 "splits": splits,
                 "download_size": info.get("download_size"),
@@ -328,7 +341,11 @@ def normalize_dataset(info: Any, *, intent: str | None = None) -> EvidenceRecord
             confidence=round(confidence, 2),
             rationale=("Matches the requested dataset metadata." if relevance else None),
         ),
-        cautions=(("Gated or private resource; examples are not persisted in release one.",) if _visibility(info) is Visibility.WORKSPACE_PRIVATE else ()),
+        cautions=(
+            ("Gated or private resource; examples are not persisted in release one.",)
+            if _visibility(info) is Visibility.WORKSPACE_PRIVATE
+            else ()
+        ),
     )
 
 

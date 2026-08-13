@@ -40,9 +40,11 @@ def http_error(request, status, code, message):
 
 def test_client_resolves_reference_exchanges_and_sends_bounded_query(monkeypatch):
     requests = []
+    timeouts = []
 
     def urlopen(request, timeout):
         requests.append(request)
+        timeouts.append(timeout)
         if request.full_url.endswith("/campaign-auth/exchange"):
             assert request.get_header("Authorization") == "Bearer bgcr.parent.refresh-secret"
             return Response({"raw_token": "bgca.access.short-lived-secret"})
@@ -60,6 +62,7 @@ def test_client_resolves_reference_exchanges_and_sends_bounded_query(monkeypatch
         "GET",
         "/campaigns/campaign-1/events",
         query={"workspace_id": "workspace-a", "after_cursor": 10, "limit": 200},
+        timeout=60,
     )
 
     assert result == {"events": [], "next_cursor": 12}
@@ -73,6 +76,7 @@ def test_client_resolves_reference_exchanges_and_sends_bounded_query(monkeypatch
     }
     assert requests[-1].get_header("Authorization") == "Bearer bgca.access.short-lived-secret"
     assert "secret" not in requests[-1].full_url
+    assert timeouts == [15.0, 60]
 
 
 def test_client_reexchanges_once_after_resource_401(monkeypatch):

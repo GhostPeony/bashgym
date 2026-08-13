@@ -107,15 +107,13 @@ def test_three_study_campaign_resumes_across_worker_restarts_and_concludes(tmp_p
         StageKind.FULL_TRAINING,
     ]
     with final_repository._connection() as connection:
-        studies = connection.execute(
-            """
+        studies = connection.execute("""
             SELECT p.proposal_id, s.status
             FROM campaign_studies s
             JOIN campaign_proposals p
               ON p.workspace_id = s.workspace_id AND p.proposal_id = s.proposal_id
             ORDER BY s.created_at, s.study_id
-            """
-        ).fetchall()
+            """).fetchall()
     assert [row["proposal_id"] for row in studies] == [
         "study-high-cheap",
         "study-high-costly",

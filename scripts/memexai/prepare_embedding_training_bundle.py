@@ -170,9 +170,7 @@ def main() -> int:
 
     real_queries = sorted(original_train + real, key=lambda row: str(row["eval_id"]))
     mixed_queries = sorted(real_queries + selected_synthetic, key=lambda row: str(row["eval_id"]))
-    selected_synthetic_ids = {
-        str(row["positive_chunk_id"]) for row in selected_synthetic
-    }
+    selected_synthetic_ids = {str(row["positive_chunk_id"]) for row in selected_synthetic}
     mixed_corpus = real_corpus + [
         row for row in synthetic_corpus if str(row["chunk_id"]) in selected_synthetic_ids
     ]
@@ -207,8 +205,7 @@ def main() -> int:
             ),
         },
         "sources": {
-            name: {"path": str(path), "sha256": sha256_file(path)}
-            for name, path in sources.items()
+            name: {"path": str(path), "sha256": sha256_file(path)} for name, path in sources.items()
         },
         "statistics": {
             "original_train": stats(original_train),
@@ -222,8 +219,7 @@ def main() -> int:
             "mixed_corpus_rows": len(mixed_corpus),
         },
         "outputs": {
-            name: {"path": path.name, "sha256": sha256_file(path)}
-            for name, path in outputs.items()
+            name: {"path": path.name, "sha256": sha256_file(path)} for name, path in outputs.items()
         },
     }
     manifest_path = args.output_dir / "manifest.json"

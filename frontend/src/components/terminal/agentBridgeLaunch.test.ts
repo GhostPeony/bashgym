@@ -7,15 +7,18 @@ const request = {
   terminalId: 'terminal-1',
   panelId: 'panel-1',
   apiBase: 'http://127.0.0.1:8003',
-  pythonCommand: 'python',
+  pythonCommand: 'python'
 } as const
 
 test('attaches BashGym MCP to a Claude launch without changing global config', () => {
-  const command = buildAgentBridgeLaunchCommand({
-    ...request,
-    kind: 'claude',
-    claudeConfigPath: 'C:\\Users\\developer\\.bashgym\\agent_bridge\\terminal-1.claude-mcp.json',
-  }, 'win32')
+  const command = buildAgentBridgeLaunchCommand(
+    {
+      ...request,
+      kind: 'claude',
+      claudeConfigPath: 'C:\\Users\\developer\\.bashgym\\agent_bridge\\terminal-1.claude-mcp.json'
+    },
+    'win32'
+  )
 
   assert.match(command, /^claude --mcp-config /)
   assert.match(command, /terminal-1\.claude-mcp\.json/)
@@ -24,12 +27,15 @@ test('attaches BashGym MCP to a Claude launch without changing global config', (
 })
 
 test('layers a workspace-scoped BashGym MCP override onto Codex', () => {
-  const command = buildAgentBridgeLaunchCommand({
-    ...request,
-    kind: 'codex',
-    serverCommand: 'C:\\Users\\developer\\.bashgym\\agent_bridge\\terminal-1.cmd',
-    serverArgs: [],
-  }, 'win32')
+  const command = buildAgentBridgeLaunchCommand(
+    {
+      ...request,
+      kind: 'codex',
+      serverCommand: 'C:\\Users\\developer\\.bashgym\\agent_bridge\\terminal-1.cmd',
+      serverArgs: []
+    },
+    'win32'
+  )
 
   assert.match(command, /^codex -c /)
   assert.match(command, /mcp_servers\.bashgym\.command/)

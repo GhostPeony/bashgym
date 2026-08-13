@@ -48,7 +48,7 @@ interface CascadeState {
   reset: () => void
 
   startCascade: (
-    config: Parameters<typeof cascadeApi.start>[0],
+    config: Parameters<typeof cascadeApi.start>[0]
   ) => Promise<{ ok: boolean; error?: string }>
   stopCascade: () => Promise<void>
 }
@@ -60,7 +60,7 @@ const emptyState = {
   currentStageNumber: null as number | null,
   totalStages: null as number | null,
   progress: 0,
-  lastUpdatedAt: null as number | null,
+  lastUpdatedAt: null as number | null
 }
 
 function stageNum(p: CascadePayload): number {
@@ -70,7 +70,7 @@ function stageNum(p: CascadePayload): number {
 function upsertStage(
   stages: CascadeStage[],
   stageNumber: number,
-  patch: Partial<CascadeStage>,
+  patch: Partial<CascadeStage>
 ): CascadeStage[] {
   const idx = stages.findIndex((s) => s.stageNumber === stageNumber)
   if (idx === -1) {
@@ -78,7 +78,7 @@ function upsertStage(
       stageNumber,
       domain: '',
       status: 'pending',
-      ...patch,
+      ...patch
     }
     return [...stages, fresh].sort((a, b) => a.stageNumber - b.stageNumber)
   }
@@ -99,9 +99,9 @@ export const useCascadeStore = create<CascadeState>((set, get) => ({
         domain: payload.domain ?? '',
         status: 'running',
         runId: (payload.run_id ?? payload.runId) as string | undefined,
-        startedAt: Date.now(),
+        startedAt: Date.now()
       }),
-      lastUpdatedAt: Date.now(),
+      lastUpdatedAt: Date.now()
     }))
   },
 
@@ -111,9 +111,9 @@ export const useCascadeStore = create<CascadeState>((set, get) => ({
       stages: upsertStage(state.stages, num, {
         status: 'completed',
         metrics: payload.metrics,
-        completedAt: Date.now(),
+        completedAt: Date.now()
       }),
-      lastUpdatedAt: Date.now(),
+      lastUpdatedAt: Date.now()
     }))
   },
 
@@ -126,9 +126,9 @@ export const useCascadeStore = create<CascadeState>((set, get) => ({
       stages: upsertStage(state.stages, num, {
         status: 'failed',
         error: err,
-        completedAt: Date.now(),
+        completedAt: Date.now()
       }),
-      lastUpdatedAt: Date.now(),
+      lastUpdatedAt: Date.now()
     }))
   },
 
@@ -137,9 +137,9 @@ export const useCascadeStore = create<CascadeState>((set, get) => ({
     set((state) => ({
       stages: upsertStage(state.stages, num, {
         status: 'skipped',
-        completedAt: Date.now(),
+        completedAt: Date.now()
       }),
-      lastUpdatedAt: Date.now(),
+      lastUpdatedAt: Date.now()
     }))
   },
 
@@ -147,7 +147,7 @@ export const useCascadeStore = create<CascadeState>((set, get) => ({
     set({
       status: 'completed',
       progress: 1,
-      lastUpdatedAt: Date.now(),
+      lastUpdatedAt: Date.now()
     })
   },
 
@@ -157,9 +157,8 @@ export const useCascadeStore = create<CascadeState>((set, get) => ({
       currentStageNumber: num > 0 ? num : state.currentStageNumber,
       totalStages:
         typeof payload.total_stages === 'number' ? payload.total_stages : state.totalStages,
-      progress:
-        typeof payload.progress === 'number' ? payload.progress : state.progress,
-      lastUpdatedAt: Date.now(),
+      progress: typeof payload.progress === 'number' ? payload.progress : state.progress,
+      lastUpdatedAt: Date.now()
     }))
   },
 
@@ -224,5 +223,5 @@ export const useCascadeStore = create<CascadeState>((set, get) => ({
     } catch {
       /* */
     }
-  },
+  }
 }))

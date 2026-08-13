@@ -4,24 +4,45 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from bashgym.campaigns.artifacts import ArtifactSealer
+from bashgym.campaigns.artifacts import ArtifactSealer, ArtifactSealError
+from bashgym.campaigns.autoresearch_dataset import (
+    AUTORESEARCH_DATASET_FILE_SCHEMA,
+    AUTORESEARCH_DATASET_RECEIPT_FILENAME,
+    AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
+    MAX_AUTORESEARCH_DATASET_RECEIPT_BYTES,
+    AutoResearchDatasetReceipt,
+    build_dataset_ledger_specs,
+)
+from bashgym.campaigns.autoresearch_evidence import (
+    AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
+    AUTORESEARCH_EVALUATION_FILENAME,
+    AUTORESEARCH_NORMALIZED_EVALUATION_DOMAIN,
+    MAX_AUTORESEARCH_EVALUATION_BYTES,
+    AutoResearchEvaluationContext,
+    AutoResearchEvaluationEvidence,
+    evaluation_context_bytes,
+)
 from bashgym.campaigns.campaign_recovery import (
     CampaignRecoveryRepository,
     RecoveryAction,
     RecoveryWorkClaim,
 )
 from bashgym.campaigns.contracts import (
+    AUTORESEARCH_EVALUATION_SCHEMA,
     ActionAttempt,
     AttemptStatus,
     CampaignStatus,
     CampaignTrigger,
     CredentialKind,
+    SealedActionResult,
     canonical_hash,
     utc_now,
 )
@@ -54,14 +75,23 @@ from bashgym.campaigns.persistence import (
 from bashgym.campaigns.remote import (
     ApprovedRemoteExecutorProfile,
     CodeLineageLaunchSnapshot,
+    RegisteredRemoteEvaluationDatasetSource,
+    RegisteredRemoteModelSource,
     RemoteCapacityPolicy,
     RemoteLaunchRequest,
+    RemoteResidentDatasetSource,
+    RemoteResidentModelSource,
     RemoteRunState,
     RemoteTrainingAdapter,
+    SealedStageArtifactInput,
+    SealedStageArtifactSource,
     remote_executor_config,
 )
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.transitions import InvalidCampaignTransitionError
+
+if TYPE_CHECKING:
+    from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
 
 
 class SimulatedWorkerCrashError(RuntimeError):
@@ -100,6 +130,7 @@ class CampaignWorker:
         ) = None,
         source_repository_profiles: Mapping[str, ApprovedSourceRepositoryProfile] | None = None,
         lineage_manager: GitHypothesisLineageManager | None = None,
+        autoresearch_loop: AutoResearchLoopCoordinator | None = None,
     ):
         self.repository = repository
         self.artifact_root = artifact_root.resolve()
@@ -121,10 +152,14 @@ class CampaignWorker:
         self.remote_adapters = dict(remote_adapters or {})
         self.remote_executor_profiles = dict(remote_executor_profiles or {})
         self.source_repository_profiles = dict(source_repository_profiles or {})
+        self.autoresearch_loop = autoresearch_loop
         self.lineage_manager = lineage_manager or GitHypothesisLineageManager(
             data_directory.resolve() / "campaigns" / "source-worktrees"
         )
         self.lineage_snapshot_root = data_directory.resolve() / "campaigns" / "source-snapshots"
+        self.evaluation_context_root = (
+            data_directory.resolve() / "campaigns" / "evaluation-contexts"
+        )
         self._lineage_snapshots: dict[str, CodeLineageSnapshotReceipt] = {}
 
     @property
@@ -172,6 +207,40 @@ class CampaignWorker:
             / attempt.action_id
             / attempt.attempt_id
         )
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        try:
+            descriptor = os.open(path, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(descriptor)
+        except OSError:
+            pass
+        finally:
+            os.close(descriptor)
+
+    @classmethod
+    def _write_evaluation_context(cls, destination: Path, payload: bytes) -> None:
+        """Durably publish canonical context without exposing partial final bytes."""
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() or destination.is_symlink():
+            if (
+                destination.is_symlink()
+                or not destination.is_file()
+                or destination.read_bytes() != payload
+            ):
+                raise RuntimeError("campaign_remote_evaluation_context_mismatch")
+            return
+        temporary = destination.parent / f".{destination.name}.{uuid4().hex}.tmp"
+        with temporary.open("xb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        cls._fsync_directory(destination.parent)
 
     def _verify(self, attempt: ActionAttempt, sealed_path: Path):
         return self.sealer.verify(
@@ -503,17 +572,434 @@ class CampaignWorker:
             if "code_lineage_execution" in executor:
                 raise RuntimeError("campaign_code_lineage_execution_record_unavailable") from exc
             code_lineage = None
+        sealed_stage_inputs: tuple[SealedStageArtifactInput, ...] = ()
+        source_training = None
+        registered_base_model = None
+        registered_evaluation_dataset = None
+        remote_resident_model = None
+        remote_resident_dataset = None
+        evaluation_suite = None
+        dataset_version = None
+        evaluation_context_path = None
+        if (
+            attempt.stage.value == "full_training"
+            and executor.get("training_base_model") is not None
+        ):
+            try:
+                registered_base_model = RegisteredRemoteModelSource.model_validate(
+                    executor["training_base_model"]
+                )
+            except ValueError as exc:
+                raise RuntimeError("campaign_remote_training_base_invalid") from exc
+            if profile.registered_base_model != registered_base_model:
+                raise RuntimeError("campaign_remote_training_base_invalid")
+        if (
+            attempt.stage.value == "full_training"
+            and executor.get("remote_resident_model") is not None
+        ):
+            try:
+                remote_resident_model = RemoteResidentModelSource.model_validate(
+                    executor["remote_resident_model"]
+                )
+            except ValueError as exc:
+                raise RuntimeError("campaign_remote_training_checkpoint_invalid") from exc
+        if attempt.stage.value == "full_training":
+            try:
+                expected_parent_model = self.repository.remote_resident_training_parent_source(
+                    attempt.workspace_id,
+                    attempt.campaign_id,
+                    attempt.study_id,
+                )
+            except (CampaignPersistenceError, RecordNotFoundError) as exc:
+                raise RuntimeError("campaign_remote_training_checkpoint_invalid") from exc
+            if expected_parent_model is not None:
+                if (
+                    registered_base_model is not None
+                    or remote_resident_model != expected_parent_model
+                ):
+                    raise RuntimeError("campaign_remote_training_checkpoint_invalid")
+                self._verify_remote_resident_model_source(
+                    attempt.workspace_id, remote_resident_model
+                )
+            elif remote_resident_model is not None:
+                raise RuntimeError("campaign_remote_training_checkpoint_invalid")
+        if (
+            attempt.stage.value == "full_training"
+            and executor.get("remote_resident_dataset") is not None
+        ):
+            try:
+                remote_resident_dataset = RemoteResidentDatasetSource.model_validate(
+                    executor["remote_resident_dataset"]
+                )
+                actual_dataset_source = self.repository.remote_resident_data_build_source(
+                    attempt.workspace_id,
+                    attempt.campaign_id,
+                    attempt.study_id,
+                    remote_resident_dataset.stage_index + 1,
+                )
+                data_attempt = self.repository.get_attempt(
+                    attempt.workspace_id,
+                    remote_resident_dataset.attempt_id,
+                )
+                data_manifest = self.repository.get_attempt_result_manifest(
+                    attempt.workspace_id,
+                    data_attempt.attempt_id,
+                )
+                data_envelope = self.sealer.envelope_bytes(data_manifest)
+                data_prefix = (
+                    f"bashgym-remote-seal://{remote_resident_dataset.compute_profile_id}/"
+                    f"{data_attempt.attempt_id}/sha256/"
+                )
+                if (
+                    actual_dataset_source != remote_resident_dataset
+                    or data_attempt.status.value != "completed"
+                    or data_attempt.stage.value != "data_build"
+                    or data_attempt.candidate_digest != attempt.candidate_digest
+                    or not data_attempt.sealed_result_uri
+                    or not data_attempt.sealed_result_uri.startswith(data_prefix)
+                    or hashlib.sha256(data_envelope).hexdigest()
+                    != data_attempt.sealed_result_uri.removeprefix(data_prefix)
+                ):
+                    raise ValueError("remote dataset source mismatch")
+                self.sealer.verify_envelope_bytes(
+                    data_envelope,
+                    expected_workspace_id=data_attempt.workspace_id,
+                    expected_campaign_id=data_attempt.campaign_id,
+                    expected_study_id=data_attempt.study_id,
+                    expected_action_id=data_attempt.action_id,
+                    expected_attempt_id=data_attempt.attempt_id,
+                    expected_manifest_revision=data_attempt.manifest_revision,
+                    expected_candidate_digest=data_attempt.candidate_digest,
+                    expected_input_digest=data_attempt.input_digest,
+                    expected_claim_generation=data_attempt.claim_generation,
+                )
+                sealed_files = {
+                    (output.path, output.sha256, output.size_bytes)
+                    for output in data_manifest.outputs
+                    if output.schema_name == AUTORESEARCH_DATASET_FILE_SCHEMA
+                }
+                resident_files = {
+                    (
+                        "dataset/" + item.remote_relative_path,
+                        item.sha256,
+                        item.size_bytes,
+                    )
+                    for item in remote_resident_dataset.files
+                }
+                if sealed_files != resident_files:
+                    raise ValueError("remote dataset inventory mismatch")
+            except (
+                ArtifactSealError,
+                CampaignPersistenceError,
+                KeyError,
+                RecordNotFoundError,
+                ValueError,
+            ) as exc:
+                raise RuntimeError("campaign_remote_training_dataset_invalid") from exc
+        if attempt.stage.value == "development_evaluation":
+            try:
+                binding = executor["evaluation_binding"]
+                evaluation_suite = self.repository.get_evaluation_suite_spec(
+                    attempt.workspace_id,
+                    binding["ledger_project_id"],
+                    binding["evaluation_suite_id"],
+                )
+                dataset_version = self.repository.get_dataset_version_spec(
+                    attempt.workspace_id,
+                    binding["ledger_project_id"],
+                    binding["dataset_version_id"],
+                )
+                registered_evaluation_dataset = (
+                    RegisteredRemoteEvaluationDatasetSource.model_validate(
+                        executor["registered_evaluation_dataset"]
+                    )
+                )
+                if (
+                    profile.registered_evaluation_dataset != registered_evaluation_dataset
+                    or binding.get("dataset_remote_path")
+                    != registered_evaluation_dataset.remote_dataset_path
+                ):
+                    raise RuntimeError("campaign_remote_evaluation_dataset_invalid")
+                if executor.get("registered_base_model") is not None:
+                    registered_base_model = RegisteredRemoteModelSource.model_validate(
+                        executor["registered_base_model"]
+                    )
+                    if (
+                        executor.get("source_training") is not None
+                        or executor.get("sealed_stage_artifact_inputs")
+                        or executor.get("remote_resident_model") is not None
+                    ):
+                        raise RuntimeError("campaign_remote_evaluated_model_source_invalid")
+                elif executor.get("remote_resident_model") is not None:
+                    remote_resident_model = RemoteResidentModelSource.model_validate(
+                        executor["remote_resident_model"]
+                    )
+                    if executor.get("source_training") is not None or executor.get(
+                        "sealed_stage_artifact_inputs"
+                    ):
+                        raise RuntimeError("campaign_remote_evaluated_model_source_invalid")
+                    try:
+                        training_attempt, source_stage_index = (
+                            self.repository.get_immediately_preceding_training_attempt(
+                                attempt.workspace_id,
+                                attempt.campaign_id,
+                                attempt.study_id,
+                                attempt.action_id,
+                            )
+                        )
+                        actual_remote_source = self.repository.remote_resident_full_training_source(
+                            attempt.workspace_id,
+                            attempt.campaign_id,
+                            attempt.study_id,
+                            source_stage_index + 1,
+                        )
+                    except (CampaignPersistenceError, RecordNotFoundError) as exc:
+                        raise RuntimeError("campaign_remote_training_checkpoint_invalid") from exc
+                    if (
+                        actual_remote_source != remote_resident_model
+                        or training_attempt.status.value != "completed"
+                        or training_attempt.candidate_digest != attempt.candidate_digest
+                    ):
+                        raise RuntimeError("campaign_remote_training_checkpoint_invalid")
+                    try:
+                        training_manifest = self.repository.get_attempt_result_manifest(
+                            attempt.workspace_id, training_attempt.attempt_id
+                        )
+                        training_envelope = self.sealer.envelope_bytes(training_manifest)
+                        training_prefix = (
+                            f"bashgym-remote-seal://{remote_resident_model.compute_profile_id}/"
+                            f"{training_attempt.attempt_id}/sha256/"
+                        )
+                        if (
+                            not training_attempt.sealed_result_uri
+                            or not training_attempt.sealed_result_uri.startswith(training_prefix)
+                            or hashlib.sha256(training_envelope).hexdigest()
+                            != training_attempt.sealed_result_uri.removeprefix(training_prefix)
+                        ):
+                            raise ValueError("training seal reference mismatch")
+                        self.sealer.verify_envelope_bytes(
+                            training_envelope,
+                            expected_workspace_id=training_attempt.workspace_id,
+                            expected_campaign_id=training_attempt.campaign_id,
+                            expected_study_id=training_attempt.study_id,
+                            expected_action_id=training_attempt.action_id,
+                            expected_attempt_id=training_attempt.attempt_id,
+                            expected_manifest_revision=training_attempt.manifest_revision,
+                            expected_candidate_digest=training_attempt.candidate_digest,
+                            expected_input_digest=training_attempt.input_digest,
+                            expected_claim_generation=training_attempt.claim_generation,
+                        )
+                        sealed_models = {
+                            (output.path, output.sha256, output.size_bytes)
+                            for output in training_manifest.outputs
+                            if output.schema_name == "huggingface_model_file.v1"
+                        }
+                        resident_models = {
+                            (
+                                "final/" + item.remote_relative_path.removeprefix("model/"),
+                                item.sha256,
+                                item.size_bytes,
+                            )
+                            for item in remote_resident_model.files
+                        }
+                        if sealed_models != resident_models:
+                            raise ValueError("training model inventory mismatch")
+                    except (ArtifactSealError, CampaignPersistenceError, ValueError) as exc:
+                        raise RuntimeError("campaign_remote_training_checkpoint_invalid") from exc
+                else:
+                    source_training = SealedStageArtifactSource.model_validate(
+                        executor["source_training"]
+                    )
+                    sealed_stage_inputs = tuple(
+                        SealedStageArtifactInput.model_validate(item)
+                        for item in executor["sealed_stage_artifact_inputs"]
+                    )
+                    try:
+                        training_attempt, source_stage_index = (
+                            self.repository.get_immediately_preceding_training_attempt(
+                                attempt.workspace_id,
+                                attempt.campaign_id,
+                                attempt.study_id,
+                                attempt.action_id,
+                            )
+                        )
+                    except RecordNotFoundError as exc:
+                        raise RuntimeError("campaign_remote_training_checkpoint_invalid") from exc
+                    actual_source = SealedStageArtifactSource(
+                        campaign_id=training_attempt.campaign_id,
+                        study_id=training_attempt.study_id,
+                        action_id=training_attempt.action_id,
+                        attempt_id=training_attempt.attempt_id,
+                        stage_index=source_stage_index,
+                    )
+                    if actual_source != source_training:
+                        raise RuntimeError("campaign_remote_training_checkpoint_invalid")
+                    for sealed_input in sealed_stage_inputs:
+                        artifact = self.repository.get_artifact(
+                            attempt.workspace_id,
+                            attempt.campaign_id,
+                            sealed_input.campaign_artifact_id,
+                        )
+                        relative_path = sealed_input.remote_relative_path.removeprefix("model/")
+                        if (
+                            artifact.sha256 != sealed_input.sha256
+                            or artifact.workspace_id != attempt.workspace_id
+                            or artifact.campaign_id != source_training.campaign_id
+                            or artifact.producer_action_id != source_training.action_id
+                            or artifact.size_bytes != sealed_input.size_bytes
+                            or artifact.schema_name != sealed_input.schema_name
+                            or Path(artifact.uri).resolve() != sealed_input.local_sealed_path
+                            or artifact.metadata.get("relative_path") != relative_path
+                            or artifact.metadata.get("attempt_id") != source_training.attempt_id
+                            or not artifact.sealed
+                            or not artifact.valid
+                        ):
+                            raise RuntimeError("campaign_remote_sealed_stage_artifact_mismatch")
+                    if (
+                        training_attempt.stage.value != "full_training"
+                        or training_attempt.status.value != "completed"
+                        or training_attempt.candidate_digest != attempt.candidate_digest
+                        or training_attempt.sealed_result_uri is None
+                    ):
+                        raise RuntimeError("campaign_remote_training_checkpoint_invalid")
+                    training_manifest = self.sealer.verify(
+                        Path(training_attempt.sealed_result_uri),
+                        expected_workspace_id=training_attempt.workspace_id,
+                        expected_campaign_id=training_attempt.campaign_id,
+                        expected_study_id=training_attempt.study_id,
+                        expected_action_id=training_attempt.action_id,
+                        expected_attempt_id=training_attempt.attempt_id,
+                        expected_manifest_revision=training_attempt.manifest_revision,
+                        expected_candidate_digest=training_attempt.candidate_digest,
+                        expected_input_digest=training_attempt.input_digest,
+                        expected_claim_generation=training_attempt.claim_generation,
+                    )
+                    sealed_output_paths = {
+                        output.path
+                        for output in training_manifest.outputs
+                        if output.schema_name == "huggingface_model_file.v1"
+                    }
+                    requested_paths = {
+                        f"final/{item.remote_relative_path.removeprefix('model/')}"
+                        for item in sealed_stage_inputs
+                    }
+                    if sealed_output_paths != requested_paths:
+                        raise RuntimeError("campaign_remote_training_checkpoint_invalid")
+            except RuntimeError:
+                raise
+            except (KeyError, OSError, ValueError) as exc:
+                raise RuntimeError("campaign_remote_sealed_stage_artifact_invalid") from exc
         try:
             expected = remote_executor_config(
                 profile,
                 attempt.stage,
                 recipe_digest=executor["recipe_digest"],
+                recipe_script_args=tuple(executor.get("recipe_script_args", ())),
                 code_lineage=code_lineage,
+                sealed_stage_artifact_inputs=sealed_stage_inputs,
+                evaluation_suite=evaluation_suite,
+                dataset_version=dataset_version,
+                source_training=(
+                    source_training if attempt.stage.value == "development_evaluation" else None
+                ),
+                remote_resident_model=(
+                    remote_resident_model
+                    if attempt.stage.value in {"full_training", "development_evaluation"}
+                    else None
+                ),
+                remote_resident_dataset=(
+                    remote_resident_dataset if attempt.stage.value == "full_training" else None
+                ),
+                bind_registered_training_base=(
+                    attempt.stage.value == "full_training" and registered_base_model is not None
+                ),
+                evaluate_registered_base_model=registered_base_model is not None,
             )
         except (KeyError, OSError, ValueError) as exc:
             raise RuntimeError("campaign_remote_executor_material_invalid") from exc
-        if executor != {"kind": "ssh_remote", **expected}:
+        persisted_context_sha = executor.get("evaluation_context_sha256")
+        expected_executor = {"kind": "ssh_remote", **expected}
+        if persisted_context_sha is not None:
+            expected_executor["evaluation_context_sha256"] = persisted_context_sha
+        if executor != expected_executor:
             raise RuntimeError("campaign_remote_executor_profile_mismatch")
+        script_args = tuple(executor["script_args"])
+        training_model_path = None
+        if attempt.stage.value == "full_training":
+            training_model_path = (
+                registered_base_model.remote_model_path
+                if registered_base_model is not None
+                else (
+                    remote_resident_model.remote_model_path
+                    if remote_resident_model is not None
+                    else None
+                )
+            )
+        if training_model_path is not None:
+            if any(
+                argument == "--model-dir" or argument.startswith("--model-dir=")
+                for argument in script_args
+            ):
+                raise RuntimeError("campaign_remote_training_base_argument_conflict")
+            script_args = (
+                "--model-dir",
+                training_model_path,
+                *script_args,
+            )
+        if remote_resident_dataset is not None:
+            if any(
+                argument == "--dataset-dir" or argument.startswith("--dataset-dir=")
+                for argument in script_args
+            ):
+                raise RuntimeError("campaign_remote_training_dataset_argument_conflict")
+            script_args = (
+                "--dataset-dir",
+                remote_resident_dataset.remote_dataset_path,
+                *script_args,
+            )
+        input_files = tuple(Path(value) for value in executor["input_files"])
+        if evaluation_suite is not None and dataset_version is not None:
+            context = AutoResearchEvaluationContext(
+                workspace_id=attempt.workspace_id,
+                campaign_id=attempt.campaign_id,
+                study_id=attempt.study_id,
+                action_id=attempt.action_id,
+                attempt_id=attempt.attempt_id,
+                candidate_digest=attempt.candidate_digest,
+                evaluation_suite_id=evaluation_suite.evaluation_suite_id,
+                evaluation_code_digest=evaluation_suite.code_digest,
+                dataset_version_id=dataset_version.dataset_version_id,
+                dataset_content_digest=dataset_version.content_digest,
+                evaluated_model_manifest_digest=executor["evaluated_model_digest"],
+            )
+            context_bytes = evaluation_context_bytes(context)
+            context_sha256 = hashlib.sha256(context_bytes).hexdigest()
+            if persisted_context_sha != context_sha256:
+                raise RuntimeError("campaign_remote_evaluation_context_digest_mismatch")
+            context_directory = self.evaluation_context_root / attempt.attempt_id
+            evaluation_context_path = context_directory / AUTORESEARCH_EVALUATION_CONTEXT_FILENAME
+            self._write_evaluation_context(evaluation_context_path, context_bytes)
+            binding = executor["evaluation_binding"]
+            input_files = (evaluation_context_path, *input_files)
+            script_args = (
+                "--context",
+                AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
+                "--model-dir",
+                (
+                    registered_base_model.remote_model_path
+                    if registered_base_model is not None
+                    else (
+                        remote_resident_model.remote_model_path
+                        if remote_resident_model is not None
+                        else "model"
+                    )
+                ),
+                "--dataset",
+                binding["dataset_remote_path"],
+                "--output",
+                AUTORESEARCH_EVALUATION_FILENAME,
+                *script_args,
+            )
         source_snapshot = None
         if code_lineage is not None:
             binding = profile.stage_profile(attempt.stage).code_lineage_binding
@@ -563,8 +1049,8 @@ class CampaignWorker:
             compute_profile_id=executor["compute_profile_id"],
             run_id=attempt.attempt_id,
             script_path=Path(executor["script_path"]),
-            input_files=tuple(Path(value) for value in executor["input_files"]),
-            script_args=tuple(executor["script_args"]),
+            input_files=input_files,
+            script_args=script_args,
             python_executable=executor["python_executable"],
             recipe_digest=executor["recipe_digest"],
             output_paths=tuple(
@@ -574,7 +1060,150 @@ class CampaignWorker:
                 )
             ),
             source_snapshot=source_snapshot,
+            sealed_stage_artifact_inputs=sealed_stage_inputs,
+            source_training=(
+                source_training if attempt.stage.value == "development_evaluation" else None
+            ),
+            registered_base_model=registered_base_model,
+            registered_evaluation_dataset=registered_evaluation_dataset,
+            remote_resident_model=remote_resident_model,
+            remote_resident_dataset=remote_resident_dataset,
+            evaluation_context_sha256=persisted_context_sha,
         )
+
+    def _verify_remote_envelope(
+        self, attempt: ActionAttempt, envelope: bytes
+    ) -> SealedActionResult:
+        return self.sealer.verify_envelope_bytes(
+            envelope,
+            expected_workspace_id=attempt.workspace_id,
+            expected_campaign_id=attempt.campaign_id,
+            expected_study_id=attempt.study_id,
+            expected_action_id=attempt.action_id,
+            expected_attempt_id=attempt.attempt_id,
+            expected_manifest_revision=attempt.manifest_revision,
+            expected_candidate_digest=attempt.candidate_digest,
+            expected_input_digest=attempt.input_digest,
+            expected_claim_generation=attempt.claim_generation,
+        )
+
+    def _verify_remote_resident_model_source(
+        self, workspace_id: str, source: RemoteResidentModelSource
+    ) -> SealedActionResult:
+        try:
+            training_attempt = self.repository.get_attempt(
+                workspace_id,
+                source.attempt_id,
+            )
+            training_manifest = self.repository.get_attempt_result_manifest(
+                training_attempt.workspace_id,
+                training_attempt.attempt_id,
+            )
+            training_envelope = self.sealer.envelope_bytes(training_manifest)
+            training_prefix = (
+                f"bashgym-remote-seal://{source.compute_profile_id}/"
+                f"{training_attempt.attempt_id}/sha256/"
+            )
+            remote_run = self.repository.get_remote_run(
+                training_attempt.workspace_id,
+                training_attempt.attempt_id,
+            )
+            if (
+                training_attempt.campaign_id != source.campaign_id
+                or training_attempt.study_id != source.study_id
+                or training_attempt.action_id != source.action_id
+                or training_attempt.stage.value != "full_training"
+                or training_attempt.status.value != "completed"
+                or not training_attempt.sealed_result_uri
+                or not training_attempt.sealed_result_uri.startswith(training_prefix)
+                or hashlib.sha256(training_envelope).hexdigest()
+                != training_attempt.sealed_result_uri.removeprefix(training_prefix)
+                or remote_run is None
+                or remote_run.identity.run_id != training_attempt.attempt_id
+                or remote_run.identity.compute_profile_id != source.compute_profile_id
+                or source.remote_model_path != f"{remote_run.identity.remote_run_directory}/final"
+            ):
+                raise ValueError("training source identity mismatch")
+            verified = self.sealer.verify_envelope_bytes(
+                training_envelope,
+                expected_workspace_id=training_attempt.workspace_id,
+                expected_campaign_id=training_attempt.campaign_id,
+                expected_study_id=training_attempt.study_id,
+                expected_action_id=training_attempt.action_id,
+                expected_attempt_id=training_attempt.attempt_id,
+                expected_manifest_revision=training_attempt.manifest_revision,
+                expected_candidate_digest=training_attempt.candidate_digest,
+                expected_input_digest=training_attempt.input_digest,
+                expected_claim_generation=training_attempt.claim_generation,
+            )
+            sealed_models = {
+                (output.path, output.sha256, output.size_bytes)
+                for output in verified.outputs
+                if output.schema_name == "huggingface_model_file.v1"
+            }
+            resident_models = {
+                (
+                    "final/" + item.remote_relative_path.removeprefix("model/"),
+                    item.sha256,
+                    item.size_bytes,
+                )
+                for item in source.files
+            }
+            if (
+                verified.outcome != "completed"
+                or verified.compute_profile_id != source.compute_profile_id
+                or verified.remote_process_identity != remote_run.identity.model_dump(mode="json")
+                or sealed_models != resident_models
+            ):
+                raise ValueError("training source manifest mismatch")
+            return verified
+        except (
+            ArtifactSealError,
+            CampaignPersistenceError,
+            RecordNotFoundError,
+            ValueError,
+        ) as exc:
+            raise RuntimeError("campaign_remote_training_checkpoint_invalid") from exc
+
+    async def _verified_terminal_envelope(
+        self,
+        attempt: ActionAttempt,
+        adapter: RemoteTrainingAdapter,
+        identity,
+        expected_manifest: SealedActionResult,
+    ) -> tuple[bytes, SealedActionResult]:
+        envelope = await adapter.read_action_seal(identity)
+        if envelope is None:
+            verified = expected_manifest
+        else:
+            verified = self.sealer.verify_envelope_bytes(
+                envelope,
+                expected_workspace_id=attempt.workspace_id,
+                expected_campaign_id=attempt.campaign_id,
+                expected_study_id=attempt.study_id,
+                expected_action_id=attempt.action_id,
+                expected_attempt_id=attempt.attempt_id,
+                expected_manifest_revision=attempt.manifest_revision,
+                expected_candidate_digest=attempt.candidate_digest,
+                expected_input_digest=attempt.input_digest,
+            )
+            if verified.claim_generation > attempt.claim_generation:
+                raise ArtifactSealError(f"{ArtifactSealError.code}: claim generation mismatch")
+        if (
+            verified.outputs != expected_manifest.outputs
+            or verified.outcome != expected_manifest.outcome
+            or verified.compute_profile_id != identity.compute_profile_id
+            or verified.remote_process_identity != identity.model_dump(mode="json")
+        ):
+            raise RuntimeError("campaign_remote_action_seal_mismatch")
+        if envelope is None or verified.claim_generation < attempt.claim_generation:
+            verified = verified.model_copy(update={"claim_generation": attempt.claim_generation})
+            envelope = self.sealer.envelope_bytes(verified)
+            await adapter.persist_action_seal(identity, envelope)
+            persisted_envelope = await adapter.read_action_seal(identity)
+            if persisted_envelope != envelope:
+                raise RuntimeError("campaign_remote_action_seal_persistence_failed")
+        return envelope, self._verify_remote_envelope(attempt, envelope)
 
     async def _remote_tick(self, attempt: ActionAttempt, *, now: datetime) -> str:
         request = self._remote_request(attempt)
@@ -588,13 +1217,29 @@ class CampaignWorker:
             identity = await adapter.discover(request)
             if identity is None:
                 if campaign.status == CampaignStatus.CANCELLING:
-                    sealed_path, manifest = self.remote_output_sealer.seal_unlaunched_cancelled(
+                    manifest = self.remote_output_sealer.unlaunched_cancelled_manifest(
                         attempt, compute_profile_id=request.compute_profile_id
                     )
-                    verified = self._verify(attempt, sealed_path)
+                    envelope = self.sealer.envelope_bytes(manifest)
+                    verified = self.sealer.verify_envelope_bytes(
+                        envelope,
+                        expected_workspace_id=attempt.workspace_id,
+                        expected_campaign_id=attempt.campaign_id,
+                        expected_study_id=attempt.study_id,
+                        expected_action_id=attempt.action_id,
+                        expected_attempt_id=attempt.attempt_id,
+                        expected_manifest_revision=attempt.manifest_revision,
+                        expected_candidate_digest=attempt.candidate_digest,
+                        expected_input_digest=attempt.input_digest,
+                        expected_claim_generation=attempt.claim_generation,
+                    )
+                    sealed_reference = (
+                        f"bashgym-controller-state://{attempt.attempt_id}/sha256/"
+                        f"{hashlib.sha256(envelope).hexdigest()}"
+                    )
                     self.repository.settle_terminal_from_seal(
                         verified,
-                        sealed_path,
+                        sealed_reference,
                         worker_id=self.worker_id,
                         now=now,
                     )
@@ -627,22 +1272,21 @@ class CampaignWorker:
 
         observation = await adapter.observe(record.identity)
         metric_cursor = record.metric_cursor
+        # Raw logs remain canonical run evidence. The worker streams only
+        # the typed metrics needed for compact campaign projections.
         log_cursor = record.log_cursor
         metric_lines: list[str] = []
-        for source, cursor_name in (
-            ("training_metrics.jsonl", "metric"),
-            ("training.log", "log"),
-        ):
-            cursor = metric_cursor if cursor_name == "metric" else log_cursor
-            try:
-                chunk = await adapter.read_stream(record.identity, source, cursor)
-            except RuntimeError:
-                continue
-            if cursor_name == "metric":
-                metric_cursor = chunk.next_cursor
-                metric_lines.extend(chunk.complete_lines)
-            else:
-                log_cursor = chunk.next_cursor
+        try:
+            chunk = await adapter.read_stream(
+                record.identity,
+                "training_metrics.jsonl",
+                metric_cursor,
+            )
+        except RuntimeError:
+            pass
+        else:
+            metric_cursor = chunk.next_cursor
+            metric_lines.extend(chunk.complete_lines)
         self.repository.append_remote_metrics(
             attempt,
             tuple(metric_lines),
@@ -675,52 +1319,171 @@ class CampaignWorker:
         if observation.state == RemoteRunState.UNKNOWN:
             return "remote_unknown"
         if observation.state == RemoteRunState.FAILED:
-            temporary = (
-                self.artifact_root
-                / ".tmp"
-                / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
-            )
-            temporary.mkdir(parents=True, exist_ok=False)
-            await adapter.collect_terminal_evidence(
-                record.identity,
-                temporary,
-                observation=observation,
+            inventory = await adapter.inventory_terminal_evidence(
+                record.identity, observation=observation
             )
             outcome = "cancelled" if campaign.status == CampaignStatus.CANCELLING else "failed"
-            sealed_path, _manifest = self.remote_output_sealer.seal_terminal(
+            expected_manifest = self.remote_output_sealer.terminal_manifest(
                 attempt,
                 record.identity,
                 observation,
-                temporary,
+                inventory,
                 outcome=outcome,
             )
-            verified = self._verify(attempt, sealed_path)
+            envelope, verified = await self._verified_terminal_envelope(
+                attempt, adapter, record.identity, expected_manifest
+            )
+            sealed_reference = (
+                f"bashgym-remote-seal://{record.identity.compute_profile_id}/"
+                f"{record.identity.run_id}/sha256/{hashlib.sha256(envelope).hexdigest()}"
+            )
             self.repository.settle_terminal_from_seal(
                 verified,
-                sealed_path,
+                sealed_reference,
                 worker_id=self.worker_id,
                 now=now,
             )
             return "remote_cancelled" if outcome == "cancelled" else "remote_failed"
 
-        temporary = (
-            self.artifact_root / ".tmp" / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
+        inventory = await adapter.inventory_outputs(
+            record.identity, request, observation=observation
         )
-        temporary.mkdir(parents=True, exist_ok=False)
-        await adapter.collect_outputs(
-            record.identity,
-            request,
-            temporary,
-            observation=observation,
+        expected_manifest = self.remote_output_sealer.completed_manifest(
+            attempt, record.identity, observation, inventory
         )
-        sealed_path, _manifest = self.remote_output_sealer.seal_completed(
-            attempt, record.identity, observation, temporary
+        envelope, verified = await self._verified_terminal_envelope(
+            attempt, adapter, record.identity, expected_manifest
         )
-        verified = self._verify(attempt, sealed_path)
+        sealed_reference = (
+            f"bashgym-remote-seal://{record.identity.compute_profile_id}/{record.identity.run_id}"
+            f"/sha256/{hashlib.sha256(envelope).hexdigest()}"
+        )
+        artifact_metadata: dict[str, dict[str, object]] = {}
+        generated_dataset = None
+        generated_dataset_version = None
+        if attempt.stage.value == "data_build":
+            receipt_outputs = tuple(
+                output
+                for output in verified.outputs
+                if output.schema_name == AUTORESEARCH_DATASET_RECEIPT_SCHEMA
+                and output.path == AUTORESEARCH_DATASET_RECEIPT_FILENAME
+            )
+            dataset_outputs = tuple(
+                output
+                for output in verified.outputs
+                if output.schema_name == AUTORESEARCH_DATASET_FILE_SCHEMA
+                and output.path.startswith("dataset/")
+            )
+            if len(receipt_outputs) != 1 or not dataset_outputs:
+                raise RuntimeError("campaign_remote_dataset_output_invalid")
+            receipt_output = receipt_outputs[0]
+            receipt_payload = await adapter.read_output_bytes(
+                record.identity,
+                receipt_output.path,
+                expected_sha256=receipt_output.sha256,
+                expected_size_bytes=receipt_output.size_bytes,
+                max_bytes=MAX_AUTORESEARCH_DATASET_RECEIPT_BYTES,
+            )
+            try:
+                receipt = AutoResearchDatasetReceipt.model_validate_json(receipt_payload)
+            except ValueError as exc:
+                raise RuntimeError("campaign_remote_dataset_output_invalid") from exc
+            expected_files = {(item.path, item.sha256, item.size_bytes) for item in receipt.files}
+            actual_files = {
+                (output.path, output.sha256, output.size_bytes) for output in dataset_outputs
+            }
+            if expected_files != actual_files:
+                raise RuntimeError("campaign_remote_dataset_output_invalid")
+            manifest_revision = self.repository.get_manifest_revision(
+                attempt.workspace_id,
+                attempt.campaign_id,
+                attempt.manifest_revision,
+            )
+            project_id = manifest_revision.manifest.evaluation_plan.get("ledger_project_id")
+            if not isinstance(project_id, str) or not project_id:
+                raise RuntimeError("campaign_remote_dataset_project_invalid")
+            generated_dataset, generated_dataset_version = build_dataset_ledger_specs(
+                attempt,
+                receipt,
+                project_id=project_id,
+                task_type=campaign.target_model.task,
+                created_at=now,
+            )
+            normalized_receipt = receipt.model_dump(mode="json")
+            artifact_metadata[receipt_output.path] = {
+                "normalized_dataset_receipt": normalized_receipt,
+                "ledger_project_id": project_id,
+                "dataset_id": generated_dataset.dataset_id,
+                "dataset_version_id": generated_dataset_version.dataset_version_id,
+                "content_digest": generated_dataset_version.content_digest,
+            }
+            receipt_files = {item.path: item for item in receipt.files}
+            for output in dataset_outputs:
+                item = receipt_files[output.path]
+                artifact_metadata[output.path] = {
+                    "relative_path": output.path.removeprefix("dataset/"),
+                    "ledger_project_id": project_id,
+                    "dataset_id": generated_dataset.dataset_id,
+                    "dataset_version_id": generated_dataset_version.dataset_version_id,
+                    "content_digest": generated_dataset_version.content_digest,
+                    "split": item.split,
+                    "row_count": item.row_count,
+                }
+        if attempt.stage.value == "development_evaluation":
+            evaluation_outputs = tuple(
+                output
+                for output in verified.outputs
+                if output.schema_name == AUTORESEARCH_EVALUATION_SCHEMA
+                and output.path == AUTORESEARCH_EVALUATION_FILENAME
+            )
+            if len(evaluation_outputs) != 1:
+                raise RuntimeError("campaign_remote_evaluation_output_invalid")
+            output = evaluation_outputs[0]
+            payload = await adapter.read_output_bytes(
+                record.identity,
+                output.path,
+                expected_sha256=output.sha256,
+                expected_size_bytes=output.size_bytes,
+                max_bytes=MAX_AUTORESEARCH_EVALUATION_BYTES,
+            )
+            try:
+                evidence = AutoResearchEvaluationEvidence.model_validate_json(payload)
+            except ValueError as exc:
+                raise RuntimeError("campaign_remote_evaluation_output_invalid") from exc
+            expected_identity = (
+                attempt.campaign_id,
+                attempt.study_id,
+                attempt.action_id,
+                attempt.attempt_id,
+                attempt.candidate_digest,
+                attempt.executor.get("evaluated_model_digest"),
+            )
+            actual_identity = (
+                evidence.campaign_id,
+                evidence.study_id,
+                evidence.action_id,
+                evidence.attempt_id,
+                evidence.candidate_digest,
+                evidence.evaluated_model_manifest_digest,
+            )
+            if actual_identity != expected_identity:
+                raise RuntimeError("campaign_remote_evaluation_output_invalid")
+            normalized = evidence.model_dump(mode="json")
+            artifact_metadata[output.path] = {
+                "normalized_evaluation": normalized,
+                "projection_key_version": self.sealer.key_version,
+                "projection_signature": self.sealer.sign_canonical_payload(
+                    normalized,
+                    domain=AUTORESEARCH_NORMALIZED_EVALUATION_DOMAIN,
+                ),
+            }
         self.repository.complete_from_seal(
             verified,
-            sealed_path,
+            sealed_reference,
             worker_id=self.worker_id,
+            artifact_metadata_by_path=artifact_metadata,
+            dataset_spec=generated_dataset,
+            dataset_version_spec=generated_dataset_version,
             now=now,
         )
         return "completed"
@@ -772,6 +1535,12 @@ class CampaignWorker:
             return reconciled
         if self._stop_requested:
             return "stopped"
+        if self.autoresearch_loop is not None:
+            loop_result = self.autoresearch_loop.tick(now=tick_at)
+            if loop_result.effect_performed:
+                return f"autoresearch_{loop_result.status}"
+            if loop_result.agent_action_required:
+                return f"autoresearch_{loop_result.status}"
         controller_result = self.controller_once(leader, now=tick_at)
         attempt = self.repository.claim_next_action(
             leader,

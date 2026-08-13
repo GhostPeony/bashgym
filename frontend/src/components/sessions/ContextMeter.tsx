@@ -10,7 +10,12 @@ interface ContextMeterProps {
 }
 
 /** Context-window occupancy for a session card */
-export function ContextMeter({ contextTokens, contextWindow, approx, detailed }: ContextMeterProps) {
+export function ContextMeter({
+  contextTokens,
+  contextWindow,
+  approx,
+  detailed
+}: ContextMeterProps) {
   if (contextTokens === undefined || !contextWindow) {
     return detailed ? <div className="font-mono text-[10px] text-text-muted">context: —</div> : null
   }
@@ -39,10 +44,12 @@ export function ContextMeter({ contextTokens, contextWindow, approx, detailed }:
     <div title={tooltip}>
       <div className="flex items-center justify-between font-mono text-[10px] text-text-muted mb-0.5">
         <span>CONTEXT</span>
-        <span className={clsx(
-          level === 'error' && 'text-status-error',
-          level === 'warning' && 'text-status-warning'
-        )}>
+        <span
+          className={clsx(
+            level === 'error' && 'text-status-error',
+            level === 'warning' && 'text-status-warning'
+          )}
+        >
           {label}
         </span>
       </div>

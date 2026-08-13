@@ -9,7 +9,7 @@ export function getGridLayout(total: number): GridLayout {
   return {
     columns,
     tracks: columns * 2,
-    rows: Math.max(1, Math.ceil(total / columns)),
+    rows: Math.max(1, Math.ceil(total / columns))
   }
 }
 
@@ -26,7 +26,5 @@ export function getGridColumnSpan(index: number, total: number): number {
 
 export function getGridTemplateRows(total: number): string {
   const { rows } = getGridLayout(total)
-  return rows <= 2
-    ? `repeat(${rows}, minmax(240px, 1fr))`
-    : `repeat(${rows}, 260px)`
+  return rows <= 2 ? `repeat(${rows}, minmax(240px, 1fr))` : `repeat(${rows}, 260px)`
 }

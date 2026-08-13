@@ -12,50 +12,45 @@ export function useCanvasHotkeys({
   onFitView,
   onFocusPanel
 }: UseCanvasHotkeysOptions = {}) {
-  const {
-    panels,
-    activePanelId,
-    setActivePanel,
-    sessions,
-    updateSession
-  } = useTerminalStore()
+  const { panels, activePanelId, setActivePanel, sessions, updateSession } = useTerminalStore()
 
-  const {
-    gridEnabled,
-    showMiniMap,
-    setGridEnabled,
-    setShowMiniMap,
-    toggleGlobalPaused
-  } = useCanvasControlStore()
+  const { gridEnabled, showMiniMap, setGridEnabled, setShowMiniMap, toggleGlobalPaused } =
+    useCanvasControlStore()
 
   // Focus session by number (1-9)
-  const focusSessionByNumber = useCallback((num: number) => {
-    const panelArray = Array.from(panels)
-    if (num > 0 && num <= panelArray.length) {
-      const panel = panelArray[num - 1]
-      setActivePanel(panel.id)
-      onFocusPanel?.(panel.id)
-    }
-  }, [panels, setActivePanel, onFocusPanel])
+  const focusSessionByNumber = useCallback(
+    (num: number) => {
+      const panelArray = Array.from(panels)
+      if (num > 0 && num <= panelArray.length) {
+        const panel = panelArray[num - 1]
+        setActivePanel(panel.id)
+        onFocusPanel?.(panel.id)
+      }
+    },
+    [panels, setActivePanel, onFocusPanel]
+  )
 
   // Cycle through sessions with Tab
-  const cycleSession = useCallback((reverse: boolean = false) => {
-    const panelArray = Array.from(panels)
-    if (panelArray.length === 0) return
+  const cycleSession = useCallback(
+    (reverse: boolean = false) => {
+      const panelArray = Array.from(panels)
+      if (panelArray.length === 0) return
 
-    const currentIndex = panelArray.findIndex(p => p.id === activePanelId)
-    let nextIndex: number
+      const currentIndex = panelArray.findIndex((p) => p.id === activePanelId)
+      let nextIndex: number
 
-    if (reverse) {
-      nextIndex = currentIndex <= 0 ? panelArray.length - 1 : currentIndex - 1
-    } else {
-      nextIndex = currentIndex >= panelArray.length - 1 ? 0 : currentIndex + 1
-    }
+      if (reverse) {
+        nextIndex = currentIndex <= 0 ? panelArray.length - 1 : currentIndex - 1
+      } else {
+        nextIndex = currentIndex >= panelArray.length - 1 ? 0 : currentIndex + 1
+      }
 
-    const nextPanel = panelArray[nextIndex]
-    setActivePanel(nextPanel.id)
-    onFocusPanel?.(nextPanel.id)
-  }, [panels, activePanelId, setActivePanel, onFocusPanel])
+      const nextPanel = panelArray[nextIndex]
+      setActivePanel(nextPanel.id)
+      onFocusPanel?.(nextPanel.id)
+    },
+    [panels, activePanelId, setActivePanel, onFocusPanel]
+  )
 
   // Toggle grid
   const toggleGrid = useCallback(() => {
@@ -71,7 +66,7 @@ export function useCanvasHotkeys({
   const toggleFocusedAgentPause = useCallback(() => {
     if (!activePanelId) return
 
-    const panel = panels.find(p => p.id === activePanelId)
+    const panel = panels.find((p) => p.id === activePanelId)
     if (!panel?.terminalId) return
 
     const session = sessions.get(panel.terminalId)
@@ -122,21 +117,39 @@ export function useCanvasHotkeys({
       }
 
       // F - fit view (without modifiers)
-      if (event.key.toLowerCase() === 'f' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      if (
+        event.key.toLowerCase() === 'f' &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.shiftKey
+      ) {
         event.preventDefault()
         onFitView?.()
         return
       }
 
       // G - toggle grid
-      if (event.key.toLowerCase() === 'g' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      if (
+        event.key.toLowerCase() === 'g' &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.shiftKey
+      ) {
         event.preventDefault()
         toggleGrid()
         return
       }
 
       // M - toggle minimap
-      if (event.key.toLowerCase() === 'm' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      if (
+        event.key.toLowerCase() === 'm' &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.shiftKey
+      ) {
         event.preventDefault()
         toggleMinimap()
         return
@@ -150,7 +163,13 @@ export function useCanvasHotkeys({
       }
 
       // P - pause/resume all (with Shift)
-      if (event.key.toLowerCase() === 'p' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (
+        event.key.toLowerCase() === 'p' &&
+        event.shiftKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey
+      ) {
         event.preventDefault()
         toggleGlobalPaused()
         return

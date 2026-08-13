@@ -3,13 +3,9 @@ import {
   toCampaignActivityFields,
   toCampaignPublicArtifact,
   type CampaignArtifact,
-  type CampaignEventItem,
+  type CampaignEventItem
 } from '../campaignVisibility'
-import {
-  campaignApi,
-  type ApiResponse,
-  type CampaignControlRoomSnapshotV1,
-} from '../services/api'
+import { campaignApi, type ApiResponse, type CampaignControlRoomSnapshotV1 } from '../services/api'
 import { useActivityStore } from './activityStore'
 import type { ControlRoomFreshness } from '../components/autoresearch/controlRoomModel'
 import {
@@ -27,7 +23,7 @@ import {
   snapshotSemanticIdentity,
   validateCampaignSnapshot,
   type CampaignHintV1,
-  type CampaignReconciliationState,
+  type CampaignReconciliationState
 } from './campaignFreshness'
 
 export type { CampaignArtifact, CampaignEventItem } from '../campaignVisibility'
@@ -212,14 +208,16 @@ export interface CampaignLedgerArtifact {
 export interface CampaignLedgerProject {
   project: { project_id: string; display_name: string; status: string }
   experiments: Array<Record<string, unknown> & { experiment_id: string }>
-  runs: Array<Record<string, unknown> & {
-    run_id: string
-    status: string
-    run_kind?: string
-    is_simulation?: boolean
-    model_version_id?: string | null
-    queued_at?: string
-  }>
+  runs: Array<
+    Record<string, unknown> & {
+      run_id: string
+      status: string
+      run_kind?: string
+      is_simulation?: boolean
+      model_version_id?: string | null
+      queued_at?: string
+    }
+  >
   evaluations: CampaignLedgerEvaluation[]
   artifacts: CampaignLedgerArtifact[]
   decisions: CampaignLedgerDecision[]
@@ -416,22 +414,23 @@ interface CampaignState {
   refresh: (workspaceId: string, campaignId: string) => Promise<void>
   loadEventsPage: (workspaceId: string, campaignId: string) => Promise<void>
   loadArtifactsPage: (workspaceId: string, campaignId: string) => Promise<void>
+  loadAttemptMetrics: (workspaceId: string, campaignId: string, attemptId: string) => Promise<void>
   loadLegacyDetail: (workspaceId: string, campaignId: string) => Promise<void>
   refreshController: (workspaceId: string) => Promise<void>
   select: (workspaceId: string, campaignId: string) => Promise<void>
   transition: (
     workspaceId: string,
     campaignId: string,
-    action: 'start' | 'pause' | 'resume' | 'cancel',
+    action: 'start' | 'pause' | 'resume' | 'cancel' | 'conclude',
     expectedVersion: number,
-    reason?: string,
+    reason?: string
   ) => Promise<boolean>
   handleHint: (hint: CampaignHintV1) => Promise<void>
   handleConnection: (connected: boolean, connectionGeneration?: number) => Promise<void>
   handleSubscription: (
     workspaceId: string,
     subscribed: boolean,
-    connectionGeneration: number,
+    connectionGeneration: number
   ) => Promise<void>
   startWorkspaceLive: (workspaceId: string) => void
   stopWorkspaceLive: (workspaceId: string) => void
@@ -451,36 +450,40 @@ const emptyWorkspace = (): CampaignWorkspaceState => ({
   liveRefs: 0,
   connected: false,
   subscribed: false,
-  connectionGeneration: 0,
+  connectionGeneration: 0
 })
 
 const controllerRefreshInFlight = new Map<string, Promise<void>>()
 const controllerRefreshAt = new Map<string, number>()
 const eventPageInFlight = new Map<string, Promise<void>>()
 const artifactPageInFlight = new Map<string, Promise<void>>()
+const attemptMetricsInFlight = new Map<string, Promise<void>>()
 const snapshotInFlight = new Map<string, Promise<void>>()
-const hintReconciliationInFlight = new Map<string, {
-  controller: AbortController
-  promise: Promise<void>
-}>()
+const hintReconciliationInFlight = new Map<
+  string,
+  {
+    controller: AbortController
+    promise: Promise<void>
+  }
+>()
 const pendingHintTargets = new Map<string, CampaignHintV1>()
 const CONTROLLER_REFRESH_DEDUPE_MS = 2_000
 const MAX_HINT_RETRIES = 5
 const MAX_PENDING_HINT_TARGETS = 256
 const CAMPAIGN_SAFETY_RECONCILE_MS = 18_000
-const campaignSafetyReconcileEntries = new Map<string, {
-  refs: number
-  timer: ReturnType<typeof setInterval>
-}>()
+const campaignSafetyReconcileEntries = new Map<
+  string,
+  {
+    refs: number
+    timer: ReturnType<typeof setInterval>
+  }
+>()
 
 function campaignKey(workspaceId: string, campaignId: string): string {
   return `${workspaceId}\u0000${campaignId}`
 }
 
-export function retainCampaignSafetyReconcile(
-  workspaceId: string,
-  campaignId: string,
-): () => void {
+export function retainCampaignSafetyReconcile(workspaceId: string, campaignId: string): () => void {
   const key = campaignKey(workspaceId, campaignId)
   const existing = campaignSafetyReconcileEntries.get(key)
   if (existing) {
@@ -488,11 +491,9 @@ export function retainCampaignSafetyReconcile(
   } else {
     const timer = setInterval(() => {
       if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-        void useCampaignStore.getState().reconcileCampaign(
-          workspaceId,
-          campaignId,
-          'safety-reconcile',
-        )
+        void useCampaignStore
+          .getState()
+          .reconcileCampaign(workspaceId, campaignId, 'safety-reconcile')
       }
     }, CAMPAIGN_SAFETY_RECONCILE_MS)
     campaignSafetyReconcileEntries.set(key, { refs: 1, timer })
@@ -532,11 +533,13 @@ function errorOf<T>(response: ApiResponse<T>, fallback: string): string {
 
 function mergeEvents(
   existing: CampaignEventItem[],
-  incoming: CampaignEventItem[],
+  incoming: CampaignEventItem[]
 ): CampaignEventItem[] {
   const byId = new Map(existing.map((item) => [item.event.event_id, item]))
   for (const item of incoming) byId.set(item.event.event_id, item)
-  return Array.from(byId.values()).sort((a, b) => a.cursor - b.cursor).slice(-500)
+  return Array.from(byId.values())
+    .sort((a, b) => a.cursor - b.cursor)
+    .slice(-500)
 }
 
 function emptyDetail(campaign: CampaignRecord): CampaignDetailState {
@@ -544,7 +547,7 @@ function emptyDetail(campaign: CampaignRecord): CampaignDetailState {
     eventCursor: 0,
     aggregateVersion: 0,
     hasSnapshot: false,
-    connected: true,
+    connected: true
   })
   return {
     snapshot: null,
@@ -563,7 +566,7 @@ function emptyDetail(campaign: CampaignRecord): CampaignDetailState {
       eventsLoaded: false,
       artifactsLoaded: false,
       eventsError: null,
-      artifactsError: null,
+      artifactsError: null
     },
     campaign,
     studies: [],
@@ -577,17 +580,20 @@ function emptyDetail(campaign: CampaignRecord): CampaignDetailState {
     lossByAttempt: {},
     nextCursor: 0,
     loading: false,
-    error: null,
+    error: null
   }
 }
 
 function isOfflineFailure(response: ApiResponse<unknown>): boolean {
-  if ([
-    'campaign_desktop_bridge_required',
-    'campaign_backend_unavailable',
-    'campaign_backend_root_unavailable',
-    'campaign_backend_configuration_invalid',
-  ].includes(response.code || '')) return true
+  if (
+    [
+      'campaign_desktop_bridge_required',
+      'campaign_backend_unavailable',
+      'campaign_backend_root_unavailable',
+      'campaign_backend_configuration_invalid'
+    ].includes(response.code || '')
+  )
+    return true
   const message = (response.error || '').toLowerCase()
   return ['network', 'offline', 'bridge unavailable', 'failed to fetch'].some((value) =>
     message.includes(value)
@@ -604,12 +610,12 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
         ...state.workspaces,
         [workspaceId]: {
           ...(state.workspaces[workspaceId] || emptyWorkspace()),
-            freshness: 'reconciling',
+          freshness: 'reconciling',
           loadGeneration: generation,
           loading: true,
-          error: null,
-        },
-      },
+          error: null
+        }
+      }
     }))
     const response = await campaignApi.list(workspaceId)
     if (!response.ok || !response.data) {
@@ -622,11 +628,13 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
         for (const [id, detail] of Object.entries(workspace.details)) {
           const freshness: ControlRoomFreshness = offline
             ? 'offline'
-            : detail.snapshot ? 'stale' : 'error'
+            : detail.snapshot
+              ? 'stale'
+              : 'error'
           details[id] = {
             ...detail,
             freshness,
-            error,
+            error
           }
         }
         return {
@@ -637,9 +645,9 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
               details,
               freshness: offline ? 'offline' : workspace.campaigns.length ? 'stale' : 'error',
               loading: false,
-              error,
-            },
-          },
+              error
+            }
+          }
         }
       })
       return
@@ -652,10 +660,11 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     set((state) => {
       const workspace = state.workspaces[workspaceId] || emptyWorkspace()
       if (workspace.loadGeneration !== generation) return state
-      const selected = campaigns.find((item) => item.campaign_id === preferredCampaignId)
-        || campaigns.find((item) => item.campaign_id === workspace.selectedCampaignId)
-        || campaigns[0]
-        || null
+      const selected =
+        campaigns.find((item) => item.campaign_id === preferredCampaignId) ||
+        campaigns.find((item) => item.campaign_id === workspace.selectedCampaignId) ||
+        campaigns[0] ||
+        null
       selectedCampaignId = selected?.campaign_id || null
       return {
         workspaces: {
@@ -667,9 +676,9 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
             selectedCampaignId,
             freshness: workspace.subscribed ? 'reconciling' : 'stale',
             loading: false,
-            error: null,
-          },
-        },
+            error: null
+          }
+        }
       }
     })
     if (selectedCampaignId) await get().refresh(workspaceId, selectedCampaignId)
@@ -683,9 +692,13 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     const campaign = workspaceBefore.campaigns.find((item) => item.campaign_id === campaignId)
     if (!campaign) return
     const previous = workspaceBefore.details[campaignId] || emptyDetail(campaign)
-    const authorityBefore = workspaceBefore.subscribed && !previous.reconciliation.subscribed
-      ? acknowledgeCampaignSubscription(previous.reconciliation, workspaceBefore.connectionGeneration)
-      : previous.reconciliation
+    const authorityBefore =
+      workspaceBefore.subscribed && !previous.reconciliation.subscribed
+        ? acknowledgeCampaignSubscription(
+            previous.reconciliation,
+            workspaceBefore.connectionGeneration
+          )
+        : previous.reconciliation
     const reconciliation = beginCampaignReconciliation(authorityBefore)
     const generation = reconciliation.generation
     set((state) => {
@@ -702,11 +715,11 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                 freshness: reconciliation.freshness,
                 reconciliation,
                 loading: true,
-                error: null,
-              },
-            },
-          },
-        },
+                error: null
+              }
+            }
+          }
+        }
       }
     })
     const request = (async () => {
@@ -721,7 +734,7 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
             generation,
             connected: !offline,
             exhausted: !offline && !detail.snapshot,
-            errorCode: response.code || 'campaign_snapshot_failed',
+            errorCode: response.code || 'campaign_snapshot_failed'
           })
           return {
             workspaces: {
@@ -735,11 +748,11 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                     reconciliation: next,
                     loading: false,
                     freshness: next.freshness,
-                    error: errorOf(response, 'Unable to load AutoResearch campaign state'),
-                  },
-                },
-              },
-            },
+                    error: errorOf(response, 'Unable to load AutoResearch campaign state')
+                  }
+                }
+              }
+            }
           }
         })
         return
@@ -763,11 +776,11 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                     reconciliation: next,
                     freshness: next.freshness,
                     loading: false,
-                    error: 'Rejected invalid campaign snapshot schema or identity.',
-                  },
-                },
-              },
-            },
+                    error: 'Rejected invalid campaign snapshot schema or identity.'
+                  }
+                }
+              }
+            }
           }
         }
         const semanticKey = snapshotSemanticIdentity(incoming)
@@ -776,11 +789,12 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
           eventCursor: incoming.latest_event_cursor,
           aggregateVersion: incoming.aggregate_version,
           semanticKey,
-          verifiedAt: incoming.snapshot_at,
+          verifiedAt: incoming.snapshot_at
         })
-        const accepted = next.appliedCursor === incoming.latest_event_cursor
-          && next.appliedVersion === incoming.aggregate_version
-          && next.errorCode !== 'campaign_snapshot_regressed'
+        const accepted =
+          next.appliedCursor === incoming.latest_event_cursor &&
+          next.appliedVersion === incoming.aggregate_version &&
+          next.errorCode !== 'campaign_snapshot_regressed'
         if (!accepted) {
           return {
             workspaces: {
@@ -794,11 +808,11 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                     reconciliation: next,
                     freshness: next.freshness,
                     loading: false,
-                    error: 'Rejected regressive campaign state; retained the last verified state.',
-                  },
-                },
-              },
-            },
+                    error: 'Rejected regressive campaign state; retained the last verified state.'
+                  }
+                }
+              }
+            }
           }
         }
         const semanticallyUnchanged = Boolean(
@@ -819,7 +833,7 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
               champion_ref: snapshot.campaign.champion_ref,
               stop_reason: snapshot.campaign.stop_reason,
               version: snapshot.aggregate_version,
-              updated_at: snapshot.snapshot_at,
+              updated_at: snapshot.snapshot_at
             }
         return {
           workspaces: {
@@ -841,11 +855,13 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                   freshness: next.freshness,
                   lastVerifiedAt: next.lastVerifiedAt,
                   loading: false,
-                  error: next.errorCode ? 'Awaiting durable campaign state for the latest notification target.' : null,
-                },
-              },
-            },
-          },
+                  error: next.errorCode
+                    ? 'Awaiting durable campaign state for the latest notification target.'
+                    : null
+                }
+              }
+            }
+          }
         }
       })
     })().finally(() => {
@@ -868,7 +884,8 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     const existing = eventPageInFlight.get(requestKey)
     if (existing) return existing
     const detail = get().workspaces[workspaceId]?.details[campaignId]
-    if (!detail || (detail.pages.eventsLoaded && !detail.pages.eventsHasMore)) return Promise.resolve()
+    if (!detail || (detail.pages.eventsLoaded && !detail.pages.eventsHasMore))
+      return Promise.resolve()
     const requestedCursor = detail.pages.eventCursor
     set((state) => {
       const workspace = state.workspaces[workspaceId] || emptyWorkspace()
@@ -883,24 +900,26 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
               ...workspace.details,
               [campaignId]: {
                 ...current,
-                pages: { ...current.pages, eventsLoading: true, eventsError: null },
-              },
-            },
-          },
-        },
+                pages: { ...current.pages, eventsLoading: true, eventsError: null }
+              }
+            }
+          }
+        }
       }
     })
     const request = (async () => {
       const response = await campaignApi.events(workspaceId, campaignId, requestedCursor, 100)
       if (!response.ok || !response.data) {
         if (response.status === 410 && response.code === 'campaign_event_cursor_expired') {
-          const detailRecord = response.details && typeof response.details === 'object'
-            ? response.details as Record<string, unknown>
-            : {}
-          const resumeCursor = Number.isSafeInteger(detailRecord.resume_cursor)
-            && Number(detailRecord.resume_cursor) >= 0
-            ? Number(detailRecord.resume_cursor)
-            : 0
+          const detailRecord =
+            response.details && typeof response.details === 'object'
+              ? (response.details as Record<string, unknown>)
+              : {}
+          const resumeCursor =
+            Number.isSafeInteger(detailRecord.resume_cursor) &&
+            Number(detailRecord.resume_cursor) >= 0
+              ? Number(detailRecord.resume_cursor)
+              : 0
           set((state) => {
             const workspace = state.workspaces[workspaceId] || emptyWorkspace()
             const current = workspace.details[campaignId]
@@ -926,12 +945,12 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                         eventsHasMore: true,
                         eventsLoading: false,
                         eventsLoaded: false,
-                        eventsError: null,
-                      },
-                    },
-                  },
-                },
-              },
+                        eventsError: null
+                      }
+                    }
+                  }
+                }
+              }
             }
           })
           await get().reconcileCampaign(workspaceId, campaignId, 'event-cursor-expired')
@@ -953,12 +972,12 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                     pages: {
                       ...current.pages,
                       eventsLoading: false,
-                      eventsError: errorOf(response, 'Unable to load campaign events'),
-                    },
-                  },
-                },
-              },
-            },
+                      eventsError: errorOf(response, 'Unable to load campaign events')
+                    }
+                  }
+                }
+              }
+            }
           }
         })
         return
@@ -995,12 +1014,12 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                     eventsHasMore: response.data!.items.length > 0 && nextCursor > requestedCursor,
                     eventsLoading: false,
                     eventsLoaded: true,
-                    eventsError: null,
-                  },
-                },
-              },
-            },
-          },
+                    eventsError: null
+                  }
+                }
+              }
+            }
+          }
         }
       })
     })().finally(() => eventPageInFlight.delete(requestKey))
@@ -1030,20 +1049,15 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
               ...workspace.details,
               [campaignId]: {
                 ...current,
-                pages: { ...current.pages, artifactsLoading: true, artifactsError: null },
-              },
-            },
-          },
-        },
+                pages: { ...current.pages, artifactsLoading: true, artifactsError: null }
+              }
+            }
+          }
+        }
       }
     })
     const request = (async () => {
-      const response = await campaignApi.artifacts(
-        workspaceId,
-        campaignId,
-        requestedCursor,
-        50,
-      )
+      const response = await campaignApi.artifacts(workspaceId, campaignId, requestedCursor, 50)
       if (!response.ok || !response.data) {
         set((state) => {
           const workspace = state.workspaces[workspaceId] || emptyWorkspace()
@@ -1061,12 +1075,12 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                     pages: {
                       ...current.pages,
                       artifactsLoading: false,
-                      artifactsError: errorOf(response, 'Unable to load campaign artifacts'),
-                    },
-                  },
-                },
-              },
-            },
+                      artifactsError: errorOf(response, 'Unable to load campaign artifacts')
+                    }
+                  }
+                }
+              }
+            }
           }
         })
         return
@@ -1098,16 +1112,88 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                     artifactsHasMore: response.data!.has_more,
                     artifactsLoading: false,
                     artifactsLoaded: true,
-                    artifactsError: null,
-                  },
-                },
-              },
-            },
-          },
+                    artifactsError: null
+                  }
+                }
+              }
+            }
+          }
         }
       })
     })().finally(() => artifactPageInFlight.delete(requestKey))
     artifactPageInFlight.set(requestKey, request)
+    return request
+  },
+
+  loadAttemptMetrics: (workspaceId, campaignId, attemptId) => {
+    const requestKey = `${workspaceId}\u0000${campaignId}\u0000${attemptId}`
+    const existing = attemptMetricsInFlight.get(requestKey)
+    if (existing) return existing
+    const detail = get().workspaces[workspaceId]?.details[campaignId]
+    if (!detail || detail.snapshot?.active_work?.attempt_id !== attemptId) return Promise.resolve()
+    const requestGeneration = detail.reconciliation.generation
+    const currentValues = detail.lossByAttempt[attemptId] || []
+    const afterStep = currentValues.reduce((latest, point) => Math.max(latest, point.step), -1)
+    const request = (async () => {
+      const response = await campaignApi.metrics(
+        workspaceId,
+        campaignId,
+        attemptId,
+        'training_metrics.jsonl',
+        'loss',
+        afterStep,
+        2000
+      )
+      if (!response.ok || !response.data) return
+      const incoming = response.data.values.filter(
+        (point) =>
+          Number.isSafeInteger(point.step) &&
+          point.step >= 0 &&
+          point.source === 'training_metrics.jsonl' &&
+          Number.isFinite(point.value) &&
+          typeof point.observed_at === 'string'
+      )
+      set((state) => {
+        const workspace = state.workspaces[workspaceId]
+        const current = workspace?.details[campaignId]
+        if (
+          !workspace ||
+          !current ||
+          current.reconciliation.generation !== requestGeneration ||
+          current.snapshot?.active_work?.attempt_id !== attemptId
+        )
+          return state
+        const byPoint = new Map(
+          (current.lossByAttempt[attemptId] || []).map((point) => [
+            `${point.source}:${point.step}`,
+            point
+          ])
+        )
+        for (const point of incoming) byPoint.set(`${point.source}:${point.step}`, point)
+        const values = Array.from(byPoint.values())
+          .sort((left, right) => left.step - right.step || left.source.localeCompare(right.source))
+          .slice(-500)
+        return {
+          workspaces: {
+            ...state.workspaces,
+            [workspaceId]: {
+              ...workspace,
+              details: {
+                ...workspace.details,
+                [campaignId]: {
+                  ...current,
+                  lossByAttempt: { ...current.lossByAttempt, [attemptId]: values }
+                }
+              }
+            }
+          }
+        }
+      })
+    })().finally(() => {
+      if (attemptMetricsInFlight.get(requestKey) === request)
+        attemptMetricsInFlight.delete(requestKey)
+    })
+    attemptMetricsInFlight.set(requestKey, request)
     return request
   },
 
@@ -1118,26 +1204,53 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     const snapshotIdentity = current.snapshot
       ? `${current.snapshot.aggregate_version}:${current.snapshot.latest_event_cursor}`
       : null
-    const [campaignResponse, studiesResponse, proposalsResponse, evidenceResponse, attemptsResponse, comparisonsResponse, ledgerResponse] = await Promise.all([
+    const [
+      campaignResponse,
+      studiesResponse,
+      proposalsResponse,
+      evidenceResponse,
+      attemptsResponse,
+      comparisonsResponse,
+      ledgerResponse
+    ] = await Promise.all([
       campaignApi.get(workspaceId, campaignId),
       campaignApi.studies(workspaceId, campaignId),
       campaignApi.proposals(workspaceId, campaignId),
       campaignApi.evidence(workspaceId, campaignId),
       campaignApi.attempts(workspaceId, campaignId),
       campaignApi.comparisons(workspaceId, campaignId),
-      campaignApi.ledger(workspaceId, campaignId),
+      campaignApi.ledger(workspaceId, campaignId)
     ])
-    if (!campaignResponse.data || !studiesResponse.data || !proposalsResponse.data || !evidenceResponse.data || !attemptsResponse.data || !comparisonsResponse.data || !ledgerResponse.data) return
+    if (
+      !campaignResponse.data ||
+      !studiesResponse.data ||
+      !proposalsResponse.data ||
+      !evidenceResponse.data ||
+      !attemptsResponse.data ||
+      !comparisonsResponse.data ||
+      !ledgerResponse.data
+    )
+      return
     const attempts = attemptsResponse.data.attempts
-    const metricResponses = await Promise.all(attempts.filter((attempt) =>
-      ['smoke_training', 'full_training'].includes(attempt.stage)
-    ).slice(-4).map(async (attempt) => ({
-      attemptId: attempt.attempt_id,
-      response: await campaignApi.metrics(workspaceId, campaignId, attempt.attempt_id, 'training_metrics.jsonl', 'loss'),
-    })))
+    const metricResponses = await Promise.all(
+      attempts
+        .filter((attempt) => ['smoke_training', 'full_training'].includes(attempt.stage))
+        .slice(-4)
+        .map(async (attempt) => ({
+          attemptId: attempt.attempt_id,
+          response: await campaignApi.metrics(
+            workspaceId,
+            campaignId,
+            attempt.attempt_id,
+            'training_metrics.jsonl',
+            'loss'
+          )
+        }))
+    )
     const incomingLossByAttempt: Record<string, CampaignMetricValue[]> = {}
     for (const item of metricResponses) {
-      if (item.response.ok && item.response.data) incomingLossByAttempt[item.attemptId] = item.response.data.values
+      if (item.response.ok && item.response.data)
+        incomingLossByAttempt[item.attemptId] = item.response.data.values
     }
     let accepted = false
     set((state) => {
@@ -1148,9 +1261,10 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
         ? `${detail.snapshot.aggregate_version}:${detail.snapshot.latest_event_cursor}`
         : null
       if (
-        detail.reconciliation.generation !== requestGeneration
-        || currentSnapshotIdentity !== snapshotIdentity
-      ) return state
+        detail.reconciliation.generation !== requestGeneration ||
+        currentSnapshotIdentity !== snapshotIdentity
+      )
+        return state
       accepted = true
       return {
         workspaces: {
@@ -1168,17 +1282,17 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                 attempts,
                 comparisons: comparisonsResponse.data!.comparisons,
                 ledger: ledgerResponse.data!,
-                lossByAttempt: { ...detail.lossByAttempt, ...incomingLossByAttempt },
-              },
-            },
-          },
-        },
+                lossByAttempt: { ...detail.lossByAttempt, ...incomingLossByAttempt }
+              }
+            }
+          }
+        }
       }
     })
     if (!accepted) return
     await Promise.all([
       get().loadEventsPage(workspaceId, campaignId),
-      get().loadArtifactsPage(workspaceId, campaignId),
+      get().loadArtifactsPage(workspaceId, campaignId)
     ])
   },
 
@@ -1197,9 +1311,9 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
             ...state.workspaces,
             [workspaceId]: {
               ...(state.workspaces[workspaceId] || emptyWorkspace()),
-              controller: response.data!.controller,
-            },
-          },
+              controller: response.data!.controller
+            }
+          }
         }))
         controllerRefreshAt.set(workspaceId, Date.now())
       }
@@ -1215,9 +1329,9 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
         [workspaceId]: {
           ...(state.workspaces[workspaceId] || emptyWorkspace()),
           selectedCampaignId: campaignId,
-          loadGeneration: (state.workspaces[workspaceId]?.loadGeneration || 0) + 1,
-        },
-      },
+          loadGeneration: (state.workspaces[workspaceId]?.loadGeneration || 0) + 1
+        }
+      }
     }))
     await get().refresh(workspaceId, campaignId)
   },
@@ -1226,27 +1340,33 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     const authority = get().workspaces[workspaceId]?.details[campaignId]
     if (!authority || authority.freshness !== 'live') return false
     const response = await campaignApi.transition(
-      workspaceId, campaignId, action, expectedVersion, reason
+      workspaceId,
+      campaignId,
+      action,
+      expectedVersion,
+      reason
     )
     if (!response.ok) {
       set((state) => {
         const workspace = state.workspaces[workspaceId] || emptyWorkspace()
         const detail = workspace.details[campaignId]
-        return !detail ? state : {
-          workspaces: {
-            ...state.workspaces,
-            [workspaceId]: {
-              ...workspace,
-              details: {
-                ...workspace.details,
-                [campaignId]: {
-                  ...detail,
-                  error: errorOf(response, `Unable to ${action} campaign`),
-                },
-              },
-            },
-          },
-        }
+        return !detail
+          ? state
+          : {
+              workspaces: {
+                ...state.workspaces,
+                [workspaceId]: {
+                  ...workspace,
+                  details: {
+                    ...workspace.details,
+                    [campaignId]: {
+                      ...detail,
+                      error: errorOf(response, `Unable to ${action} campaign`)
+                    }
+                  }
+                }
+              }
+            }
       })
       // A rejected mutation can itself prove that the renderer's last verified
       // authority is no longer current (readiness drift, lease loss, or CAS
@@ -1279,7 +1399,7 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       detail = workspace.details[hint.campaign_id] || emptyDetail(campaign)
       const acknowledged = acknowledgeCampaignSubscription(
         detail.reconciliation,
-        workspace.connectionGeneration,
+        workspace.connectionGeneration
       )
       detail = { ...detail, reconciliation: acknowledged, freshness: acknowledged.freshness }
       set((state) => ({
@@ -1289,10 +1409,10 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
             ...state.workspaces[hint.workspace_id]!,
             details: {
               ...state.workspaces[hint.workspace_id]!.details,
-              [hint.campaign_id]: detail!,
-            },
-          },
-        },
+              [hint.campaign_id]: detail!
+            }
+          }
+        }
       }))
       pendingHintTargets.delete(key)
     } else if (!detail) {
@@ -1300,17 +1420,24 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       if (!knownCampaign) return
       const acknowledged = acknowledgeCampaignSubscription(
         emptyDetail(knownCampaign).reconciliation,
-        workspace.connectionGeneration,
+        workspace.connectionGeneration
       )
-      detail = { ...emptyDetail(knownCampaign), reconciliation: acknowledged, freshness: acknowledged.freshness }
+      detail = {
+        ...emptyDetail(knownCampaign),
+        reconciliation: acknowledged,
+        freshness: acknowledged.freshness
+      }
       set((state) => ({
         workspaces: {
           ...state.workspaces,
           [hint.workspace_id]: {
             ...state.workspaces[hint.workspace_id]!,
-            details: { ...state.workspaces[hint.workspace_id]!.details, [hint.campaign_id]: detail! },
-          },
-        },
+            details: {
+              ...state.workspaces[hint.workspace_id]!.details,
+              [hint.campaign_id]: detail!
+            }
+          }
+        }
       }))
     }
     if (!detail) return
@@ -1333,11 +1460,11 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                 ...current,
                 reconciliation: next.state,
                 freshness: next.state.freshness,
-                error: null,
-              },
-            },
-          },
-        },
+                error: null
+              }
+            }
+          }
+        }
       }
     })
 
@@ -1352,17 +1479,26 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
         const current = get().workspaces[hint.workspace_id]?.details[hint.campaign_id]
         if (!current) return
         const authority = current.reconciliation
-        const satisfied = authority.subscribed
-          && authority.appliedCursor >= authority.targetCursor
-          && authority.appliedVersion >= authority.targetVersion
+        const satisfied =
+          authority.subscribed &&
+          authority.appliedCursor >= authority.targetCursor &&
+          authority.appliedVersion >= authority.targetVersion
         if (satisfied) return
-        if (['campaign_snapshot_invalid', 'campaign_subscription_denied'].includes(authority.errorCode || '')) return
+        if (
+          ['campaign_snapshot_invalid', 'campaign_subscription_denied'].includes(
+            authority.errorCode || ''
+          )
+        )
+          return
         if (attempt >= MAX_HINT_RETRIES) {
           set((state) => {
             const currentWorkspace = state.workspaces[hint.workspace_id]
             const latest = currentWorkspace?.details[hint.campaign_id]
             if (!currentWorkspace || !latest) return state
-            const next = markCampaignError(latest.reconciliation, 'campaign_snapshot_retry_exhausted')
+            const next = markCampaignError(
+              latest.reconciliation,
+              'campaign_snapshot_retry_exhausted'
+            )
             return {
               workspaces: {
                 ...state.workspaces,
@@ -1374,33 +1510,37 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
                       ...latest,
                       reconciliation: next,
                       freshness: next.freshness,
-                      error: 'Awaiting durable campaign state for the latest notification target.',
-                    },
-                  },
-                },
-              },
+                      error: 'Awaiting durable campaign state for the latest notification target.'
+                    }
+                  }
+                }
+              }
             }
           })
           return
         }
         await abortableDelay(reconciliationRetryDelay(attempt), controller.signal)
       }
-    })().catch((error) => {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) throw error
-    }).finally(() => {
-      if (hintReconciliationInFlight.get(key)?.promise === request) {
-        hintReconciliationInFlight.delete(key)
-      }
-    })
+    })()
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) throw error
+      })
+      .finally(() => {
+        if (hintReconciliationInFlight.get(key)?.promise === request) {
+          hintReconciliationInFlight.delete(key)
+        }
+      })
     hintReconciliationInFlight.set(key, { controller, promise: request })
     return request
   },
 
   handleConnection: async (connected, suppliedGeneration) => {
-    const nextGeneration = suppliedGeneration ?? Math.max(
-      1,
-      ...Object.values(get().workspaces).map((workspace) => workspace.connectionGeneration + 1),
-    )
+    const nextGeneration =
+      suppliedGeneration ??
+      Math.max(
+        1,
+        ...Object.values(get().workspaces).map((workspace) => workspace.connectionGeneration + 1)
+      )
     if (!connected) {
       for (const run of hintReconciliationInFlight.values()) run.controller.abort()
       hintReconciliationInFlight.clear()
@@ -1409,49 +1549,57 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       snapshotInFlight.clear()
       pendingHintTargets.clear()
       set((state) => ({
-        workspaces: Object.fromEntries(Object.entries(state.workspaces).map(([workspaceId, workspace]) => [
-          workspaceId,
-          {
-            ...workspace,
-            freshness: 'offline',
-            connected: false,
-            subscribed: false,
-            connectionGeneration: nextGeneration,
-            loading: false,
-            details: Object.fromEntries(Object.entries(workspace.details).map(([campaignId, detail]) => [
-              campaignId,
-              {
-                ...detail,
-                freshness: 'offline',
-                reconciliation: markCampaignDisconnected(detail.reconciliation, nextGeneration),
-                loading: false,
-              },
-            ])),
-          },
-        ])),
+        workspaces: Object.fromEntries(
+          Object.entries(state.workspaces).map(([workspaceId, workspace]) => [
+            workspaceId,
+            {
+              ...workspace,
+              freshness: 'offline',
+              connected: false,
+              subscribed: false,
+              connectionGeneration: nextGeneration,
+              loading: false,
+              details: Object.fromEntries(
+                Object.entries(workspace.details).map(([campaignId, detail]) => [
+                  campaignId,
+                  {
+                    ...detail,
+                    freshness: 'offline',
+                    reconciliation: markCampaignDisconnected(detail.reconciliation, nextGeneration),
+                    loading: false
+                  }
+                ])
+              )
+            }
+          ])
+        )
       }))
       return
     }
     const workspaces = Object.entries(get().workspaces)
     set((state) => ({
-      workspaces: Object.fromEntries(Object.entries(state.workspaces).map(([workspaceId, workspace]) => [
-        workspaceId,
-        {
-          ...workspace,
-          freshness: 'reconciling',
-          connected: true,
-          subscribed: false,
-          connectionGeneration: nextGeneration,
-          details: Object.fromEntries(Object.entries(workspace.details).map(([campaignId, detail]) => [
-            campaignId,
-            {
-              ...detail,
-              freshness: 'reconciling',
-              reconciliation: markCampaignReconnected(detail.reconciliation, nextGeneration),
-            },
-          ])),
-        },
-      ])),
+      workspaces: Object.fromEntries(
+        Object.entries(state.workspaces).map(([workspaceId, workspace]) => [
+          workspaceId,
+          {
+            ...workspace,
+            freshness: 'reconciling',
+            connected: true,
+            subscribed: false,
+            connectionGeneration: nextGeneration,
+            details: Object.fromEntries(
+              Object.entries(workspace.details).map(([campaignId, detail]) => [
+                campaignId,
+                {
+                  ...detail,
+                  freshness: 'reconciling',
+                  reconciliation: markCampaignReconnected(detail.reconciliation, nextGeneration)
+                }
+              ])
+            )
+          }
+        ])
+      )
     }))
     // Socket-open is transport only. Campaign authority waits for per-workspace ack.
     void workspaces
@@ -1472,25 +1620,32 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
             subscribed,
             connectionGeneration,
             freshness: subscribed ? 'reconciling' : 'error',
-            details: Object.fromEntries(Object.entries(workspace.details).map(([campaignId, detail]) => {
-              const reconciliation = subscribed
-                ? acknowledgeCampaignSubscription(detail.reconciliation, connectionGeneration)
-                : markCampaignError(detail.reconciliation, 'campaign_subscription_denied')
-              return [campaignId, {
-                ...detail,
-                freshness: reconciliation.freshness,
-                reconciliation,
-                error: subscribed ? null : 'Live campaign subscription was denied.',
-              }]
-            })),
-          },
-        },
+            details: Object.fromEntries(
+              Object.entries(workspace.details).map(([campaignId, detail]) => {
+                const reconciliation = subscribed
+                  ? acknowledgeCampaignSubscription(detail.reconciliation, connectionGeneration)
+                  : markCampaignError(detail.reconciliation, 'campaign_subscription_denied')
+                return [
+                  campaignId,
+                  {
+                    ...detail,
+                    freshness: reconciliation.freshness,
+                    reconciliation,
+                    error: subscribed ? null : 'Live campaign subscription was denied.'
+                  }
+                ]
+              })
+            )
+          }
+        }
       }
     })
     if (subscribed) {
-      await Promise.all(Object.keys(get().workspaces[workspaceId]?.details || {}).map((campaignId) =>
-        get().reconcileCampaign(workspaceId, campaignId, 'subscription-ack')
-      ))
+      await Promise.all(
+        Object.keys(get().workspaces[workspaceId]?.details || {}).map((campaignId) =>
+          get().reconcileCampaign(workspaceId, campaignId, 'subscription-ack')
+        )
+      )
     }
   },
 
@@ -1500,9 +1655,9 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
         ...state.workspaces,
         [workspaceId]: {
           ...(state.workspaces[workspaceId] || emptyWorkspace()),
-          liveRefs: (state.workspaces[workspaceId]?.liveRefs || 0) + 1,
-        },
-      },
+          liveRefs: (state.workspaces[workspaceId]?.liveRefs || 0) + 1
+        }
+      }
     }))
   },
 
@@ -1513,9 +1668,9 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       return {
         workspaces: {
           ...state.workspaces,
-          [workspaceId]: { ...workspace, liveRefs: Math.max(0, workspace.liveRefs - 1) },
-        },
+          [workspaceId]: { ...workspace, liveRefs: Math.max(0, workspace.liveRefs - 1) }
+        }
       }
     })
-  },
+  }
 }))

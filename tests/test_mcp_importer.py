@@ -4,18 +4,53 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 MCP_JSONRPC_LOG = [
-    {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "read_file", "arguments": {"path": "/src/main.py"}}, "id": 1, "timestamp": "2024-11-15T10:00:00Z"},
-    {"jsonrpc": "2.0", "result": {"content": [{"type": "text", "text": "def main(): pass"}]}, "id": 1, "timestamp": "2024-11-15T10:00:01Z"},
-    {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "write_file", "arguments": {"path": "/src/main.py", "content": "def main():\n    print('hello')"}}, "id": 2, "timestamp": "2024-11-15T10:00:10Z"},
-    {"jsonrpc": "2.0", "result": {"content": [{"type": "text", "text": "File written successfully"}]}, "id": 2, "timestamp": "2024-11-15T10:00:11Z"},
+    {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {"name": "read_file", "arguments": {"path": "/src/main.py"}},
+        "id": 1,
+        "timestamp": "2024-11-15T10:00:00Z",
+    },
+    {
+        "jsonrpc": "2.0",
+        "result": {"content": [{"type": "text", "text": "def main(): pass"}]},
+        "id": 1,
+        "timestamp": "2024-11-15T10:00:01Z",
+    },
+    {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "write_file",
+            "arguments": {"path": "/src/main.py", "content": "def main():\n    print('hello')"},
+        },
+        "id": 2,
+        "timestamp": "2024-11-15T10:00:10Z",
+    },
+    {
+        "jsonrpc": "2.0",
+        "result": {"content": [{"type": "text", "text": "File written successfully"}]},
+        "id": 2,
+        "timestamp": "2024-11-15T10:00:11Z",
+    },
 ]
 
 MCP_SIMPLE_LOG = [
-    {"tool": "read_file", "arguments": {"path": "/src/main.py"}, "result": "def main(): pass", "timestamp": "2024-11-15T10:00:00Z", "duration_ms": 50},
-    {"tool": "write_file", "arguments": {"path": "/src/main.py", "content": "updated"}, "result": "OK", "timestamp": "2024-11-15T10:00:10Z", "duration_ms": 30},
+    {
+        "tool": "read_file",
+        "arguments": {"path": "/src/main.py"},
+        "result": "def main(): pass",
+        "timestamp": "2024-11-15T10:00:00Z",
+        "duration_ms": 50,
+    },
+    {
+        "tool": "write_file",
+        "arguments": {"path": "/src/main.py", "content": "updated"},
+        "result": "OK",
+        "timestamp": "2024-11-15T10:00:10Z",
+        "duration_ms": 30,
+    },
 ]
 
 
@@ -93,8 +128,19 @@ class TestMCPLogImporter:
         from bashgym.trace_capture.importers.mcp_logs import MCPLogImporter
 
         error_log = [
-            {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "bad_tool", "arguments": {}}, "id": 99, "timestamp": "2024-11-15T10:00:00Z"},
-            {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid request"}, "id": 99, "timestamp": "2024-11-15T10:00:01Z"},
+            {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "bad_tool", "arguments": {}},
+                "id": 99,
+                "timestamp": "2024-11-15T10:00:00Z",
+            },
+            {
+                "jsonrpc": "2.0",
+                "error": {"code": -32600, "message": "Invalid request"},
+                "id": 99,
+                "timestamp": "2024-11-15T10:00:01Z",
+            },
         ]
 
         importer = MCPLogImporter()

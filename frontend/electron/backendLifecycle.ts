@@ -39,27 +39,25 @@ export function resolveBackendRoot(input: BackendRootResolutionInput): string | 
     ...ancestors(input.cwd, 2),
     ...ancestors(input.appPath),
     ...ancestors(input.resourcesPath),
-    ...ancestors(input.executablePath),
+    ...ancestors(input.executablePath)
   ]
   const candidates = inferred.map((candidate) => path.resolve(candidate))
   const uniqueCandidates = Array.from(new Set(candidates))
-  return uniqueCandidates.find((candidate) => (
+  return uniqueCandidates.find((candidate) =>
     input.markerExists(path.join(candidate, 'bashgym', 'api', 'routes.py'))
-  ))
+  )
 }
 
 export function managedBackendStartAction(
   reachable: boolean,
-  ownsLiveChild: boolean,
+  ownsLiveChild: boolean
 ): 'reuse' | 'spawn' {
   if (reachable && ownsLiveChild) return 'reuse'
   if (reachable) throw new Error('BashGym managed backend port is already in use')
   return 'spawn'
 }
 
-export function createRetryableInitializer(
-  initialize: () => Promise<void>,
-): RetryableInitializer {
+export function createRetryableInitializer(initialize: () => Promise<void>): RetryableInitializer {
   let inFlightOrReady: Promise<void> | null = null
 
   return {
@@ -74,6 +72,6 @@ export function createRetryableInitializer(
     },
     invalidate: () => {
       inFlightOrReady = null
-    },
+    }
   }
 }

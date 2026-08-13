@@ -41,9 +41,7 @@ class ModelFamilyProfile:
     tool_call_format: str = "openai_json"  # openai_json|gemma4_delimited|qwen_xml|hermes
     lora_target_modules: tuple[str, ...] = _DEFAULT_LORA_TARGETS
     lora_exclude_modules: tuple[str, ...] = ()
-    attn_implementation: str = (
-        "sdpa"  # sdpa works on GB10/sm_121; flash_attention_2 where supported
-    )
+    attn_implementation: str = "sdpa"  # Broadly compatible; use flash_attention_2 where supported.
     dtype: str = "bfloat16"
     patches: tuple[str, ...] = ()  # names resolved by bashgym.families.patches
     thinking: bool = False  # needs a *-thinking chat template

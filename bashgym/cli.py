@@ -81,29 +81,9 @@ class TrainingRecipe:
 
 
 DOCS = {
-    "overview": {
-        "path": "docs/training/overview.md",
-        "summary": "Training mental model, data sources, strategy overview, and world-model placement.",
-    },
-    "capabilities": {
-        "path": "docs/training/capability-map.md",
-        "summary": "Full training/eval capability map with ready, backend-dependent, and diagnostic surfaces.",
-    },
-    "methods-reference": {
-        "path": "docs/training/training-methods-reference.md",
-        "summary": "Method-by-method reference for SFT, DPO, GRPO/RLVR, DPPO, ECHO/RWML, and related ecosystems.",
-    },
-    "external-review": {
-        "path": "docs/training/external-review-packet.md",
-        "summary": "Shareable AI/ML reviewer packet with capabilities, claims, risks, and feedback questions.",
-    },
-    "rlhf-handbook-comparison": {
-        "path": "docs/training/rlhf-handbook-comparison.md",
-        "summary": "RLHF Book comparison with BashGym strengths, gaps, reviewer answers, and action plan.",
-    },
     "strategy": {
         "path": "docs/training/strategy-guide.md",
-        "summary": "Starting settings for SFT, DPO, GRPO/RLVR, distillation, cascade, and DPPO.",
+        "summary": "Choose and configure SFT, DPO, reward modeling, GRPO/RLVR, and distillation.",
     },
     "world-models": {
         "path": "docs/training/world-models.md",
@@ -117,18 +97,6 @@ DOCS = {
         "path": "docs/training/glossary.md",
         "summary": "Compact definitions for training, terminal RL, and world-model terms.",
     },
-    "agent-cli": {
-        "path": "docs/training/agent-cli.md",
-        "summary": "Machine-readable CLI commands agents can use for setup and replay analysis.",
-    },
-    "experiment-ledger": {
-        "path": "docs/training/agent-cli.md",
-        "summary": "Project-isolated ledger inspection and bounded agent context commands.",
-    },
-    "artifacts": {
-        "path": "docs/training/agent-cli.md",
-        "summary": "Training launch, retention, Hugging Face upload, and cleanup controls.",
-    },
     "terminal-rl-recipe": {
         "path": "docs/training/tmax-terminal-rl-recipe.md",
         "summary": "TMax-style terminal RL recipe from environment pool to release gate.",
@@ -137,9 +105,9 @@ DOCS = {
         "path": "docs/training/session-distillation.md",
         "summary": "Hint-injected self-distillation method, artifact contract, defaults, and feasibility sources.",
     },
-    "private-compute-checklist": {
-        "path": "docs/training/private-compute-eval-checklist.md",
-        "summary": "Private compute-target backend-smoke and eval checklist for DPPO/ECHO/RWML handoff.",
+    "autoresearch-campaign": {
+        "path": "docs/training/autoresearch-campaign.md",
+        "summary": "Run the baseline, candidate, evaluation, comparison, and iteration campaign loop.",
     },
 }
 
@@ -590,7 +558,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "Inspect generated examples for truncation.",
                 "Run heldout trace eval and executable environment pass@k before routing.",
             ],
-            docs=["overview", "strategy", "metrics", "artifacts"],
+            docs=["strategy", "metrics", "autoresearch-campaign"],
         ),
         "dpo": TrainingRecipe(
             strategy="dpo",
@@ -615,7 +583,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "Audit pairs for shared prompt identity.",
                 "Compare against the SFT checkpoint on heldout eval.",
             ],
-            docs=["strategy", "metrics", "glossary", "artifacts"],
+            docs=["strategy", "metrics", "glossary"],
         ),
         "grpo": TrainingRecipe(
             strategy="grpo",
@@ -645,7 +613,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "Confirm reward groups have non-zero variance.",
                 "Export DPPO replay with behavior logprobs if using the DPPO path.",
             ],
-            docs=["strategy", "metrics", "world-models", "artifacts"],
+            docs=["strategy", "metrics", "world-models", "terminal-rl-recipe"],
         ),
         "world-model": TrainingRecipe(
             strategy="world-model",
@@ -711,7 +679,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "Keep RewardBench/CUARewardBench-style sources eval-only unless a source card explicitly allows training.",
                 "Use the reward model first for audits, best-of-N, or rejection sampling with matched controls.",
             ],
-            docs=["methods-reference", "metrics", "strategy", "rlhf-handbook-comparison"],
+            docs=["strategy", "metrics", "glossary"],
         ),
         "distillation": TrainingRecipe(
             strategy="distillation",
@@ -743,7 +711,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "Verify teacher outputs and dataset provenance before training.",
                 "Compare the student against both its base checkpoint and the teacher on heldout behavior.",
             ],
-            docs=["strategy", "methods-reference", "metrics", "artifacts"],
+            docs=["strategy", "metrics", "glossary"],
         ),
         "session-distillation": TrainingRecipe(
             strategy="session-distillation",
@@ -784,8 +752,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "session-distillation",
                 "strategy",
                 "metrics",
-                "methods-reference",
-                "artifacts",
+                "glossary",
             ],
         ),
     }
@@ -1194,7 +1161,7 @@ def _education_path() -> list[dict[str, str]]:
     return [
         {
             "id": "mental_model",
-            "read": "docs/training/overview.md",
+            "read": "docs/training/strategy-guide.md",
             "goal": "Understand traces, environments, strategies, and why loss is not release evidence.",
         },
         {
@@ -1224,8 +1191,8 @@ def _education_path() -> list[dict[str, str]]:
         },
         {
             "id": "private_compute_finalization",
-            "read": "docs/training/private-compute-eval-checklist.md",
-            "goal": "Run private compute evals/backend smokes only after local smoke artifacts are complete.",
+            "read": "docs/training/autoresearch-campaign.md",
+            "goal": "Connect training and evaluation stages to the baseline-first experiment loop.",
         },
     ]
 
@@ -1857,7 +1824,7 @@ def _capability_matrix() -> dict[str, Any]:
                     "MOPD settings",
                 ],
                 "evidence": ["per-domain holdouts", "stage forgetting", "final generalist holdout"],
-                "plan_command": "bashgym training docs --topic capabilities --json",
+                "plan_command": "bashgym training docs --topic strategy --json",
             },
             {
                 "id": "dppo_replay",
@@ -2175,6 +2142,9 @@ def cmd_manifest(args: argparse.Namespace) -> int:
                 "Atomically create a READY campaign without starting compute."
             ),
             "campaign status": "Read one campaign aggregate and its next valid action.",
+            "campaign control-room": (
+                "Read the authoritative visual campaign snapshot for native agent goals and resume."
+            ),
             "campaign autoresearch": "Read durable AutoResearch state and decisions.",
             "campaign manifest": "Read one immutable campaign manifest revision.",
             "campaign evidence": "Read the bounded planner-safe evidence snapshot.",
@@ -2197,6 +2167,22 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "campaign protected-lease": "Request the protected evaluation lease.",
             "campaign promote": "Compute and persist a champion decision.",
             "campaign export": "Request reproducible campaign report artifacts.",
+            "research prepare": (
+                "Resume guided AutoResearch preparation without starting compute."
+            ),
+            "research onboard": (
+                "Prepare model, services, bindings, and one READY campaign from a reviewed contract."
+            ),
+            "research state": (
+                "Read one campaign as a native-agent goal brief and Markdown progress view."
+            ),
+            "research wait": "Wait for the next campaign change or agent action.",
+            "research start": "Start an explicitly prepared AutoResearch campaign.",
+            "research submit-iteration": (
+                "Submit one baseline or candidate iteration through the campaign authority."
+            ),
+            "research report": "Request reproducible AutoResearch report artifacts.",
+            "service status": "Read resident API and worker liveness without opening the UI.",
             "ledger projects": "List isolated ML projects in the authorized workspace.",
             "ledger context": "Read one project's structured status, health, and evidence context.",
             "ledger runs": "List official run identities and lineage for one project.",
@@ -2234,8 +2220,8 @@ def cmd_manifest(args: argparse.Namespace) -> int:
         "docs": _doc_entries(),
         "next": [
             {
-                "reason": "Read training overview before changing run settings.",
-                "command": "bashgym training docs --topic overview --json",
+                "reason": "Read the strategy guide before changing run settings.",
+                "command": "bashgym training docs --topic strategy --json",
             },
             {
                 "reason": "Generate a starter run config.",
@@ -2259,15 +2245,15 @@ def cmd_training_capabilities(args: argparse.Namespace) -> int:
         "title": "BashGym Training Capability Matrix",
         "ok": True,
         **_capability_matrix(),
-        "docs": [{"topic": "capabilities", "path": str(REPO_ROOT / DOCS["capabilities"]["path"])}],
+        "docs": [{"topic": "strategy", "path": str(REPO_ROOT / DOCS["strategy"]["path"])}],
         "next": [
             {
                 "reason": "Generate settings for a selected strategy.",
                 "command": "bashgym training plan --strategy sft --json",
             },
             {
-                "reason": "Read the human capability map.",
-                "command": "bashgym training docs --topic capabilities --json",
+                "reason": "Read the training strategy guide.",
+                "command": "bashgym training docs --topic strategy --json",
             },
         ],
     }
@@ -2622,7 +2608,7 @@ def cmd_training_reward_model_smoke(args: argparse.Namespace) -> int:
             },
             {
                 "reason": "Keep this as a contract smoke before a real TRL/OpenRLHF reward backend.",
-                "command": "bashgym training docs --topic methods-reference --json",
+                "command": "bashgym training docs --topic strategy --json",
             },
         ],
     }
@@ -2838,7 +2824,7 @@ def _plan_next(recipe: TrainingRecipe) -> list[tuple[str, str]]:
             ),
             (
                 "Review reward-model method details.",
-                "bashgym training docs --topic methods-reference --json",
+                "bashgym training docs --topic strategy --json",
             ),
         ]
     if recipe.strategy == "world-model":
@@ -2909,7 +2895,7 @@ def cmd_replay_scrub(args: argparse.Namespace) -> int:
         "next": [
             {
                 "reason": "Use scrubbed traces for review, public examples, and training data QA.",
-                "command": "bashgym training docs --topic overview --json",
+                "command": "bashgym training docs --topic strategy --json",
             }
         ],
     }
@@ -3217,6 +3203,36 @@ def _campaign_error(args: argparse.Namespace, exc: Exception) -> int:
     return error.exit_code
 
 
+def _local_runtime_error(args: argparse.Namespace, exc: Exception) -> int:
+    """Emit a bounded error contract for local onboarding and service commands."""
+
+    is_onboarding = (
+        getattr(args, "command", None) == "research"
+        and getattr(args, "research_command", None) == "onboard"
+    )
+    title = (
+        "BashGym AutoResearch Onboarding Error"
+        if is_onboarding
+        else "BashGym Resident Services Error"
+    )
+    message = (
+        "AutoResearch onboarding could not be completed."
+        if is_onboarding
+        else "Resident service status could not be read."
+    )
+    fallback = "autoresearch_onboarding_failed" if is_onboarding else "service_status_failed"
+    candidate = str(exc)
+    code = candidate if re.fullmatch(r"[a-z][a-z0-9_]{0,127}", candidate) else fallback
+    payload = {
+        "title": title,
+        "ok": False,
+        "error": {"code": code, "message": message},
+    }
+    print(f"{code}: {message}", file=sys.stderr)
+    _emit(payload, as_json=bool(getattr(args, "json", False)))
+    return 2
+
+
 def _campaign_request(
     args: argparse.Namespace,
     method: str,
@@ -3225,6 +3241,7 @@ def _campaign_request(
     query: dict[str, Any] | None = None,
     payload: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> tuple[Any | None, int | None]:
     try:
         return (
@@ -3234,6 +3251,7 @@ def _campaign_request(
                 query=query,
                 payload=payload,
                 headers=headers,
+                **({"timeout": timeout} if timeout is not None else {}),
             ),
             None,
         )
@@ -3469,7 +3487,7 @@ def cmd_campaign_control_smoke(args: argparse.Namespace) -> int:
 
 
 def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
-    """Bind an installed definition to one registered private/local SSH device."""
+    """Bind an installed definition to one registered private SSH model host."""
 
     import asyncio
     import hashlib
@@ -3479,6 +3497,8 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         activate_autoresearch,
     )
     from bashgym.campaigns.autoresearch import load_autoresearch_template_definitions
+    from bashgym.campaigns.autoresearch_dataset import AUTORESEARCH_DATASET_RECEIPT_FILENAME
+    from bashgym.campaigns.autoresearch_evidence import AUTORESEARCH_EVALUATION_FILENAME
     from bashgym.campaigns.contracts import CodeMutationKind, StageKind
     from bashgym.campaigns.installation import autoresearch_binding_plan
     from bashgym.campaigns.lineage import ApprovedSourceRepositoryProfile
@@ -3486,7 +3506,10 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         ApprovedCodeLineageExecutionBinding,
         ApprovedRemoteExecutorProfile,
         PinnedRemoteStageProfile,
+        RegisteredRemoteEvaluationDatasetSource,
+        RegisteredRemoteModelSource,
         RemoteCapacityPolicy,
+        RemoteTrainingAdapter,
     )
     from bashgym.config import get_bashgym_dir
     from bashgym.device_registry import DeviceRegistry
@@ -3519,6 +3542,40 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
     if definition is None:
         raise ValueError("installed AutoResearch template was not found")
     binding = autoresearch_binding_plan(definition)
+    registered_base_model = RegisteredRemoteModelSource(
+        source_id=(args.model_source_id or f"{args.executor_profile_id}-registered-base"),
+        compute_profile_id=binding.compute_profile_id,
+        target_contract_key=binding.target_contract_key,
+        model_digest=binding.target_model_digest,
+        remote_model_path=args.remote_model_path,
+    )
+    registered_evaluation_dataset = RegisteredRemoteEvaluationDatasetSource(
+        source_id=args.dataset_source_id,
+        compute_profile_id=binding.compute_profile_id,
+        dataset_version_id=binding.dataset_version_id,
+        content_digest=args.dataset_content_digest,
+        remote_dataset_path=args.remote_dataset_path,
+    )
+    evaluator_file = Path(args.evaluator_file).expanduser().resolve()
+    training_script = Path(args.training_script).expanduser().resolve()
+    training_inputs = tuple(
+        sorted(
+            {
+                *(Path(value).expanduser().resolve() for value in args.training_input),
+            },
+            key=lambda path: path.name,
+        )
+    )
+    if not training_inputs:
+        raise ValueError("--training-input must pin the installation-owned runner config")
+    evaluation_inputs = tuple(
+        sorted(
+            {
+                *(Path(value).expanduser().resolve() for value in args.evaluation_input),
+            },
+            key=lambda path: path.name,
+        )
+    )
 
     registry = DeviceRegistry(Path(args.device_registry) if args.device_registry else None)
 
@@ -3526,6 +3583,8 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         device = await registry.get_device(args.device_id)
         if device is None:
             raise ValueError("registered compute device was not found")
+        if not args.apply:
+            return device, None
         result = await RemoteTrainer(
             SSHConfig(
                 host=device.host,
@@ -3537,23 +3596,22 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         ).preflight_check(require_unsloth=False)
         if not result.ok:
             raise ValueError("registered compute device failed SSH preflight")
-        if args.apply:
-            await registry.update_capabilities(device.id, result.capabilities())
+        adapter = RemoteTrainingAdapter(
+            SSHConfig(
+                host=device.host,
+                port=device.port,
+                username=device.username,
+                key_path=device.key_path,
+                remote_work_dir=device.work_dir,
+            ),
+            compute_profile_id=binding.compute_profile_id,
+        )
+        await adapter.verify_registered_base_model(registered_base_model)
+        await adapter.verify_registered_evaluation_dataset(registered_evaluation_dataset)
+        await registry.update_capabilities(device.id, result.capabilities())
         return device, result
 
     device, preflight = asyncio.run(resolve_and_preflight())
-    dataset_file = Path(args.dataset_file).expanduser().resolve()
-    evaluator_file = Path(args.evaluator_file).expanduser().resolve()
-    training_script = Path(args.training_script).expanduser().resolve()
-    training_inputs = tuple(
-        sorted(
-            {
-                dataset_file,
-                *(Path(value).expanduser().resolve() for value in args.training_input),
-            },
-            key=lambda path: path.name,
-        )
-    )
     source_repository = Path(args.source_repository).expanduser().resolve()
     mutation_paths: dict[CodeMutationKind, list[str]] = {}
     for raw in args.mutation_path:
@@ -3570,16 +3628,19 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         },
     )
     input_hashes = {path.name: sha256_file(path) for path in training_inputs}
+    evaluation_input_hashes = {path.name: sha256_file(path) for path in evaluation_inputs}
     capacity = RemoteCapacityPolicy(
         minimum_available_memory_gib=args.minimum_available_memory_gib,
         minimum_available_disk_gib=args.minimum_available_disk_gib,
         maximum_external_gpu_processes=args.maximum_external_gpu_processes,
     )
-    reservations = {
-        StageKind.FULL_TRAINING: args.full_budget_reservation,
-        StageKind.SMOKE_TRAINING: args.smoke_budget_reservation,
-    }
-    stages = tuple(
+    training_stage_kinds = [StageKind.FULL_TRAINING]
+    if args.smoke_budget_reservation is not None:
+        training_stage_kinds.append(StageKind.SMOKE_TRAINING)
+    reservations = {StageKind.FULL_TRAINING: args.full_budget_reservation}
+    if args.smoke_budget_reservation is not None:
+        reservations[StageKind.SMOKE_TRAINING] = args.smoke_budget_reservation
+    training_stages = tuple(
         PinnedRemoteStageProfile(
             stage=stage,
             script_path=training_script,
@@ -3598,8 +3659,64 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
                 entrypoint_path=args.source_entrypoint,
             ),
         )
-        for stage in (StageKind.FULL_TRAINING, StageKind.SMOKE_TRAINING)
+        for stage in training_stage_kinds
     )
+    evaluation_stage = PinnedRemoteStageProfile(
+        stage=StageKind.DEVELOPMENT_EVALUATION,
+        script_path=evaluator_file,
+        script_sha256=sha256_file(evaluator_file),
+        input_files=evaluation_inputs,
+        input_sha256=evaluation_input_hashes,
+        script_args=tuple(args.evaluation_arg),
+        output_paths=(AUTORESEARCH_EVALUATION_FILENAME,),
+        capacity_policy=capacity,
+        budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
+        budget_reservation=args.evaluation_budget_reservation,
+        python_executable=args.python_executable,
+    )
+    data_build_stage = None
+    data_build_requested = bool(
+        args.data_build_script
+        or args.data_build_input
+        or args.data_build_arg
+        or args.data_build_budget_reservation is not None
+    )
+    if data_build_requested:
+        if (
+            not args.data_build_script
+            or not args.data_build_input
+            or args.data_build_budget_reservation is None
+        ):
+            raise ValueError(
+                "Data Designer activation requires --data-build-script, "
+                "--data-build-input, and --data-build-budget-reservation"
+            )
+        data_build_script = Path(args.data_build_script).expanduser().resolve()
+        data_build_inputs = tuple(
+            sorted(
+                {Path(value).expanduser().resolve() for value in args.data_build_input},
+                key=lambda path: path.name,
+            )
+        )
+        data_build_stage = PinnedRemoteStageProfile(
+            stage=StageKind.DATA_BUILD,
+            script_path=data_build_script,
+            script_sha256=sha256_file(data_build_script),
+            input_files=data_build_inputs,
+            input_sha256={path.name: sha256_file(path) for path in data_build_inputs},
+            script_args=tuple(args.data_build_arg),
+            output_paths=(AUTORESEARCH_DATASET_RECEIPT_FILENAME, "dataset"),
+            capacity_policy=capacity,
+            budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
+            budget_reservation=args.data_build_budget_reservation,
+            python_executable=args.python_executable,
+            code_lineage_binding=ApprovedCodeLineageExecutionBinding(
+                binding_id=f"{args.executor_profile_id}-data-build-source-v1",
+                binding_revision=1,
+                source_repository_profile_id=source_profile.profile_id,
+                entrypoint_path=args.source_entrypoint,
+            ),
+        )
     executor = ApprovedRemoteExecutorProfile(
         profile_id=args.executor_profile_id,
         profile_revision=args.executor_profile_revision,
@@ -3611,7 +3728,13 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         port=device.port,
         key_path=device.key_path,
         remote_work_dir=device.work_dir,
-        stages=stages,
+        stages=tuple(
+            stage
+            for stage in (data_build_stage, evaluation_stage, *training_stages)
+            if stage is not None
+        ),
+        registered_base_model=registered_base_model,
+        registered_evaluation_dataset=registered_evaluation_dataset,
     )
     task_type = definition.target_model.task
     request = AutoResearchActivationRequest(
@@ -3636,8 +3759,8 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
             project_id=binding.ledger_project_id,
             dataset_id=args.dataset_id,
             dataset_version_id=binding.dataset_version_id,
-            source_uri=args.dataset_source_uri,
-            content_digest=sha256_file(dataset_file),
+            source_uri=registered_evaluation_dataset.source_uri,
+            content_digest=registered_evaluation_dataset.content_digest,
         ),
         evaluation_suite=EvaluationSuiteSpec(
             workspace_id=args.workspace_id,
@@ -3667,15 +3790,24 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
             "title": "BashGym AutoResearch Activation",
             "ok": bool(receipt.doctor.materializable) if receipt.doctor else True,
             "activation": receipt.model_dump(mode="json"),
-            "compute_preflight": {
-                "device_id": device.id,
-                "ok": preflight.ok,
-                "effective_vram_gb": preflight.effective_vram_gb,
-                "unified_memory": preflight.unified_memory,
-                "disk_free_gb": preflight.disk_free_gb,
-                "gpu_count": len(preflight.gpus or []),
-                "warnings": preflight.warnings,
-            },
+            "compute_preflight": (
+                {
+                    "device_id": device.id,
+                    "status": "not_run",
+                    "reason": "plan_mode",
+                }
+                if preflight is None
+                else {
+                    "device_id": device.id,
+                    "status": "passed",
+                    "ok": preflight.ok,
+                    "effective_vram_gb": preflight.effective_vram_gb,
+                    "unified_memory": preflight.unified_memory,
+                    "disk_free_gb": preflight.disk_free_gb,
+                    "gpu_count": len(preflight.gpus or []),
+                    "warnings": preflight.warnings,
+                }
+            ),
             "next": (
                 "Re-run with --apply after reviewing this plan."
                 if not args.apply
@@ -4152,6 +4284,120 @@ def cmd_campaign_status(args: argparse.Namespace) -> int:
 
 def cmd_campaign_autoresearch(args: argparse.Namespace) -> int:
     return _campaign_read_collection(args, "autoresearch", "autoresearch")
+
+
+def cmd_campaign_control_room(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(
+        args,
+        "control-room-snapshot",
+        "control-room",
+    )
+
+
+def cmd_research_state(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "research-state", "research")
+
+
+def cmd_research_wait(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/research-wait",
+        query={
+            "workspace_id": args.workspace_id,
+            "after_cursor": args.after_cursor,
+            "timeout_seconds": args.timeout_seconds,
+        },
+        timeout=args.timeout_seconds + 5,
+    )
+    return error if error is not None else _emit_campaign_result(args, response, collection="wait")
+
+
+def cmd_research_onboard(args: argparse.Namespace) -> int:
+    """Plan or apply one deterministic AutoResearch preparation contract."""
+
+    from bashgym.campaigns.onboarding import (
+        AutoResearchOnboardingContract,
+        AutoResearchOnboardingCoordinator,
+        build_local_onboarding_services,
+    )
+
+    contract = AutoResearchOnboardingContract.from_file(Path(args.contract))
+    if not args.apply:
+        onboarding = AutoResearchOnboardingCoordinator.plan(contract)
+        mode = "plan"
+    else:
+        onboarding = AutoResearchOnboardingCoordinator(
+            build_local_onboarding_services(contract)
+        ).apply(contract)
+        mode = "apply"
+    return _emit(
+        {
+            "title": "BashGym AutoResearch Onboarding",
+            "ok": True,
+            "mode": mode,
+            "onboarding": onboarding.model_dump(mode="json"),
+        },
+        as_json=bool(args.json),
+    )
+
+
+def cmd_service_status(args: argparse.Namespace) -> int:
+    """Read resident API and worker liveness without requiring the UI or API."""
+
+    from bashgym.campaigns.worker_service import (
+        ApiServiceManager,
+        WorkerServiceManager,
+        build_api_service_definition,
+        build_service_definition,
+        probe_api_health,
+        project_controller_status_from_database,
+        read_worker_config,
+    )
+    from bashgym.config import get_bashgym_dir
+
+    root = get_bashgym_dir().resolve()
+    api = ApiServiceManager().status(build_api_service_definition(data_directory=root))
+    api_health = probe_api_health(expected_state_root=root)
+    api = {**api, "health": api_health}
+    config_path = root / "campaigns" / "worker-config.v1.json"
+    worker_ready = False
+    if config_path.is_file():
+        config = read_worker_config(config_path)
+        controller = project_controller_status_from_database(config.database_path, root)
+        worker = WorkerServiceManager().status(
+            build_service_definition(config_path),
+            controller,
+        )
+        worker_ready = bool(
+            config.controller_owner_id is not None
+            and controller.online
+            and controller.owner_id == config.controller_owner_id
+        )
+    else:
+        worker = {
+            "schema_version": "campaign_worker_service_status.v1",
+            "installed": False,
+            "supervisor_state": "unavailable",
+            "controller": {"online": False, "state": "offline"},
+        }
+    ready = (
+        api["installed"]
+        and api["supervisor_state"] == "available"
+        and api_health["healthy"]
+        and api_health["state_root_match"]
+        and worker_ready
+    )
+    return _emit(
+        {
+            "title": "BashGym Resident Services",
+            "ok": True,
+            "ready": ready,
+            "api": api,
+            "worker": worker,
+        },
+        as_json=bool(args.json),
+    )
 
 
 def _campaign_read_collection(args: argparse.Namespace, suffix: str, collection: str) -> int:
@@ -4791,7 +5037,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Home precedence: Codex uses CODEX_HOME, then ~/.codex; Claude uses "
             "CLAUDE_CONFIG_DIR, then CLAUDE_HOME, then ~/.claude; Hermes uses "
             "HERMES_HOME, then ~/.hermes. Each host installs under its selected "
-            "home's skills directory."
+            "home's skills directory. Use --host agents for "
+            "<current project>/.agents/skills; it is never auto-detected."
         ),
         parents=[json_parent],
     )
@@ -4804,8 +5051,8 @@ def build_parser() -> argparse.ArgumentParser:
         )
         skills_parser.add_argument(
             "--host",
-            choices=("codex", "claude", "hermes"),
-            help="Agent host (auto-detected only when unambiguous)",
+            choices=("codex", "claude", "hermes", "agents"),
+            help="Agent host (agents is project-local and always explicit)",
         )
         skills_parser.set_defaults(func=cmd_operator_skills)
     operator_context = operator_sub.add_parser(
@@ -5081,14 +5328,35 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_activate.add_argument("--project-tag", action="append", default=[])
     campaign_activate.add_argument("--dataset-id", required=True)
     campaign_activate.add_argument("--dataset-name", required=True)
-    campaign_activate.add_argument("--dataset-file", required=True)
     campaign_activate.add_argument(
-        "--dataset-source-uri",
+        "--remote-dataset-path",
         required=True,
-        help="Stable logical/artifact URI stored in the ledger; local rows are never copied",
+        help="Absolute held-out dataset file already present on the registered SSH device",
+    )
+    campaign_activate.add_argument(
+        "--dataset-content-digest",
+        required=True,
+        help="Exact SHA-256 of the registered held-out dataset",
+    )
+    campaign_activate.add_argument(
+        "--dataset-source-id",
+        required=True,
+        help="Stable opaque ID used to derive the public ledger source URI",
     )
     campaign_activate.add_argument("--evaluator-file", required=True)
+    campaign_activate.add_argument("--evaluation-input", action="append", default=[])
+    campaign_activate.add_argument("--evaluation-arg", action="append", default=[])
+    campaign_activate.add_argument("--evaluation-budget-reservation", type=float, required=True)
     campaign_activate.add_argument("--evaluation-name", required=True)
+    campaign_activate.add_argument(
+        "--remote-model-path",
+        required=True,
+        help="Existing immutable base-model directory on the registered SSH device; never downloaded",
+    )
+    campaign_activate.add_argument(
+        "--model-source-id",
+        help="Stable opaque ID for the registered remote base model",
+    )
     campaign_activate.add_argument("--source-repository", required=True)
     campaign_activate.add_argument("--source-entrypoint", required=True)
     campaign_activate.add_argument(
@@ -5098,12 +5366,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Approved source scope as trainer|gym|reward|evaluator=relative/path",
     )
     campaign_activate.add_argument("--training-script", required=True)
-    campaign_activate.add_argument("--training-input", action="append", default=[])
+    campaign_activate.add_argument(
+        "--training-input",
+        action="append",
+        default=[],
+        help="Pinned runner config/input; the held-out evaluation dataset is never included",
+    )
     campaign_activate.add_argument("--training-arg", action="append", default=[])
+    campaign_activate.add_argument(
+        "--data-build-script",
+        help="Optional pinned Data Designer runner",
+    )
+    campaign_activate.add_argument("--data-build-input", action="append", default=[])
+    campaign_activate.add_argument("--data-build-arg", action="append", default=[])
+    campaign_activate.add_argument("--data-build-budget-reservation", type=float)
     campaign_activate.add_argument("--python-executable", default="python3")
     campaign_activate.add_argument("--executor-profile", dest="executor_profile_id", required=True)
     campaign_activate.add_argument("--executor-profile-revision", type=int, default=1)
-    campaign_activate.add_argument("--smoke-budget-reservation", type=float, required=True)
+    campaign_activate.add_argument(
+        "--smoke-budget-reservation",
+        type=float,
+        help="Optional preflight canary reservation; smoke is not required for every iteration",
+    )
     campaign_activate.add_argument("--full-budget-reservation", type=float, required=True)
     campaign_activate.add_argument("--minimum-available-memory-gib", type=float, default=0.0)
     campaign_activate.add_argument("--minimum-available-disk-gib", type=float, default=50.0)
@@ -5347,6 +5631,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign_status.add_argument("--campaign", dest="campaign_id", required=True)
     campaign_status.set_defaults(func=cmd_campaign_status)
+
+    campaign_control_room = campaign_sub.add_parser(
+        "control-room",
+        help="Read the authoritative visual snapshot used for native agent goals and resume",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_control_room.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_control_room.set_defaults(func=cmd_campaign_control_room)
 
     campaign_autoresearch = campaign_sub.add_parser(
         "autoresearch",
@@ -5709,6 +6001,102 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_force_stop.add_argument("--reason", required=True)
     campaign_force_stop.add_argument("--confirm", action="store_true", required=True)
     campaign_force_stop.set_defaults(func=cmd_campaign_force_stop)
+
+    research = subparsers.add_parser(
+        "research",
+        help="Run the simple prepare, inspect, iterate, and report AutoResearch workflow",
+        parents=[json_parent],
+    )
+    research_sub = research.add_subparsers(dest="research_command", required=True)
+
+    research_onboard = research_sub.add_parser(
+        "onboard",
+        help="Plan or apply one resumable AutoResearch setup contract without Start",
+        parents=[json_parent],
+    )
+    research_onboard.add_argument("--contract", required=True)
+    research_onboard.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the exact contract and stop after the campaign reaches READY",
+    )
+    research_onboard.set_defaults(func=cmd_research_onboard)
+
+    research_prepare = research_sub.add_parser(
+        "prepare",
+        help="Resume guided preparation without starting compute",
+        parents=[json_parent, campaign_connection],
+    )
+    research_prepare.add_argument("--session-id")
+    research_prepare.set_defaults(func=cmd_campaign_setup_context)
+
+    research_state = research_sub.add_parser(
+        "state",
+        help="Read the native-agent goal brief and Markdown progress view",
+        parents=[json_parent, campaign_connection],
+    )
+    research_state.add_argument("--campaign", dest="campaign_id", required=True)
+    research_state.set_defaults(func=cmd_research_state)
+
+    research_wait = research_sub.add_parser(
+        "wait",
+        help="Wait briefly for durable research progress or the next agent action",
+        parents=[json_parent, campaign_connection],
+    )
+    research_wait.add_argument("--campaign", dest="campaign_id", required=True)
+    research_wait.add_argument("--after-cursor", type=int, default=0)
+    research_wait.add_argument("--timeout-seconds", type=int, choices=range(1, 56), default=30)
+    research_wait.set_defaults(func=cmd_research_wait)
+
+    research_start = research_sub.add_parser(
+        "start",
+        help="Start an explicitly prepared AutoResearch campaign",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(research_start)
+    research_start.set_defaults(func=cmd_campaign_start)
+
+    research_submit = research_sub.add_parser(
+        "submit-iteration",
+        help="Submit one baseline or candidate iteration",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(research_submit)
+    research_submit.add_argument("--proposal", required=True)
+    research_submit.add_argument(
+        "--role",
+        dest="autoresearch_role",
+        choices=("baseline", "candidate"),
+        required=True,
+    )
+    research_submit.add_argument(
+        "--parent-proposal",
+        dest="parent_proposal_id",
+        help="Current incumbent proposal ID; required for a candidate",
+    )
+    research_submit.set_defaults(func=cmd_campaign_propose)
+
+    research_report = research_sub.add_parser(
+        "report",
+        help="Request reproducible AutoResearch report artifacts",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(research_report)
+    research_report.add_argument("--formats", default="markdown,json")
+    research_report.set_defaults(func=cmd_campaign_export)
+
+    service = subparsers.add_parser(
+        "service",
+        help="Inspect resident BashGym process liveness without opening the UI",
+        parents=[json_parent],
+    )
+    service_sub = service.add_subparsers(dest="service_command", required=True)
+    service_status = service_sub.add_parser(
+        "status",
+        help="Read headless API and campaign-worker liveness",
+        parents=[json_parent],
+    )
+    service_status.set_defaults(func=cmd_service_status)
 
     ledger = subparsers.add_parser(
         "ledger",
@@ -6453,9 +6841,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         if getattr(args, "command", None) == "campaign":
             return _campaign_error(args, exc)
+        if getattr(args, "command", None) == "service" or (
+            getattr(args, "command", None) == "research"
+            and getattr(args, "research_command", None) == "onboard"
+        ):
+            return _local_runtime_error(args, exc)
         raise
 
 

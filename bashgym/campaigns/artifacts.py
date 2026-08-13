@@ -107,6 +107,61 @@ class ArtifactSealer:
         message = domain.encode("utf-8") + b"\0" + _canonical_bytes(value)
         return hmac.new(self._key, message, hashlib.sha256).hexdigest()
 
+    def envelope_bytes(self, manifest: SealedActionResult) -> bytes:
+        """Authenticate one action manifest without writing controller evidence files."""
+
+        return _canonical_bytes(
+            {
+                "schema_version": "sealed_action_result_envelope.v1",
+                "key_version": self.key_version,
+                "manifest": manifest.model_dump(mode="json"),
+                "signature": self._signature(manifest),
+            }
+        )
+
+    def verify_envelope_bytes(
+        self,
+        payload: bytes,
+        *,
+        expected_action_id: str | None = None,
+        expected_workspace_id: str | None = None,
+        expected_campaign_id: str | None = None,
+        expected_study_id: str | None = None,
+        expected_attempt_id: str | None = None,
+        expected_manifest_revision: int | None = None,
+        expected_candidate_digest: str | None = None,
+        expected_input_digest: str | None = None,
+        expected_claim_generation: int | None = None,
+    ) -> SealedActionResult:
+        """Verify an in-memory HMAC envelope and its durable fencing identity."""
+
+        try:
+            envelope = json.loads(payload)
+            if envelope.get("schema_version") != "sealed_action_result_envelope.v1":
+                raise ValueError("wrong envelope schema")
+            if envelope.get("key_version") != self.key_version:
+                raise ValueError("wrong seal key version")
+            manifest = SealedActionResult.model_validate(envelope["manifest"])
+            if not hmac.compare_digest(envelope["signature"], self._signature(manifest)):
+                raise ValueError("signature mismatch")
+        except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ArtifactSealError(f"{ArtifactSealError.code}: invalid seal envelope") from exc
+        expected_identity = {
+            "action": (expected_action_id, manifest.action_id),
+            "workspace": (expected_workspace_id, manifest.workspace_id),
+            "campaign": (expected_campaign_id, manifest.campaign_id),
+            "study": (expected_study_id, manifest.study_id),
+            "attempt": (expected_attempt_id, manifest.attempt_id),
+            "manifest revision": (expected_manifest_revision, manifest.manifest_revision),
+            "candidate digest": (expected_candidate_digest, manifest.candidate_digest),
+            "input digest": (expected_input_digest, manifest.input_digest),
+            "claim generation": (expected_claim_generation, manifest.claim_generation),
+        }
+        for label, (expected, actual) in expected_identity.items():
+            if expected is not None and expected != actual:
+                raise ArtifactSealError(f"{ArtifactSealError.code}: {label} mismatch")
+        return manifest
+
     def seal(
         self,
         temporary_directory: Path,
@@ -148,15 +203,9 @@ class ArtifactSealer:
                 # and the seal file plus parent rename are flushed separately.
                 pass
 
-        envelope = {
-            "schema_version": "sealed_action_result_envelope.v1",
-            "key_version": self.key_version,
-            "manifest": manifest.model_dump(mode="json"),
-            "signature": self._signature(manifest),
-        }
         seal_path = temporary_directory / SEAL_FILENAME
         with seal_path.open("wb") as handle:
-            handle.write(_canonical_bytes(envelope))
+            handle.write(self.envelope_bytes(manifest))
             handle.flush()
             os.fsync(handle.fileno())
         _fsync_directory(temporary_directory)

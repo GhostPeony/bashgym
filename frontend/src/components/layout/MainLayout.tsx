@@ -23,37 +23,61 @@ import { isElectron, isWeb } from '../../utils/platform'
 // Electron-only components — tree-shaken from web builds because isElectron
 // is a build-time constant (VITE_MODE !== 'web' → true in Electron, false in web)
 const TerminalGrid = isElectron
-  ? lazy(() => import('../terminal/TerminalGrid').then(m => ({ default: m.TerminalGrid })))
+  ? lazy(() => import('../terminal/TerminalGrid').then((m) => ({ default: m.TerminalGrid })))
   : null
 const AgentChat = isElectron
-  ? lazy(() => import('../agent/AgentChat').then(m => ({ default: m.AgentChat })))
+  ? lazy(() => import('../agent/AgentChat').then((m) => ({ default: m.AgentChat })))
   : null
 const AgentStreamOverlay = isElectron
-  ? lazy(() => import('../sessions/AgentStreamOverlay').then(m => ({ default: m.AgentStreamOverlay })))
+  ? lazy(() =>
+      import('../sessions/AgentStreamOverlay').then((m) => ({ default: m.AgentStreamOverlay }))
+    )
   : null
 const OrchestratorDashboard = isElectron
-  ? lazy(() => import('../orchestrator/OrchestratorDashboard').then(m => ({ default: m.OrchestratorDashboard })))
+  ? lazy(() =>
+      import('../orchestrator/OrchestratorDashboard').then((m) => ({
+        default: m.OrchestratorDashboard
+      }))
+    )
   : null
 const PipelineDashboard = isElectron
-  ? lazy(() => import('../pipeline/PipelineDashboard').then(m => ({ default: m.PipelineDashboard })))
+  ? lazy(() =>
+      import('../pipeline/PipelineDashboard').then((m) => ({ default: m.PipelineDashboard }))
+    )
   : null
 const IntegrationDashboard = isElectron
-  ? lazy(() => import('../integration/IntegrationDashboard').then(m => ({ default: m.IntegrationDashboard })))
+  ? lazy(() =>
+      import('../integration/IntegrationDashboard').then((m) => ({
+        default: m.IntegrationDashboard
+      }))
+    )
   : null
 
 // Web-only components
 const DownloadPage = isWeb
-  ? lazy(() => import('../download/DownloadPage').then(m => ({ default: m.DownloadPage })))
+  ? lazy(() => import('../download/DownloadPage').then((m) => ({ default: m.DownloadPage })))
   : null
 
 type ModelSubView = 'browser' | 'profile' | 'comparison' | 'trends'
 
 function LazyFallback() {
-  return <div className="flex-1 flex items-center justify-center text-text-muted font-mono text-sm">Loading...</div>
+  return (
+    <div className="flex-1 flex items-center justify-center text-text-muted font-mono text-sm">
+      Loading...
+    </div>
+  )
 }
 
 export function MainLayout() {
-  const { isSidebarOpen: _isSidebarOpen, overlayView, trainingSubview, openOverlay, isAgentChatOpen, toggleAgentChat, hydrateNavigationFromUrl } = useUIStore()
+  const {
+    isSidebarOpen: _isSidebarOpen,
+    overlayView,
+    trainingSubview,
+    openOverlay,
+    isAgentChatOpen,
+    toggleAgentChat,
+    hydrateNavigationFromUrl
+  } = useUIStore()
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
   const [modelSubView, setModelSubView] = useState<ModelSubView>('browser')
   const [compareModelIds, setCompareModelIds] = useState<string[]>([])
@@ -106,7 +130,11 @@ export function MainLayout() {
           {/* Dashboard Overlays */}
           {overlayView === 'training' && (
             <div className="flex-1 overflow-auto">
-              {trainingSubview === 'autoresearch' ? <AutoResearchControlRoom /> : <TrainingDashboard />}
+              {trainingSubview === 'autoresearch' ? (
+                <AutoResearchControlRoom />
+              ) : (
+                <TrainingDashboard />
+              )}
             </div>
           )}
 
@@ -157,7 +185,7 @@ export function MainLayout() {
                   }}
                   onAddModel={() => setModelSubView('browser')}
                   onRemoveModel={(id) => {
-                    setCompareModelIds(prev => prev.filter(m => m !== id))
+                    setCompareModelIds((prev) => prev.filter((m) => m !== id))
                     if (compareModelIds.length <= 2) {
                       setModelSubView('browser')
                     }

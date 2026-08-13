@@ -1,4 +1,5 @@
 """Unit tests for bashgym.research.report.render_report — pure, no I/O."""
+
 from datetime import datetime, timedelta
 
 from bashgym.research.report import render_report

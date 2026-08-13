@@ -211,12 +211,8 @@ def test_attempt_metric_event_and_transition_ingestion_are_idempotent(repository
         )
     )
 
-    running = repository.transition_run(
-        "workspace-a", "project-a", "run-1", RunStatus.RUNNING
-    )
-    repository.transition_attempt(
-        "workspace-a", "project-a", "attempt-1", RunStatus.RUNNING
-    )
+    running = repository.transition_run("workspace-a", "project-a", "run-1", RunStatus.RUNNING)
+    repository.transition_attempt("workspace-a", "project-a", "attempt-1", RunStatus.RUNNING)
     assert running["started_at"] is not None
 
     point = MetricPointSpec(
@@ -252,12 +248,8 @@ def test_attempt_metric_event_and_transition_ingestion_are_idempotent(repository
     assert replayed is False
     assert replayed_again is True
 
-    repository.transition_attempt(
-        "workspace-a", "project-a", "attempt-1", RunStatus.COMPLETED
-    )
-    repository.transition_run(
-        "workspace-a", "project-a", "run-1", RunStatus.COMPLETED
-    )
+    repository.transition_attempt("workspace-a", "project-a", "attempt-1", RunStatus.COMPLETED)
+    repository.transition_run("workspace-a", "project-a", "run-1", RunStatus.COMPLETED)
     with pytest.raises(LedgerTransitionError):
         repository.transition_run("workspace-a", "project-a", "run-1", RunStatus.RUNNING)
 
@@ -404,9 +396,7 @@ def test_context_pack_flags_stale_or_incomplete_runs(repository):
 def test_run_comparison_requires_the_same_evaluation_suite(repository):
     seed_project(repository)
     repository.register_run(run_spec(run_id="run-1"))
-    second = run_spec(run_id="run-2").model_copy(
-        update={"correlation_id": "correlation-2"}
-    )
+    second = run_spec(run_id="run-2").model_copy(update={"correlation_id": "correlation-2"})
     repository.register_run(second)
     repository.register_evaluation_suite(
         EvaluationSuiteSpec(
@@ -435,9 +425,7 @@ def test_run_comparison_requires_the_same_evaluation_suite(repository):
             )
         )
 
-    comparison = compare_runs(
-        repository, "workspace-a", "project-a", ["run-1", "run-2"]
-    )
+    comparison = compare_runs(repository, "workspace-a", "project-a", ["run-1", "run-2"])
 
     metric = comparison["comparisons"][0]["metrics"][0]
     assert metric["direction"] == "maximize"

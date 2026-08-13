@@ -22,11 +22,13 @@ export function selectTests(tests, filters, cwd = process.cwd()) {
     const candidates = [
       normalized(testPath),
       normalized(relative(cwd, testPath)),
-      normalized(basename(testPath)),
+      normalized(basename(testPath))
     ]
     return requested.some((filter) => {
       const wanted = normalized(filter)
-      return candidates.some((candidate) => candidate === wanted || candidate.endsWith(`/${wanted}`))
+      return candidates.some(
+        (candidate) => candidate === wanted || candidate.endsWith(`/${wanted}`)
+      )
     })
   })
   if (selected.length === 0) {
@@ -38,15 +40,13 @@ export function selectTests(tests, filters, cwd = process.cwd()) {
 export function main(args = process.argv.slice(2)) {
   const tests = [
     ...findTests(join(process.cwd(), 'src')),
-    ...findTests(join(process.cwd(), 'scripts')),
+    ...findTests(join(process.cwd(), 'scripts'))
   ]
   if (tests.length === 0) throw new Error('No frontend tests found')
   const selected = selectTests(tests, args)
-  const result = spawnSync(
-    process.execPath,
-    ['--import', 'tsx', '--test', ...selected],
-    { stdio: 'inherit' },
-  )
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--test', ...selected], {
+    stdio: 'inherit'
+  })
   return result.status ?? 1
 }
 

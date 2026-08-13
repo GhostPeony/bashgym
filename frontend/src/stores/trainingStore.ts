@@ -8,16 +8,11 @@ import {
   inferTrainingComputeTarget,
   resolveTrainingOrigin,
   trainingQueuedPayloadFromResponse,
-  type TrainingOrigin,
+  type TrainingOrigin
 } from './trainingCanvasLifecycle'
 
 export type TrainingStrategy =
-  | 'sft'
-  | 'dpo'
-  | 'grpo'
-  | 'distillation'
-  | 'session_distillation'
-  | 'cascade'
+  'sft' | 'dpo' | 'grpo' | 'distillation' | 'session_distillation' | 'cascade'
 export type TrainingStatus = 'idle' | 'starting' | 'running' | 'paused' | 'completed' | 'failed'
 export type TrainingProfile = 'default' | 'terminal_rl_tmax_like'
 export type ArtifactRetention = 'adapter_only' | 'adapter_checkpoint' | 'deployable' | 'full_run'
@@ -31,7 +26,7 @@ export interface TrainingMetrics {
   step: number
   totalSteps: number
   eta?: string
-  simulation?: boolean  // True when running in simulation mode (no GPU/trainer)
+  simulation?: boolean // True when running in simulation mode (no GPU/trainer)
   timestamp: number
   // Richer per-step metrics the trainer emits (forwarded from training:progress).
   evalLoss?: number
@@ -66,13 +61,13 @@ export interface TrainingConfig {
   loraRank?: number
   loraAlpha?: number
   loraDropout?: number
-  load4Bit?: boolean  // QLoRA: load model in 4-bit quantization
+  load4Bit?: boolean // QLoRA: load model in 4-bit quantization
   // Strategy-specific
   dpoBeta?: number
   grpoNumGenerations?: number
   grpoTemperature?: number
-  grpoLossType?: string  // grpo | gspo | dr_grpo | dapo | bnpo
-  grpoBackend?: string   // auto | unsloth | plain | trl_vllm
+  grpoLossType?: string // grpo | gspo | dr_grpo | dapo | bnpo
+  grpoBackend?: string // auto | unsloth | plain | trl_vllm
   grpoUseVllm?: boolean
   trainingProfile?: TrainingProfile
   grpoGroupSize?: number
@@ -97,7 +92,7 @@ export interface TrainingConfig {
   rwmlHistoryWindow?: number
   rwmlEmbeddingModel?: string
   rwmlKlBeta?: number
-  useLiger?: boolean     // plain backend: Liger fused-linear-CE (262k-vocab OOM fix)
+  useLiger?: boolean // plain backend: Liger fused-linear-CE (262k-vocab OOM fix)
   // Knowledge Distillation
   teacherModel?: string
   teacherTemperature?: number
@@ -110,7 +105,7 @@ export interface TrainingConfig {
   sessionDistillationContextMode?: string
   sessionDistillationReader?: string
   // Repo selection
-  selectedRepos?: string[]  // Repos to include in training (empty = all)
+  selectedRepos?: string[] // Repos to include in training (empty = all)
   // Training backend
   useNemoCustomizer?: boolean
   /** @deprecated Compatibility alias for hosted NeMo Customizer. */
@@ -145,7 +140,7 @@ export interface TrainingRun {
   currentMetrics?: TrainingMetrics
   metricsHistory: TrainingMetrics[]
   error?: string
-  reconnected?: boolean  // True when run was reconnected after backend restart
+  reconnected?: boolean // True when run was reconnected after backend restart
 }
 
 export interface TrainingLog {
@@ -224,13 +219,7 @@ interface TrainingState {
 // TRL/backend stats dicts look like: {'loss': 0.12, 'grad_norm': 0.4,
 //   'reward': 0.5, 'kl': 0.02, 'echo_loss': 1.1, 'rwml_pass_rate': 0.7,
 //   'step': 42, ...}. We do a fast substring gate then regex-extract fields.
-const STATS_SIGNATURE_KEYS = [
-  "'loss':",
-  "'reward':",
-  "'kl':",
-  "'echo_loss':",
-  "'rwml_pass_rate':",
-]
+const STATS_SIGNATURE_KEYS = ["'loss':", "'reward':", "'kl':", "'echo_loss':", "'rwml_pass_rate':"]
 const FIELD_RE = /'([a-z_]+)':\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|nan|inf|-inf)/g
 
 function parseStatsLine(line: string): GrpoMetric | null {
@@ -250,7 +239,8 @@ function parseStatsLine(line: string): GrpoMetric | null {
     !('reward' in parsed) &&
     !('echo_loss' in parsed) &&
     !('rwml_pass_rate' in parsed)
-  ) return null
+  )
+    return null
   const step = parsed.step ?? 0
   return {
     step,
@@ -273,7 +263,7 @@ function parseStatsLine(line: string): GrpoMetric | null {
     requestedPromptGroups: parsed.requested_prompt_groups,
     candidatePromptGroups: parsed.candidate_prompt_groups,
     grpoGroupSize: parsed.grpo_group_size,
-    timestamp: Date.now(),
+    timestamp: Date.now()
   }
 }
 
@@ -306,7 +296,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       currentRun: tempRun,
       runs: [...get().runs, tempRun],
       lossHistory: [],
-      logs: [],  // Clear logs when starting new training
+      logs: [], // Clear logs when starting new training
       grpoMetrics: []
     })
 
@@ -395,7 +385,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         hf_private: config.hfPrivate,
         hf_upload_artifact: config.hfUploadArtifact,
         auto_export_gguf: config.autoExportGGUF,
-        gguf_quantization: config.ggufQuantization,
+        gguf_quantization: config.ggufQuantization
       })
 
       if (response.ok && response.data) {
@@ -404,7 +394,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         // Update with actual run ID from backend
         set((state) => ({
           currentRun: state.currentRun ? { ...state.currentRun, id: apiRunId, status } : null,
-          runs: state.runs.map(r => r.id === tempRunId ? { ...r, id: apiRunId, status } : r)
+          runs: state.runs.map((r) => (r.id === tempRunId ? { ...r, id: apiRunId, status } : r))
         }))
 
         const queuedPayload = trainingQueuedPayloadFromResponse(response.data, {
@@ -413,15 +403,14 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
           datasetPath: config.datasetPath,
           origin,
           correlationId,
-          computeTarget,
+          computeTarget
         })
 
         // The POST itself is authoritative. WebSocket delivery can now miss a
         // queued event without leaving the canvas or Activity node unaware.
-        useActivityStore.getState().addEvent(
-          'training:queued',
-          queuedPayload as unknown as Record<string, unknown>,
-        )
+        useActivityStore
+          .getState()
+          .addEvent('training:queued', queuedPayload as unknown as Record<string, unknown>)
         try {
           useCanvasOrchestratorStore.getState().handleTrainingQueued(queuedPayload)
         } catch (canvasError) {
@@ -431,14 +420,22 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       } else {
         // API call failed
         set((state) => ({
-          currentRun: state.currentRun ? { ...state.currentRun, status: 'failed', error: response.error || 'Failed to start training' } : null
+          currentRun: state.currentRun
+            ? {
+                ...state.currentRun,
+                status: 'failed',
+                error: response.error || 'Failed to start training'
+              }
+            : null
         }))
         throw new Error(response.error || 'Failed to start training')
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
       set((state) => ({
-        currentRun: state.currentRun ? { ...state.currentRun, status: 'failed', error: errorMsg } : null
+        currentRun: state.currentRun
+          ? { ...state.currentRun, status: 'failed', error: errorMsg }
+          : null
       }))
       throw error
     }
@@ -489,9 +486,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
         return {
           currentRun: null,
-          runs: state.runs.map((r) =>
-            r.id === completedRun.id ? completedRun : r
-          )
+          runs: state.runs.map((r) => (r.id === completedRun.id ? completedRun : r))
         }
       })
     } catch (error) {
@@ -536,30 +531,37 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   hydrateFromReconnect: (runId: string, metrics: TrainingMetrics) => {
     const reconnectedRun: TrainingRun = {
       id: runId,
-      config: {} as TrainingConfig,  // Will be populated from API
+      config: {} as TrainingConfig, // Will be populated from API
       status: 'running',
       startTime: Date.now(),
       metricsHistory: [metrics],
       currentMetrics: metrics,
-      reconnected: true,
+      reconnected: true
     }
 
     set((state) => ({
       currentRun: reconnectedRun,
       runs: [...state.runs, reconnectedRun],
-      lossHistory: metrics.loss != null ? [{ step: metrics.step, loss: metrics.loss }] : [],
+      lossHistory: metrics.loss != null ? [{ step: metrics.step, loss: metrics.loss }] : []
     }))
 
     // Fetch full run details from API to populate config
-    trainingApi.getStatus(runId).then((response) => {
-      if (response.ok && response.data) {
-        set((state) => ({
-          currentRun: state.currentRun?.id === runId
-            ? { ...state.currentRun, startTime: new Date(response.data!.started_at || Date.now()).getTime() }
-            : state.currentRun,
-        }))
-      }
-    }).catch(() => {})  // Best-effort hydration
+    trainingApi
+      .getStatus(runId)
+      .then((response) => {
+        if (response.ok && response.data) {
+          set((state) => ({
+            currentRun:
+              state.currentRun?.id === runId
+                ? {
+                    ...state.currentRun,
+                    startTime: new Date(response.data!.started_at || Date.now()).getTime()
+                  }
+                : state.currentRun
+          }))
+        }
+      })
+      .catch(() => {}) // Best-effort hydration
   },
 
   getRun: (id: string) => {
@@ -570,9 +572,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const parsed = parseStatsLine(log.message)
     set((state) => ({
       logs: [...state.logs, log].slice(-1000),
-      grpoMetrics: parsed
-        ? [...state.grpoMetrics, parsed].slice(-300)
-        : state.grpoMetrics,
+      grpoMetrics: parsed ? [...state.grpoMetrics, parsed].slice(-300) : state.grpoMetrics
     }))
   },
 
@@ -590,5 +590,5 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   setDatasetPathOverride: (path: string | null) => {
     set({ datasetPathOverride: path })
-  },
+  }
 }))

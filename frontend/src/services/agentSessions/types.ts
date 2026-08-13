@@ -15,7 +15,12 @@ export interface TokenTotals {
   cacheCreate: number
 }
 
-export const emptyTotals = (): TokenTotals => ({ input: 0, output: 0, cacheRead: 0, cacheCreate: 0 })
+export const emptyTotals = (): TokenTotals => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheCreate: 0
+})
 
 export interface AgentSessionSnapshot {
   kind: AgentSessionKind

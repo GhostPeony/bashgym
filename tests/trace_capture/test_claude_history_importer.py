@@ -11,19 +11,17 @@ Tests cover:
 """
 
 import json
-import tempfile
-from pathlib import Path
 from dataclasses import asdict
 
 import pytest
 
+from bashgym.trace_capture.core import TraceSession, estimate_cost_usd
 from bashgym.trace_capture.importers.claude_history import ClaudeSessionImporter
-from bashgym.trace_capture.core import estimate_cost_usd, TraceSession
-
 
 # ---------------------------------------------------------------------------
 # Helpers to build JSONL fixtures
 # ---------------------------------------------------------------------------
+
 
 def _assistant_event(
     tool_uses=None,
@@ -48,12 +46,14 @@ def _assistant_event(
             content.append({"type": "text", "text": t})
     if tool_uses:
         for tu in tool_uses:
-            content.append({
-                "type": "tool_use",
-                "id": tu.get("id", "toolu_test123"),
-                "name": tu.get("name", "Bash"),
-                "input": tu.get("input", {"command": "echo hello"}),
-            })
+            content.append(
+                {
+                    "type": "tool_use",
+                    "id": tu.get("id", "toolu_test123"),
+                    "name": tu.get("name", "Bash"),
+                    "input": tu.get("input", {"command": "echo hello"}),
+                }
+            )
     return {
         "type": "assistant",
         "timestamp": timestamp,
@@ -86,12 +86,14 @@ def _user_event(
         content.append({"type": "text", "text": text})
     if tool_results:
         for tr in tool_results:
-            content.append({
-                "type": "tool_result",
-                "tool_use_id": tr.get("tool_use_id", "toolu_test123"),
-                "content": tr.get("content", "command output here"),
-                "is_error": tr.get("is_error", False),
-            })
+            content.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tr.get("tool_use_id", "toolu_test123"),
+                    "content": tr.get("content", "command output here"),
+                    "is_error": tr.get("is_error", False),
+                }
+            )
     event = {
         "type": "user",
         "timestamp": timestamp,
@@ -117,6 +119,7 @@ def _write_session(events, tmp_path, name="test_session"):
 # ---------------------------------------------------------------------------
 # 1. Backward Compatibility
 # ---------------------------------------------------------------------------
+
 
 class TestBackwardCompat:
     """Existing fields and shapes still present after enrichment."""
@@ -175,10 +178,12 @@ class TestBackwardCompat:
 
         user_prompt = session_meta.pop("user_initial_prompt", "Imported session")
         session = TraceSession.from_steps(
-            steps, source_tool="claude_code",
-            verification_passed=None, imported=True,
+            steps,
+            source_tool="claude_code",
+            verification_passed=None,
+            imported=True,
             user_initial_prompt=user_prompt,
-            **session_meta
+            **session_meta,
         )
         d = asdict(session)
         assert d["source_tool"] == "claude_code"
@@ -189,19 +194,23 @@ class TestBackwardCompat:
     def test_summary_has_tool_breakdown(self, tmp_path):
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
-            _assistant_event(tool_uses=[
-                {"id": "t1", "name": "Bash", "input": {"command": "ls"}},
-                {"id": "t2", "name": "Read", "input": {"file_path": "a.py"}},
-            ]),
-            _assistant_event(tool_uses=[
-                {"id": "t3", "name": "Bash", "input": {"command": "pwd"}},
-            ]),
+            _assistant_event(
+                tool_uses=[
+                    {"id": "t1", "name": "Bash", "input": {"command": "ls"}},
+                    {"id": "t2", "name": "Read", "input": {"file_path": "a.py"}},
+                ]
+            ),
+            _assistant_event(
+                tool_uses=[
+                    {"id": "t3", "name": "Bash", "input": {"command": "pwd"}},
+                ]
+            ),
         ]
         f = _write_session(events, tmp_path)
         importer = ClaudeSessionImporter()
         steps, meta = importer.parse_session_file(f)
 
-        user_prompt = meta.pop("user_initial_prompt", "")
+        meta.pop("user_initial_prompt", "")
         session = TraceSession.from_steps(steps, source_tool="claude_code", **meta)
         assert session.summary["tool_breakdown"] == {"Bash": 2, "Read": 1}
 
@@ -209,6 +218,7 @@ class TestBackwardCompat:
 # ---------------------------------------------------------------------------
 # 2. Session Metadata Extraction
 # ---------------------------------------------------------------------------
+
 
 class TestSessionMetadata:
     """Session-level accumulators are computed correctly."""
@@ -230,10 +240,20 @@ class TestSessionMetadata:
     def test_token_sums(self, tmp_path):
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
-            _assistant_event(input_tokens=100, output_tokens=50, cache_creation=30, cache_read=200,
-                             tool_uses=[{"id": "t1", "name": "Bash"}]),
-            _assistant_event(input_tokens=200, output_tokens=100, cache_creation=70, cache_read=300,
-                             tool_uses=[{"id": "t2", "name": "Bash"}]),
+            _assistant_event(
+                input_tokens=100,
+                output_tokens=50,
+                cache_creation=30,
+                cache_read=200,
+                tool_uses=[{"id": "t1", "name": "Bash"}],
+            ),
+            _assistant_event(
+                input_tokens=200,
+                output_tokens=100,
+                cache_creation=70,
+                cache_read=300,
+                tool_uses=[{"id": "t2", "name": "Bash"}],
+            ),
         ]
         f = _write_session(events, tmp_path)
         importer = ClaudeSessionImporter()
@@ -246,14 +266,24 @@ class TestSessionMetadata:
 
     def test_all_user_prompts_multi_turn(self, tmp_path):
         events = [
-            {"type": "user", "message": {"content": "Fix the login bug"}, "cwd": "/repo",
-             "timestamp": "2026-02-24T12:00:00Z"},
+            {
+                "type": "user",
+                "message": {"content": "Fix the login bug"},
+                "cwd": "/repo",
+                "timestamp": "2026-02-24T12:00:00Z",
+            },
             _assistant_event(tool_uses=[{"id": "t1", "name": "Bash"}]),
-            {"type": "user", "message": {"content": "Now add tests"},
-             "timestamp": "2026-02-24T12:05:00Z"},
+            {
+                "type": "user",
+                "message": {"content": "Now add tests"},
+                "timestamp": "2026-02-24T12:05:00Z",
+            },
             _assistant_event(tool_uses=[{"id": "t2", "name": "Write"}]),
-            {"type": "user", "message": {"content": "Looks good, commit it"},
-             "timestamp": "2026-02-24T12:10:00Z"},
+            {
+                "type": "user",
+                "message": {"content": "Looks good, commit it"},
+                "timestamp": "2026-02-24T12:10:00Z",
+            },
         ]
         f = _write_session(events, tmp_path)
         importer = ClaudeSessionImporter()
@@ -285,9 +315,15 @@ class TestSessionMetadata:
 
     def test_git_branch_and_version(self, tmp_path):
         events = [
-            {"type": "user", "message": {"content": "go"}, "cwd": "/repo",
-             "gitBranch": "feature/auth", "version": "2.1.39", "slug": "cool-session",
-             "sessionId": "abc-123-def"},
+            {
+                "type": "user",
+                "message": {"content": "go"},
+                "cwd": "/repo",
+                "gitBranch": "feature/auth",
+                "version": "2.1.39",
+                "slug": "cool-session",
+                "sessionId": "abc-123-def",
+            },
             _assistant_event(tool_uses=[{"id": "t1", "name": "Bash"}]),
         ]
         f = _write_session(events, tmp_path)
@@ -305,12 +341,20 @@ class TestSessionMetadata:
             _assistant_event(tool_uses=[{"id": "t1", "name": "Task"}]),
             _user_event(
                 tool_results=[{"tool_use_id": "t1", "content": "Agent result"}],
-                tool_use_result={"totalTokens": 15000, "totalDurationMs": 8500, "totalToolUseCount": 5},
+                tool_use_result={
+                    "totalTokens": 15000,
+                    "totalDurationMs": 8500,
+                    "totalToolUseCount": 5,
+                },
             ),
             _assistant_event(tool_uses=[{"id": "t2", "name": "Task"}]),
             _user_event(
                 tool_results=[{"tool_use_id": "t2", "content": "Agent result 2"}],
-                tool_use_result={"totalTokens": 20000, "totalDurationMs": 12000, "totalToolUseCount": 8},
+                tool_use_result={
+                    "totalTokens": 20000,
+                    "totalDurationMs": 12000,
+                    "totalToolUseCount": 8,
+                },
             ),
         ]
         f = _write_session(events, tmp_path)
@@ -323,8 +367,12 @@ class TestSessionMetadata:
 
     def test_plan_contents(self, tmp_path):
         events = [
-            {"type": "user", "message": {"content": "plan this"},
-             "cwd": "/repo", "planContent": "Step 1: Do X\nStep 2: Do Y"},
+            {
+                "type": "user",
+                "message": {"content": "plan this"},
+                "cwd": "/repo",
+                "planContent": "Step 1: Do X\nStep 2: Do Y",
+            },
             _assistant_event(tool_uses=[{"id": "t1", "name": "Bash"}]),
         ]
         f = _write_session(events, tmp_path)
@@ -339,6 +387,7 @@ class TestSessionMetadata:
 # 3. Per-Step Enrichment
 # ---------------------------------------------------------------------------
 
+
 class TestPerStepEnrichment:
     """Individual TraceStep.metadata has model/tokens/thinking/text."""
 
@@ -346,7 +395,9 @@ class TestPerStepEnrichment:
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
             _assistant_event(
-                model="claude-opus-4-6", input_tokens=500, output_tokens=200,
+                model="claude-opus-4-6",
+                input_tokens=500,
+                output_tokens=200,
                 tool_uses=[{"id": "t1", "name": "Bash", "input": {"command": "ls"}}],
             ),
         ]
@@ -430,13 +481,16 @@ class TestPerStepEnrichment:
 # 4. Tool Expansion
 # ---------------------------------------------------------------------------
 
+
 class TestToolExpansion:
     """All tools captured, not just the old 6-tool whitelist."""
 
     def test_task_tool_captured(self, tmp_path):
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
-            _assistant_event(tool_uses=[{"id": "t1", "name": "Task", "input": {"prompt": "research"}}]),
+            _assistant_event(
+                tool_uses=[{"id": "t1", "name": "Task", "input": {"prompt": "research"}}]
+            ),
         ]
         f = _write_session(events, tmp_path)
         importer = ClaudeSessionImporter()
@@ -449,11 +503,13 @@ class TestToolExpansion:
     def test_mcp_and_webfetch_captured(self, tmp_path):
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
-            _assistant_event(tool_uses=[
-                {"id": "t1", "name": "WebFetch", "input": {"url": "https://example.com"}},
-                {"id": "t2", "name": "mcp__pencil__batch_get", "input": {"filePath": "x.pen"}},
-                {"id": "t3", "name": "WebSearch", "input": {"query": "test"}},
-            ]),
+            _assistant_event(
+                tool_uses=[
+                    {"id": "t1", "name": "WebFetch", "input": {"url": "https://example.com"}},
+                    {"id": "t2", "name": "mcp__pencil__batch_get", "input": {"filePath": "x.pen"}},
+                    {"id": "t3", "name": "WebSearch", "input": {"query": "test"}},
+                ]
+            ),
         ]
         f = _write_session(events, tmp_path)
         importer = ClaudeSessionImporter()
@@ -471,6 +527,7 @@ class TestToolExpansion:
 # ---------------------------------------------------------------------------
 # 5. Cost Estimation
 # ---------------------------------------------------------------------------
+
 
 class TestCostEstimation:
     """estimate_cost_usd returns correct values."""
@@ -503,7 +560,9 @@ class TestCostEstimation:
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
             _assistant_event(
-                model="claude-sonnet-4-5", input_tokens=1000, output_tokens=500,
+                model="claude-sonnet-4-5",
+                input_tokens=1000,
+                output_tokens=500,
                 tool_uses=[{"id": "t1", "name": "Bash"}],
             ),
         ]
@@ -518,6 +577,7 @@ class TestCostEstimation:
 # ---------------------------------------------------------------------------
 # 6. Edge Cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     """Graceful handling of unusual inputs."""
@@ -549,12 +609,10 @@ class TestEdgeCases:
         with open(session_file, "w") as f:
             f.write("not valid json\n")
             f.write('{"broken": true\n')  # missing closing brace
-            f.write(json.dumps({
-                "type": "user", "message": {"content": "valid"}, "cwd": "/repo"
-            }) + "\n")
-            f.write(json.dumps(_assistant_event(
-                tool_uses=[{"id": "t1", "name": "Bash"}]
-            )) + "\n")
+            f.write(
+                json.dumps({"type": "user", "message": {"content": "valid"}, "cwd": "/repo"}) + "\n"
+            )
+            f.write(json.dumps(_assistant_event(tool_uses=[{"id": "t1", "name": "Bash"}])) + "\n")
         importer = ClaudeSessionImporter()
         steps, meta = importer.parse_session_file(session_file)
 
@@ -565,12 +623,16 @@ class TestEdgeCases:
     def test_tool_result_matches_step(self, tmp_path):
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
-            _assistant_event(tool_uses=[
-                {"id": "t1", "name": "Bash", "input": {"command": "echo hello"}},
-            ]),
-            _user_event(tool_results=[
-                {"tool_use_id": "t1", "content": "hello\n", "is_error": False},
-            ]),
+            _assistant_event(
+                tool_uses=[
+                    {"id": "t1", "name": "Bash", "input": {"command": "echo hello"}},
+                ]
+            ),
+            _user_event(
+                tool_results=[
+                    {"tool_use_id": "t1", "content": "hello\n", "is_error": False},
+                ]
+            ),
         ]
         f = _write_session(events, tmp_path)
         importer = ClaudeSessionImporter()
@@ -583,12 +645,16 @@ class TestEdgeCases:
     def test_error_tool_result(self, tmp_path):
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
-            _assistant_event(tool_uses=[
-                {"id": "t1", "name": "Bash", "input": {"command": "bad_cmd"}},
-            ]),
-            _user_event(tool_results=[
-                {"tool_use_id": "t1", "content": "command not found", "is_error": True},
-            ]),
+            _assistant_event(
+                tool_uses=[
+                    {"id": "t1", "name": "Bash", "input": {"command": "bad_cmd"}},
+                ]
+            ),
+            _user_event(
+                tool_results=[
+                    {"tool_use_id": "t1", "content": "command not found", "is_error": True},
+                ]
+            ),
         ]
         f = _write_session(events, tmp_path)
         importer = ClaudeSessionImporter()

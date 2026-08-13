@@ -25,9 +25,13 @@ def _env(env_id: str, family: str, domain: str = "cli") -> EnvironmentSpec:
     )
 
 
-def _attempts(environments: list[EnvironmentSpec], *, passed: bool = True) -> list[EnvironmentAttempt]:
+def _attempts(
+    environments: list[EnvironmentSpec], *, passed: bool = True
+) -> list[EnvironmentAttempt]:
     return [
-        EnvironmentAttempt(env.id, attempt_index=0, passed=passed, verifier_status="passed" if passed else "failed")
+        EnvironmentAttempt(
+            env.id, attempt_index=0, passed=passed, verifier_status="passed" if passed else "failed"
+        )
         for env in environments
     ]
 
@@ -47,7 +51,9 @@ def test_environment_holdout_split_is_grouped_and_deterministic():
 
 
 def test_environment_hash_ignores_ids_to_catch_copied_tasks():
-    assert environment_hash(_env("env_original", "same")) == environment_hash(_env("env_copy", "same"))
+    assert environment_hash(_env("env_original", "same")) == environment_hash(
+        _env("env_copy", "same")
+    )
 
 
 def test_environment_holdout_contamination_detects_copied_task_across_groups():
@@ -59,7 +65,9 @@ def test_environment_holdout_contamination_detects_copied_task_across_groups():
         metadata={"task_family": "holdout_family", "generator_seed": "holdout_family"},
         files=dict(original.files),
     )
-    split = make_environment_holdout_split([original, copied], by="task_family", fraction=0.5, seed=0)
+    split = make_environment_holdout_split(
+        [original, copied], by="task_family", fraction=0.5, seed=0
+    )
 
     assert environment_holdout_contamination(split) == [environment_hash(original)]
 

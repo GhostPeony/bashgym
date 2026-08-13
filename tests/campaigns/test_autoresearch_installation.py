@@ -48,13 +48,19 @@ def test_builder_requires_an_explicit_immutable_trainable_base():
         "revision_binding": "immutable",
     }
     assert built.manifest.allow_hf_publication is False
-    assert built.manifest.evaluation_plan["required_training_stages"] == [
-        "smoke_training",
+    assert built.manifest.evaluation_plan["required_training_stages"] == ["full_training"]
+    assert built.manifest.evaluation_plan["required_compute_stages"] == [
+        "development_evaluation",
         "full_training",
     ]
-    assert built.manifest.evaluation_plan["source_repository_binding_id"] == (
-        "bashgym-source-1"
-    )
+    assert built.manifest.evaluation_plan["source_repository_binding_id"] == ("bashgym-source-1")
+
+    with_data_designer = definition(include_data_build=True)
+    assert with_data_designer.manifest.evaluation_plan["required_compute_stages"] == [
+        "data_build",
+        "development_evaluation",
+        "full_training",
+    ]
 
 
 def test_install_is_atomic_idempotent_and_emits_exact_binding_plan(tmp_path):
@@ -74,7 +80,6 @@ def test_install_is_atomic_idempotent_and_emits_exact_binding_plan(tmp_path):
     assert first.binding_plan.compute_profile_id == "private-training-1"
     assert first.binding_plan.source_repository_profile_id == "bashgym-source-1"
     assert tuple(stage.value for stage in first.binding_plan.required_training_stages) == (
-        "smoke_training",
         "full_training",
     )
 

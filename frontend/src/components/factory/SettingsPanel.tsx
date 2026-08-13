@@ -1,14 +1,5 @@
 import { useState } from 'react'
-import {
-  Shield,
-  ShieldAlert,
-  Sparkles,
-  Code,
-  AlertTriangle,
-  Copy,
-  Check,
-  X,
-} from 'lucide-react'
+import { Shield, ShieldAlert, Sparkles, Code, AlertTriangle, Copy, Check, X } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { FactoryConfig } from '../../services/api'
 import { PII_TYPES, RISK_LEVELS } from './types'
@@ -21,9 +12,7 @@ interface SettingsPanelProps {
 export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
   const togglePiiType = (type: string) => {
     const current = config.privacy.pii_types
-    const updated = current.includes(type)
-      ? current.filter(t => t !== type)
-      : [...current, type]
+    const updated = current.includes(type) ? current.filter((t) => t !== type) : [...current, type]
     onConfigChange({
       ...config,
       privacy: { ...config.privacy, pii_types: updated }
@@ -52,26 +41,37 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
               <Shield className="w-5 h-5 text-accent" />
               <div>
                 <h3 className="font-brand text-lg text-text-primary">Privacy (Safe Synthesizer)</h3>
-                <p className="text-xs text-text-muted font-mono">Differential privacy for PII protection</p>
+                <p className="text-xs text-text-muted font-mono">
+                  Differential privacy for PII protection
+                </p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
                 checked={config.privacy.enabled}
-                onChange={(e) => onConfigChange({
-                  ...config,
-                  privacy: { ...config.privacy, enabled: e.target.checked }
-                })}
+                onChange={(e) =>
+                  onConfigChange({
+                    ...config,
+                    privacy: { ...config.privacy, enabled: e.target.checked }
+                  })
+                }
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-background-secondary border-brutal border-border rounded-brutal peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-brutal after:border-border after:rounded-brutal after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
             </label>
           </div>
 
-          <div className={clsx('space-y-3', !config.privacy.enabled && 'opacity-50 pointer-events-none')}>
+          <div
+            className={clsx(
+              'space-y-3',
+              !config.privacy.enabled && 'opacity-50 pointer-events-none'
+            )}
+          >
             <div>
-              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Privacy Budget (Epsilon)</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">
+                Privacy Budget (Epsilon)
+              </label>
               <div className="flex items-center gap-3">
                 <input
                   type="range"
@@ -79,29 +79,35 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                   max="16"
                   step="0.5"
                   value={config.privacy.epsilon}
-                  onChange={(e) => onConfigChange({
-                    ...config,
-                    privacy: { ...config.privacy, epsilon: parseFloat(e.target.value) }
-                  })}
+                  onChange={(e) =>
+                    onConfigChange({
+                      ...config,
+                      privacy: { ...config.privacy, epsilon: parseFloat(e.target.value) }
+                    })
+                  }
                   className="flex-1 accent-accent"
                 />
-                <span className="text-xs font-mono text-text-primary w-10 text-center border-brutal border-border rounded-brutal px-1 py-0.5 bg-background-secondary">{config.privacy.epsilon}</span>
+                <span className="text-xs font-mono text-text-primary w-10 text-center border-brutal border-border rounded-brutal px-1 py-0.5 bg-background-secondary">
+                  {config.privacy.epsilon}
+                </span>
               </div>
-              <p className="text-[10px] text-text-muted mt-0.5 font-mono">Lower = more privacy. Recommended: 4-12</p>
+              <p className="text-[10px] text-text-muted mt-0.5 font-mono">
+                Lower = more privacy. Recommended: 4-12
+              </p>
             </div>
 
             <div>
-              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">PII Types to Detect</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">
+                PII Types to Detect
+              </label>
               <div className="flex flex-wrap gap-1.5">
-                {PII_TYPES.map(type => (
+                {PII_TYPES.map((type) => (
                   <button
                     key={type}
                     onClick={() => togglePiiType(type)}
                     className={clsx(
                       'tag transition-colors cursor-pointer',
-                      config.privacy.pii_types.includes(type)
-                        ? 'bg-accent text-white'
-                        : ''
+                      config.privacy.pii_types.includes(type) ? 'bg-accent text-white' : ''
                     )}
                   >
                     <span>{type.replace('_', ' ')}</span>
@@ -120,38 +126,53 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
               <ShieldAlert className="w-5 h-5 text-accent" />
               <div>
                 <h3 className="font-brand text-lg text-text-primary">Safety Configuration</h3>
-                <p className="text-xs text-text-muted font-mono">Control risk levels and blocked patterns</p>
+                <p className="text-xs text-text-muted font-mono">
+                  Control risk levels and blocked patterns
+                </p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
                 checked={config.safety.enabled}
-                onChange={(e) => onConfigChange({
-                  ...config,
-                  safety: { ...config.safety, enabled: e.target.checked }
-                })}
+                onChange={(e) =>
+                  onConfigChange({
+                    ...config,
+                    safety: { ...config.safety, enabled: e.target.checked }
+                  })
+                }
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-background-secondary border-brutal border-border rounded-brutal peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-brutal after:border-border after:rounded-brutal after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
             </label>
           </div>
 
-          <div className={clsx('space-y-3', !config.safety.enabled && 'opacity-50 pointer-events-none')}>
+          <div
+            className={clsx(
+              'space-y-3',
+              !config.safety.enabled && 'opacity-50 pointer-events-none'
+            )}
+          >
             <div className="space-y-2">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={config.safety.block_dangerous_commands}
-                  onChange={(e) => onConfigChange({
-                    ...config,
-                    safety: { ...config.safety, block_dangerous_commands: e.target.checked }
-                  })}
+                  onChange={(e) =>
+                    onConfigChange({
+                      ...config,
+                      safety: { ...config.safety, block_dangerous_commands: e.target.checked }
+                    })
+                  }
                   className="rounded-brutal"
                 />
                 <div>
-                  <span className="font-mono text-xs font-semibold text-text-primary">Block Dangerous Commands</span>
-                  <p className="text-[10px] text-text-muted font-mono">Prevent rm -rf, sudo, etc.</p>
+                  <span className="font-mono text-xs font-semibold text-text-primary">
+                    Block Dangerous Commands
+                  </span>
+                  <p className="text-[10px] text-text-muted font-mono">
+                    Prevent rm -rf, sudo, etc.
+                  </p>
                 </div>
               </label>
 
@@ -159,35 +180,53 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                 <input
                   type="checkbox"
                   checked={config.safety.require_confirmation_for_high_risk}
-                  onChange={(e) => onConfigChange({
-                    ...config,
-                    safety: { ...config.safety, require_confirmation_for_high_risk: e.target.checked }
-                  })}
+                  onChange={(e) =>
+                    onConfigChange({
+                      ...config,
+                      safety: {
+                        ...config.safety,
+                        require_confirmation_for_high_risk: e.target.checked
+                      }
+                    })
+                  }
                   className="rounded-brutal"
                 />
                 <div>
-                  <span className="font-mono text-xs font-semibold text-text-primary">Require High-Risk Confirmation</span>
-                  <p className="text-[10px] text-text-muted font-mono">Flag high-risk outputs for review</p>
+                  <span className="font-mono text-xs font-semibold text-text-primary">
+                    Require High-Risk Confirmation
+                  </span>
+                  <p className="text-[10px] text-text-muted font-mono">
+                    Flag high-risk outputs for review
+                  </p>
                 </div>
               </label>
             </div>
 
             <div>
-              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Max Risk Level</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">
+                Max Risk Level
+              </label>
               <div className="flex gap-2">
-                {RISK_LEVELS.map(level => (
+                {RISK_LEVELS.map((level) => (
                   <button
                     key={level.id}
-                    onClick={() => onConfigChange({
-                      ...config,
-                      safety: { ...config.safety, max_risk_level: level.id as 'normal' | 'elevated' | 'high' }
-                    })}
+                    onClick={() =>
+                      onConfigChange({
+                        ...config,
+                        safety: {
+                          ...config.safety,
+                          max_risk_level: level.id as 'normal' | 'elevated' | 'high'
+                        }
+                      })
+                    }
                     className={clsx(
                       'flex-1 py-1.5 px-3 rounded-brutal text-xs font-mono font-semibold uppercase tracking-widest transition-all border-brutal',
                       config.safety.max_risk_level === level.id
-                        ? level.id === 'normal' ? 'bg-status-success text-white border-status-success shadow-brutal-sm' :
-                          level.id === 'elevated' ? 'bg-status-warning text-white border-status-warning shadow-brutal-sm' :
-                          'bg-status-error text-white border-status-error shadow-brutal-sm'
+                        ? level.id === 'normal'
+                          ? 'bg-status-success text-white border-status-success shadow-brutal-sm'
+                          : level.id === 'elevated'
+                            ? 'bg-status-warning text-white border-status-warning shadow-brutal-sm'
+                            : 'bg-status-error text-white border-status-error shadow-brutal-sm'
                         : 'bg-background-secondary text-text-secondary border-border hover:text-text-primary'
                     )}
                   >
@@ -198,7 +237,9 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
             </div>
 
             <div>
-              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Blocked Patterns</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">
+                Blocked Patterns
+              </label>
               <div className="space-y-1.5">
                 {config.safety.blocked_patterns.map((pattern, idx) => (
                   <div key={idx} className="flex items-center gap-1.5">
@@ -248,35 +289,53 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
             <div className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-accent" />
               <div>
-                <h3 className="font-brand text-lg text-text-primary">Prompt Optimization (MIPROv2)</h3>
-                <p className="text-xs text-text-muted font-mono">Auto-optimize prompts before synthesis</p>
+                <h3 className="font-brand text-lg text-text-primary">
+                  Prompt Optimization (MIPROv2)
+                </h3>
+                <p className="text-xs text-text-muted font-mono">
+                  Auto-optimize prompts before synthesis
+                </p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
                 checked={config.prompt_optimization.enabled}
-                onChange={(e) => onConfigChange({
-                  ...config,
-                  prompt_optimization: { ...config.prompt_optimization, enabled: e.target.checked }
-                })}
+                onChange={(e) =>
+                  onConfigChange({
+                    ...config,
+                    prompt_optimization: {
+                      ...config.prompt_optimization,
+                      enabled: e.target.checked
+                    }
+                  })
+                }
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-background-secondary border-brutal border-border rounded-brutal peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-brutal after:border-border after:rounded-brutal after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
             </label>
           </div>
 
-          <div className={clsx('space-y-3', !config.prompt_optimization.enabled && 'opacity-50 pointer-events-none')}>
+          <div
+            className={clsx(
+              'space-y-3',
+              !config.prompt_optimization.enabled && 'opacity-50 pointer-events-none'
+            )}
+          >
             <div>
-              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Intensity</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">
+                Intensity
+              </label>
               <div className="flex gap-2">
-                {(['light', 'medium', 'heavy'] as const).map(intensity => (
+                {(['light', 'medium', 'heavy'] as const).map((intensity) => (
                   <button
                     key={intensity}
-                    onClick={() => onConfigChange({
-                      ...config,
-                      prompt_optimization: { ...config.prompt_optimization, intensity }
-                    })}
+                    onClick={() =>
+                      onConfigChange({
+                        ...config,
+                        prompt_optimization: { ...config.prompt_optimization, intensity }
+                      })
+                    }
                     className={clsx(
                       'flex-1 py-1.5 px-3 rounded-brutal text-xs font-mono font-semibold uppercase tracking-widest transition-all border-brutal',
                       config.prompt_optimization.intensity === intensity
@@ -291,32 +350,46 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
             </div>
 
             <div className="flex items-center justify-between">
-              <label className="font-mono text-xs uppercase tracking-widest text-text-primary">Max Demos</label>
+              <label className="font-mono text-xs uppercase tracking-widest text-text-primary">
+                Max Demos
+              </label>
               <input
                 type="number"
                 min="1"
                 max="10"
                 value={config.prompt_optimization.max_demos}
-                onChange={(e) => onConfigChange({
-                  ...config,
-                  prompt_optimization: { ...config.prompt_optimization, max_demos: parseInt(e.target.value) }
-                })}
+                onChange={(e) =>
+                  onConfigChange({
+                    ...config,
+                    prompt_optimization: {
+                      ...config.prompt_optimization,
+                      max_demos: parseInt(e.target.value)
+                    }
+                  })
+                }
                 className="input w-20 text-xs text-center font-mono"
               />
             </div>
 
             <div className="flex items-center justify-between">
-              <label className="font-mono text-xs uppercase tracking-widest text-text-primary">Stop Threshold</label>
+              <label className="font-mono text-xs uppercase tracking-widest text-text-primary">
+                Stop Threshold
+              </label>
               <input
                 type="number"
                 min="0"
                 max="1"
                 step="0.05"
                 value={config.prompt_optimization.metric_threshold}
-                onChange={(e) => onConfigChange({
-                  ...config,
-                  prompt_optimization: { ...config.prompt_optimization, metric_threshold: parseFloat(e.target.value) }
-                })}
+                onChange={(e) =>
+                  onConfigChange({
+                    ...config,
+                    prompt_optimization: {
+                      ...config.prompt_optimization,
+                      metric_threshold: parseFloat(e.target.value)
+                    }
+                  })
+                }
                 className="input w-20 text-xs text-center font-mono"
               />
             </div>
@@ -353,7 +426,7 @@ function CLICommandCard({ config }: { config: FactoryConfig }) {
     const parts = ['python', '-m', 'bashgym.data_factory']
 
     if (config.columns.length > 0) {
-      parts.push('--schema', `"${config.columns.map(c => `${c.name}:${c.type}`).join(',')}"`)
+      parts.push('--schema', `"${config.columns.map((c) => `${c.name}:${c.type}`).join(',')}"`)
     }
 
     if (config.seeds.length > 0) {
@@ -435,7 +508,11 @@ function CLICommandCard({ config }: { config: FactoryConfig }) {
         </pre>
       </div>
       <p className="text-[10px] text-text-muted mt-2 font-mono">
-        Export seeds to JSON first. Use <code className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-secondary">--help</code> for all options.
+        Export seeds to JSON first. Use{' '}
+        <code className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-secondary">
+          --help
+        </code>{' '}
+        for all options.
       </p>
     </div>
   )

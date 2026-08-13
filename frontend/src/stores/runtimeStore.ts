@@ -24,8 +24,9 @@ function sameRuntimeJob(left: ObservedRuntimeJob, right: ObservedRuntimeJob): bo
 }
 
 function sameRuntimeJobs(left: ObservedRuntimeJob[], right: ObservedRuntimeJob[]): boolean {
-  return left === right || (
-    left.length === right.length && left.every((job, index) => sameRuntimeJob(job, right[index]))
+  return (
+    left === right ||
+    (left.length === right.length && left.every((job, index) => sameRuntimeJob(job, right[index])))
   )
 }
 
@@ -42,7 +43,7 @@ function activityPayload(job: ObservedRuntimeJob): Record<string, unknown> {
     pipeline: job.pipeline,
     progress: job.progress,
     output_dir: job.output_dir,
-    source: job.source,
+    source: job.source
   }
 }
 
@@ -80,13 +81,13 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       const previousById = new Map(previous.map((job) => [job.job_id, job]))
       const responseIds = new Set(response.data.jobs.map((job) => job.job_id))
       const activeIds = new Set(
-        response.data.jobs.filter((job) => job.status === 'running').map((job) => job.job_id),
+        response.data.jobs.filter((job) => job.status === 'running').map((job) => job.job_id)
       )
       const completedOutputDirs = new Set(
         response.data.jobs
           .filter((job) => job.status === 'completed')
           .map(normalizedOutputDir)
-          .filter((value): value is string => Boolean(value)),
+          .filter((value): value is string => Boolean(value))
       )
       const pendingMissing: ObservedRuntimeJob[] = []
       const completedNow: ObservedRuntimeJob[] = []
@@ -108,7 +109,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         completedNow.push({
           ...job,
           status: 'completed',
-          observed_completed_at: new Date().toISOString(),
+          observed_completed_at: new Date().toISOString()
         })
       }
 
@@ -130,15 +131,15 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         useCanvasOrchestratorStore.getState().handleRuntimeJob(job)
       }
 
-      const retainedCompleted = previous.filter((job) => (
-        job.status === 'completed' && !responseIds.has(job.job_id)
-      ))
+      const retainedCompleted = previous.filter(
+        (job) => job.status === 'completed' && !responseIds.has(job.job_id)
+      )
       const nextById = new Map<string, ObservedRuntimeJob>()
       for (const job of [
         ...response.data.jobs,
         ...pendingMissing,
         ...completedNow,
-        ...retainedCompleted,
+        ...retainedCompleted
       ]) {
         if (!nextById.has(job.job_id)) nextById.set(job.job_id, job)
       }
@@ -146,7 +147,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       set({
         jobs: sameRuntimeJobs(previous, nextJobs) ? previous : nextJobs,
         error: null,
-        lastPolledAt: response.data.polled_at,
+        lastPolledAt: response.data.polled_at
       })
     } finally {
       pollInFlight = false
@@ -156,5 +157,5 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   clear: () => {
     missingPolls.clear()
     set({ jobs: [], error: null, lastPolledAt: null })
-  },
+  }
 }))

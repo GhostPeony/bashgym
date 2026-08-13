@@ -23,6 +23,17 @@ from typing import Any
 from bashgym.api_base import normalize_api_base, open_api_url
 
 
+def _source_checkout_root() -> Path | None:
+    """Find the checkout containing this bundled script when one exists."""
+
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / "pyproject.toml").is_file() and (
+            candidate / "bashgym" / "cli.py"
+        ).is_file():
+            return candidate
+    return None
+
+
 @dataclass(frozen=True)
 class OperatorPaths:
     bashgym_root: Path
@@ -36,8 +47,11 @@ class OperatorPaths:
     @classmethod
     def from_environment(cls) -> OperatorPaths:
         home = Path.home()
+        source_checkout = _source_checkout_root()
         return cls(
-            bashgym_root=Path(os.environ.get("BASHGYM_ROOT", home / "bashgym")).expanduser(),
+            bashgym_root=Path(
+                os.environ.get("BASHGYM_ROOT") or source_checkout or home / "bashgym"
+            ).expanduser(),
             training_root=Path(
                 os.environ.get("BASHGYM_TRAINING_ROOT", home / "bashgym-training")
             ).expanduser(),

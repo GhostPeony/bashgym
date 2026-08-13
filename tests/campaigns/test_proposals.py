@@ -155,17 +155,26 @@ def _live_training_proposal(proposal_id: str) -> StudyProposalSubmission:
                 "schema_version": "recipe.v1",
                 "runtime": {"executor_kind": "registered_training"},
             },
+            "evaluation_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
             "stage_plan": StagePlan(
                 items=(
                     StagePlanItem(
                         stage=StageKind.SMOKE_TRAINING,
-                        disposition=StageDisposition.REQUIRED,
-                        reason="Prove the pinned remote recipe in a bounded smoke.",
+                        disposition=StageDisposition.NOT_APPLICABLE,
+                        reason="Optionally prove the pinned recipe before the iteration.",
                     ),
                     StagePlanItem(
                         stage=StageKind.FULL_TRAINING,
                         disposition=StageDisposition.REQUIRED,
                         reason="Run the pinned recipe inside the approved budget.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Compare the candidate on the fixed development evaluation.",
                     ),
                 )
             ),
@@ -184,9 +193,108 @@ def test_live_training_requires_declared_compute_capabilities(repository):
     )
 
     assert result.record.validation.reason_codes == (
-        "proposal_compute_smoke_capability_missing",
         "proposal_compute_training_capability_missing",
+        "proposal_development_evaluation_capability_missing",
     )
+
+
+def test_registered_data_build_recipe_is_typed_and_requires_data_capability(repository):
+    value = proposal("proposal-data-build").model_copy(
+        update={
+            "dataset_recipe": {
+                "schema_version": "bashgym.terminal_data_recipe.v1",
+                "data_scope_id": "memexai-approved-training",
+                "runtime": {"executor_kind": "registered_compute"},
+                "script_args": ["--pipeline", "terminal_env_generation", "--rows", "64"],
+            },
+            "training_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_training"},
+            },
+            "evaluation_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "required_capabilities": frozenset(
+                {
+                    Capability.DATA_BUILD,
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.DATA_BUILD,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Generate and validate one remote-resident training dataset.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.FULL_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Train against the exact generated dataset.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Evaluate the candidate on the fixed held-out tasks.",
+                    ),
+                )
+            ),
+        }
+    )
+
+    valid = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+    missing_capability = validate_proposal_submission(
+        value.model_copy(
+            update={
+                "required_capabilities": frozenset(
+                    {
+                        Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                        Capability.EVAL_DEVELOPMENT,
+                    }
+                )
+            }
+        ),
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert valid.valid is True
+    assert missing_capability.reason_codes == ("proposal_data_build_capability_missing",)
+
+
+def test_tmax_training_recipe_rejects_unavailable_dppo_backend(repository):
+    value = _live_training_proposal("proposal-tmax-dppo").model_copy(
+        update={
+            "training_recipe": {
+                "schema_version": "bashgym.tmax_composite_training_recipe.v1",
+                "runtime": {"executor_kind": "registered_training"},
+                "algorithm": "dppo",
+            },
+            "required_capabilities": frozenset(
+                {
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
+        }
+    )
+
+    result = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert result.reason_codes == ("proposal_tmax_training_recipe_invalid",)
 
 
 def test_external_handoff_uses_generic_opt_in_and_keeps_legacy_capability_read_only(
@@ -214,9 +322,7 @@ def test_external_handoff_uses_generic_opt_in_and_keeps_legacy_capability_read_o
     assert allowed.valid is True
 
     legacy_actor = actor.model_copy(
-        update={
-            "capabilities": actor.capabilities | {Capability.HANDOFF_MEMEXAI_PREPARE}
-        }
+        update={"capabilities": actor.capabilities | {Capability.HANDOFF_MEMEXAI_PREPARE}}
     )
     legacy = generic.model_copy(
         update={
@@ -245,7 +351,10 @@ def test_live_training_rejects_actor_supplied_execution_material(repository):
                 },
             },
             "required_capabilities": frozenset(
-                {Capability.COMPUTE_SMOKE, Capability.COMPUTE_TRAIN_WITHIN_BUDGET}
+                {
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
             ),
         }
     )
@@ -262,7 +371,10 @@ def test_live_training_accepts_mode_only_with_declared_capabilities(repository):
     value = _live_training_proposal("proposal-live-valid").model_copy(
         update={
             "required_capabilities": frozenset(
-                {Capability.COMPUTE_SMOKE, Capability.COMPUTE_TRAIN_WITHIN_BUDGET}
+                {
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
             )
         }
     )
@@ -309,6 +421,315 @@ def test_registered_compute_evaluation_requires_declared_capability(repository):
         "live-eval-valid",
     )
     assert accepted.record.validation.valid is True
+
+
+@pytest.mark.parametrize(
+    ("items", "required_capabilities"),
+    (
+        (
+            (
+                StagePlanItem(
+                    stage=StageKind.FULL_TRAINING,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="A candidate cannot skip its fixed evaluation.",
+                ),
+            ),
+            frozenset(
+                {
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
+        ),
+        (
+            (
+                StagePlanItem(
+                    stage=StageKind.SMOKE_TRAINING,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Smoke must not be required every iteration.",
+                ),
+                StagePlanItem(
+                    stage=StageKind.FULL_TRAINING,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Train the candidate.",
+                ),
+                StagePlanItem(
+                    stage=StageKind.DEVELOPMENT_EVALUATION,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Evaluate the candidate.",
+                ),
+            ),
+            frozenset(
+                {
+                    Capability.COMPUTE_SMOKE,
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
+        ),
+    ),
+)
+def test_live_proposal_rejects_non_autoresearch_required_stage_shape(
+    repository,
+    items,
+    required_capabilities,
+):
+    value = _live_training_proposal("proposal-invalid-stage-shape").model_copy(
+        update={
+            "required_capabilities": required_capabilities,
+            "stage_plan": StagePlan(items=items),
+        }
+    )
+
+    result = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert result.reason_codes == ("proposal_autoresearch_stage_plan_invalid",)
+
+
+def test_live_baseline_can_carry_registered_training_configuration(repository):
+    value = _live_training_proposal("proposal-baseline-with-training-config").model_copy(
+        update={
+            "required_capabilities": frozenset({Capability.EVAL_DEVELOPMENT}),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Evaluate the immutable base without training it.",
+                    ),
+                )
+            ),
+        }
+    )
+
+    result = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert result.valid is True
+
+
+@pytest.mark.parametrize(
+    ("recipe_update", "items", "required_capabilities"),
+    (
+        (
+            {
+                "dataset_recipe": {
+                    "schema_version": "recipe.v1",
+                    "data_scope_id": "memexai-approved-training",
+                }
+            },
+            (
+                StagePlanItem(
+                    stage=StageKind.DATA_BUILD,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Build the candidate dataset on registered compute.",
+                ),
+                StagePlanItem(
+                    stage=StageKind.FULL_TRAINING,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Train the candidate on registered compute.",
+                ),
+                StagePlanItem(
+                    stage=StageKind.DEVELOPMENT_EVALUATION,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Evaluate the candidate on registered compute.",
+                ),
+            ),
+            frozenset(
+                {
+                    Capability.DATA_BUILD,
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
+        ),
+        (
+            {
+                "training_recipe": {
+                    "schema_version": "recipe.v1",
+                    "runtime": {"executor_kind": "fake"},
+                }
+            },
+            (
+                StagePlanItem(
+                    stage=StageKind.FULL_TRAINING,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Train the candidate on registered compute.",
+                ),
+                StagePlanItem(
+                    stage=StageKind.DEVELOPMENT_EVALUATION,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Evaluate the candidate on registered compute.",
+                ),
+            ),
+            frozenset(
+                {
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
+        ),
+        (
+            {
+                "evaluation_recipe": {
+                    "schema_version": "recipe.v1",
+                    "runtime": {"executor_kind": "fake"},
+                }
+            },
+            (
+                StagePlanItem(
+                    stage=StageKind.DEVELOPMENT_EVALUATION,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Evaluate the immutable base on registered compute.",
+                ),
+            ),
+            frozenset({Capability.EVAL_DEVELOPMENT}),
+        ),
+    ),
+)
+def test_live_proposal_requires_registered_runtime_for_each_required_stage(
+    repository,
+    recipe_update,
+    items,
+    required_capabilities,
+):
+    value = _live_training_proposal("proposal-required-stage-runtime").model_copy(
+        update={
+            **recipe_update,
+            "required_capabilities": required_capabilities,
+            "stage_plan": StagePlan(items=items),
+        }
+    )
+
+    result = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert result.reason_codes == ("proposal_required_stage_runtime_not_registered",)
+
+
+def test_live_baseline_rejects_extra_required_stage(repository):
+    value = proposal("proposal-invalid-baseline-shape").model_copy(
+        update={
+            "evaluation_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "required_capabilities": frozenset({Capability.EVAL_DEVELOPMENT}),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.SMOKE_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="A baseline cannot require smoke training.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Evaluate the immutable base.",
+                    ),
+                )
+            ),
+        }
+    )
+
+    result = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert result.reason_codes == ("proposal_autoresearch_stage_plan_invalid",)
+
+
+def test_live_data_build_requires_exact_candidate_stage_order(repository):
+    value = _live_training_proposal("proposal-invalid-data-order").model_copy(
+        update={
+            "dataset_recipe": {
+                "schema_version": "recipe.v1",
+                "data_scope_id": "memexai-approved-training",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "required_capabilities": frozenset(
+                {
+                    Capability.DATA_BUILD,
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.FULL_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Incorrectly train before building data.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DATA_BUILD,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Incorrectly build data after training.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Evaluate the candidate.",
+                    ),
+                )
+            ),
+        }
+    )
+
+    result = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert result.reason_codes == ("proposal_autoresearch_stage_plan_invalid",)
+
+
+def test_fake_proposal_keeps_generic_stage_plan_behavior(repository):
+    value = proposal("proposal-fake-generic").model_copy(
+        update={
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.SMOKE_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Generic fake proposal shape remains unconstrained.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.FULL_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Generic fake proposal shape remains unconstrained.",
+                    ),
+                )
+            )
+        }
+    )
+
+    result = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert result.valid is True
 
 
 def test_withdraw_requires_submitted_status_and_expected_version(repository):

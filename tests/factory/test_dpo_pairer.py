@@ -88,16 +88,16 @@ class TestPairFailuresForDpo:
     """Test the main pairing function with mocked embeddings."""
 
     @patch("bashgym.factory.dpo_pairer.EmbeddingDeduplicator")
-    def test_basic_pairing(self, MockDedup):
+    def test_basic_pairing(self, mock_dedup):
         """Verify that gold and failed traces are paired by similarity."""
         # Mock the deduplicator
-        mock_instance = MockDedup.return_value
+        mock_instance = mock_dedup.return_value
         # Gold embeddings: 2 traces, each a simple vector
         # Failed embeddings: 1 trace
         # We want failed[0] to be most similar to gold[1]
         mock_instance.compute_embeddings.side_effect = [
             [[1.0, 0.0], [0.0, 1.0]],  # gold embeddings
-            [[0.1, 0.9]],               # failed embeddings (similar to gold[1])
+            [[0.1, 0.9]],  # failed embeddings (similar to gold[1])
         ]
         mock_instance._cosine_similarity.side_effect = lambda a, b: sum(
             x * y for x, y in zip(a, b)
@@ -123,12 +123,12 @@ class TestPairFailuresForDpo:
         assert pair.metadata["similarity"] > 0
 
     @patch("bashgym.factory.dpo_pairer.EmbeddingDeduplicator")
-    def test_below_threshold_no_pair(self, MockDedup):
+    def test_below_threshold_no_pair(self, mock_dedup):
         """If similarity is below threshold, no pair is produced."""
-        mock_instance = MockDedup.return_value
+        mock_instance = mock_dedup.return_value
         mock_instance.compute_embeddings.side_effect = [
-            [[1.0, 0.0]],   # gold
-            [[0.0, 1.0]],   # failed (orthogonal = 0 similarity)
+            [[1.0, 0.0]],  # gold
+            [[0.0, 1.0]],  # failed (orthogonal = 0 similarity)
         ]
         mock_instance._cosine_similarity.return_value = 0.0
 
@@ -146,9 +146,9 @@ class TestPairFailuresForDpo:
         assert len(pairs) == 0
 
     @patch("bashgym.factory.dpo_pairer.EmbeddingDeduplicator")
-    def test_api_unavailable_returns_empty(self, MockDedup):
+    def test_api_unavailable_returns_empty(self, mock_dedup):
         """When NIM API is unavailable, return empty list gracefully."""
-        mock_instance = MockDedup.return_value
+        mock_instance = mock_dedup.return_value
         mock_instance.compute_embeddings.side_effect = RuntimeError("NIM API unavailable")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -177,9 +177,9 @@ class TestPairFailuresForDpo:
         assert pairs == []
 
     @patch("bashgym.factory.dpo_pairer.EmbeddingDeduplicator")
-    def test_max_pairs_limit(self, MockDedup):
+    def test_max_pairs_limit(self, mock_dedup):
         """Respects max_pairs limit."""
-        mock_instance = MockDedup.return_value
+        mock_instance = mock_dedup.return_value
         # 3 gold, 3 failed, all similar
         mock_instance.compute_embeddings.side_effect = [
             [[1.0, 0.0]] * 3,  # gold

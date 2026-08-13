@@ -5,17 +5,35 @@ import hashlib
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from bashgym._compat import UTC
+from bashgym.campaigns import remote as remote_contracts
 from bashgym.campaigns.artifacts import SEAL_FILENAME, ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthService
+from bashgym.campaigns.autoresearch import (
+    AutoResearchCampaignCore,
+    AutoResearchCampaignSpec,
+    AutoResearchProposalControl,
+    AutoResearchRepository,
+    AutoResearchStopRules,
+    ExperimentRole,
+    MetricDirection,
+)
+from bashgym.campaigns.autoresearch_evidence import (
+    AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
+    AUTORESEARCH_EVALUATION_FILENAME,
+    AutoResearchEvaluationContext,
+)
 from bashgym.campaigns.contracts import (
+    ActionAttempt,
     AttemptStatus,
     AutonomyProfile,
     CampaignTrigger,
     CredentialKind,
+    SealedActionResult,
     StageDisposition,
     StageKind,
     StagePlan,
@@ -26,25 +44,33 @@ from bashgym.campaigns.contracts import (
 from bashgym.campaigns.evaluation import load_retrieval_evaluation_artifact
 from bashgym.campaigns.executors import FakeExecutionRequest, fake_digest
 from bashgym.campaigns.human_oversight import HumanOversightRepository
+from bashgym.campaigns.lineage import canonical_model_manifest_digest
 from bashgym.campaigns.nemo_gym_evidence import (
     NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
     build_nemo_gym_campaign_evidence,
     write_nemo_gym_campaign_evidence,
 )
+from bashgym.campaigns.persistence import CampaignPersistenceError, RecordNotFoundError
 from bashgym.campaigns.remote import (
     ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
+    RegisteredRemoteEvaluationDatasetSource,
+    RegisteredRemoteModelSource,
     RemoteCapacitySnapshot,
     RemoteObservation,
+    RemoteOutputFile,
+    RemoteOutputInventory,
     RemoteRunIdentity,
     RemoteRunState,
     RemoteStreamChunk,
+    SealedStageArtifactInput,
     remote_executor_config,
 )
 from bashgym.campaigns.runtime import (
     ActionIdentityMismatchError,
     ActionSpec,
+    CampaignArtifactRecord,
     CampaignRuntimeRepository,
 )
 from bashgym.campaigns.worker import (
@@ -57,6 +83,13 @@ from bashgym.environments.star_count import (
     generate_star_count_dataset,
     star_count_environment_spec,
 )
+from bashgym.ledger.contracts import (
+    DatasetSpec,
+    DatasetVersionSpec,
+    EvaluationSuiteSpec,
+    ProjectSpec,
+)
+from bashgym.ledger.persistence import ExperimentLedgerRepository
 from tests.campaigns.test_persistence import campaign, create, transition
 
 START = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
@@ -180,6 +213,9 @@ class FakeRemoteAdapter:
         self.terminate_count = 0
         self.force_stop_count = 0
         self.last_request = None
+        self.seal_payload = None
+        self.persist_count = 0
+        self.stream_sources = []
 
     async def capacity_preflight(self, policy):
         reasons = () if self.admitted else ("external_gpu_process_limit_exceeded",)
@@ -195,6 +231,7 @@ class FakeRemoteAdapter:
 
     async def discover(self, request):
         self.discover_count += 1
+        self.last_request = request
         return self.identity
 
     async def launch(self, request):
@@ -232,6 +269,7 @@ class FakeRemoteAdapter:
         )
 
     async def read_stream(self, identity, source, cursor):
+        self.stream_sources.append(source)
         return RemoteStreamChunk(
             source=source,
             start_offset=cursor.byte_offset,
@@ -270,6 +308,58 @@ class FakeRemoteAdapter:
         )
         return tuple(path for path in local_directory.rglob("*") if path.is_file())
 
+    async def inventory_outputs(self, identity, request, *, observation):
+        self.collect_count += 1
+        payloads = {
+            "exit_code": b"0\n",
+            "final/config.json": b"{}",
+            "launch_manifest.json": b"{}",
+            "training.log": b"complete\n",
+            "training_manifest.json": json.dumps({"run_id": identity.run_id}).encode(),
+            "training_metrics.jsonl": b'{"step":1,"loss":0.5}\n',
+        }
+        return RemoteOutputInventory(
+            compute_profile_id=identity.compute_profile_id,
+            run_id=identity.run_id,
+            files=tuple(
+                RemoteOutputFile(
+                    path=path,
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    size_bytes=len(payload),
+                )
+                for path, payload in sorted(payloads.items())
+            ),
+        )
+
+    async def inventory_terminal_evidence(self, identity, *, observation):
+        self.collect_count += 1
+        payloads = {
+            "exit_code": b"7\n",
+            "launch_manifest.json": b"{}",
+            "training.log": b"failed\n",
+        }
+        return RemoteOutputInventory(
+            compute_profile_id=identity.compute_profile_id,
+            run_id=identity.run_id,
+            files=tuple(
+                RemoteOutputFile(
+                    path=path,
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    size_bytes=len(payload),
+                )
+                for path, payload in sorted(payloads.items())
+            ),
+        )
+
+    async def persist_action_seal(self, identity, envelope):
+        self.persist_count += 1
+        self.seal_payload = bytes(envelope)
+        return f"{identity.remote_run_directory}/{SEAL_FILENAME}"
+
+    async def read_action_seal(self, identity):
+        del identity
+        return self.seal_payload
+
     async def terminate(self, identity):
         self.terminate_count += 1
         return True
@@ -300,8 +390,148 @@ def approved_remote_profile(
         python_executable="/approved/venv/bin/python",
         code_lineage_binding=code_lineage_binding,
     )
+    target_model_digest = canonical_hash(campaign().target_model.model_dump(mode="json"))
+    registered_base_model = (
+        RegisteredRemoteModelSource(
+            source_id="registered-base-v1",
+            compute_profile_id="ssh-gpu-lab",
+            target_contract_key="memexai-embedding-v1",
+            model_digest=target_model_digest,
+            remote_model_path="/models/registered-base-v1",
+        )
+        if stage == StageKind.FULL_TRAINING
+        else None
+    )
     return ApprovedRemoteExecutorProfile(
         profile_id="memexai-approved-v1",
+        profile_revision=1,
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="memexai-embedding-v1",
+        target_model_digest=target_model_digest,
+        host="192.0.2.10",
+        username="trainer",
+        key_path=str(key),
+        remote_work_dir="~/bashgym-training",
+        stages=(pinned,),
+        registered_base_model=registered_base_model,
+    )
+
+
+def test_evaluation_remote_request_regenerates_context_and_revalidates_sealed_model(tmp_path):
+    sealer = ArtifactSealer(b"w" * 32, key_version="worker-test-v1")
+    training_attempt = ActionAttempt(
+        attempt_id="attempt-training-1",
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        study_id="study-1",
+        action_id="action-training-1",
+        attempt_number=1,
+        claim_generation=1,
+        status=AttemptStatus.COMPLETED,
+        input_digest="1" * 64,
+        candidate_digest=fake_digest("candidate:study-1"),
+        manifest_revision=1,
+        stage=StageKind.FULL_TRAINING,
+        sealed_result_uri=str(tmp_path / "sealed-training"),
+        created_at=START,
+        updated_at=START,
+    )
+    temporary = tmp_path / "temporary-training"
+    (temporary / "final").mkdir(parents=True)
+    (temporary / "final" / "config.json").write_text("{}", encoding="utf-8")
+    (temporary / "final" / "weights.safetensors").write_bytes(b"weights")
+    outputs = sealer.describe_outputs(
+        temporary,
+        {
+            "final/config.json": "huggingface_model_file.v1",
+            "final/weights.safetensors": "huggingface_model_file.v1",
+        },
+    )
+    training_manifest = SealedActionResult(
+        workspace_id=training_attempt.workspace_id,
+        campaign_id=training_attempt.campaign_id,
+        study_id=training_attempt.study_id,
+        action_id=training_attempt.action_id,
+        attempt_id=training_attempt.attempt_id,
+        manifest_revision=training_attempt.manifest_revision,
+        candidate_digest=training_attempt.candidate_digest,
+        input_digest=training_attempt.input_digest,
+        claim_generation=training_attempt.claim_generation,
+        executor_id="campaign-ssh-remote-executor",
+        executor_version="1",
+        compute_profile_id="ssh-gpu-lab",
+        started_at=START,
+        ended_at=START + timedelta(seconds=1),
+        outcome="completed",
+        exit_code=0,
+        exit_reason="remote_exit_code_recorded",
+        outputs=outputs,
+    )
+    sealed_training = Path(training_attempt.sealed_result_uri)
+    sealer.seal(temporary, sealed_training, training_manifest)
+    artifacts = tuple(
+        CampaignArtifactRecord(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            artifact_id=f"artifact-model-{index}",
+            producer_action_id=training_attempt.action_id,
+            uri=str(sealed_training / output.path),
+            sha256=output.sha256,
+            size_bytes=output.size_bytes,
+            schema_name=output.schema_name,
+            sealed=True,
+            valid=True,
+            metadata={
+                "attempt_id": training_attempt.attempt_id,
+                "relative_path": output.path.removeprefix("final/"),
+            },
+            created_at=START,
+        )
+        for index, output in enumerate(outputs, start=1)
+    )
+    evaluator = tmp_path / "evaluate.py"
+    dataset_path = tmp_path / "development.jsonl"
+    key = tmp_path / "campaign-key"
+    evaluator.write_text("print('evaluate')\n", encoding="utf-8")
+    dataset_path.write_text("{}\n", encoding="utf-8")
+    key.write_text("fixture-key\n", encoding="utf-8")
+    dataset = DatasetVersionSpec(
+        workspace_id="workspace-a",
+        project_id="project-a",
+        dataset_id="dataset-a",
+        dataset_version_id="dataset-version-a",
+        source_uri="bashgym-remote-dataset://development-v1",
+        content_digest=hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+    )
+    suite = EvaluationSuiteSpec(
+        workspace_id="workspace-a",
+        project_id="project-a",
+        evaluation_suite_id="suite-a",
+        name="Development evaluator",
+        task_type="retrieval",
+        dataset_version_id=dataset.dataset_version_id,
+        metric_contract={"primary_metric": "score"},
+        code_digest=hashlib.sha256(evaluator.read_bytes()).hexdigest(),
+    )
+    heldout = RegisteredRemoteEvaluationDatasetSource(
+        source_id="development-v1",
+        compute_profile_id="ssh-gpu-lab",
+        dataset_version_id=dataset.dataset_version_id,
+        content_digest=dataset.content_digest,
+        remote_dataset_path="/datasets/development.jsonl",
+    )
+    stage = PinnedRemoteStageProfile(
+        stage=StageKind.DEVELOPMENT_EVALUATION,
+        script_path=evaluator,
+        script_sha256=suite.code_digest,
+        input_files=(),
+        input_sha256={},
+        script_args=("--batch-size", "8"),
+        output_paths=(AUTORESEARCH_EVALUATION_FILENAME,),
+        budget_reservation=0.25,
+    )
+    profile = ApprovedRemoteExecutorProfile(
+        profile_id="evaluation-profile-v1",
         profile_revision=1,
         compute_profile_id="ssh-gpu-lab",
         target_contract_key="memexai-embedding-v1",
@@ -309,8 +539,586 @@ def approved_remote_profile(
         host="192.0.2.10",
         username="trainer",
         key_path=str(key),
-        remote_work_dir="~/bashgym-training",
-        stages=(pinned,),
+        stages=(stage,),
+        registered_evaluation_dataset=heldout,
+    )
+    sealed_inputs = tuple(
+        SealedStageArtifactInput(
+            campaign_artifact_id=artifact.artifact_id,
+            sha256=artifact.sha256,
+            size_bytes=artifact.size_bytes,
+            schema_name=artifact.schema_name,
+            local_sealed_path=Path(artifact.uri),
+            remote_relative_path=f"model/{artifact.metadata['relative_path']}",
+        )
+        for artifact in artifacts
+    )
+    source_training = {
+        "campaign_id": training_attempt.campaign_id,
+        "study_id": training_attempt.study_id,
+        "action_id": training_attempt.action_id,
+        "attempt_id": training_attempt.attempt_id,
+        "stage_index": 1,
+    }
+    executor_config = remote_executor_config(
+        profile,
+        StageKind.DEVELOPMENT_EVALUATION,
+        recipe_digest="e" * 64,
+        sealed_stage_artifact_inputs=sealed_inputs,
+        evaluation_suite=suite,
+        dataset_version=dataset,
+        source_training=source_training,
+    )
+    persisted_context = AutoResearchEvaluationContext(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        study_id="study-1",
+        action_id="action-evaluation-1",
+        attempt_id="attempt-evaluation-1",
+        candidate_digest=training_attempt.candidate_digest,
+        evaluation_suite_id=suite.evaluation_suite_id,
+        evaluation_code_digest=suite.code_digest,
+        dataset_version_id=dataset.dataset_version_id,
+        dataset_content_digest=dataset.content_digest,
+        evaluated_model_manifest_digest=canonical_model_manifest_digest(sealed_inputs),
+    )
+    executor_config["evaluation_context_sha256"] = hashlib.sha256(
+        json.dumps(
+            persisted_context.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    evaluation_attempt = ActionAttempt(
+        attempt_id="attempt-evaluation-1",
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        study_id="study-1",
+        action_id="action-evaluation-1",
+        attempt_number=1,
+        claim_generation=1,
+        status=AttemptStatus.RUNNING,
+        input_digest="3" * 64,
+        candidate_digest=training_attempt.candidate_digest,
+        manifest_revision=1,
+        stage=StageKind.DEVELOPMENT_EVALUATION,
+        executor={"kind": "ssh_remote", **executor_config},
+        created_at=START,
+        updated_at=START,
+    )
+
+    class Repository:
+        def get_study(self, *_args):
+            return SimpleNamespace(proposal_id="proposal-1")
+
+        def get_code_lineage(self, *_args):
+            raise RecordNotFoundError("missing")
+
+        def get_artifact(self, _workspace_id, _campaign_id, artifact_id):
+            return {artifact.artifact_id: artifact for artifact in artifacts}[artifact_id]
+
+        def get_attempt(self, _workspace_id, attempt_id):
+            assert attempt_id == training_attempt.attempt_id
+            return training_attempt
+
+        def get_immediately_preceding_training_attempt(self, *_args):
+            return training_attempt, 1
+
+        def get_evaluation_suite_spec(self, *_args):
+            return suite
+
+        def get_dataset_version_spec(self, *_args):
+            return dataset
+
+    worker = CampaignWorker.__new__(CampaignWorker)
+    worker.repository = Repository()
+    worker.sealer = sealer
+    worker.remote_executor_profiles = {
+        (profile.compute_profile_id, profile.target_contract_key): profile
+    }
+    worker.source_repository_profiles = {}
+    worker._lineage_snapshots = {}
+    worker.evaluation_context_root = tmp_path / "evaluation-contexts"
+
+    request = worker._remote_request(evaluation_attempt)
+
+    context_path = next(
+        path
+        for path in request.input_files
+        if path.name == AUTORESEARCH_EVALUATION_CONTEXT_FILENAME
+    )
+    context = AutoResearchEvaluationContext.model_validate_json(context_path.read_bytes())
+    assert context.attempt_id == evaluation_attempt.attempt_id
+    assert context.evaluation_code_digest == suite.code_digest
+    assert context.dataset_content_digest == dataset.content_digest
+    assert request.sealed_stage_artifact_inputs == sealed_inputs
+    assert (
+        request.source_training.model_dump(mode="json", exclude={"schema_version"})
+        == source_training
+    )
+    assert request.evaluation_context_sha256 == executor_config["evaluation_context_sha256"]
+    assert evaluation_attempt.executor["source_training"] == source_training
+    assert request.script_args == (
+        "--context",
+        AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
+        "--model-dir",
+        "model",
+        "--dataset",
+        heldout.remote_dataset_path,
+        "--output",
+        AUTORESEARCH_EVALUATION_FILENAME,
+        "--batch-size",
+        "8",
+    )
+
+    tampered = evaluation_attempt.model_copy(deep=True)
+    tampered.executor["sealed_stage_artifact_inputs"][0][
+        "remote_relative_path"
+    ] = "model/renamed.json"
+    with pytest.raises(RuntimeError, match="profile mismatch|artifact"):
+        worker._remote_request(tampered)
+
+    cross_study = evaluation_attempt.model_copy(deep=True)
+    cross_study.executor["source_training"]["study_id"] = "study-other"
+    with pytest.raises(RuntimeError, match="training_checkpoint_invalid"):
+        worker._remote_request(cross_study)
+
+    non_immediate = evaluation_attempt.model_copy(deep=True)
+    non_immediate.executor["source_training"]["stage_index"] = 0
+    with pytest.raises(RuntimeError, match="training_checkpoint_invalid"):
+        worker._remote_request(non_immediate)
+
+    preceding_training = worker.repository.get_immediately_preceding_training_attempt
+
+    def missing_predecessor(*_args):
+        raise RecordNotFoundError("immediately preceding training attempt not found")
+
+    worker.repository.get_immediately_preceding_training_attempt = missing_predecessor
+    with pytest.raises(RuntimeError, match="campaign_remote_training_checkpoint_invalid"):
+        worker._remote_request(evaluation_attempt)
+    worker.repository.get_immediately_preceding_training_attempt = preceding_training
+
+    retry_repository = active_repository(tmp_path / "retry.sqlite3")
+    retry_plan = seed_validated_study(retry_repository, stage=StageKind.DEVELOPMENT_EVALUATION)
+    retry_scheduler = make_worker(retry_repository, tmp_path / "retry-worker", "retry-scheduler")
+    assert retry_scheduler.run_once(now=START) == "idle"
+    scheduled = retry_repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-1",
+            stage_index=0,
+            stage=StageKind.DEVELOPMENT_EVALUATION,
+            input_contract=retry_plan.items[0].input_contract,
+            candidate_digest=training_attempt.candidate_digest,
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            executor_kind="ssh_remote",
+            executor_config=executor_config,
+        ),
+        retry_scheduler.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+    with retry_repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaign_attempts SET status = 'failed' WHERE attempt_id = ?",
+            (scheduled.attempt_id,),
+        )
+        connection.execute(
+            "UPDATE campaign_actions SET status = 'failed' WHERE action_id = ?",
+            (scheduled.action_id,),
+        )
+        connection.execute(
+            """
+            UPDATE campaigns SET active_action_id = NULL, active_study_id = NULL,
+                version = version + 1 WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (scheduled.workspace_id, scheduled.campaign_id),
+        )
+    retry_mutation = retry_repository.retry_action(
+        scheduled.workspace_id,
+        scheduled.campaign_id,
+        scheduled.action_id,
+        expected_version=retry_repository.get_campaign(
+            scheduled.workspace_id, scheduled.campaign_id
+        ).version,
+        actor_id="operator-a",
+        credential_kind=CredentialKind.ACCESS,
+        correlation_id="retry-evaluation",
+        idempotency_key="retry-evaluation",
+    )
+    retry_attempt = retry_repository.get_attempt(
+        scheduled.workspace_id, retry_mutation.details["attempt_id"]
+    )
+    assert (
+        retry_attempt.executor["evaluation_context_sha256"]
+        != scheduled.executor["evaluation_context_sha256"]
+    )
+    retry_request = worker._remote_request(retry_attempt)
+    retry_context_path = next(
+        path
+        for path in retry_request.input_files
+        if path.name == AUTORESEARCH_EVALUATION_CONTEXT_FILENAME
+    )
+    retry_context = AutoResearchEvaluationContext.model_validate_json(
+        retry_context_path.read_bytes()
+    )
+    assert retry_context.attempt_id == retry_attempt.attempt_id
+
+
+def test_evaluation_context_write_recovers_after_pre_replace_crash(tmp_path, monkeypatch):
+    worker = CampaignWorker.__new__(CampaignWorker)
+    worker_module = __import__("importlib").import_module("bashgym.campaigns.worker")
+    destination = tmp_path / "attempt-1" / AUTORESEARCH_EVALUATION_CONTEXT_FILENAME
+    payload = b'{"schema_version":"autoresearch_evaluation_context.v1"}'
+    original_replace = __import__("os").replace
+
+    def crash_before_replace(_source, _destination):
+        raise OSError("injected pre-replace crash")
+
+    monkeypatch.setattr(worker_module.os, "replace", crash_before_replace)
+    with pytest.raises(OSError, match="pre-replace crash"):
+        worker._write_evaluation_context(destination, payload)
+    assert not destination.exists()
+
+    destination.write_bytes(b"partial")
+    with pytest.raises(RuntimeError, match="evaluation_context_mismatch"):
+        worker._write_evaluation_context(destination, payload)
+    destination.unlink()
+
+    monkeypatch.setattr(worker_module.os, "replace", original_replace)
+    worker._write_evaluation_context(destination, payload)
+    assert destination.read_bytes() == payload
+
+
+def test_persisted_evaluation_retry_restart_adopts_identical_remote_request(tmp_path):
+    database = tmp_path / "campaigns.sqlite3"
+    repository = active_repository(database)
+    training_plan = seed_validated_study(repository)
+    evaluation_item = StagePlanItem(
+        stage=StageKind.DEVELOPMENT_EVALUATION,
+        disposition=StageDisposition.REQUIRED,
+        reason="Evaluate the immediately preceding sealed checkpoint.",
+        input_contract={"fixture": "development-evaluation"},
+        output_contract={"schema": "autoresearch_evaluation_evidence.v1"},
+    )
+    plan = StagePlan(items=(*training_plan.items, evaluation_item))
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE campaign_studies SET stage_plan_json = ?
+            WHERE workspace_id = ? AND study_id = ?
+            """,
+            (plan.model_dump_json(), "workspace-a", "study-1"),
+        )
+
+    sealer = ArtifactSealer(b"w" * 32, key_version="worker-test-v1")
+    scheduler = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        sealer,
+        data_directory=tmp_path / "data-root",
+        worker_id="training-scheduler",
+    )
+    training = schedule(repository, scheduler, plan)
+    claimed_training = repository.claim_next_action(
+        scheduler.leader,
+        ttl=timedelta(seconds=15),
+        now=START + timedelta(seconds=1),
+    )
+    assert claimed_training is not None
+    assert claimed_training.attempt_id == training.attempt_id
+    temporary = tmp_path / "training-output"
+    (temporary / "final").mkdir(parents=True)
+    (temporary / "final" / "config.json").write_text("{}", encoding="utf-8")
+    (temporary / "final" / "weights.safetensors").write_bytes(b"weights")
+    outputs = sealer.describe_outputs(
+        temporary,
+        {
+            "final/config.json": "huggingface_model_file.v1",
+            "final/weights.safetensors": "huggingface_model_file.v1",
+        },
+    )
+    training_manifest = SealedActionResult(
+        workspace_id=claimed_training.workspace_id,
+        campaign_id=claimed_training.campaign_id,
+        study_id=claimed_training.study_id,
+        action_id=claimed_training.action_id,
+        attempt_id=claimed_training.attempt_id,
+        manifest_revision=claimed_training.manifest_revision,
+        candidate_digest=claimed_training.candidate_digest,
+        input_digest=claimed_training.input_digest,
+        claim_generation=claimed_training.claim_generation,
+        executor_id="campaign-test-training-executor",
+        executor_version="1",
+        compute_profile_id="fake-local",
+        started_at=START + timedelta(seconds=1),
+        ended_at=START + timedelta(seconds=2),
+        outcome="completed",
+        exit_code=0,
+        exit_reason="test_training_completed",
+        outputs=outputs,
+    )
+    sealed_training = scheduler.sealed_path(claimed_training)
+    sealer.seal(temporary, sealed_training, training_manifest)
+    verified_training = scheduler._verify(claimed_training, sealed_training)
+    repository.complete_from_seal(
+        verified_training,
+        sealed_training,
+        worker_id=scheduler.worker_id,
+        now=START + timedelta(seconds=2),
+    )
+
+    artifacts, _cursor, _has_more = repository.list_artifact_page("workspace-a", "campaign-1")
+    model_artifacts = tuple(
+        artifact
+        for artifact in artifacts
+        if artifact.producer_action_id == claimed_training.action_id
+        and artifact.schema_name == "huggingface_model_file.v1"
+    )
+    assert len(model_artifacts) == 2
+    assert {artifact.metadata["attempt_id"] for artifact in model_artifacts} == {
+        claimed_training.attempt_id
+    }
+
+    evaluator = tmp_path / "evaluate.py"
+    dataset_path = tmp_path / "development.jsonl"
+    key = tmp_path / "evaluation-key"
+    evaluator.write_text("print('evaluate')\n", encoding="utf-8")
+    dataset_path.write_text("{}\n", encoding="utf-8")
+    key.write_text("fixture-key\n", encoding="utf-8")
+    dataset = DatasetVersionSpec(
+        workspace_id="workspace-a",
+        project_id="project-a",
+        dataset_id="dataset-a",
+        dataset_version_id="dataset-version-a",
+        source_uri="bashgym-remote-dataset://development-v1",
+        content_digest=hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+    )
+    suite = EvaluationSuiteSpec(
+        workspace_id="workspace-a",
+        project_id="project-a",
+        evaluation_suite_id="suite-a",
+        name="Development evaluator",
+        task_type="retrieval",
+        dataset_version_id=dataset.dataset_version_id,
+        metric_contract={"primary_metric": "score"},
+        code_digest=hashlib.sha256(evaluator.read_bytes()).hexdigest(),
+    )
+    ledger = ExperimentLedgerRepository(database)
+    ledger.initialize()
+    ledger.register_project(
+        ProjectSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            display_name="Evaluation retry fixture",
+            owner_actor_id="operator-a",
+        )
+    )
+    ledger.register_dataset(
+        DatasetSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            dataset_id=dataset.dataset_id,
+            display_name="Development dataset",
+            task_type="retrieval",
+        )
+    )
+    ledger.register_dataset_version(dataset)
+    ledger.register_evaluation_suite(suite)
+    heldout = RegisteredRemoteEvaluationDatasetSource(
+        source_id="development-v1",
+        compute_profile_id="ssh-gpu-lab",
+        dataset_version_id=dataset.dataset_version_id,
+        content_digest=dataset.content_digest,
+        remote_dataset_path="/datasets/development.jsonl",
+    )
+    evaluation_stage = PinnedRemoteStageProfile(
+        stage=StageKind.DEVELOPMENT_EVALUATION,
+        script_path=evaluator,
+        script_sha256=suite.code_digest,
+        input_files=(),
+        input_sha256={},
+        script_args=("--batch-size", "8"),
+        output_paths=(AUTORESEARCH_EVALUATION_FILENAME,),
+        budget_reservation=0.25,
+    )
+    evaluation_profile = ApprovedRemoteExecutorProfile(
+        profile_id="evaluation-retry-profile-v1",
+        profile_revision=1,
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="memexai-embedding-v1",
+        target_model_digest=canonical_hash(campaign().target_model.model_dump(mode="json")),
+        host="192.0.2.10",
+        username="trainer",
+        key_path=str(key),
+        stages=(evaluation_stage,),
+        registered_evaluation_dataset=heldout,
+    )
+    source_training, sealed_inputs = repository.sealed_full_training_launch_inputs(
+        "workspace-a", "campaign-1", "study-1", 1
+    )
+    evaluation_executor = remote_executor_config(
+        evaluation_profile,
+        StageKind.DEVELOPMENT_EVALUATION,
+        recipe_digest="e" * 64,
+        sealed_stage_artifact_inputs=sealed_inputs,
+        evaluation_suite=suite,
+        dataset_version=dataset,
+        source_training=source_training,
+    )
+    evaluation = repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-1",
+            stage_index=1,
+            stage=StageKind.DEVELOPMENT_EVALUATION,
+            input_contract=evaluation_item.input_contract,
+            candidate_digest=claimed_training.candidate_digest,
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            executor_kind="ssh_remote",
+            executor_config=evaluation_executor,
+        ),
+        scheduler.leader,
+        expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        now=START + timedelta(seconds=3),
+    )
+    first_evaluation_attempt = repository.claim_next_action(
+        scheduler.leader,
+        ttl=timedelta(seconds=15),
+        now=START + timedelta(seconds=4),
+    )
+    assert first_evaluation_attempt is not None
+    assert first_evaluation_attempt.attempt_id == evaluation.attempt_id
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaign_attempts SET status = 'failed' WHERE attempt_id = ?",
+            (evaluation.attempt_id,),
+        )
+        connection.execute(
+            "UPDATE campaign_actions SET status = 'failed' WHERE action_id = ?",
+            (evaluation.action_id,),
+        )
+        connection.execute(
+            """
+            UPDATE campaigns SET active_action_id = NULL, active_study_id = NULL,
+                version = version + 1 WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (evaluation.workspace_id, evaluation.campaign_id),
+        )
+    retry = repository.retry_action(
+        evaluation.workspace_id,
+        evaluation.campaign_id,
+        evaluation.action_id,
+        expected_version=repository.get_campaign(
+            evaluation.workspace_id, evaluation.campaign_id
+        ).version,
+        actor_id="operator-a",
+        credential_kind=CredentialKind.ACCESS,
+        correlation_id="persisted-evaluation-retry",
+        idempotency_key="persisted-evaluation-retry",
+    )
+
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.RUNNING,))
+    precrash_repository = CampaignRuntimeRepository(database)
+    precrash_repository.initialize()
+    precrash = CampaignWorker(
+        precrash_repository,
+        tmp_path / "artifacts",
+        sealer,
+        data_directory=tmp_path / "data-root",
+        worker_id="evaluation-before-restart",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles={
+            (evaluation_profile.compute_profile_id, evaluation_profile.target_contract_key): (
+                evaluation_profile
+            )
+        },
+    )
+    restart_base = START + timedelta(days=90)
+    precrash_leader = precrash._ensure_leader(restart_base)
+    claimed_retry = precrash_repository.claim_next_action(
+        precrash_leader,
+        ttl=timedelta(seconds=15),
+        now=restart_base,
+    )
+    assert claimed_retry is not None
+    assert claimed_retry.attempt_id == retry.details["attempt_id"]
+    assert claimed_retry.executor["evaluation_context_sha256"] != (
+        first_evaluation_attempt.executor["evaluation_context_sha256"]
+    )
+    initial_request = precrash._remote_request(claimed_retry)
+    initial_context = next(
+        path
+        for path in initial_request.input_files
+        if path.name == AUTORESEARCH_EVALUATION_CONTEXT_FILENAME
+    ).read_bytes()
+    asyncio.run(adapter.launch(initial_request))
+    assert (
+        precrash_repository.get_remote_run(claimed_retry.workspace_id, claimed_retry.attempt_id)
+        is None
+    )
+
+    successor_repository = CampaignRuntimeRepository(database)
+    successor_repository.initialize()
+    successor = CampaignWorker(
+        successor_repository,
+        tmp_path / "artifacts",
+        sealer,
+        data_directory=tmp_path / "data-root",
+        worker_id="evaluation-after-restart",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles={
+            (evaluation_profile.compute_profile_id, evaluation_profile.target_contract_key): (
+                evaluation_profile
+            )
+        },
+    )
+    assert successor.run_once(now=restart_base + timedelta(seconds=17)) == "remote_running"
+    adopted_request = adapter.last_request
+    assert adopted_request.request_digest == initial_request.request_digest
+    adopted_context = next(
+        path
+        for path in adopted_request.input_files
+        if path.name == AUTORESEARCH_EVALUATION_CONTEXT_FILENAME
+    ).read_bytes()
+    assert adopted_context == initial_context
+    assert adapter.launch_count == 1
+    assert adapter.discover_count >= 1
+    remote = successor_repository.get_remote_run(
+        claimed_retry.workspace_id, claimed_retry.attempt_id
+    )
+    assert remote is not None
+    assert remote.identity == adapter.identity
+
+
+def test_runtime_model_manifest_input_digest_is_order_independent(tmp_path):
+    first = tmp_path / "config.json"
+    second = tmp_path / "weights.safetensors"
+    first.write_text("{}", encoding="utf-8")
+    second.write_bytes(b"weights")
+    inputs = tuple(
+        SealedStageArtifactInput(
+            campaign_artifact_id=f"artifact-{path.stem}",
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+            size_bytes=path.stat().st_size,
+            schema_name="huggingface_model_file.v1",
+            local_sealed_path=path,
+            remote_relative_path=f"model/{path.name}",
+        )
+        for path in (first, second)
+    )
+
+    assert CampaignRuntimeRepository._evaluation_model_manifest_digest(inputs) == (
+        CampaignRuntimeRepository._evaluation_model_manifest_digest(tuple(reversed(inputs)))
+    )
+    assert CampaignRuntimeRepository._evaluation_model_manifest_digest(inputs) == (
+        canonical_model_manifest_digest(inputs)
     )
 
 
@@ -344,10 +1152,11 @@ def schedule_remote(repository, worker, plan, tmp_path):
     )
 
 
-def activate_controller_live_study(repository, plan) -> None:
+def activate_controller_live_study(repository, plan, *, training_recipe=None) -> None:
     proposal_payload = {
         "dataset_recipe": {"schema_version": "recipe.v1"},
-        "training_recipe": {
+        "training_recipe": training_recipe
+        or {
             "schema_version": "recipe.v1",
             "runtime": {"executor_kind": "registered_training"},
         },
@@ -546,6 +1355,56 @@ def test_remote_worker_launches_once_then_completes_on_a_later_tick(tmp_path):
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository)
     adapter = FakeRemoteAdapter(states=(RemoteRunState.RUNNING, RemoteRunState.COMPLETED))
+    artifact_root = tmp_path / "artifacts"
+    worker = CampaignWorker(
+        repository,
+        artifact_root,
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+    )
+    scheduled = schedule_remote(repository, worker, plan, tmp_path)
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_running"
+    assert adapter.stream_sources == ["training_metrics.jsonl"]
+    running = repository.get_attempt("workspace-a", scheduled.attempt_id)
+    assert running.status == AttemptStatus.RUNNING
+    assert repository.get_remote_run("workspace-a", scheduled.attempt_id) is not None
+    assert worker.run_once(now=START + timedelta(seconds=2)) == "completed"
+    assert adapter.stream_sources == ["training_metrics.jsonl", "training_metrics.jsonl"]
+
+    completed = repository.get_attempt("workspace-a", scheduled.attempt_id)
+    assert completed.status == AttemptStatus.COMPLETED
+    assert adapter.launch_count == 1
+    assert adapter.collect_count == 1
+    assert completed.sealed_result_uri.startswith(
+        f"bashgym-remote-seal://ssh-gpu-lab/{completed.attempt_id}/sha256/"
+    )
+    assert not artifact_root.exists()
+    artifacts = repository.list_artifacts("workspace-a", "campaign-1")
+    assert artifacts
+    assert all(
+        artifact.uri.startswith(f"bashgym-remote-artifact://ssh-gpu-lab/{completed.attempt_id}/")
+        for artifact in artifacts
+    )
+    source = repository.remote_resident_full_training_source(
+        "workspace-a", "campaign-1", "study-1", 1
+    )
+    assert source.compute_profile_id == "ssh-gpu-lab"
+    assert source.remote_model_path.endswith(f"/{completed.attempt_id}/final")
+    assert [item.remote_relative_path for item in source.files] == ["model/config.json"]
+    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours") == {
+        "reserved": 0.0,
+        "actual": 0.25,
+        "limit_delta": 0.0,
+    }
+
+
+def test_remote_completion_reuses_seal_after_worker_restart_boundary(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.COMPLETED,))
     worker = CampaignWorker(
         repository,
         tmp_path / "artifacts",
@@ -555,23 +1414,84 @@ def test_remote_worker_launches_once_then_completes_on_a_later_tick(tmp_path):
         remote_adapters={"ssh-gpu-lab": adapter},
     )
     scheduled = schedule_remote(repository, worker, plan, tmp_path)
+    original_complete = repository.complete_from_seal
+    repository.complete_from_seal = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        SimulatedWorkerCrashError("worker crashed after remote seal")
+    )
 
-    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_running"
-    running = repository.get_attempt("workspace-a", scheduled.attempt_id)
-    assert running.status == AttemptStatus.RUNNING
-    assert repository.get_remote_run("workspace-a", scheduled.attempt_id) is not None
+    with pytest.raises(SimulatedWorkerCrashError):
+        worker.run_once(now=START + timedelta(seconds=1))
+
+    repository.complete_from_seal = original_complete
     assert worker.run_once(now=START + timedelta(seconds=2)) == "completed"
-
     completed = repository.get_attempt("workspace-a", scheduled.attempt_id)
     assert completed.status == AttemptStatus.COMPLETED
+    assert adapter.persist_count == 1
+    assert not (tmp_path / "artifacts").exists()
+
+
+def test_successor_rebinds_remote_seal_after_terminal_lease_expiry(tmp_path):
+    path = tmp_path / "campaigns.sqlite3"
+    repository = active_repository(path)
+    plan = seed_validated_study(repository)
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.COMPLETED,))
+    sealer = ArtifactSealer(b"w" * 32, key_version="worker-test-v1")
+    predecessor = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        sealer,
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-before",
+        remote_adapters={"ssh-gpu-lab": adapter},
+    )
+    scheduled = schedule_remote(repository, predecessor, plan, tmp_path)
+    original_complete = repository.complete_from_seal
+    repository.complete_from_seal = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        SimulatedWorkerCrashError("worker crashed after remote seal")
+    )
+
+    with pytest.raises(SimulatedWorkerCrashError):
+        predecessor.run_once(now=START + timedelta(seconds=1))
+
+    repository.complete_from_seal = original_complete
+    prior_envelope = adapter.seal_payload
+    assert prior_envelope is not None
+    prior_manifest = sealer.verify_envelope_bytes(
+        prior_envelope,
+        expected_attempt_id=scheduled.attempt_id,
+        expected_claim_generation=1,
+    )
+
+    successor_repository = CampaignRuntimeRepository(path)
+    successor_repository.initialize()
+    successor = CampaignWorker(
+        successor_repository,
+        tmp_path / "artifacts",
+        sealer,
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-after",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles=predecessor.remote_executor_profiles,
+    )
+
+    assert successor.run_once(now=START + timedelta(hours=1, seconds=2)) == "completed"
+    completed = successor_repository.get_attempt("workspace-a", scheduled.attempt_id)
+    assert completed.status == AttemptStatus.COMPLETED
+    assert completed.claim_generation == 2
     assert adapter.launch_count == 1
-    assert adapter.collect_count == 1
-    assert (Path(completed.sealed_result_uri) / "final" / "config.json").is_file()
-    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours") == {
-        "reserved": 0.0,
-        "actual": 0.25,
-        "limit_delta": 0.0,
-    }
+    assert adapter.persist_count == 2
+    assert adapter.seal_payload is not None
+    rebound_manifest = sealer.verify_envelope_bytes(
+        adapter.seal_payload,
+        expected_attempt_id=scheduled.attempt_id,
+        expected_claim_generation=2,
+    )
+    assert rebound_manifest.outputs == prior_manifest.outputs
+    assert rebound_manifest.remote_process_identity == prior_manifest.remote_process_identity
+    assert completed.sealed_result_uri.endswith(
+        f"/sha256/{hashlib.sha256(adapter.seal_payload).hexdigest()}"
+    )
+    assert not (tmp_path / "artifacts").exists()
 
 
 def test_nemo_gym_receipt_is_registered_with_bounded_metadata(tmp_path):
@@ -721,6 +1641,128 @@ def test_controller_resolves_server_profile_and_launches_without_actor_material(
     }
 
 
+def test_first_generation_full_training_binds_registered_base_for_plain_recipe(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    activate_controller_live_study(repository, plan)
+    profile = approved_remote_profile(tmp_path)
+    base_model = RegisteredRemoteModelSource(
+        source_id="registered-base-v1",
+        compute_profile_id=profile.compute_profile_id,
+        target_contract_key=profile.target_contract_key,
+        model_digest=profile.target_model_digest,
+        remote_model_path="/models/registered-base-v1",
+    )
+    profile = ApprovedRemoteExecutorProfile(
+        **profile.model_dump(exclude={"profile_digest", "registered_base_model"}),
+        registered_base_model=base_model,
+    )
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.RUNNING,))
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles={
+            (profile.compute_profile_id, profile.target_contract_key): profile
+        },
+    )
+
+    assert worker.run_once(now=START) == "remote_running"
+    request = adapter.last_request
+    assert request is not None
+    assert request.registered_base_model == base_model
+    assert request.remote_resident_model is None
+    assert request.script_args[:2] == ("--model-dir", base_model.remote_model_path)
+    attempt = repository.list_attempts("workspace-a", "campaign-1")[0]
+    assert attempt.executor["training_base_model"] == base_model.model_dump(mode="json")
+
+
+def test_remote_executor_config_binds_first_generation_training_base(tmp_path):
+    profile = approved_remote_profile(tmp_path)
+
+    executor = remote_executor_config(
+        profile,
+        StageKind.FULL_TRAINING,
+        recipe_digest="e" * 64,
+    )
+
+    assert executor["training_base_model"] == profile.registered_base_model.model_dump(mode="json")
+    assert "remote_resident_model" not in executor
+
+
+def test_worker_passes_typed_training_recipe_arguments_to_compute(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    recipe_args = (
+        "--algorithm",
+        "grpo",
+        "--sft-enabled",
+        "false",
+        "--learning-rate",
+        "2e-05",
+        "--max-steps",
+        "250",
+        "--group-size",
+        "16",
+        "--temperature",
+        "0.7",
+        "--seed",
+        "7",
+    )
+    activate_controller_live_study(
+        repository,
+        plan,
+        training_recipe={
+            "schema_version": "bashgym.tmax_composite_training_recipe.v1",
+            "runtime": {"executor_kind": "registered_training"},
+            "algorithm": "grpo",
+            "sft_enabled": False,
+            "learning_rate": 0.00002,
+            "max_steps": 250,
+            "group_size": 16,
+            "temperature": 0.7,
+            "seed": 7,
+        },
+    )
+    profile = approved_remote_profile(tmp_path)
+    profile = ApprovedRemoteExecutorProfile(
+        **profile.model_dump(exclude={"profile_digest", "registered_base_model"}),
+        registered_base_model=RegisteredRemoteModelSource(
+            source_id="registered-base-v1",
+            compute_profile_id=profile.compute_profile_id,
+            target_contract_key=profile.target_contract_key,
+            model_digest=profile.target_model_digest,
+            remote_model_path="/models/registered-base-v1",
+        ),
+    )
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.RUNNING,))
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles={
+            (profile.compute_profile_id, profile.target_contract_key): profile
+        },
+    )
+
+    assert worker.run_once(now=START) == "remote_running"
+    assert adapter.last_request is not None
+    assert adapter.last_request.script_args == (
+        "--model-dir",
+        "/models/registered-base-v1",
+        *profile.stages[0].script_args,
+        *recipe_args,
+    )
+    attempt = repository.list_attempts("workspace-a", "campaign-1")[0]
+    assert attempt.executor["recipe_script_args"] == list(recipe_args)
+
+
 def test_controller_missing_profile_blocks_once_without_budget_or_launch(tmp_path):
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository)
@@ -749,7 +1791,7 @@ def test_controller_missing_profile_blocks_once_without_budget_or_launch(tmp_pat
     assert blocked[0].payload["code"] == "campaign_controller_action_blocked"
 
 
-def test_registered_compute_resolves_remote_development_evaluation(tmp_path):
+def test_unbound_registered_compute_rejects_remote_development_evaluation(tmp_path):
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository, stage=StageKind.DEVELOPMENT_EVALUATION)
     activate_controller_live_study(repository, plan)
@@ -768,16 +1810,230 @@ def test_registered_compute_resolves_remote_development_evaluation(tmp_path):
         )
     profile = approved_remote_profile(tmp_path, stage=StageKind.DEVELOPMENT_EVALUATION)
 
-    action = repository.next_action_spec(
-        "workspace-a",
-        "campaign-1",
-        "study-1",
-        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
+    with pytest.raises(CampaignPersistenceError, match="profile_material_invalid"):
+        repository.next_action_spec(
+            "workspace-a",
+            "campaign-1",
+            "study-1",
+            executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
+        )
+
+
+def test_controller_launches_evaluation_only_baseline_from_registered_remote_model(tmp_path):
+    database = tmp_path / "campaigns.sqlite3"
+    repository = AutoResearchRepository(database)
+    repository.initialize()
+    create(repository)
+    AutoResearchCampaignCore(repository).register(
+        AutoResearchCampaignSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            primary_metric="score",
+            metric_direction=MetricDirection.MAXIMIZE,
+            ledger_project_id="project-a",
+            evaluation_suite_id="suite-a",
+            stop_rules=AutoResearchStopRules(
+                max_attempts=3,
+                budget_unit="gpu_hours",
+                max_total_cost=3.0,
+            ),
+            created_at=START,
+        )
+    )
+    transition(repository, CampaignTrigger.VALIDATE, 1, key="validate-baseline")
+    transition(repository, CampaignTrigger.VALIDATION_PASSED, 2, key="ready-baseline")
+    transition(repository, CampaignTrigger.START, 3, key="start-baseline")
+    plan = seed_validated_study(repository, stage=StageKind.DEVELOPMENT_EVALUATION)
+    repository.register_autoresearch_proposal(
+        AutoResearchProposalControl(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            proposal_id="proposal-study-1",
+            role=ExperimentRole.BASELINE,
+            created_at=START,
+        )
     )
 
-    assert action.stage == StageKind.DEVELOPMENT_EVALUATION
-    assert action.executor_kind == "ssh_remote"
-    assert action.executor_config["stage"] == "development_evaluation"
+    evaluator = tmp_path / "evaluate.py"
+    dataset_path = tmp_path / "development.jsonl"
+    key = tmp_path / "evaluation-key"
+    evaluator.write_text("print('evaluate')\n", encoding="utf-8")
+    dataset_path.write_text("{}\n", encoding="utf-8")
+    key.write_text("fixture-key\n", encoding="utf-8")
+    dataset = DatasetVersionSpec(
+        workspace_id="workspace-a",
+        project_id="project-a",
+        dataset_id="dataset-a",
+        dataset_version_id="dataset-version-a",
+        source_uri=str(dataset_path),
+        content_digest=hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+    )
+    suite = EvaluationSuiteSpec(
+        workspace_id="workspace-a",
+        project_id="project-a",
+        evaluation_suite_id="suite-a",
+        name="Fixed development evaluator",
+        task_type="retrieval",
+        dataset_version_id=dataset.dataset_version_id,
+        metric_contract={"primary_metric": "score"},
+        code_digest=hashlib.sha256(evaluator.read_bytes()).hexdigest(),
+    )
+    ledger = ExperimentLedgerRepository(database)
+    ledger.initialize()
+    ledger.register_project(
+        ProjectSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            display_name="Baseline evaluation fixture",
+            owner_actor_id="operator-a",
+        )
+    )
+    ledger.register_dataset(
+        DatasetSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            dataset_id=dataset.dataset_id,
+            display_name="Fixed development dataset",
+            task_type="retrieval",
+        )
+    )
+    ledger.register_dataset_version(dataset)
+    ledger.register_evaluation_suite(suite)
+
+    target_model_digest = canonical_hash(campaign().target_model.model_dump(mode="json"))
+    base_model = remote_contracts.RegisteredRemoteModelSource(
+        source_id="memexai-base-model",
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="memexai-embedding-v1",
+        model_digest=target_model_digest,
+        remote_model_path="/models/memexai-base-model",
+    )
+    heldout = RegisteredRemoteEvaluationDatasetSource(
+        source_id="development-v1",
+        compute_profile_id="ssh-gpu-lab",
+        dataset_version_id=dataset.dataset_version_id,
+        content_digest=dataset.content_digest,
+        remote_dataset_path="/datasets/development.jsonl",
+    )
+    evaluation_stage = PinnedRemoteStageProfile(
+        stage=StageKind.DEVELOPMENT_EVALUATION,
+        script_path=evaluator,
+        script_sha256=suite.code_digest,
+        input_files=(),
+        input_sha256={},
+        script_args=("--batch-size", "8"),
+        output_paths=(AUTORESEARCH_EVALUATION_FILENAME,),
+        budget_reservation=0.25,
+    )
+    profile = ApprovedRemoteExecutorProfile(
+        profile_id="evaluation-baseline-profile-v1",
+        profile_revision=1,
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="memexai-embedding-v1",
+        target_model_digest=target_model_digest,
+        host="192.0.2.10",
+        username="trainer",
+        key_path=str(key),
+        stages=(evaluation_stage,),
+        registered_base_model=base_model,
+        registered_evaluation_dataset=heldout,
+    )
+    proposal_payload = {
+        "dataset_recipe": {"schema_version": "recipe.v1"},
+        "training_recipe": {"schema_version": "recipe.v1"},
+        "evaluation_recipe": {
+            "schema_version": "recipe.v1",
+            "runtime": {"executor_kind": "registered_compute"},
+        },
+    }
+    with repository._connection(immediate=True) as connection:
+        manifest_row = connection.execute(
+            """
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+        manifest_payload = json.loads(manifest_row["manifest_json"])
+        manifest_payload["evaluation_plan"].update(
+            {
+                "ledger_project_id": "project-a",
+                "evaluation_suite_id": suite.evaluation_suite_id,
+                "dataset_binding_id": dataset.dataset_version_id,
+            }
+        )
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            (
+                json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")),
+                canonical_hash(manifest_payload),
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+        connection.execute(
+            "UPDATE campaign_studies SET stage_plan_json = ? WHERE study_id = ?",
+            (plan.model_dump_json(), "study-1"),
+        )
+        connection.execute(
+            "UPDATE campaign_proposals SET proposal_json = ? WHERE proposal_id = ?",
+            (json.dumps(proposal_payload), "proposal-study-1"),
+        )
+        connection.execute(
+            "UPDATE campaigns SET active_study_id = ? WHERE campaign_id = ?",
+            ("study-1", "campaign-1"),
+        )
+
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.RUNNING,))
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="baseline-worker",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles={("ssh-gpu-lab", "memexai-embedding-v1"): profile},
+    )
+
+    assert worker.run_once(now=START) == "remote_running"
+    request = adapter.last_request
+    assert request.registered_base_model == base_model
+    assert request.registered_evaluation_dataset == heldout
+    assert request.input_files == (
+        tmp_path
+        / "data-root"
+        / "campaigns"
+        / "evaluation-contexts"
+        / request.run_id
+        / AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
+    )
+    assert request.source_training is None
+    assert request.sealed_stage_artifact_inputs == ()
+    assert request.script_args == (
+        "--context",
+        AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
+        "--model-dir",
+        base_model.remote_model_path,
+        "--dataset",
+        heldout.remote_dataset_path,
+        "--output",
+        AUTORESEARCH_EVALUATION_FILENAME,
+        "--batch-size",
+        "8",
+    )
+    attempt = repository.list_attempts("workspace-a", "campaign-1")[0]
+    assert attempt.executor["evaluation_binding"] == {
+        "ledger_project_id": "project-a",
+        "evaluation_suite_id": suite.evaluation_suite_id,
+        "evaluation_code_digest": suite.code_digest,
+        "dataset_version_id": dataset.dataset_version_id,
+        "dataset_content_digest": dataset.content_digest,
+        "dataset_remote_path": heldout.remote_dataset_path,
+        "dataset_remote_name": heldout.remote_dataset_path,
+    }
 
 
 def test_controller_profile_hash_change_blocks_before_remote_side_effect(tmp_path):
@@ -916,9 +2172,10 @@ def test_failed_remote_attempt_seals_evidence_and_settles_budget(tmp_path):
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository)
     adapter = FakeRemoteAdapter(states=(RemoteRunState.FAILED,))
+    artifact_root = tmp_path / "artifacts"
     worker = CampaignWorker(
         repository,
-        tmp_path / "artifacts",
+        artifact_root,
         ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
         data_directory=tmp_path / "data-root",
         worker_id="worker-a",
@@ -929,7 +2186,10 @@ def test_failed_remote_attempt_seals_evidence_and_settles_budget(tmp_path):
     assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_failed"
     failed = repository.get_attempt("workspace-a", scheduled.attempt_id)
     assert failed.status == AttemptStatus.FAILED
-    assert (Path(failed.sealed_result_uri) / "training.log").is_file()
+    assert failed.sealed_result_uri.startswith(
+        f"bashgym-remote-seal://ssh-gpu-lab/{failed.attempt_id}/sha256/"
+    )
+    assert not artifact_root.exists()
     assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours") == {
         "reserved": 0.0,
         "actual": 0.25,
@@ -952,9 +2212,10 @@ def test_campaign_cancel_terminates_remote_group_and_settles_cancelled(tmp_path)
             RemoteRunState.FAILED,
         )
     )
+    artifact_root = tmp_path / "artifacts"
     worker = CampaignWorker(
         repository,
-        tmp_path / "artifacts",
+        artifact_root,
         ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
         data_directory=tmp_path / "data-root",
         worker_id="worker-a",
@@ -970,7 +2231,45 @@ def test_campaign_cancel_terminates_remote_group_and_settles_cancelled(tmp_path)
     cancelled = repository.get_attempt("workspace-a", scheduled.attempt_id)
     assert cancelled.status == AttemptStatus.CANCELLED
     assert repository.get_campaign("workspace-a", "campaign-1").status.value == "cancelled"
-    assert (Path(cancelled.sealed_result_uri) / "exit_code").is_file()
+    assert cancelled.sealed_result_uri.startswith(
+        f"bashgym-remote-seal://ssh-gpu-lab/{cancelled.attempt_id}/sha256/"
+    )
+    assert not artifact_root.exists()
+
+
+def test_unlaunched_remote_cancellation_writes_no_controller_evidence(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.RUNNING,))
+    artifact_root = tmp_path / "artifacts"
+    worker = CampaignWorker(
+        repository,
+        artifact_root,
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+    )
+    scheduled = schedule_remote(repository, worker, plan, tmp_path)
+    claimed = repository.claim_next_action(
+        worker.leader,
+        ttl=timedelta(seconds=15),
+        now=START + timedelta(milliseconds=1),
+    )
+    assert claimed is not None
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaigns SET status = ? WHERE campaign_id = ?",
+            ("cancelling", "campaign-1"),
+        )
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_cancelled"
+
+    cancelled = repository.get_attempt("workspace-a", scheduled.attempt_id)
+    assert cancelled.status == AttemptStatus.CANCELLED
+    assert cancelled.sealed_result_uri.startswith("bashgym-controller-state://")
+    assert not artifact_root.exists()
+    assert adapter.launch_count == 0
 
 
 def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path):

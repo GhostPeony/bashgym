@@ -73,7 +73,7 @@ function trainingVisual(phase: NodeVisualPhase, motion: NodeVisualMotion): NodeV
     phase,
     intensity: phase === 'failed' ? 'urgent' : phase === 'planned' ? 'quiet' : 'active',
     icon: 'dumbbell',
-    motion,
+    motion
   }
 }
 
@@ -83,13 +83,13 @@ function skillLabVisual(phase: NodeVisualPhase, motion: NodeVisualMotion): NodeV
     phase,
     intensity: phase === 'failed' ? 'urgent' : phase === 'running' ? 'active' : 'quiet',
     icon: 'skill-lab',
-    motion,
+    motion
   }
 }
 
 export function recipeFromWorkspaceIntent(
   payload: WorkspaceCanvasIntentPayload,
-  originPanelId?: string,
+  originPanelId?: string
 ): CanvasNodeRecipe | null {
   const explicitSkillLab = payload.suggested_nodes?.find((node) => node.recipe === 'skill_lab')
   const entityKind = String(payload.entity?.kind ?? '')
@@ -97,13 +97,14 @@ export function recipeFromWorkspaceIntent(
   if (looksLikeSkillLab) {
     const config = explicitSkillLab?.config || {}
     const status = String(config.status || payload.entity?.status || 'prepared')
-    const phase: NodeVisualPhase = status === 'running' || status === 'queued'
-      ? 'running'
-      : status === 'failed'
-        ? 'failed'
-        : status === 'completed'
-          ? 'completed'
-          : 'planned'
+    const phase: NodeVisualPhase =
+      status === 'running' || status === 'queued'
+        ? 'running'
+        : status === 'failed'
+          ? 'failed'
+          : status === 'completed'
+            ? 'completed'
+            : 'planned'
     const correlationId = payload.correlation_id ?? `skill-lab-${Date.now()}`
     const visual = skillLabVisual(phase, phase === 'running' ? 'state-strip' : 'enter-from-origin')
     return {
@@ -122,8 +123,8 @@ export function recipeFromWorkspaceIntent(
         originAgent: payload.source?.agent,
         correlationId,
         summary: payload.summary,
-        visual,
-      },
+        visual
+      }
     }
   }
 
@@ -159,14 +160,14 @@ export function recipeFromWorkspaceIntent(
       originAgent: payload.source?.agent,
       correlationId,
       summary: payload.summary,
-      visual: trainingVisual('planned', 'enter-from-origin'),
-    },
+      visual: trainingVisual('planned', 'enter-from-origin')
+    }
   }
 }
 
 export function recipeFromTrainingQueued(
   payload: TrainingQueuedPayload,
-  originPanelId?: string,
+  originPanelId?: string
 ): CanvasNodeRecipe {
   const strategy = payload.strategy || 'sft'
   const correlationId = payload.correlation_id
@@ -191,14 +192,14 @@ export function recipeFromTrainingQueued(
       originAgent: payload.origin?.agent,
       correlationId,
       computeTarget: payload.compute_target,
-      visual: trainingVisual('queued', 'enter-from-origin'),
-    },
+      visual: trainingVisual('queued', 'enter-from-origin')
+    }
   }
 }
 
 export function recipeFromTrainingProgress(
   payload: TrainingProgressPayload,
-  originPanelId?: string,
+  originPanelId?: string
 ): CanvasNodeRecipe {
   return {
     key: `training:${payload.run_id}`,
@@ -213,8 +214,8 @@ export function recipeFromTrainingProgress(
       status: 'running',
       originPanelId,
       computeTarget: payload.compute_target,
-      visual: trainingVisual('running', 'state-strip'),
-    },
+      visual: trainingVisual('running', 'state-strip')
+    }
   }
 }
 
@@ -238,7 +239,7 @@ export function statusVisualForTraining(status: string | undefined): NodeVisualR
 /** A configured-but-unbound Training node becomes the run it launches. */
 export function shouldReuseTrainingOrigin(
   recipe: CanvasNodeRecipe,
-  originPanel?: { type: PanelType; adapterConfig?: Record<string, unknown> },
+  originPanel?: { type: PanelType; adapterConfig?: Record<string, unknown> }
 ): boolean {
   if (recipe.type !== 'training' || originPanel?.type !== 'training') return false
   return !originPanel.adapterConfig?.runId

@@ -20,6 +20,11 @@ from bashgym.campaigns.contracts import (
     ControllerObservationV1,
     CredentialKind,
     ReadinessSummaryV1,
+    StageDisposition,
+    StageKind,
+    StagePlan,
+    StagePlanItem,
+    StudyProposal,
 )
 from bashgym.campaigns.control_room import (
     CandidateProvenance,
@@ -727,40 +732,80 @@ def test_broken_champion_decision_fails_closed_without_trusted_provenance(
 
 
 def test_valid_running_stage_plan_projects_active_work_without_invariant_failure(repository):
-    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
     now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    proposal = StudyProposal(
+        proposal_id="proposal-1",
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        hypothesis="Changing batch size improves held-out retrieval.",
+        study_family="embedding-retrieval",
+        primary_variable="training.batch_size",
+        controlled_variables=("dataset.revision", "evaluation.suite"),
+        expected_outcome="Held-out retrieval improves.",
+        falsification_criterion="Reject if held-out retrieval regresses.",
+        estimated_cost=1.0,
+        dataset_recipe={"schema_version": "recipe.v1"},
+        training_recipe={"schema_version": "recipe.v1"},
+        evaluation_recipe={"schema_version": "recipe.v1"},
+        stage_plan=StagePlan(
+            items=(
+                StagePlanItem(
+                    stage=StageKind.SMOKE_TRAINING,
+                    disposition=StageDisposition.REQUIRED,
+                    reason="Bounded smoke check",
+                ),
+            )
+        ),
+        planner_actor_id="planner",
+        rationale="Test one controlled training change.",
+        creation_sequence=1,
+        created_at=now,
+    )
+    with sqlite3.connect(repository.db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_proposals(
+                workspace_id, campaign_id, proposal_id, status, priority,
+                estimated_cost, creation_sequence, proposal_json, created_at
+            ) VALUES (?, ?, ?, 'accepted', 50, 1.0, 1, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                proposal.proposal_id,
+                proposal.model_dump_json(),
+                now.isoformat(),
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_studies(
+                workspace_id, campaign_id, study_id, proposal_id, status,
+                current_stage_index, stage_plan_json, candidate_digest,
+                version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'smoke_training', 0, ?, ?, 1, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "study-1",
+                proposal.proposal_id,
+                proposal.stage_plan.model_dump_json(),
+                "a" * 64,
+                now.isoformat(),
+                now.isoformat(),
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE campaigns SET status = 'active', active_study_id = ?, active_action_id = ?
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            ("study-1", "action-1", "workspace-a", "campaign-1"),
+        )
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
     durable = replace(
         durable,
-        campaign=durable.campaign.model_copy(
-            update={
-                "status": "active",
-                "active_study_id": "study-1",
-                "active_action_id": "action-1",
-            }
-        ),
-        active_studies=(
-            {
-                "study_id": "study-1",
-                "proposal_id": "proposal-1",
-                "status": "smoke_training",
-                "current_stage_index": 0,
-                "stage_plan_json": json.dumps(
-                    {
-                        "schema_version": "campaign_stage_plan.v1",
-                        "items": [
-                            {
-                                "schema_version": "campaign_stage_plan_item.v1",
-                                "stage": "smoke_training",
-                                "disposition": "required",
-                                "reason": "Bounded smoke check",
-                                "input_contract": {},
-                                "output_contract": {},
-                            }
-                        ],
-                    }
-                ),
-            },
-        ),
         active_actions=(
             {
                 "action_id": "action-1",
@@ -820,6 +865,9 @@ def test_valid_running_stage_plan_projects_active_work_without_invariant_failure
     assert snapshot.active_work.study_id == "study-1"
     assert snapshot.active_work.attempt_id == "attempt-1"
     assert snapshot.active_work.executor_type == "fake"
+    assert snapshot.active_work.hypothesis_summary == proposal.hypothesis
+    assert snapshot.active_work.primary_variable_summary == proposal.primary_variable
+    assert snapshot.active_work.controlled_variable_summary == proposal.controlled_variables
     assert snapshot.active_work.progress_fraction is None
     assert snapshot.active_work.eta_seconds is None
 

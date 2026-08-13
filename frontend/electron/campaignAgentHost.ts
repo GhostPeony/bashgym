@@ -6,7 +6,7 @@ import {
   generateKeyPairSync,
   hkdfSync,
   randomUUID,
-  type KeyObject,
+  type KeyObject
 } from 'node:crypto'
 
 export type CampaignAgentHostFamily = 'codex' | 'hermes'
@@ -63,7 +63,11 @@ export interface CampaignAgentHostTransport {
   revoke(registrationId: string): Promise<unknown>
   grant?(campaignId: string, body: Record<string, unknown>): Promise<unknown>
   attach?(campaignId: string, body: Record<string, unknown>): Promise<unknown>
-  revokeAttachment?(campaignId: string, attachmentId: string, body: Record<string, unknown>): Promise<unknown>
+  revokeAttachment?(
+    campaignId: string,
+    attachmentId: string,
+    body: Record<string, unknown>
+  ): Promise<unknown>
   heartbeat?(credential: Buffer, body: CampaignAgentHostHeartbeatBody): Promise<unknown>
   observe?(credential: Buffer): Promise<unknown>
   artifacts?(credential: Buffer, query: CampaignAgentHostArtifactQuery): Promise<unknown>
@@ -89,7 +93,8 @@ export interface CampaignAgentHostPublicStatus {
   campaignId: string
   family: CampaignAgentHostFamily
   registrationId: string
-  state: 'registered' | 'authorized' | 'credential_ready' | 'active' | 'credential_consumed' | 'failed'
+  state:
+    'registered' | 'authorized' | 'credential_ready' | 'active' | 'credential_consumed' | 'failed'
   expiresAt: string
   credentialReady: boolean
   actionsEnabled?: boolean
@@ -128,19 +133,15 @@ interface HostState {
 }
 
 export type CampaignAgentHostTeardownReason =
-  | 'pty_exit'
-  | 'pty_replacement'
-  | 'renderer_reload'
-  | 'app_shutdown'
-  | 'explicit_revoke'
+  'pty_exit' | 'pty_replacement' | 'renderer_reload' | 'app_shutdown' | 'explicit_revoke'
 
 export type CampaignAgentHostLifecycleEvent =
   | { terminalId: string; kind: 'activated' }
   | {
-    terminalId: string
-    kind: 'actions_locked' | 'torn_down'
-    reason: 'heartbeat_timeout' | 'authority_rejected' | 'credential_expired' | 'identity_changed'
-  }
+      terminalId: string
+      kind: 'actions_locked' | 'torn_down'
+      reason: 'heartbeat_timeout' | 'authority_rejected' | 'credential_expired' | 'identity_changed'
+    }
 
 export interface CampaignAgentHostScheduler {
   set(delayMs: number, action: () => void | Promise<void>): unknown
@@ -160,7 +161,11 @@ const HEARTBEAT_RETRY_MS = 5_000
 const HEARTBEAT_STALE_MS = 90_000
 const ARTIFACT_CURSOR = /^a1\.[A-Za-z0-9_-]{11}$/
 const CAPABILITIES = new Set<CampaignAgentCapability>([
-  'campaign_observe', 'training_launch', 'training_pause_self', 'artifact_read', 'artifact_propose',
+  'campaign_observe',
+  'training_launch',
+  'training_pause_self',
+  'artifact_read',
+  'artifact_propose'
 ])
 
 class CampaignAgentAuthorityClosedError extends Error {}
@@ -176,13 +181,18 @@ export function createMainOwnedCampaignAgentIdentity(input: {
   if (input.family !== 'codex' && input.family !== 'hermes') {
     throw new Error('Unsupported campaign agent family')
   }
-  if (typeof input.hostInstanceId !== 'string' || input.hostInstanceId.length < 8 || input.hostInstanceId.length > 256) {
+  if (
+    typeof input.hostInstanceId !== 'string' ||
+    input.hostInstanceId.length < 8 ||
+    input.hostInstanceId.length > 256
+  ) {
     throw new Error('Campaign agent desktop host identity is invalid')
   }
-  const digest = (domain: string, parts: readonly string[]) => createHash('sha256')
-    .update(`${domain}\0${parts.join('\0')}`, 'utf8')
-    .digest('hex')
-    .slice(0, 32)
+  const digest = (domain: string, parts: readonly string[]) =>
+    createHash('sha256')
+      .update(`${domain}\0${parts.join('\0')}`, 'utf8')
+      .digest('hex')
+      .slice(0, 32)
   return {
     terminalId,
     generation,
@@ -190,7 +200,7 @@ export function createMainOwnedCampaignAgentIdentity(input: {
     origin: `desktop_${digest('origin', [input.hostInstanceId])}`,
     principalId: `${input.family}_pty_${digest('principal', [input.hostInstanceId, terminalId, generation, input.family])}`,
     sessionId: `pty_${digest('session', [input.hostInstanceId, terminalId, generation, input.family])}`,
-    live: true,
+    live: true
   }
 }
 
@@ -226,7 +236,10 @@ function decodeBase64Url(value: unknown, expectedBytes: number | null, label: st
     throw new Error(`Campaign agent host ${label} is invalid`)
   }
   const decoded = Buffer.from(value, 'base64url')
-  if (decoded.toString('base64url') !== value || (expectedBytes !== null && decoded.length !== expectedBytes)) {
+  if (
+    decoded.toString('base64url') !== value ||
+    (expectedBytes !== null && decoded.length !== expectedBytes)
+  ) {
     decoded.fill(0)
     throw new Error(`Campaign agent host ${label} is invalid`)
   }
@@ -237,7 +250,7 @@ function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   if (isRecord(value)) {
     return `{${Object.entries(value)
-      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([key, nested]) => `${JSON.stringify(key)}:${canonical(nested)}`)
       .join(',')}}`
   }
@@ -262,7 +275,12 @@ function parseCanonicalObject(value: unknown, label: string): Record<string, unk
 
 function publicKeyRaw(publicKey: KeyObject): Buffer {
   const jwk = publicKey.export({ format: 'jwk' })
-  if (jwk.kty !== 'OKP' || jwk.crv !== 'X25519' || typeof jwk.x !== 'string' || !BASE64URL_32.test(jwk.x)) {
+  if (
+    jwk.kty !== 'OKP' ||
+    jwk.crv !== 'X25519' ||
+    typeof jwk.x !== 'string' ||
+    !BASE64URL_32.test(jwk.x)
+  ) {
     throw new Error('Campaign agent host could not create an X25519 public key')
   }
   return Buffer.from(jwk.x, 'base64url')
@@ -273,7 +291,9 @@ function publicKeyObject(encoded: string): KeyObject {
   return createPublicKey({ key: { kty: 'OKP', crv: 'X25519', x: encoded }, format: 'jwk' })
 }
 
-function assertAttachRequest(value: CampaignAgentHostAttachRequest): CampaignAgentHostAttachRequest {
+function assertAttachRequest(
+  value: CampaignAgentHostAttachRequest
+): CampaignAgentHostAttachRequest {
   if (!isRecord(value) || !exactKeys(value, ['terminalId', 'workspaceId', 'campaignId'])) {
     throw new Error('Campaign agent host attach request contract is invalid')
   }
@@ -281,12 +301,20 @@ function assertAttachRequest(value: CampaignAgentHostAttachRequest): CampaignAge
   return {
     terminalId,
     workspaceId: publicIdentifier(value.workspaceId, 'workspace id'),
-    campaignId: publicIdentifier(value.campaignId, 'campaign id'),
+    campaignId: publicIdentifier(value.campaignId, 'campaign id')
   }
 }
 
-function capabilityList(value: unknown, label: string, allowEmpty: boolean): CampaignAgentCapability[] {
-  if (!Array.isArray(value) || (!allowEmpty && value.length === 0) || value.length > CAPABILITIES.size) {
+function capabilityList(
+  value: unknown,
+  label: string,
+  allowEmpty: boolean
+): CampaignAgentCapability[] {
+  if (
+    !Array.isArray(value) ||
+    (!allowEmpty && value.length === 0) ||
+    value.length > CAPABILITIES.size
+  ) {
     throw new Error(`Campaign agent ${label} capabilities are invalid`)
   }
   const capabilities = value.map((entry) => {
@@ -301,15 +329,25 @@ function capabilityList(value: unknown, label: string, allowEmpty: boolean): Cam
   return capabilities.sort()
 }
 
-function assertAuthorizeRequest(value: CampaignAgentHostAuthorizeRequest): CampaignAgentHostAuthorizeRequest {
-  if (!isRecord(value) || !exactKeys(value, [
-    'terminalId', 'workspaceId', 'campaignId', 'requestedCapabilities',
-    'grantedCapabilities', 'idempotencyKey',
-  ])) throw new Error('Campaign agent authorize request contract is invalid')
+function assertAuthorizeRequest(
+  value: CampaignAgentHostAuthorizeRequest
+): CampaignAgentHostAuthorizeRequest {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, [
+      'terminalId',
+      'workspaceId',
+      'campaignId',
+      'requestedCapabilities',
+      'grantedCapabilities',
+      'idempotencyKey'
+    ])
+  )
+    throw new Error('Campaign agent authorize request contract is invalid')
   const scope = assertAttachRequest({
     terminalId: value.terminalId,
     workspaceId: value.workspaceId,
-    campaignId: value.campaignId,
+    campaignId: value.campaignId
   })
   const requestedCapabilities = capabilityList(value.requestedCapabilities, 'requested', false)
   const grantedCapabilities = capabilityList(value.grantedCapabilities, 'granted', true)
@@ -320,41 +358,49 @@ function assertAuthorizeRequest(value: CampaignAgentHostAuthorizeRequest): Campa
     ...scope,
     requestedCapabilities,
     grantedCapabilities,
-    idempotencyKey: publicIdentifier(value.idempotencyKey, 'authorization idempotency key'),
+    idempotencyKey: publicIdentifier(value.idempotencyKey, 'authorization idempotency key')
   }
 }
 
 function assertArtifactQuery(value: unknown): CampaignAgentHostArtifactQuery {
   if (!isRecord(value)) throw new Error('Campaign agent artifact query is invalid')
   const keys = Reflect.ownKeys(value)
-  if (keys.length > 2 || keys.some((key) => typeof key !== 'string'
-    || (key !== 'afterCursor' && key !== 'limit'))) {
+  if (
+    keys.length > 2 ||
+    keys.some((key) => typeof key !== 'string' || (key !== 'afterCursor' && key !== 'limit'))
+  ) {
     throw new Error('Campaign agent artifact query is invalid')
   }
   const descriptors = Object.getOwnPropertyDescriptors(value)
-  if (keys.some((key) => {
-    const descriptor = descriptors[key as string]
-    return !descriptor || !('value' in descriptor)
-  })) throw new Error('Campaign agent artifact query is invalid')
+  if (
+    keys.some((key) => {
+      const descriptor = descriptors[key as string]
+      return !descriptor || !('value' in descriptor)
+    })
+  )
+    throw new Error('Campaign agent artifact query is invalid')
   const afterCursor = descriptors.afterCursor?.value
   const limit = descriptors.limit?.value
-  if ((afterCursor !== undefined && (typeof afterCursor !== 'string' || !ARTIFACT_CURSOR.test(afterCursor)))
-    || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))) {
+  if (
+    (afterCursor !== undefined &&
+      (typeof afterCursor !== 'string' || !ARTIFACT_CURSOR.test(afterCursor))) ||
+    (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
+  ) {
     throw new Error('Campaign agent artifact query is invalid')
   }
   return {
     ...(afterCursor !== undefined ? { afterCursor } : {}),
-    ...(limit !== undefined ? { limit } : {}),
+    ...(limit !== undefined ? { limit } : {})
   }
 }
 
 function capabilityDigest(
   principalId: string,
   requested: readonly CampaignAgentCapability[],
-  granted: readonly CampaignAgentCapability[],
+  granted: readonly CampaignAgentCapability[]
 ): string {
   const payload = `principal=${principalId};requested=${[...requested].sort().join(',')};granted=${[...granted].sort().join(',')}`
-  let digest = 0x811C9DC5
+  let digest = 0x811c9dc5
   for (const value of Buffer.from(payload, 'ascii')) {
     digest ^= value
     digest = Math.imul(digest, 0x01000193) >>> 0
@@ -382,11 +428,16 @@ export class CampaignAgentHostController {
     this.idFactory = options.idFactory ?? (() => randomUUID().replaceAll('-', ''))
     this.scheduler = options.scheduler ?? {
       set: (delayMs, action) => {
-        const timer = setTimeout(() => { void action() }, Math.max(0, delayMs))
+        const timer = setTimeout(
+          () => {
+            void action()
+          },
+          Math.max(0, delayMs)
+        )
         timer.unref?.()
         return timer
       },
-      clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
     }
   }
 
@@ -398,10 +449,8 @@ export class CampaignAgentHostController {
   }
 
   private scheduleExpiry(state: HostState): void {
-    this.replaceTimer(
-      state,
-      state.registration.expiresAt - this.clock(),
-      () => this.teardownTerminal(state.identity.terminalId, 'explicit_revoke'),
+    this.replaceTimer(state, state.registration.expiresAt - this.clock(), () =>
+      this.teardownTerminal(state.identity.terminalId, 'explicit_revoke')
     )
   }
 
@@ -411,17 +460,13 @@ export class CampaignAgentHostController {
       : 0
     const renewAt = state.registration.expiresAt - 60_000
     if (credentialExpiresAt > 0 && credentialExpiresAt <= renewAt) {
-      this.replaceTimer(
-        state,
-        credentialExpiresAt - this.clock(),
-        () => this.teardownTerminal(state.identity.terminalId, 'explicit_revoke'),
+      this.replaceTimer(state, credentialExpiresAt - this.clock(), () =>
+        this.teardownTerminal(state.identity.terminalId, 'explicit_revoke')
       )
       return
     }
-    this.replaceTimer(
-      state,
-      renewAt - this.clock(),
-      () => this.renewRegistration(state.identity.terminalId),
+    this.replaceTimer(state, renewAt - this.clock(), () =>
+      this.renewRegistration(state.identity.terminalId)
     )
   }
 
@@ -436,46 +481,69 @@ export class CampaignAgentHostController {
       expiresAt: new Date(state.registration.expiresAt).toISOString(),
       credentialReady: state.credential !== null,
       ...(state.credential !== null ? { actionsEnabled: state.actionsEnabled } : {}),
-      ...(state.authorization ? { authorization: { ...state.authorization } } : {}),
+      ...(state.authorization ? { authorization: { ...state.authorization } } : {})
     }
   }
 
   private validateReceipt(
     value: unknown,
     body: CampaignAgentHostRegistrationBody,
-    expectedStatus: 'live' | 'revoked',
+    expectedStatus: 'live' | 'revoked'
   ): SessionReceipt {
-    if (!isRecord(value) || !exactKeys(value, [
-      'schemaVersion', 'registrationId', 'scope', 'agentFamily', 'agentOrigin',
-      'agentPrincipalId', 'sessionId', 'publicKeyDigest', 'registeredAt', 'expiresAt', 'status',
-    ])) throw new Error('Campaign agent host receipt contract is invalid')
-    if (value.schemaVersion !== 'campaign_agent_host_session.v1' || value.status !== expectedStatus) {
+    if (
+      !isRecord(value) ||
+      !exactKeys(value, [
+        'schemaVersion',
+        'registrationId',
+        'scope',
+        'agentFamily',
+        'agentOrigin',
+        'agentPrincipalId',
+        'sessionId',
+        'publicKeyDigest',
+        'registeredAt',
+        'expiresAt',
+        'status'
+      ])
+    )
+      throw new Error('Campaign agent host receipt contract is invalid')
+    if (
+      value.schemaVersion !== 'campaign_agent_host_session.v1' ||
+      value.status !== expectedStatus
+    ) {
       throw new Error('Campaign agent host receipt state is invalid')
     }
     if (!isRecord(value.scope) || !exactKeys(value.scope, ['workspaceId', 'campaignId'])) {
       throw new Error('Campaign agent host receipt scope is invalid')
     }
     const registrationId = publicIdentifier(value.registrationId, 'registration id')
-    if (!REGISTRATION_ID.test(registrationId)
-      || value.scope.workspaceId !== body.scope.workspaceId
-      || value.scope.campaignId !== body.scope.campaignId
-      || value.agentFamily !== body.agentFamily
-      || value.agentOrigin !== body.agentOrigin
-      || value.agentPrincipalId !== body.agentPrincipalId
-      || value.sessionId !== body.sessionId
-      || typeof value.publicKeyDigest !== 'string'
-      || !SHA256_DIGEST.test(value.publicKeyDigest)) {
+    if (
+      !REGISTRATION_ID.test(registrationId) ||
+      value.scope.workspaceId !== body.scope.workspaceId ||
+      value.scope.campaignId !== body.scope.campaignId ||
+      value.agentFamily !== body.agentFamily ||
+      value.agentOrigin !== body.agentOrigin ||
+      value.agentPrincipalId !== body.agentPrincipalId ||
+      value.sessionId !== body.sessionId ||
+      typeof value.publicKeyDigest !== 'string' ||
+      !SHA256_DIGEST.test(value.publicKeyDigest)
+    ) {
       throw new Error('Campaign agent host receipt tuple is invalid')
     }
     const rawPublicKey = Buffer.from(body.ephemeralPublicKey, 'base64url')
     const expectedDigest = `sha256:${createHash('sha256').update(rawPublicKey).digest('hex')}`
     rawPublicKey.fill(0)
-    if (value.publicKeyDigest !== expectedDigest) throw new Error('Campaign agent host receipt public key is invalid')
+    if (value.publicKeyDigest !== expectedDigest)
+      throw new Error('Campaign agent host receipt public key is invalid')
     const registeredAt = publicDate(value.registeredAt, 'registered time')
     const expiresAt = publicDate(value.expiresAt, 'expiry time')
     const now = this.clock()
-    if (registeredAt > now + CLOCK_SKEW_MS || expiresAt <= registeredAt || expiresAt <= now
-      || expiresAt > registeredAt + (body.ttlSeconds * 1_000) + CLOCK_SKEW_MS) {
+    if (
+      registeredAt > now + CLOCK_SKEW_MS ||
+      expiresAt <= registeredAt ||
+      expiresAt <= now ||
+      expiresAt > registeredAt + body.ttlSeconds * 1_000 + CLOCK_SKEW_MS
+    ) {
       throw new Error('Campaign agent host receipt time bounds are invalid')
     }
     return { registrationId, registeredAt, expiresAt }
@@ -510,13 +578,17 @@ export class CampaignAgentHostController {
       sessionId: identity.sessionId,
       ephemeralPublicKey: encodedPublicKey,
       ttlSeconds: HOST_TTL_SECONDS,
-      idempotencyKey: `hostreg_${this.idFactory()}`,
+      idempotencyKey: `hostreg_${this.idFactory()}`
     }
     let registration: SessionReceipt | null = null
     try {
       registration = this.validateReceipt(await this.options.transport.register(body), body, 'live')
       const currentIdentity = this.options.resolveIdentity(request.terminalId)
-      if (!currentIdentity || !currentIdentity.live || currentIdentity.generation !== identity.generation) {
+      if (
+        !currentIdentity ||
+        !currentIdentity.live ||
+        currentIdentity.generation !== identity.generation
+      ) {
         throw new Error('Campaign agent host PTY changed during registration')
       }
       const state: HostState = {
@@ -533,28 +605,38 @@ export class CampaignAgentHostController {
         heartbeatDeadlineTimer: null,
         actionsEnabled: false,
         activating: false,
-        lastSuccessfulHeartbeatAt: null,
+        lastSuccessfulHeartbeatAt: null
       }
       this.sessions.set(request.terminalId, state)
       this.scheduleExpiry(state)
       return this.publicStatus(state)
     } catch (error) {
-      if (registration) void this.options.transport.revoke(registration.registrationId).catch(() => undefined)
+      if (registration)
+        void this.options.transport.revoke(registration.registrationId).catch(() => undefined)
       throw error
     }
   }
 
-  async authorize(input: CampaignAgentHostAuthorizeRequest): Promise<CampaignAgentHostPublicStatus> {
+  async authorize(
+    input: CampaignAgentHostAuthorizeRequest
+  ): Promise<CampaignAgentHostPublicStatus> {
     const request = assertAuthorizeRequest(input)
     const state = this.sessions.get(request.terminalId)
     if (!state || !state.privateKey || state.claimAttempted) {
       throw new Error('Campaign agent host registration is not ready for authorization')
     }
-    if (request.workspaceId !== state.scope.workspaceId || request.campaignId !== state.scope.campaignId) {
+    if (
+      request.workspaceId !== state.scope.workspaceId ||
+      request.campaignId !== state.scope.campaignId
+    ) {
       throw new Error('Campaign agent authorization scope changed')
     }
     const currentIdentity = this.options.resolveIdentity(request.terminalId)
-    if (!currentIdentity || !currentIdentity.live || currentIdentity.generation !== state.identity.generation) {
+    if (
+      !currentIdentity ||
+      !currentIdentity.live ||
+      currentIdentity.generation !== state.identity.generation
+    ) {
       await this.teardownTerminal(request.terminalId, 'pty_replacement').catch(() => undefined)
       throw new Error('Campaign agent host PTY changed before authorization')
     }
@@ -568,50 +650,78 @@ export class CampaignAgentHostController {
       agentPrincipalId: state.identity.principalId,
       sessionId: state.identity.sessionId,
       requestedCapabilities: request.requestedCapabilities,
-      grantedCapabilities: request.grantedCapabilities,
+      grantedCapabilities: request.grantedCapabilities
     }
     const idempotencyDigest = createHash('sha256')
-      .update(`${request.idempotencyKey}\0${request.terminalId}\0${request.workspaceId}\0${request.campaignId}`, 'utf8')
+      .update(
+        `${request.idempotencyKey}\0${request.terminalId}\0${request.workspaceId}\0${request.campaignId}`,
+        'utf8'
+      )
       .digest('hex')
       .slice(0, 32)
     const grantBody = {
       ...tuple,
-      idempotencyKey: `hostgrant_${idempotencyDigest}`,
+      idempotencyKey: `hostgrant_${idempotencyDigest}`
     }
     const receipt = await this.options.transport.grant(request.campaignId, grantBody)
-    if (!isRecord(receipt) || !exactKeys(receipt, [
-      'schemaVersion', 'issuer', 'receiptId', 'receiptDigest', 'humanPrincipal', 'scope',
-      'agentFamily', 'agentOrigin', 'agentPrincipalId', 'sessionId', 'requestedCapabilities',
-      'grantedCapabilities', 'capabilityDigest', 'grantRevision', 'issuedAt', 'expiresAt',
-    ])
-      || receipt.schemaVersion !== 'campaign_agent_grant_confirmation.v1'
-      || receipt.issuer !== 'campaign_authority'
-      || !isRecord(receipt.humanPrincipal)
-      || !exactKeys(receipt.humanPrincipal, ['principalId', 'principalType'])
-      || receipt.humanPrincipal.principalType !== 'human'
-      || !IDENTIFIER.test(String(receipt.humanPrincipal.principalId))
-      || !isRecord(receipt.scope)
-      || !exactKeys(receipt.scope, ['workspaceId', 'campaignId'])
-      || receipt.scope.workspaceId !== state.scope.workspaceId
-      || receipt.scope.campaignId !== state.scope.campaignId
-      || receipt.agentFamily !== state.identity.family
-      || receipt.agentOrigin !== state.identity.origin
-      || receipt.agentPrincipalId !== state.identity.principalId
-      || receipt.sessionId !== state.identity.sessionId
-      || canonical(receipt.requestedCapabilities) !== canonical(request.requestedCapabilities)
-      || canonical(receipt.grantedCapabilities) !== canonical(request.grantedCapabilities)
-      || receipt.capabilityDigest !== capabilityDigest(
-        state.identity.principalId, request.requestedCapabilities, request.grantedCapabilities,
-      )
-      || !Number.isSafeInteger(receipt.grantRevision) || Number(receipt.grantRevision) < 1
-      || typeof receipt.receiptDigest !== 'string' || !SHA256_DIGEST.test(receipt.receiptDigest)) {
+    if (
+      !isRecord(receipt) ||
+      !exactKeys(receipt, [
+        'schemaVersion',
+        'issuer',
+        'receiptId',
+        'receiptDigest',
+        'humanPrincipal',
+        'scope',
+        'agentFamily',
+        'agentOrigin',
+        'agentPrincipalId',
+        'sessionId',
+        'requestedCapabilities',
+        'grantedCapabilities',
+        'capabilityDigest',
+        'grantRevision',
+        'issuedAt',
+        'expiresAt'
+      ]) ||
+      receipt.schemaVersion !== 'campaign_agent_grant_confirmation.v1' ||
+      receipt.issuer !== 'campaign_authority' ||
+      !isRecord(receipt.humanPrincipal) ||
+      !exactKeys(receipt.humanPrincipal, ['principalId', 'principalType']) ||
+      receipt.humanPrincipal.principalType !== 'human' ||
+      !IDENTIFIER.test(String(receipt.humanPrincipal.principalId)) ||
+      !isRecord(receipt.scope) ||
+      !exactKeys(receipt.scope, ['workspaceId', 'campaignId']) ||
+      receipt.scope.workspaceId !== state.scope.workspaceId ||
+      receipt.scope.campaignId !== state.scope.campaignId ||
+      receipt.agentFamily !== state.identity.family ||
+      receipt.agentOrigin !== state.identity.origin ||
+      receipt.agentPrincipalId !== state.identity.principalId ||
+      receipt.sessionId !== state.identity.sessionId ||
+      canonical(receipt.requestedCapabilities) !== canonical(request.requestedCapabilities) ||
+      canonical(receipt.grantedCapabilities) !== canonical(request.grantedCapabilities) ||
+      receipt.capabilityDigest !==
+        capabilityDigest(
+          state.identity.principalId,
+          request.requestedCapabilities,
+          request.grantedCapabilities
+        ) ||
+      !Number.isSafeInteger(receipt.grantRevision) ||
+      Number(receipt.grantRevision) < 1 ||
+      typeof receipt.receiptDigest !== 'string' ||
+      !SHA256_DIGEST.test(receipt.receiptDigest)
+    ) {
       throw new Error('Campaign agent grant receipt tuple is invalid')
     }
     const receiptId = publicIdentifier(receipt.receiptId, 'grant receipt id')
     const issuedAt = publicDate(receipt.issuedAt, 'grant issue time')
     const expiresAt = publicDate(receipt.expiresAt, 'grant expiry time')
-    if (issuedAt > this.clock() + CLOCK_SKEW_MS || expiresAt <= issuedAt || expiresAt <= this.clock()
-      || expiresAt > issuedAt + (30 * 60_000)) {
+    if (
+      issuedAt > this.clock() + CLOCK_SKEW_MS ||
+      expiresAt <= issuedAt ||
+      expiresAt <= this.clock() ||
+      expiresAt > issuedAt + 30 * 60_000
+    ) {
       throw new Error('Campaign agent grant receipt time bounds are invalid')
     }
     const attachment = await this.options.transport.attach(request.campaignId, {
@@ -619,51 +729,68 @@ export class CampaignAgentHostController {
       ...tuple,
       confirmationReceipt: receipt,
       baseAttachmentVersion: null,
-      idempotencyKey: `hostattach_${idempotencyDigest}`,
+      idempotencyKey: `hostattach_${idempotencyDigest}`
     })
-    if (!isRecord(attachment) || !exactKeys(attachment, [
-      'schema_version', 'observed_at', 'scope', 'attachment', 'audit_events',
-    ])
-      || attachment.schema_version !== 'campaign_agent_public_view.v1'
-      || !isRecord(attachment.scope)
-      || attachment.scope.workspace_id !== state.scope.workspaceId
-      || attachment.scope.campaign_id !== state.scope.campaignId
-      || !isRecord(attachment.attachment)) {
+    if (
+      !isRecord(attachment) ||
+      !exactKeys(attachment, [
+        'schema_version',
+        'observed_at',
+        'scope',
+        'attachment',
+        'audit_events'
+      ]) ||
+      attachment.schema_version !== 'campaign_agent_public_view.v1' ||
+      !isRecord(attachment.scope) ||
+      attachment.scope.workspace_id !== state.scope.workspaceId ||
+      attachment.scope.campaign_id !== state.scope.campaignId ||
+      !isRecord(attachment.attachment)
+    ) {
       throw new Error('Campaign agent attachment view is invalid')
     }
     const view = attachment.attachment
-    if (view.status !== 'attached'
-      || !Number.isSafeInteger(view.attachment_version) || Number(view.attachment_version) < 1
-      || canonical(view.requested_capabilities) !== canonical(request.requestedCapabilities)
-      || canonical(view.granted_capabilities) !== canonical(request.grantedCapabilities)
-      || !isRecord(view.provenance)
-      || view.provenance.agent_family !== state.identity.family
-      || view.provenance.agent_origin !== state.identity.origin
-      || view.provenance.agent_principal_id !== state.identity.principalId
-      || view.provenance.session_id !== state.identity.sessionId
-      || view.provenance.grant_receipt_id !== receiptId
-      || view.provenance.grant_receipt_digest !== receipt.receiptDigest) {
+    if (
+      view.status !== 'attached' ||
+      !Number.isSafeInteger(view.attachment_version) ||
+      Number(view.attachment_version) < 1 ||
+      canonical(view.requested_capabilities) !== canonical(request.requestedCapabilities) ||
+      canonical(view.granted_capabilities) !== canonical(request.grantedCapabilities) ||
+      !isRecord(view.provenance) ||
+      view.provenance.agent_family !== state.identity.family ||
+      view.provenance.agent_origin !== state.identity.origin ||
+      view.provenance.agent_principal_id !== state.identity.principalId ||
+      view.provenance.session_id !== state.identity.sessionId ||
+      view.provenance.grant_receipt_id !== receiptId ||
+      view.provenance.grant_receipt_digest !== receipt.receiptDigest
+    ) {
       throw new Error('Campaign agent attachment tuple is invalid')
     }
     const attachmentId = publicIdentifier(view.attachment_id, 'attachment id')
-    const credentialExpiresAt = publicDate(view.provenance.credential_expires_at, 'credential expiry time')
-    if (credentialExpiresAt <= this.clock()) throw new Error('Campaign agent credential already expired')
+    const credentialExpiresAt = publicDate(
+      view.provenance.credential_expires_at,
+      'credential expiry time'
+    )
+    if (credentialExpiresAt <= this.clock())
+      throw new Error('Campaign agent credential already expired')
     state.authorization = {
       receiptId,
       attachmentId,
       attachmentVersion: Number(view.attachment_version),
       grantedCapabilities: [...request.grantedCapabilities],
-      credentialExpiresAt: new Date(credentialExpiresAt).toISOString(),
+      credentialExpiresAt: new Date(credentialExpiresAt).toISOString()
     }
     state.authorizationAuthority = {
       humanPrincipalId: String(receipt.humanPrincipal.principalId),
-      idempotencyDigest,
+      idempotencyDigest
     }
     state.state = 'authorized'
     return this.publicStatus(state)
   }
 
-  private validateEnvelope(value: unknown, state: HostState): {
+  private validateEnvelope(
+    value: unknown,
+    state: HostState
+  ): {
     credentialId: string
     ciphertext: Buffer
     nonce: Buffer
@@ -672,42 +799,74 @@ export class CampaignAgentHostController {
     aadJson: string
     peerPublicKey: KeyObject
   } {
-    if (!isRecord(value) || !exactKeys(value, [
-      'schemaVersion', 'envelopeId', 'registrationId', 'credentialId', 'algorithm',
-      'ephemeralPublicKey', 'hkdfSalt', 'hkdfInfo', 'nonce', 'ciphertext', 'aadJson', 'createdAt',
-    ])) throw new Error('Campaign agent delivery envelope contract is invalid')
+    if (
+      !isRecord(value) ||
+      !exactKeys(value, [
+        'schemaVersion',
+        'envelopeId',
+        'registrationId',
+        'credentialId',
+        'algorithm',
+        'ephemeralPublicKey',
+        'hkdfSalt',
+        'hkdfInfo',
+        'nonce',
+        'ciphertext',
+        'aadJson',
+        'createdAt'
+      ])
+    )
+      throw new Error('Campaign agent delivery envelope contract is invalid')
     const envelopeId = publicIdentifier(value.envelopeId, 'envelope id')
     const credentialId = publicIdentifier(value.credentialId, 'credential id')
-    if (value.schemaVersion !== 'campaign_agent_delivery_envelope.v1'
-      || value.registrationId !== state.registration.registrationId
-      || value.algorithm !== ALGORITHM) {
+    if (
+      value.schemaVersion !== 'campaign_agent_delivery_envelope.v1' ||
+      value.registrationId !== state.registration.registrationId ||
+      value.algorithm !== ALGORITHM
+    ) {
       throw new Error('Campaign agent delivery envelope identity is invalid')
     }
     const expectedInfo = `bashgym.campaign-agent-delivery-key.v1:${state.registration.registrationId}:${credentialId}`
-    if (value.hkdfInfo !== expectedInfo) throw new Error('Campaign agent delivery KDF context is invalid')
+    if (value.hkdfInfo !== expectedInfo)
+      throw new Error('Campaign agent delivery KDF context is invalid')
     const createdAt = publicDate(value.createdAt, 'delivery creation time')
-    if (createdAt < state.registration.registeredAt - CLOCK_SKEW_MS
-      || createdAt > this.clock() + CLOCK_SKEW_MS
-      || createdAt >= state.registration.expiresAt) {
+    if (
+      createdAt < state.registration.registeredAt - CLOCK_SKEW_MS ||
+      createdAt > this.clock() + CLOCK_SKEW_MS ||
+      createdAt >= state.registration.expiresAt
+    ) {
       throw new Error('Campaign agent delivery time bounds are invalid')
     }
     const aad = parseCanonicalObject(value.aadJson, 'delivery AAD')
-    if (!exactKeys(aad, [
-      'schema_version', 'envelope_id', 'registration_id', 'credential_id', 'attachment_id',
-      'workspace_id', 'campaign_id', 'agent_family', 'agent_origin', 'session_id',
-      'agent_principal_id', 'public_key_digest', 'issued_at', 'expires_at',
-    ])
-      || aad.schema_version !== 'campaign_agent_delivery_aad.v1'
-      || aad.envelope_id !== envelopeId
-      || aad.registration_id !== state.registration.registrationId
-      || aad.credential_id !== credentialId
-      || aad.workspace_id !== state.scope.workspaceId
-      || aad.campaign_id !== state.scope.campaignId
-      || aad.agent_family !== state.identity.family
-      || aad.agent_origin !== state.identity.origin
-      || aad.session_id !== state.identity.sessionId
-      || aad.agent_principal_id !== state.identity.principalId
-      || aad.public_key_digest !== state.publicKeyDigest) {
+    if (
+      !exactKeys(aad, [
+        'schema_version',
+        'envelope_id',
+        'registration_id',
+        'credential_id',
+        'attachment_id',
+        'workspace_id',
+        'campaign_id',
+        'agent_family',
+        'agent_origin',
+        'session_id',
+        'agent_principal_id',
+        'public_key_digest',
+        'issued_at',
+        'expires_at'
+      ]) ||
+      aad.schema_version !== 'campaign_agent_delivery_aad.v1' ||
+      aad.envelope_id !== envelopeId ||
+      aad.registration_id !== state.registration.registrationId ||
+      aad.credential_id !== credentialId ||
+      aad.workspace_id !== state.scope.workspaceId ||
+      aad.campaign_id !== state.scope.campaignId ||
+      aad.agent_family !== state.identity.family ||
+      aad.agent_origin !== state.identity.origin ||
+      aad.session_id !== state.identity.sessionId ||
+      aad.agent_principal_id !== state.identity.principalId ||
+      aad.public_key_digest !== state.publicKeyDigest
+    ) {
       throw new Error('Campaign agent delivery AAD tuple is invalid')
     }
     publicIdentifier(aad.attachment_id, 'attachment id')
@@ -723,7 +882,7 @@ export class CampaignAgentHostController {
       salt: decodeBase64Url(value.hkdfSalt, 16, 'HKDF salt'),
       info: expectedInfo,
       aadJson: value.aadJson as string,
-      peerPublicKey: publicKeyObject(value.ephemeralPublicKey as string),
+      peerPublicKey: publicKeyObject(value.ephemeralPublicKey as string)
     }
   }
 
@@ -739,7 +898,11 @@ export class CampaignAgentHostController {
       throw new Error('Campaign agent host registration expired')
     }
     const currentIdentity = this.options.resolveIdentity(terminalId)
-    if (!currentIdentity || !currentIdentity.live || currentIdentity.generation !== state.identity.generation) {
+    if (
+      !currentIdentity ||
+      !currentIdentity.live ||
+      currentIdentity.generation !== state.identity.generation
+    ) {
       await this.teardownTerminal(terminalId, 'pty_replacement')
       throw new Error('Campaign agent host PTY is no longer live')
     }
@@ -751,27 +914,35 @@ export class CampaignAgentHostController {
     try {
       encrypted = this.validateEnvelope(
         await this.options.transport.claim(state.registration.registrationId),
-        state,
+        state
       )
-      if (encrypted.ciphertext.length < 17 || encrypted.ciphertext.length > MAX_TOKEN_BYTES + 2_048) {
+      if (
+        encrypted.ciphertext.length < 17 ||
+        encrypted.ciphertext.length > MAX_TOKEN_BYTES + 2_048
+      ) {
         throw new Error('Campaign agent delivery ciphertext is invalid')
       }
       shared = diffieHellman({ privateKey: state.privateKey, publicKey: encrypted.peerPublicKey })
       key = Buffer.from(hkdfSync('sha256', shared, encrypted.salt, encrypted.info, 32))
       const authTag = encrypted.ciphertext.subarray(encrypted.ciphertext.length - 16)
       const ciphertext = encrypted.ciphertext.subarray(0, encrypted.ciphertext.length - 16)
-      const decipher = createDecipheriv('chacha20-poly1305', key, encrypted.nonce, { authTagLength: 16 })
+      const decipher = createDecipheriv('chacha20-poly1305', key, encrypted.nonce, {
+        authTagLength: 16
+      })
       decipher.setAAD(Buffer.from(encrypted.aadJson), { plaintextLength: ciphertext.length })
       decipher.setAuthTag(authTag)
       plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()])
-      if (plaintext.length > MAX_TOKEN_BYTES + 512) throw new Error('Campaign agent credential is too large')
+      if (plaintext.length > MAX_TOKEN_BYTES + 512)
+        throw new Error('Campaign agent credential is too large')
       const payload = parseCanonicalObject(plaintext.toString('utf8'), 'credential payload')
-      if (!exactKeys(payload, ['schema_version', 'registration_id', 'credential_id', 'raw_token'])
-        || payload.schema_version !== 'campaign_agent_credential_delivery.v1'
-        || payload.registration_id !== state.registration.registrationId
-        || payload.credential_id !== encrypted.credentialId
-        || typeof payload.raw_token !== 'string'
-        || !/^bgag\.[A-Za-z0-9_.:-]+\.[A-Za-z0-9_-]{32,512}$/.test(payload.raw_token)) {
+      if (
+        !exactKeys(payload, ['schema_version', 'registration_id', 'credential_id', 'raw_token']) ||
+        payload.schema_version !== 'campaign_agent_credential_delivery.v1' ||
+        payload.registration_id !== state.registration.registrationId ||
+        payload.credential_id !== encrypted.credentialId ||
+        typeof payload.raw_token !== 'string' ||
+        !/^bgag\.[A-Za-z0-9_.:-]+\.[A-Za-z0-9_-]{32,512}$/.test(payload.raw_token)
+      ) {
         throw new Error('Campaign agent credential payload is invalid')
       }
       state.credential = Buffer.from(payload.raw_token, 'utf8')
@@ -797,8 +968,12 @@ export class CampaignAgentHostController {
   async renewRegistration(terminalId: string): Promise<CampaignAgentHostPublicStatus> {
     publicIdentifier(terminalId, 'terminal id')
     const state = this.sessions.get(terminalId)
-    if (!state || !state.claimAttempted || !state.authorization
-      || !['credential_ready', 'active', 'credential_consumed'].includes(state.state)) {
+    if (
+      !state ||
+      !state.claimAttempted ||
+      !state.authorization ||
+      !['credential_ready', 'active', 'credential_consumed'].includes(state.state)
+    ) {
       throw new Error('Campaign agent host registration is not eligible for renewal')
     }
     const identity = this.options.resolveIdentity(terminalId)
@@ -819,11 +994,13 @@ export class CampaignAgentHostController {
       sessionId: state.identity.sessionId,
       ephemeralPublicKey,
       ttlSeconds: HOST_TTL_SECONDS,
-      idempotencyKey: `hostrenew_${this.idFactory()}`,
+      idempotencyKey: `hostrenew_${this.idFactory()}`
     }
     try {
       const registration = this.validateReceipt(
-        await this.options.transport.register(body), body, 'live',
+        await this.options.transport.register(body),
+        body,
+        'live'
       )
       const current = this.options.resolveIdentity(terminalId)
       if (!current || !current.live || current.generation !== state.identity.generation) {
@@ -857,17 +1034,22 @@ export class CampaignAgentHostController {
 
   private authorityFailure(state: HostState): 'credential_expired' | 'identity_changed' | null {
     const identity = this.options.resolveIdentity(state.identity.terminalId)
-    if (!identity || !identity.live
-      || identity.terminalId !== state.identity.terminalId
-      || identity.generation !== state.identity.generation
-      || identity.family !== state.identity.family
-      || identity.origin !== state.identity.origin
-      || identity.principalId !== state.identity.principalId
-      || identity.sessionId !== state.identity.sessionId) {
+    if (
+      !identity ||
+      !identity.live ||
+      identity.terminalId !== state.identity.terminalId ||
+      identity.generation !== state.identity.generation ||
+      identity.family !== state.identity.family ||
+      identity.origin !== state.identity.origin ||
+      identity.principalId !== state.identity.principalId ||
+      identity.sessionId !== state.identity.sessionId
+    ) {
       return 'identity_changed'
     }
-    if (!state.authorization
-      || Date.parse(state.authorization.credentialExpiresAt) <= this.clock()) {
+    if (
+      !state.authorization ||
+      Date.parse(state.authorization.credentialExpiresAt) <= this.clock()
+    ) {
       return 'credential_expired'
     }
     return null
@@ -876,9 +1058,14 @@ export class CampaignAgentHostController {
   private isAuthorityRejection(error: unknown): boolean {
     if (!error || (typeof error !== 'object' && typeof error !== 'function')) return false
     const value = error as { status?: unknown; statusCode?: unknown; code?: unknown }
-    return value.status === 401 || value.status === 403
-      || value.statusCode === 401 || value.statusCode === 403
-      || value.code === 'UNAUTHORIZED' || value.code === 'FORBIDDEN'
+    return (
+      value.status === 401 ||
+      value.status === 403 ||
+      value.statusCode === 401 ||
+      value.statusCode === 403 ||
+      value.code === 'UNAUTHORIZED' ||
+      value.code === 'FORBIDDEN'
+    )
   }
 
   private heartbeatBody(state: HostState): CampaignAgentHostHeartbeatBody {
@@ -887,20 +1074,22 @@ export class CampaignAgentHostController {
       agentFamily: state.identity.family,
       agentOrigin: state.identity.origin,
       agentPrincipalId: state.identity.principalId,
-      sessionId: state.identity.sessionId,
+      sessionId: state.identity.sessionId
     }
   }
 
   private async teardownAuthority(
     state: HostState,
-    reason: 'authority_rejected' | 'credential_expired' | 'identity_changed',
+    reason: 'authority_rejected' | 'credential_expired' | 'identity_changed'
   ): Promise<never> {
     const terminalId = state.identity.terminalId
     await this.teardownTerminal(terminalId, 'explicit_revoke').catch(() => undefined)
     this.emitLifecycle({ terminalId, kind: 'torn_down', reason })
-    throw new CampaignAgentAuthorityClosedError(reason === 'authority_rejected'
-      ? 'Campaign agent authority rejected the credential'
-      : 'Campaign agent credential is no longer authorized')
+    throw new CampaignAgentAuthorityClosedError(
+      reason === 'authority_rejected'
+        ? 'Campaign agent authority rejected the credential'
+        : 'Campaign agent credential is no longer authorized'
+    )
   }
 
   private scheduleHeartbeatDeadline(state: HostState): void {
@@ -909,9 +1098,12 @@ export class CampaignAgentHostController {
     if (lastSuccess === null) return
     state.heartbeatDeadlineTimer = this.scheduler.set(HEARTBEAT_STALE_MS, async () => {
       state.heartbeatDeadlineTimer = null
-      if (this.sessions.get(state.identity.terminalId) !== state
-        || state.lastSuccessfulHeartbeatAt !== lastSuccess
-        || this.clock() - lastSuccess < HEARTBEAT_STALE_MS) return
+      if (
+        this.sessions.get(state.identity.terminalId) !== state ||
+        state.lastSuccessfulHeartbeatAt !== lastSuccess ||
+        this.clock() - lastSuccess < HEARTBEAT_STALE_MS
+      )
+        return
       state.actionsEnabled = false
       state.state = 'credential_ready'
       if (state.heartbeatTimer !== null) this.scheduler.clear(state.heartbeatTimer)
@@ -919,7 +1111,7 @@ export class CampaignAgentHostController {
       this.emitLifecycle({
         terminalId: state.identity.terminalId,
         kind: 'actions_locked',
-        reason: 'heartbeat_timeout',
+        reason: 'heartbeat_timeout'
       })
     })
   }
@@ -933,7 +1125,12 @@ export class CampaignAgentHostController {
   }
 
   private async runHeartbeat(state: HostState, retry: boolean): Promise<void> {
-    if (this.sessions.get(state.identity.terminalId) !== state || !state.credential || !state.actionsEnabled) return
+    if (
+      this.sessions.get(state.identity.terminalId) !== state ||
+      !state.credential ||
+      !state.actionsEnabled
+    )
+      return
     const authorityFailure = this.authorityFailure(state)
     if (authorityFailure) await this.teardownAuthority(state, authorityFailure)
     const heartbeat = this.options.transport.heartbeat
@@ -943,7 +1140,7 @@ export class CampaignAgentHostController {
       this.emitLifecycle({
         terminalId: state.identity.terminalId,
         kind: 'actions_locked',
-        reason: 'heartbeat_timeout',
+        reason: 'heartbeat_timeout'
       })
       return
     }
@@ -957,7 +1154,8 @@ export class CampaignAgentHostController {
       this.scheduleHeartbeat(state, HEARTBEAT_INTERVAL_MS, false)
     } catch (error) {
       if (error instanceof CampaignAgentAuthorityClosedError) throw error
-      if (this.isAuthorityRejection(error)) await this.teardownAuthority(state, 'authority_rejected')
+      if (this.isAuthorityRejection(error))
+        await this.teardownAuthority(state, 'authority_rejected')
       this.scheduleHeartbeat(state, retry ? HEARTBEAT_INTERVAL_MS : HEARTBEAT_RETRY_MS, !retry)
     }
   }
@@ -992,7 +1190,8 @@ export class CampaignAgentHostController {
       return this.publicStatus(state)
     } catch (error) {
       if (error instanceof CampaignAgentAuthorityClosedError) throw error
-      if (this.isAuthorityRejection(error)) await this.teardownAuthority(state, 'authority_rejected')
+      if (this.isAuthorityRejection(error))
+        await this.teardownAuthority(state, 'authority_rejected')
       throw new Error('Campaign agent heartbeat failed')
     } finally {
       state.activating = false
@@ -1003,7 +1202,7 @@ export class CampaignAgentHostController {
     terminalId: string,
     capability: 'campaign_observe' | 'artifact_read',
     action: ((credential: Buffer) => Promise<unknown>) | undefined,
-    label: string,
+    label: string
   ): Promise<unknown> {
     publicIdentifier(terminalId, 'terminal id')
     const state = this.sessions.get(terminalId)
@@ -1029,7 +1228,10 @@ export class CampaignAgentHostController {
 
   observe(terminalId: string): Promise<unknown> {
     return this.fixedAction(
-      terminalId, 'campaign_observe', this.options.transport.observe, 'observe',
+      terminalId,
+      'campaign_observe',
+      this.options.transport.observe,
+      'observe'
     )
   }
 
@@ -1041,7 +1243,7 @@ export class CampaignAgentHostController {
       this.options.transport.artifacts
         ? (credential) => this.options.transport.artifacts!(credential, safeQuery)
         : undefined,
-      'artifact read',
+      'artifact read'
     )
   }
 
@@ -1052,21 +1254,23 @@ export class CampaignAgentHostController {
   }
 
   eligibleSessions(
-    identities: readonly MainOwnedCampaignAgentIdentity[],
+    identities: readonly MainOwnedCampaignAgentIdentity[]
   ): CampaignAgentHostEligibleSession[] {
     return identities
-      .filter((identity) => identity.live && (identity.family === 'codex' || identity.family === 'hermes'))
+      .filter(
+        (identity) => identity.live && (identity.family === 'codex' || identity.family === 'hermes')
+      )
       .map((identity): CampaignAgentHostEligibleSession => ({
         terminalId: identity.terminalId,
         family: identity.family,
-        state: this.sessions.get(identity.terminalId)?.state ?? 'eligible',
+        state: this.sessions.get(identity.terminalId)?.state ?? 'eligible'
       }))
       .sort((left, right) => left.terminalId.localeCompare(right.terminalId))
   }
 
   async teardownTerminal(
     terminalId: string,
-    _reason: CampaignAgentHostTeardownReason,
+    _reason: CampaignAgentHostTeardownReason
   ): Promise<void> {
     const state = this.sessions.get(terminalId)
     if (!state) return
@@ -1095,20 +1299,24 @@ export class CampaignAgentHostController {
             attachmentVersion: state.authorization.attachmentVersion,
             scope: { workspaceId: state.scope.workspaceId, campaignId: state.scope.campaignId },
             actorId: state.authorizationAuthority.humanPrincipalId,
-            idempotencyKey: `hostrevoke_${state.authorizationAuthority.idempotencyDigest}`,
-          },
+            idempotencyKey: `hostrevoke_${state.authorizationAuthority.idempotencyDigest}`
+          }
         )
-        if (!isRecord(response) || response.schema_version !== 'campaign_agent_public_view.v1'
-          || !isRecord(response.scope)
-          || response.scope.workspace_id !== state.scope.workspaceId
-          || response.scope.campaign_id !== state.scope.campaignId
-          || !isRecord(response.attachment)
-          || response.attachment.attachment_id !== state.authorization.attachmentId
-          || response.attachment.status !== 'revoked'
-          || !Number.isSafeInteger(response.attachment.attachment_version)
-          || Number(response.attachment.attachment_version) <= state.authorization.attachmentVersion
-          || !isRecord(response.attachment.provenance)
-          || response.attachment.provenance.revoked_by !== state.authorizationAuthority.humanPrincipalId) {
+        if (
+          !isRecord(response) ||
+          response.schema_version !== 'campaign_agent_public_view.v1' ||
+          !isRecord(response.scope) ||
+          response.scope.workspace_id !== state.scope.workspaceId ||
+          response.scope.campaign_id !== state.scope.campaignId ||
+          !isRecord(response.attachment) ||
+          response.attachment.attachment_id !== state.authorization.attachmentId ||
+          response.attachment.status !== 'revoked' ||
+          !Number.isSafeInteger(response.attachment.attachment_version) ||
+          Number(response.attachment.attachment_version) <= state.authorization.attachmentVersion ||
+          !isRecord(response.attachment.provenance) ||
+          response.attachment.provenance.revoked_by !==
+            state.authorizationAuthority.humanPrincipalId
+        ) {
           throw new Error('Campaign agent attachment revoke view is invalid')
         }
       } catch (error) {
@@ -1116,24 +1324,37 @@ export class CampaignAgentHostController {
       }
     }
     const response = await this.options.transport.revoke(state.registration.registrationId)
-    if (!isRecord(response) || !exactKeys(response, [
-      'schemaVersion', 'registrationId', 'scope', 'agentFamily', 'agentOrigin',
-      'agentPrincipalId', 'sessionId', 'publicKeyDigest', 'registeredAt', 'expiresAt', 'status',
-    ])
-      || response.schemaVersion !== 'campaign_agent_host_session.v1'
-      || response.registrationId !== state.registration.registrationId
-      || response.status !== 'revoked'
-      || !isRecord(response.scope)
-      || !exactKeys(response.scope, ['workspaceId', 'campaignId'])
-      || response.scope.workspaceId !== state.scope.workspaceId
-      || response.scope.campaignId !== state.scope.campaignId
-      || response.agentFamily !== state.identity.family
-      || response.agentOrigin !== state.identity.origin
-      || response.agentPrincipalId !== state.identity.principalId
-      || response.sessionId !== state.identity.sessionId
-      || response.publicKeyDigest !== state.publicKeyDigest
-      || publicDate(response.registeredAt, 'revoke registered time') !== state.registration.registeredAt
-      || publicDate(response.expiresAt, 'revoke expiry time') !== state.registration.expiresAt) {
+    if (
+      !isRecord(response) ||
+      !exactKeys(response, [
+        'schemaVersion',
+        'registrationId',
+        'scope',
+        'agentFamily',
+        'agentOrigin',
+        'agentPrincipalId',
+        'sessionId',
+        'publicKeyDigest',
+        'registeredAt',
+        'expiresAt',
+        'status'
+      ]) ||
+      response.schemaVersion !== 'campaign_agent_host_session.v1' ||
+      response.registrationId !== state.registration.registrationId ||
+      response.status !== 'revoked' ||
+      !isRecord(response.scope) ||
+      !exactKeys(response.scope, ['workspaceId', 'campaignId']) ||
+      response.scope.workspaceId !== state.scope.workspaceId ||
+      response.scope.campaignId !== state.scope.campaignId ||
+      response.agentFamily !== state.identity.family ||
+      response.agentOrigin !== state.identity.origin ||
+      response.agentPrincipalId !== state.identity.principalId ||
+      response.sessionId !== state.identity.sessionId ||
+      response.publicKeyDigest !== state.publicKeyDigest ||
+      publicDate(response.registeredAt, 'revoke registered time') !==
+        state.registration.registeredAt ||
+      publicDate(response.expiresAt, 'revoke expiry time') !== state.registration.expiresAt
+    ) {
       throw new Error('Campaign agent revoke receipt tuple is invalid')
     }
     if (attachmentFailure) throw attachmentFailure
@@ -1141,8 +1362,12 @@ export class CampaignAgentHostController {
 
   async teardownAll(reason: CampaignAgentHostTeardownReason): Promise<void> {
     const terminalIds = [...this.sessions.keys()]
-    const results = await Promise.allSettled(terminalIds.map((terminalId) => this.teardownTerminal(terminalId, reason)))
-    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    const results = await Promise.allSettled(
+      terminalIds.map((terminalId) => this.teardownTerminal(terminalId, reason))
+    )
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    )
     if (failure) throw failure.reason
   }
 

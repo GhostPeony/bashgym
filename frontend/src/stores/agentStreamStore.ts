@@ -29,21 +29,26 @@ export const useAgentStreamStore = create<AgentStreamState>((set) => ({
   hermesStreams: new Map(),
   version: 0,
 
-  publishHermesStream: (snapshot) => set((state) => {
-    const next = new Map(state.hermesStreams)
-    next.set(snapshot.panelId, snapshot)
-    return { hermesStreams: next, version: state.version + 1 }
-  }),
+  publishHermesStream: (snapshot) =>
+    set((state) => {
+      const next = new Map(state.hermesStreams)
+      next.set(snapshot.panelId, snapshot)
+      return { hermesStreams: next, version: state.version + 1 }
+    }),
 
-  removeHermesStream: (panelId) => set((state) => {
-    if (!state.hermesStreams.has(panelId)) return state
-    const next = new Map(state.hermesStreams)
-    next.delete(panelId)
-    return { hermesStreams: next, version: state.version + 1 }
-  })
+  removeHermesStream: (panelId) =>
+    set((state) => {
+      if (!state.hermesStreams.has(panelId)) return state
+      const next = new Map(state.hermesStreams)
+      next.delete(panelId)
+      return { hermesStreams: next, version: state.version + 1 }
+    })
 }))
 
-export function registerHermesPromptSender(panelId: string, sender: HermesPromptSender): () => void {
+export function registerHermesPromptSender(
+  panelId: string,
+  sender: HermesPromptSender
+): () => void {
   hermesPromptSenders.set(panelId, sender)
   return () => {
     if (hermesPromptSenders.get(panelId) === sender) hermesPromptSenders.delete(panelId)

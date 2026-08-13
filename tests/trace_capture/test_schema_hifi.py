@@ -191,8 +191,6 @@ class TestTraceStepToEventsHiFi:
             "cwd": "/home/user",
         }
         events = trace_step_to_events(step, trace_id="t1")
-        body = events[0].body
-
         # Validate the operational body parses without error
         op = validate_operational_event(events[0])
         assert op.tool_name == "Read"

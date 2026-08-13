@@ -1,16 +1,45 @@
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import {
-  Terminal, Sparkles, BarChart3, GitBranch, Trophy, Database, ArrowRight,
-  FileStack, Layers, FlaskConical, Shield, Activity, Network, Link2, Cloud,
+  Terminal,
+  Sparkles,
+  BarChart3,
+  GitBranch,
+  Trophy,
+  Database,
+  ArrowRight,
+  FileStack,
+  Layers,
+  FlaskConical,
+  Shield,
+  Activity,
+  Network,
+  Link2,
+  Cloud,
   Rocket
 } from 'lucide-react'
 import { useUIStore } from '../../stores'
 import { useAchievementStore } from '../../stores/achievementStore'
-import { systemApi, tracesApi } from '../../services/api'
+import { traceReposResource } from '../../stores/appResources'
+import { systemStatsResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
-function SpaceCard({ icon, title, desc, stat, onClick, primary, size = 'normal' }: {
-  icon: React.ReactNode; title: string; desc: string; stat?: string; onClick: () => void; primary?: boolean; size?: 'normal' | 'compact'
+function SpaceCard({
+  icon,
+  title,
+  desc,
+  stat,
+  onClick,
+  primary,
+  size = 'normal'
+}: {
+  icon: React.ReactNode
+  title: string
+  desc: string
+  stat?: string
+  onClick: () => void
+  primary?: boolean
+  size?: 'normal' | 'compact'
 }) {
   return (
     <button
@@ -21,20 +50,30 @@ function SpaceCard({ icon, title, desc, stat, onClick, primary, size = 'normal' 
         size === 'compact' ? 'p-4' : 'p-5'
       )}
     >
-      <div className={clsx(
-        'border-brutal border-border rounded-brutal bg-accent-light flex items-center justify-center mb-2.5',
-        size === 'compact' ? 'w-8 h-8' : 'w-9 h-9'
-      )}>
+      <div
+        className={clsx(
+          'border-brutal border-border rounded-brutal bg-accent-light flex items-center justify-center mb-2.5',
+          size === 'compact' ? 'w-8 h-8' : 'w-9 h-9'
+        )}
+      >
         {icon}
       </div>
-      <h3 className={clsx(
-        'font-brand text-text-primary mb-1',
-        size === 'compact' ? 'text-sm' : 'text-base'
-      )}>{title}</h3>
-      <p className={clsx(
-        'text-text-secondary flex-1 leading-relaxed',
-        size === 'compact' ? 'text-xs mb-2' : 'text-sm mb-3'
-      )}>{desc}</p>
+      <h3
+        className={clsx(
+          'font-brand text-text-primary mb-1',
+          size === 'compact' ? 'text-sm' : 'text-base'
+        )}
+      >
+        {title}
+      </h3>
+      <p
+        className={clsx(
+          'text-text-secondary flex-1 leading-relaxed',
+          size === 'compact' ? 'text-xs mb-2' : 'text-sm mb-3'
+        )}
+      >
+        {desc}
+      </p>
       {stat && (
         <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">{stat}</p>
       )}
@@ -48,35 +87,24 @@ function SpaceCard({ icon, title, desc, stat, onClick, primary, size = 'normal' 
 export function HomeScreen() {
   const { openOverlay, closeOverlay } = useUIStore()
   const { earnedCount, totalCount, totalPoints, fetchRecent } = useAchievementStore()
-  const [stats, setStats] = useState({ traces: 0, examples: 0, models: 0 })
+  const { data: systemStats } = useSessionResource(systemStatsResource)
+  const { data: repos } = useSessionResource(traceReposResource)
 
   useEffect(() => {
     fetchRecent()
-    const fetchStats = async () => {
-      try {
-        const statsResult = await systemApi.stats()
-        if (statsResult.ok && statsResult.data) {
-          const data = statsResult.data
-          setStats(prev => ({
-            ...prev,
-            traces: data.gold_traces_count || 0,
-            models: data.models_count || 0
-          }))
-        }
-        const tracesResult = await tracesApi.listRepos()
-        if (tracesResult.ok && tracesResult.data) {
-          const total = tracesResult.data.reduce((sum: number, r: any) => sum + (r.trace_count || 0), 0)
-          setStats(prev => ({ ...prev, traces: total, examples: total * 3 }))
-        }
-      } catch { /* silent */ }
-    }
-    fetchStats()
   }, [fetchRecent])
+
+  // Repo trace totals win over the system gold count once repos have loaded
+  const repoTraceTotal = repos?.reduce((sum, r) => sum + (r.trace_count || 0), 0)
+  const stats = {
+    traces: repoTraceTotal ?? systemStats?.gold_traces_count ?? 0,
+    examples: (repoTraceTotal ?? 0) * 3,
+    models: systemStats?.models_count ?? 0
+  }
 
   return (
     <div className="h-full bg-background-primary overflow-auto">
       <div className="max-w-[1100px] mx-auto px-8 py-8">
-
         {/* Header row — brand + stats */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
@@ -92,15 +120,21 @@ export function HomeScreen() {
             >
               <Database className="w-3.5 h-3.5 text-accent" />
               <span className="font-mono text-xs text-text-primary">{stats.traces}</span>
-              <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">Traces</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
+                Traces
+              </span>
             </button>
             <button
               onClick={() => openOverlay('achievements')}
               className="card flex items-center gap-2 px-3 py-1.5 hover:border-accent active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-pressed transition-press"
             >
               <Trophy className="w-3.5 h-3.5 text-status-warning" />
-              <span className="font-mono text-xs text-text-primary">{earnedCount}/{totalCount}</span>
-              <span className="tag text-[9px] py-0 px-1"><span>{totalPoints} pts</span></span>
+              <span className="font-mono text-xs text-text-primary">
+                {earnedCount}/{totalCount}
+              </span>
+              <span className="tag text-[9px] py-0 px-1">
+                <span>{totalPoints} pts</span>
+              </span>
             </button>
           </div>
         </div>
@@ -113,9 +147,12 @@ export function HomeScreen() {
                 <Rocket className="w-5 h-5 text-accent-dark" />
               </div>
               <div className="flex-1">
-                <h3 className="font-brand text-base text-text-primary mb-1">New here? Get started in minutes</h3>
+                <h3 className="font-brand text-base text-text-primary mb-1">
+                  New here? Get started in minutes
+                </h3>
                 <p className="text-sm text-text-secondary mb-3">
-                  Install hooks and start using Claude Code to capture your first traces. Each session automatically becomes training data for your personal coding assistant.
+                  Install hooks and start using Claude Code to capture your first traces. Each
+                  session automatically becomes training data for your personal coding assistant.
                 </p>
                 <button
                   onClick={() => useUIStore.getState().setOnboardingOpen(true)}
@@ -130,7 +167,9 @@ export function HomeScreen() {
 
         {/* Section: Core Spaces */}
         <div className="mb-8">
-          <h2 className="tag mb-4"><span>CORE</span></h2>
+          <h2 className="tag mb-4">
+            <span>CORE</span>
+          </h2>
           <div className="grid grid-cols-2 gap-5">
             <SpaceCard
               icon={<Terminal className="w-5 h-5 text-accent-dark" />}
@@ -144,7 +183,11 @@ export function HomeScreen() {
               icon={<Sparkles className="w-5 h-5 text-accent-dark" />}
               title="Data Factory"
               desc="Import traces from Claude Code sessions, segment them into training examples, augment with synthetic data, and export to NeMo JSONL format."
-              stat={stats.traces > 0 ? `${stats.traces} traces / ~${stats.examples} examples` : 'No traces yet'}
+              stat={
+                stats.traces > 0
+                  ? `${stats.traces} traces / ~${stats.examples} examples`
+                  : 'No traces yet'
+              }
               onClick={() => openOverlay('factory')}
             />
             <SpaceCard
@@ -166,7 +209,9 @@ export function HomeScreen() {
 
         {/* Section: Library & Tools */}
         <div className="mb-8">
-          <h2 className="tag mb-4"><span>LIBRARY & TOOLS</span></h2>
+          <h2 className="tag mb-4">
+            <span>LIBRARY & TOOLS</span>
+          </h2>
           <div className="grid grid-cols-3 gap-4">
             <SpaceCard
               icon={<FileStack className="w-4 h-4 text-accent-dark" />}
@@ -217,7 +262,9 @@ export function HomeScreen() {
 
         {/* Section: Connections */}
         <div>
-          <h2 className="tag mb-4"><span>CONNECTIONS</span></h2>
+          <h2 className="tag mb-4">
+            <span>CONNECTIONS</span>
+          </h2>
           <div className="grid grid-cols-3 gap-4">
             <SpaceCard
               icon={<Cloud className="w-4 h-4 text-accent-dark" />}
@@ -243,7 +290,6 @@ export function HomeScreen() {
             />
           </div>
         </div>
-
       </div>
     </div>
   )

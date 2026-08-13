@@ -1,1 +1,1 @@
-"""Campaign control-plane test package."""
+"""Experiment campaign test package."""

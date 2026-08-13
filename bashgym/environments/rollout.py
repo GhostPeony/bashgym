@@ -146,9 +146,7 @@ def extract_verifier_rewards(
         except (TypeError, ValueError) as exc:
             raise ValueError("declared total_reward must be numeric") from exc
         if not math.isclose(declared_total_value, computed_total, rel_tol=1e-9, abs_tol=1e-9):
-            raise ValueError(
-                "declared total_reward does not match the weighted reward components"
-            )
+            raise ValueError("declared total_reward does not match the weighted reward components")
     return computed_total, components
 
 

@@ -7,7 +7,7 @@ type CampaignTransition = (
   campaignId: string,
   action: CampaignTransitionAction,
   expectedVersion: number,
-  reason?: string,
+  reason?: string
 ) => Promise<unknown>
 
 export function openCampaignInAutoResearch(workspaceId: string, campaignId: string): void {
@@ -16,13 +16,13 @@ export function openCampaignInAutoResearch(workspaceId: string, campaignId: stri
 
 export function shouldLoadCampaignDrillDown(
   configOpen: boolean,
-  snapshotVersion: number | null,
+  snapshotVersion: number | null
 ): boolean {
   return configOpen && snapshotVersion !== null
 }
 
 export function hasLiveCampaignAuthority(
-  detail: Pick<CampaignDetailState, 'freshness'> | null | undefined,
+  detail: Pick<CampaignDetailState, 'freshness'> | null | undefined
 ): boolean {
   return detail?.freshness === 'live'
 }
@@ -37,17 +37,18 @@ export async function submitCampaignTransitionIfLive(input: {
   const { detail, mutating, action, workspaceId, transition } = input
   if (!hasLiveCampaignAuthority(detail) || !detail || mutating) return false
 
-  const reason = action === 'pause'
-    ? 'Paused from the BashGym campaign canvas.'
-    : action === 'cancel'
-      ? 'Cancelled from the BashGym campaign canvas.'
-      : undefined
+  const reason =
+    action === 'pause'
+      ? 'Paused from the BashGym campaign canvas.'
+      : action === 'cancel'
+        ? 'Cancelled from the BashGym campaign canvas.'
+        : undefined
   await transition(
     workspaceId,
     detail.campaign.campaign_id,
     action,
     detail.campaign.version,
-    reason,
+    reason
   )
   return true
 }

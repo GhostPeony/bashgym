@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, ChevronDown, GripHorizontal, Palette, SendHorizontal, Terminal, X } from 'lucide-react'
+import {
+  Bot,
+  ChevronDown,
+  GripHorizontal,
+  Palette,
+  SendHorizontal,
+  Terminal,
+  X
+} from 'lucide-react'
 import { clsx } from 'clsx'
 import {
   getTerminalFgColor,
@@ -111,15 +119,19 @@ export function AgentStreamOverlay() {
       if (panel.type !== 'terminal' || !panel.terminalId) return []
       const session = sessions.get(panel.terminalId)
       if (!session) return []
-      return [{
-        id: `terminal:${session.id}`,
-        kind: 'terminal' as const,
-        label: panel.title,
-        subtitle: session.agentKind ? `${session.agentKind} · ${session.status.replace('_', ' ')}` : 'shell',
-        terminalId: session.id,
-        lines: normalizeTerminalFeed(session.lastOutput ?? []),
-        busy: session.status === 'running' || session.status === 'tool_calling'
-      }]
+      return [
+        {
+          id: `terminal:${session.id}`,
+          kind: 'terminal' as const,
+          label: panel.title,
+          subtitle: session.agentKind
+            ? `${session.agentKind} · ${session.status.replace('_', ' ')}`
+            : 'shell',
+          terminalId: session.id,
+          lines: normalizeTerminalFeed(session.lastOutput ?? []),
+          busy: session.status === 'running' || session.status === 'tool_calling'
+        }
+      ]
     })
     const hermesSources: StreamSource[] = Array.from(hermesStreams.values()).map((snapshot) => ({
       id: `hermes:${snapshot.panelId}`,
@@ -143,11 +155,11 @@ export function AgentStreamOverlay() {
 
   const selected = sources.find((source) => source.id === selectedId) ?? sources[0]
   const terminalLines = useMemo(
-    () => selected?.kind === 'terminal' ? selected.lines : [],
+    () => (selected?.kind === 'terminal' ? selected.lines : []),
     [selected]
   )
   const hermesMessages = useMemo(
-    () => selected?.kind === 'hermes' ? hermesTranscript(selected.snapshot.messages) : [],
+    () => (selected?.kind === 'hermes' ? hermesTranscript(selected.snapshot.messages) : []),
     [selected]
   )
 
@@ -155,10 +167,14 @@ export function AgentStreamOverlay() {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' })
   }, [hermesMessages, terminalLines])
 
-  const clampToViewport = useCallback((next: StreamGeometry) => clampStreamGeometry(next, {
-    width: window.innerWidth,
-    height: window.innerHeight
-  }), [])
+  const clampToViewport = useCallback(
+    (next: StreamGeometry) =>
+      clampStreamGeometry(next, {
+        width: window.innerWidth,
+        height: window.innerHeight
+      }),
+    []
+  )
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -166,9 +182,18 @@ export function AgentStreamOverlay() {
       if (!interaction) return
       const deltaX = event.clientX - interaction.startX
       const deltaY = event.clientY - interaction.startY
-      const next = interaction.kind === 'move'
-        ? { ...interaction.geometry, x: interaction.geometry.x + deltaX, y: interaction.geometry.y + deltaY }
-        : { ...interaction.geometry, width: interaction.geometry.width + deltaX, height: interaction.geometry.height + deltaY }
+      const next =
+        interaction.kind === 'move'
+          ? {
+              ...interaction.geometry,
+              x: interaction.geometry.x + deltaX,
+              y: interaction.geometry.y + deltaY
+            }
+          : {
+              ...interaction.geometry,
+              width: interaction.geometry.width + deltaX,
+              height: interaction.geometry.height + deltaY
+            }
       setGeometry(clampToViewport(next))
     }
     const handlePointerUp = () => {
@@ -216,12 +241,12 @@ export function AgentStreamOverlay() {
   }
 
   const feedTextColor = getTerminalFgColor(resolvedTheme, terminalFgHue)
-  const glassBackground = resolvedTheme === 'dark'
-    ? `hsla(${accentHue}, 24%, 9%, 0.78)`
-    : `hsla(${accentHue}, 35%, 97%, 0.72)`
-  const composerBackground = resolvedTheme === 'dark'
-    ? `hsla(${accentHue}, 18%, 18%, 0.72)`
-    : 'rgba(255,255,255,0.68)'
+  const glassBackground =
+    resolvedTheme === 'dark'
+      ? `hsla(${accentHue}, 24%, 9%, 0.78)`
+      : `hsla(${accentHue}, 35%, 97%, 0.72)`
+  const composerBackground =
+    resolvedTheme === 'dark' ? `hsla(${accentHue}, 18%, 18%, 0.72)` : 'rgba(255,255,255,0.68)'
 
   if (!isOpen) return null
 
@@ -254,10 +279,14 @@ export function AgentStreamOverlay() {
           >
             <GripHorizontal className="h-4 w-4" />
           </button>
-          <span className={clsx('status-dot flex-shrink-0', selected?.busy ? 'status-success' : '')} />
-          {selected?.kind === 'hermes'
-            ? <Bot className="h-4 w-4 flex-shrink-0 text-accent" />
-            : <Terminal className="h-4 w-4 flex-shrink-0 text-accent" />}
+          <span
+            className={clsx('status-dot flex-shrink-0', selected?.busy ? 'status-success' : '')}
+          />
+          {selected?.kind === 'hermes' ? (
+            <Bot className="h-4 w-4 flex-shrink-0 text-accent" />
+          ) : (
+            <Terminal className="h-4 w-4 flex-shrink-0 text-accent" />
+          )}
           <label className="relative min-w-0 flex-1">
             <span className="sr-only">Viewing agent feed</span>
             <select
@@ -309,42 +338,63 @@ export function AgentStreamOverlay() {
         >
           {selected?.kind === 'hermes' ? (
             <div className="space-y-4">
-              {hermesMessages.length > 0 ? hermesMessages.map((message, index) => (
-                <div key={`${message.role}-${index}`} className={clsx('max-w-[92%]', message.role === 'user' ? 'ml-auto text-right' : null)}>
-                  <div className={clsx(
-                    'mb-1 font-mono text-[9px] font-semibold uppercase tracking-[0.14em]',
-                    message.role === 'user' ? 'text-text-muted' : 'text-accent'
-                  )}>
-                    {message.role === 'user' ? 'You' : selected.label}
+              {hermesMessages.length > 0 ? (
+                hermesMessages.map((message, index) => (
+                  <div
+                    key={`${message.role}-${index}`}
+                    className={clsx(
+                      'max-w-[92%]',
+                      message.role === 'user' ? 'ml-auto text-right' : null
+                    )}
+                  >
+                    <div
+                      className={clsx(
+                        'mb-1 font-mono text-[9px] font-semibold uppercase tracking-[0.14em]',
+                        message.role === 'user' ? 'text-text-muted' : 'text-accent'
+                      )}
+                    >
+                      {message.role === 'user' ? 'You' : selected.label}
+                    </div>
+                    <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-text-primary">
+                      {message.content}
+                    </div>
                   </div>
-                  <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-text-primary">
-                    {message.content}
-                  </div>
-                </div>
-              )) : (
-                <p className="pt-8 text-center font-mono text-[11px] text-text-muted">Waiting for this Hermes conversation…</p>
+                ))
+              ) : (
+                <p className="pt-8 text-center font-mono text-[11px] text-text-muted">
+                  Waiting for this Hermes conversation…
+                </p>
               )}
               {selected.snapshot.sending ? (
-                <div className="font-mono text-[10px] text-accent">{selected.snapshot.activity || 'Hermes is responding…'}</div>
+                <div className="font-mono text-[10px] text-accent">
+                  {selected.snapshot.activity || 'Hermes is responding…'}
+                </div>
               ) : null}
               {selected.snapshot.error ? (
-                <div className="font-mono text-[10px] text-status-error">{selected.snapshot.error}</div>
+                <div className="font-mono text-[10px] text-status-error">
+                  {selected.snapshot.error}
+                </div>
               ) : null}
             </div>
           ) : (
-            <div className="space-y-1.5 font-mono text-[11px] leading-relaxed" style={{ color: feedTextColor }}>
-              {terminalLines.length > 0 ? terminalLines.map((line, index) => {
-                const recency = (index + 1) / terminalLines.length
-                return (
-                  <div
-                    key={`${index}-${line}`}
-                    className="whitespace-pre-wrap break-words"
-                    style={{ opacity: 0.3 + recency * 0.7 }}
-                  >
-                    {line}
-                  </div>
-                )
-              }) : (
+            <div
+              className="space-y-1.5 font-mono text-[11px] leading-relaxed"
+              style={{ color: feedTextColor }}
+            >
+              {terminalLines.length > 0 ? (
+                terminalLines.map((line, index) => {
+                  const recency = (index + 1) / terminalLines.length
+                  return (
+                    <div
+                      key={`${index}-${line}`}
+                      className="whitespace-pre-wrap break-words"
+                      style={{ opacity: 0.3 + recency * 0.7 }}
+                    >
+                      {line}
+                    </div>
+                  )
+                })
+              ) : (
                 <p className="pt-8 text-center text-text-muted">Waiting for terminal output…</p>
               )}
             </div>

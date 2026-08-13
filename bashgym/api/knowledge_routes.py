@@ -14,12 +14,34 @@ from pydantic import BaseModel, ConfigDict, Field
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
 TEXT_SUFFIXES = {
-    ".md", ".mdx", ".txt", ".json", ".jsonl", ".yaml", ".yml",
-    ".toml", ".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go",
+    ".md",
+    ".mdx",
+    ".txt",
+    ".json",
+    ".jsonl",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".rs",
+    ".go",
 }
 SKIP_NAMES = {
-    ".git", ".env", ".venv", "venv", "node_modules", "__pycache__",
-    ".pytest_cache", ".ruff_cache", "dist", "build", "coverage",
+    ".git",
+    ".env",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "dist",
+    "build",
+    "coverage",
 }
 MAX_FILE_BYTES = 512 * 1024
 
@@ -113,7 +135,9 @@ def _safe_relative(root: Path, path: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
 
 
-def _walk_tree(root: Path, *, max_depth: int, max_entries: int) -> tuple[list[dict[str, Any]], dict[str, int], bool]:
+def _walk_tree(
+    root: Path, *, max_depth: int, max_entries: int
+) -> tuple[list[dict[str, Any]], dict[str, int], bool]:
     counts = {"files": 0, "folders": 0, "knowledge_files": 0}
     truncated = [False]
 
@@ -123,7 +147,11 @@ def _walk_tree(root: Path, *, max_depth: int, max_entries: int) -> tuple[list[di
             return []
         try:
             children = sorted(
-                (item for item in directory.iterdir() if item.name not in SKIP_NAMES and not item.name.startswith(".")),
+                (
+                    item
+                    for item in directory.iterdir()
+                    if item.name not in SKIP_NAMES and not item.name.startswith(".")
+                ),
                 key=lambda item: (not item.is_dir(), item.name.casefold()),
             )
         except OSError:
@@ -140,23 +168,27 @@ def _walk_tree(root: Path, *, max_depth: int, max_entries: int) -> tuple[list[di
             relative = _safe_relative(root, item)
             if item.is_dir():
                 counts["folders"] += 1
-                nodes.append({
-                    "name": item.name,
-                    "path": relative,
-                    "type": "folder",
-                    "children": visit(item, depth + 1, per_folder_budget),
-                })
+                nodes.append(
+                    {
+                        "name": item.name,
+                        "path": relative,
+                        "type": "folder",
+                        "children": visit(item, depth + 1, per_folder_budget),
+                    }
+                )
             elif item.is_file():
                 counts["files"] += 1
                 if item.suffix.casefold() in TEXT_SUFFIXES:
                     counts["knowledge_files"] += 1
-                nodes.append({
-                    "name": item.name,
-                    "path": relative,
-                    "type": "file",
-                    "knowledge": item.suffix.casefold() in TEXT_SUFFIXES,
-                    "size_bytes": item.stat().st_size if item.exists() else 0,
-                })
+                nodes.append(
+                    {
+                        "name": item.name,
+                        "path": relative,
+                        "type": "file",
+                        "knowledge": item.suffix.casefold() in TEXT_SUFFIXES,
+                        "size_bytes": item.stat().st_size if item.exists() else 0,
+                    }
+                )
         return nodes
 
     return visit(root, 1, max_entries), counts, truncated[0]
@@ -164,7 +196,9 @@ def _walk_tree(root: Path, *, max_depth: int, max_entries: int) -> tuple[list[di
 
 def _read_text(path: Path, max_chars: int) -> str:
     if path.suffix.casefold() not in TEXT_SUFFIXES:
-        raise HTTPException(status_code=415, detail="Preview is limited to safe text and source files")
+        raise HTTPException(
+            status_code=415, detail="Preview is limited to safe text and source files"
+        )
     if path.stat().st_size > MAX_FILE_BYTES:
         raise HTTPException(status_code=413, detail="File is too large to preview")
     try:
@@ -188,7 +222,12 @@ def knowledge_status(request: Request, workspace_id: str = Query(...)) -> dict[s
         },
         "adapters": [
             {"id": "workspace", "label": "Workspace files", "available": True, "mode": "local"},
-            {"id": "gbrain", "label": "GBrain", "available": bool(executable or sources), "mode": "local-cli"},
+            {
+                "id": "gbrain",
+                "label": "GBrain",
+                "available": bool(executable or sources),
+                "mode": "local-cli",
+            },
         ],
     }
 
@@ -235,7 +274,9 @@ def search_knowledge_source(request: Request, body: SearchInput) -> dict[str, An
     for candidate in root.rglob("*"):
         if len(results) >= body.limit or scanned >= 2000:
             break
-        if any(part in SKIP_NAMES or part.startswith(".") for part in candidate.relative_to(root).parts):
+        if any(
+            part in SKIP_NAMES or part.startswith(".") for part in candidate.relative_to(root).parts
+        ):
             continue
         if not candidate.is_file() or candidate.suffix.casefold() not in TEXT_SUFFIXES:
             continue
@@ -248,7 +289,7 @@ def search_knowledge_source(request: Request, body: SearchInput) -> dict[str, An
         if position < 0 and query not in candidate.name.casefold():
             continue
         start = max(0, position - 120) if position >= 0 else 0
-        snippet = " ".join(text[start:start + 360].split())
+        snippet = " ".join(text[start : start + 360].split())
         results.append({"path": _safe_relative(root, candidate), "snippet": snippet})
     return {
         "provider": body.provider,

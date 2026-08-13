@@ -120,7 +120,10 @@ function inferHarness(session?: TerminalSession): HarnessKind {
     session?.model,
     session?.taskSummary,
     ...(session?.lastOutput || [])
-  ].filter(Boolean).join(' ').toLowerCase()
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
 
   if (text.includes('claude')) return 'claude'
   if (text.includes('codex') || text.includes('gpt-')) return 'codex'
@@ -151,7 +154,8 @@ function toolMatchesLinkedScope(tool: ToolkitTool, linkedInstances: LinkedInstan
   if (!linkedInstances.length) return tool.source.startsWith('peony')
   return linkedInstances.some((instance) => {
     if (instance.kind === 'hermes') return tool.source.startsWith('peony')
-    if (instance.kind === 'claude' || instance.kind === 'codex') return tool.source.startsWith('peony')
+    if (instance.kind === 'claude' || instance.kind === 'codex')
+      return tool.source.startsWith('peony')
     return tool.source.startsWith('peony')
   })
 }
@@ -171,7 +175,7 @@ function buildToolkitContext(
     '',
     `Generated: ${new Date().toISOString()}`,
     `Toolkit API: GET ${API_BASE}/agent/toolkit`,
-    `Scope: ${scopeMode}`,
+    `Scope: ${scopeMode}`
   ]
 
   if (!inventory) {
@@ -193,7 +197,9 @@ function buildToolkitContext(
   lines.push('', '### Linked instances')
   if (linkedInstances.length) {
     for (const instance of linkedInstances) {
-      lines.push(`- ${instance.label}: ${instance.title}${instance.model ? ` (${instance.model})` : ''}`)
+      lines.push(
+        `- ${instance.label}: ${instance.title}${instance.model ? ` (${instance.model})` : ''}`
+      )
     }
   } else {
     lines.push('- none linked; showing workspace/Peony defaults')
@@ -211,8 +217,12 @@ function buildToolkitContext(
       skill.resource_counts.references ? `${skill.resource_counts.references} refs` : '',
       skill.resource_counts.assets ? `${skill.resource_counts.assets} assets` : '',
       skill.tool_count ? `${skill.tool_count} tools` : ''
-    ].filter(Boolean).join(', ')
-    lines.push(`- ${skill.name} [${skill.source}]${resources ? ` (${resources})` : ''}: ${skill.description}`)
+    ]
+      .filter(Boolean)
+      .join(', ')
+    lines.push(
+      `- ${skill.name} [${skill.source}]${resources ? ` (${resources})` : ''}: ${skill.description}`
+    )
   }
 
   lines.push('', '### Peony tools')
@@ -253,14 +263,22 @@ function buildToolkitContext(
   return lines.join('\n')
 }
 
-function SkillRow({ skill, onSelect }: { skill: ToolkitSkill; onSelect: (skill: ToolkitSkill) => void }) {
+function SkillRow({
+  skill,
+  onSelect
+}: {
+  skill: ToolkitSkill
+  onSelect: (skill: ToolkitSkill) => void
+}) {
   const resources = skill.resource_counts
   const resourceBits = [
     resources.scripts ? `${resources.scripts}s` : '',
     resources.references ? `${resources.references}r` : '',
     resources.assets ? `${resources.assets}a` : '',
     skill.tool_count ? `${skill.tool_count}t` : ''
-  ].filter(Boolean).join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   const content = (
     <>
@@ -369,21 +387,32 @@ export const ToolKitNode = memo(function ToolKitNode({
   const canvasEdges = useTerminalStore((state) => state.canvasEdges)
   const sessionsVersion = useTerminalStore((state) => state.sessionsVersion)
 
-  const loadInventory = useCallback(async (refresh = false) => {
-    setLoading(true)
-    const res = await toolkitApi.inventory({ includeRemote, refresh })
-    if (!mountedRef.current) return
-    setLoading(false)
-    if (res.ok && res.data) {
-      const snapshot = res.data
-      setInventory(snapshot)
-      setError(null)
-      const workspaceRoot = snapshot.skill_roots.find((root) => root.label === 'workspace' && root.exists)
-      setTargetRoot((current) => current || workspaceRoot?.path || snapshot.skill_roots.find((root) => root.exists)?.path || '')
-    } else {
-      setError(res.error || 'Unable to load toolkit inventory')
-    }
-  }, [includeRemote])
+  const loadInventory = useCallback(
+    async (refresh = false) => {
+      setLoading(true)
+      const res = await toolkitApi.inventory({ includeRemote, refresh })
+      if (!mountedRef.current) return
+      setLoading(false)
+      if (res.ok && res.data) {
+        const snapshot = res.data
+        setInventory(snapshot)
+        setError(null)
+        const workspaceRoot = snapshot.skill_roots.find(
+          (root) => root.label === 'workspace' && root.exists
+        )
+        setTargetRoot(
+          (current) =>
+            current ||
+            workspaceRoot?.path ||
+            snapshot.skill_roots.find((root) => root.exists)?.path ||
+            ''
+        )
+      } else {
+        setError(res.error || 'Unable to load toolkit inventory')
+      }
+    },
+    [includeRemote]
+  )
 
   useEffect(() => {
     mountedRef.current = true
@@ -478,17 +507,27 @@ export const ToolKitNode = memo(function ToolKitNode({
   }, [scopedEndpoints, query])
 
   const buildContext = useCallback(
-    () => buildToolkitContext(
-      inventory,
-      skillIdea,
-      targetRoot,
-      linkedInstances,
-      scopeMode,
+    () =>
+      buildToolkitContext(
+        inventory,
+        skillIdea,
+        targetRoot,
+        linkedInstances,
+        scopeMode,
+        filteredSkills,
+        filteredTools,
+        filteredEndpoints
+      ),
+    [
+      filteredEndpoints,
       filteredSkills,
       filteredTools,
-      filteredEndpoints
-    ),
-    [filteredEndpoints, filteredSkills, filteredTools, inventory, linkedInstances, scopeMode, skillIdea, targetRoot]
+      inventory,
+      linkedInstances,
+      scopeMode,
+      skillIdea,
+      targetRoot
+    ]
   )
 
   const statusBarClass = error
@@ -502,310 +541,352 @@ export const ToolKitNode = memo(function ToolKitNode({
     ? linkedInstances.map((instance) => instance.label).join(' + ')
     : 'Workspace'
 
-  const openSkillLab = useCallback((skill: ToolkitSkill) => {
-    const state = useTerminalStore.getState()
-    const existing = state.panels.find((panel) => panel.type === 'skilllab')
-    const adapterConfig = {
-      ...(existing?.adapterConfig || {}),
-      selectedSkillId: skillIdFor(skill),
-      selectedSkillName: skill.name,
-      selectedSkillRevision: skill.revision,
-      selectedSkillSource: skill.source,
-      selectedSkillPath: skill.path,
-      openRequestedAt: Date.now(),
-    }
-    const panelId = existing?.id ?? state.addPanel({
-      type: 'skilllab',
-      title: 'Skill Lab',
-      adapterConfig,
-    })
-    if (existing) {
-      state.updatePanelConfig(panelId, adapterConfig)
-    } else {
-      const anchor = state.canvasNodes.get(data.panelId)?.position
-      const occupied = Array.from(state.canvasNodes.values()).map((node) => node.position)
-      state.updateCanvasNode(panelId, findDynamicNodePosition('skilllab', anchor, occupied))
-    }
-    const edgeExists = state.canvasEdges.some((edge) => (
-      (edge.source === data.panelId && edge.target === panelId)
-      || (edge.target === data.panelId && edge.source === panelId)
-    ))
-    if (!edgeExists) {
-      state.setCanvasEdges([
-        ...state.canvasEdges,
-        { id: `edge-${data.panelId}-${panelId}`, source: data.panelId, target: panelId },
-      ])
-    }
-    state.setActivePanel(panelId)
-  }, [data.panelId])
+  const openSkillLab = useCallback(
+    (skill: ToolkitSkill) => {
+      const state = useTerminalStore.getState()
+      const existing = state.panels.find((panel) => panel.type === 'skilllab')
+      const adapterConfig = {
+        ...(existing?.adapterConfig || {}),
+        selectedSkillId: skillIdFor(skill),
+        selectedSkillName: skill.name,
+        selectedSkillRevision: skill.revision,
+        selectedSkillSource: skill.source,
+        selectedSkillPath: skill.path,
+        openRequestedAt: Date.now()
+      }
+      const panelId =
+        existing?.id ??
+        state.addPanel({
+          type: 'skilllab',
+          title: 'Skill Lab',
+          adapterConfig
+        })
+      if (existing) {
+        state.updatePanelConfig(panelId, adapterConfig)
+      } else {
+        const anchor = state.canvasNodes.get(data.panelId)?.position
+        const occupied = Array.from(state.canvasNodes.values()).map((node) => node.position)
+        state.updateCanvasNode(panelId, findDynamicNodePosition('skilllab', anchor, occupied))
+      }
+      const edgeExists = state.canvasEdges.some(
+        (edge) =>
+          (edge.source === data.panelId && edge.target === panelId) ||
+          (edge.target === data.panelId && edge.source === panelId)
+      )
+      if (!edgeExists) {
+        state.setCanvasEdges([
+          ...state.canvasEdges,
+          { id: `edge-${data.panelId}-${panelId}`, source: data.panelId, target: panelId }
+        ])
+      }
+      state.setActivePanel(panelId)
+    },
+    [data.panelId]
+  )
 
   return (
     <>
-    <DataNodeShell
-      panelId={data.panelId}
-      title={data.title}
-      flowerVariant="toolkit"
-      selected={selected}
-      hasConnections={data.hasConnections}
-      buildContext={data.hasTerminalConnections ? buildContext : undefined}
-      statusBarClass={statusBarClass}
-      hue={hueFor('toolkit')}
-      onFocus={data.onFocus}
-      onClose={data.onClose}
-      headerRight={
-        <>
-          <div className="flex items-center gap-1 text-[9px] font-mono text-text-muted uppercase">
-            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-            <span>{inventory?.cached ? 'cached' : formatDate(inventory?.generated_at)}</span>
+      <DataNodeShell
+        panelId={data.panelId}
+        title={data.title}
+        flowerVariant="toolkit"
+        selected={selected}
+        hasConnections={data.hasConnections}
+        buildContext={data.hasTerminalConnections ? buildContext : undefined}
+        statusBarClass={statusBarClass}
+        hue={hueFor('toolkit')}
+        onFocus={data.onFocus}
+        onClose={data.onClose}
+        headerRight={
+          <>
+            <div className="flex items-center gap-1 text-[9px] font-mono text-text-muted uppercase">
+              {loading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Sparkles className="w-3 h-3" />
+              )}
+              <span>{inventory?.cached ? 'cached' : formatDate(inventory?.generated_at)}</span>
+            </div>
+            <button
+              type="button"
+              className="nodrag node-btn node-btn-accent"
+              onClick={(event) => {
+                event.stopPropagation()
+                setConfigOpen(true)
+              }}
+              title="Configure Tool Kit node"
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+            </button>
+            <button
+              type="button"
+              className="nodrag node-btn node-btn-accent"
+              onClick={(event) => {
+                event.stopPropagation()
+                setWorkshopOpen(true)
+              }}
+              title="Open skill workshop"
+            >
+              <FilePlus2 className="w-3 h-3" />
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-1.5">
+            <CountTile icon={Brain} label="Skills" value={scopedSkills.length} />
+            <CountTile icon={Wrench} label="Tools" value={scopedTools.length} />
+            <CountTile icon={Network} label="Agents" value={scopedEndpoints.length} />
           </div>
-          <button
-            type="button"
-            className="nodrag node-btn node-btn-accent"
-            onClick={(event) => {
-              event.stopPropagation()
-              setConfigOpen(true)
-            }}
-            title="Configure Tool Kit node"
-          >
-            <SlidersHorizontal className="w-3 h-3" />
-          </button>
-          <button
-            type="button"
-            className="nodrag node-btn node-btn-accent"
-            onClick={(event) => {
-              event.stopPropagation()
-              setWorkshopOpen(true)
-            }}
-            title="Open skill workshop"
-          >
-            <FilePlus2 className="w-3 h-3" />
-          </button>
-        </>
-      }
-    >
-      <div className="space-y-2">
-        <div className="grid grid-cols-3 gap-1.5">
-          <CountTile icon={Brain} label="Skills" value={scopedSkills.length} />
-          <CountTile icon={Wrench} label="Tools" value={scopedTools.length} />
-          <CountTile icon={Network} label="Agents" value={scopedEndpoints.length} />
-        </div>
 
-        <div className="node-section !p-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Terminal className="w-3.5 h-3.5 text-accent flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="node-field-label">Linked instance</div>
-              <div className="text-[11px] font-mono text-text-primary truncate">
-                {scopeMode === 'all' ? 'All skill roots' : linkedLabel}
+          <div className="node-section !p-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Terminal className="w-3.5 h-3.5 text-accent flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="node-field-label">Linked instance</div>
+                <div className="text-[11px] font-mono text-text-primary truncate">
+                  {scopeMode === 'all' ? 'All skill roots' : linkedLabel}
+                </div>
               </div>
+              <span className="text-[9px] font-mono text-text-muted uppercase">
+                {includeRemote ? 'agents on' : 'agents off'}
+              </span>
             </div>
-            <span className="text-[9px] font-mono text-text-muted uppercase">
-              {includeRemote ? 'agents on' : 'agents off'}
-            </span>
+            {linkedInstances.length > 0 && scopeMode === 'linked' && (
+              <div className="mt-1 text-[9px] font-mono text-text-muted truncate">
+                {linkedInstances.map((instance) => instance.title).join(' | ')}
+              </div>
+            )}
           </div>
-          {linkedInstances.length > 0 && scopeMode === 'linked' && (
-            <div className="mt-1 text-[9px] font-mono text-text-muted truncate">
-              {linkedInstances.map((instance) => instance.title).join(' | ')}
+
+          <div className="nodrag flex items-center gap-2">
+            <div className="relative flex-1 min-w-0">
+              <Search className="w-3 h-3 text-text-muted absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                className="input-brutal text-[11px] font-mono min-h-9 !pl-8"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search"
+              />
             </div>
-          )}
-        </div>
-
-        <div className="nodrag flex items-center gap-2">
-          <div className="relative flex-1 min-w-0">
-            <Search className="w-3 h-3 text-text-muted absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              className="input-brutal text-[11px] font-mono min-h-9 !pl-8"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search"
-            />
-          </div>
-          <button
-            type="button"
-            className="node-btn h-9 w-9 justify-center flex-shrink-0"
-            onClick={() => void loadInventory(true)}
-            disabled={loading}
-            title="Refresh"
-          >
-            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-          </button>
-        </div>
-
-        <div className="nodrag grid grid-cols-4 gap-1">
-          {(['skills', 'tools', 'agents'] as ViewMode[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setViewMode(mode)}
-              className={clsx(
-                'px-1.5 py-1 border-brutal rounded-brutal text-[9px] font-mono uppercase',
-                viewMode === mode
-                  ? 'border-accent bg-accent/10 text-accent'
-                  : 'border-border-subtle text-text-muted hover:text-text-primary'
-              )}
-            >
-              {mode}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              setWorkshopOpen(true)
-            }}
-            className="border-brutal rounded-brutal border-border-subtle text-text-muted hover:text-text-primary px-1.5 py-1"
-            title="Open skill workshop"
-          >
-            <FilePlus2 className="w-3 h-3 mx-auto" />
-          </button>
-        </div>
-
-        {error && (
-          <div className="border-brutal border-status-error/50 bg-status-error/10 rounded-brutal px-2 py-1 text-[10px] font-mono text-status-error">
-            <AlertCircle className="inline w-3 h-3 mr-1" />
-            {error.length > 130 ? `${error.slice(0, 127)}...` : error}
-          </div>
-        )}
-
-        <div className="max-h-48 overflow-y-auto pr-1 space-y-1.5">
-          {viewMode === 'skills' && (
-              filteredSkills.length ? filteredSkills.map((skill) => (
-              <SkillRow key={`${skill.source}-${skill.name}-${skill.path || ''}`} skill={skill} onSelect={openSkillLab} />
-            )) : (
-              <div className="text-[10px] font-mono text-text-muted">No skills</div>
-            )
-          )}
-
-          {viewMode === 'tools' && (
-            filteredTools.length ? filteredTools.map((tool) => (
-              <ToolRow key={`${tool.source}-${tool.name}`} tool={tool} />
-            )) : (
-              <div className="text-[10px] font-mono text-text-muted">No tools</div>
-            )
-          )}
-
-          {viewMode === 'agents' && (
-            filteredEndpoints.length ? filteredEndpoints.map((endpoint) => (
-              <EndpointRow key={endpoint.endpoint_id} endpoint={endpoint} />
-            )) : (
-              <div className="text-[10px] font-mono text-text-muted">No agent endpoints</div>
-            )
-          )}
-        </div>
-      </div>
-    </DataNodeShell>
-    <NodeConfigModal
-      isOpen={configOpen}
-      onClose={() => setConfigOpen(false)}
-      title={`${data.title} Config`}
-      description="Capability inventory scope"
-      size="lg"
-    >
-      <ConfigSection title="Inventory State">
-        <ConfigRows>
-          <ConfigRow label="Generated" value={inventory?.generated_at ? new Date(inventory.generated_at).toLocaleString() : undefined} />
-          <ConfigRow label="Cached" value={inventory?.cached ? 'yes' : 'no'} />
-          <ConfigRow label="Visible skills" value={scopedSkills.length} />
-          <ConfigRow label="Visible tools" value={scopedTools.length} />
-          <ConfigRow label="Visible agents" value={scopedEndpoints.length} />
-          <ConfigRow label="Linked" value={linkedInstances.length ? linkedInstances.map((instance) => instance.title).join(', ') : 'workspace defaults'} />
-          <ConfigRow label="Error" value={error} />
-        </ConfigRows>
-      </ConfigSection>
-
-      <ConfigSection title="Scope">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="node-field">
-            <span className="node-field-label">Capability scope</span>
-            <select
-              className="input-brutal text-[11px] font-mono min-h-9"
-              value={scopeMode}
-              onChange={(event) => setScopeMode(event.target.value as ScopeMode)}
-            >
-              <option value="linked">Linked instance</option>
-              <option value="all">All skill roots</option>
-            </select>
-          </label>
-          <label className="node-field">
-            <span className="node-field-label">Agent endpoint probe</span>
             <button
               type="button"
-              className={clsx(
-                'node-btn node-btn-wide min-h-9 justify-center',
-                includeRemote ? 'node-btn-success' : 'node-btn-accent'
+              className="node-btn h-9 w-9 justify-center flex-shrink-0"
+              onClick={() => void loadInventory(true)}
+              disabled={loading}
+              title="Refresh"
+            >
+              {loading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3 h-3" />
               )}
-              onClick={() => setIncludeRemote((current) => !current)}
-            >
-              <Filter className="w-3 h-3" />
-              <span>{includeRemote ? 'Enabled' : 'Disabled'}</span>
             </button>
-          </label>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="node-btn node-btn-wide node-btn-accent justify-center"
-            onClick={() => void loadInventory(true)}
-            disabled={loading}
-          >
-            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            <span>Refresh Inventory</span>
-          </button>
-        </div>
-      </ConfigSection>
+          </div>
 
-      <ConfigSection title="Live Handles">
-        <ConfigRows>
-          <ConfigRow label="Toolkit API" value={`${API_BASE}/agent/toolkit`} />
-          <ConfigRow label="Workspace API" value={`${API_BASE}/workspace/context?format=json`} />
-        </ConfigRows>
-      </ConfigSection>
-    </NodeConfigModal>
-
-    <NodeConfigModal
-      isOpen={workshopOpen}
-      onClose={() => setWorkshopOpen(false)}
-      title={`${data.title} Workshop`}
-      description="Skill context package"
-      size="lg"
-    >
-      <ConfigSection title="Skill Workshop">
-        <div className="grid grid-cols-1 gap-3">
-          <label className="node-field">
-            <span className="node-field-label">Target root</span>
-            <select
-              className="input-brutal text-[11px] font-mono min-h-9"
-              value={targetRoot}
-              onChange={(event) => setTargetRoot(event.target.value)}
+          <div className="nodrag grid grid-cols-4 gap-1">
+            {(['skills', 'tools', 'agents'] as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                className={clsx(
+                  'px-1.5 py-1 border-brutal rounded-brutal text-[9px] font-mono uppercase',
+                  viewMode === mode
+                    ? 'border-accent bg-accent/10 text-accent'
+                    : 'border-border-subtle text-text-muted hover:text-text-primary'
+                )}
+              >
+                {mode}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                setWorkshopOpen(true)
+              }}
+              className="border-brutal rounded-brutal border-border-subtle text-text-muted hover:text-text-primary px-1.5 py-1"
+              title="Open skill workshop"
             >
-              <option value="">Choose root</option>
-              {roots.map((root) => (
-                <option key={`${root.label}-${root.path}`} value={root.path}>
-                  {root.label} ({root.skill_count})
-                </option>
+              <FilePlus2 className="w-3 h-3 mx-auto" />
+            </button>
+          </div>
+
+          {error && (
+            <div className="border-brutal border-status-error/50 bg-status-error/10 rounded-brutal px-2 py-1 text-[10px] font-mono text-status-error">
+              <AlertCircle className="inline w-3 h-3 mr-1" />
+              {error.length > 130 ? `${error.slice(0, 127)}...` : error}
+            </div>
+          )}
+
+          <div className="max-h-48 overflow-y-auto pr-1 space-y-1.5">
+            {viewMode === 'skills' &&
+              (filteredSkills.length ? (
+                filteredSkills.map((skill) => (
+                  <SkillRow
+                    key={`${skill.source}-${skill.name}-${skill.path || ''}`}
+                    skill={skill}
+                    onSelect={openSkillLab}
+                  />
+                ))
+              ) : (
+                <div className="text-[10px] font-mono text-text-muted">No skills</div>
               ))}
-            </select>
-          </label>
-          <label className="node-field">
-            <span className="node-field-label">Skill idea</span>
-            <textarea
-              className="input-brutal nowheel text-[11px] font-mono min-h-[144px]"
-              value={skillIdea}
-              onChange={(event) => setSkillIdea(event.target.value)}
-              placeholder="Skill idea"
-            />
-          </label>
-        </div>
-      </ConfigSection>
 
-      <ConfigSection title="Context">
-        <ConfigRows>
-          <ConfigRow label="Target" value={targetRoot} />
-          <ConfigRow label="Idea ready" value={skillIdea.trim() ? 'yes' : 'no'} />
-          <ConfigRow label="Send context" value={data.hasConnections ? 'linked terminal available' : 'link a terminal first'} />
-        </ConfigRows>
-      </ConfigSection>
-    </NodeConfigModal>
+            {viewMode === 'tools' &&
+              (filteredTools.length ? (
+                filteredTools.map((tool) => (
+                  <ToolRow key={`${tool.source}-${tool.name}`} tool={tool} />
+                ))
+              ) : (
+                <div className="text-[10px] font-mono text-text-muted">No tools</div>
+              ))}
+
+            {viewMode === 'agents' &&
+              (filteredEndpoints.length ? (
+                filteredEndpoints.map((endpoint) => (
+                  <EndpointRow key={endpoint.endpoint_id} endpoint={endpoint} />
+                ))
+              ) : (
+                <div className="text-[10px] font-mono text-text-muted">No agent endpoints</div>
+              ))}
+          </div>
+        </div>
+      </DataNodeShell>
+      <NodeConfigModal
+        isOpen={configOpen}
+        onClose={() => setConfigOpen(false)}
+        title={`${data.title} Config`}
+        description="Capability inventory scope"
+        size="lg"
+      >
+        <ConfigSection title="Inventory State">
+          <ConfigRows>
+            <ConfigRow
+              label="Generated"
+              value={
+                inventory?.generated_at
+                  ? new Date(inventory.generated_at).toLocaleString()
+                  : undefined
+              }
+            />
+            <ConfigRow label="Cached" value={inventory?.cached ? 'yes' : 'no'} />
+            <ConfigRow label="Visible skills" value={scopedSkills.length} />
+            <ConfigRow label="Visible tools" value={scopedTools.length} />
+            <ConfigRow label="Visible agents" value={scopedEndpoints.length} />
+            <ConfigRow
+              label="Linked"
+              value={
+                linkedInstances.length
+                  ? linkedInstances.map((instance) => instance.title).join(', ')
+                  : 'workspace defaults'
+              }
+            />
+            <ConfigRow label="Error" value={error} />
+          </ConfigRows>
+        </ConfigSection>
+
+        <ConfigSection title="Scope">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="node-field">
+              <span className="node-field-label">Capability scope</span>
+              <select
+                className="input-brutal text-[11px] font-mono min-h-9"
+                value={scopeMode}
+                onChange={(event) => setScopeMode(event.target.value as ScopeMode)}
+              >
+                <option value="linked">Linked instance</option>
+                <option value="all">All skill roots</option>
+              </select>
+            </label>
+            <label className="node-field">
+              <span className="node-field-label">Agent endpoint probe</span>
+              <button
+                type="button"
+                className={clsx(
+                  'node-btn node-btn-wide min-h-9 justify-center',
+                  includeRemote ? 'node-btn-success' : 'node-btn-accent'
+                )}
+                onClick={() => setIncludeRemote((current) => !current)}
+              >
+                <Filter className="w-3 h-3" />
+                <span>{includeRemote ? 'Enabled' : 'Disabled'}</span>
+              </button>
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="node-btn node-btn-wide node-btn-accent justify-center"
+              onClick={() => void loadInventory(true)}
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3 h-3" />
+              )}
+              <span>Refresh Inventory</span>
+            </button>
+          </div>
+        </ConfigSection>
+
+        <ConfigSection title="Live Handles">
+          <ConfigRows>
+            <ConfigRow label="Toolkit API" value={`${API_BASE}/agent/toolkit`} />
+            <ConfigRow label="Workspace API" value={`${API_BASE}/workspace/context?format=json`} />
+          </ConfigRows>
+        </ConfigSection>
+      </NodeConfigModal>
+
+      <NodeConfigModal
+        isOpen={workshopOpen}
+        onClose={() => setWorkshopOpen(false)}
+        title={`${data.title} Workshop`}
+        description="Skill context package"
+        size="lg"
+      >
+        <ConfigSection title="Skill Workshop">
+          <div className="grid grid-cols-1 gap-3">
+            <label className="node-field">
+              <span className="node-field-label">Target root</span>
+              <select
+                className="input-brutal text-[11px] font-mono min-h-9"
+                value={targetRoot}
+                onChange={(event) => setTargetRoot(event.target.value)}
+              >
+                <option value="">Choose root</option>
+                {roots.map((root) => (
+                  <option key={`${root.label}-${root.path}`} value={root.path}>
+                    {root.label} ({root.skill_count})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="node-field">
+              <span className="node-field-label">Skill idea</span>
+              <textarea
+                className="input-brutal nowheel text-[11px] font-mono min-h-[144px]"
+                value={skillIdea}
+                onChange={(event) => setSkillIdea(event.target.value)}
+                placeholder="Skill idea"
+              />
+            </label>
+          </div>
+        </ConfigSection>
+
+        <ConfigSection title="Context">
+          <ConfigRows>
+            <ConfigRow label="Target" value={targetRoot} />
+            <ConfigRow label="Idea ready" value={skillIdea.trim() ? 'yes' : 'no'} />
+            <ConfigRow
+              label="Send context"
+              value={data.hasConnections ? 'linked terminal available' : 'link a terminal first'}
+            />
+          </ConfigRows>
+        </ConfigSection>
+      </NodeConfigModal>
     </>
   )
 })

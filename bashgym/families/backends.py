@@ -3,7 +3,7 @@
 This is where the long-standing "Unsloth vs plain-transformers" GRPO question becomes
 a *switch* instead of an either/or: pick the backend from explicit config, else the
 family default, else probe the platform (prefer Unsloth when importable, otherwise
-plain transformers+peft — the path that works on GB10/sm_121 when Unsloth can't load).
+plain transformers+peft for platforms where Unsloth cannot load).
 """
 
 from __future__ import annotations

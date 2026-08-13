@@ -7,7 +7,7 @@ export const CAMPAIGN_AGENT_CLEANUP_FAILED_ERROR =
 interface CampaignAgentWorkspaceStore {
   adoptTerminalIntoWorkspace: (
     workspaceId: string,
-    terminal: { terminalId: string; title: string; cwd: string },
+    terminal: { terminalId: string; title: string; cwd: string }
   ) => boolean
 }
 
@@ -32,18 +32,18 @@ export type CampaignAgentLaunchLifecycleOutcome =
 export function adoptCampaignAgentTerminal(
   workspaceStore: CampaignAgentWorkspaceStore,
   workspaceId: string,
-  terminal: MainOwnedCampaignAgentTerminal,
+  terminal: MainOwnedCampaignAgentTerminal
 ): boolean {
   return workspaceStore.adoptTerminalIntoWorkspace(workspaceId, {
     terminalId: terminal.terminalId,
     title: AUTO_RESEARCH_CODEX_TERMINAL_TITLE,
-    cwd: terminal.cwd,
+    cwd: terminal.cwd
   })
 }
 
 export async function finalizeSuccessfulCampaignAgentLaunch(
   terminalId: string,
-  lifecycle: CampaignAgentLaunchLifecycle,
+  lifecycle: CampaignAgentLaunchLifecycle
 ): Promise<CampaignAgentLaunchLifecycleOutcome> {
   let adopted = false
   try {
@@ -62,7 +62,7 @@ export async function finalizeSuccessfulCampaignAgentLaunch(
     if (await lifecycle.kill(terminalId)) {
       return {
         status: 'adoption_failed_cleaned',
-        durableError: CAMPAIGN_AGENT_ADOPTION_CLEANED_ERROR,
+        durableError: CAMPAIGN_AGENT_ADOPTION_CLEANED_ERROR
       }
     }
   } catch {
@@ -71,13 +71,13 @@ export async function finalizeSuccessfulCampaignAgentLaunch(
 
   return {
     status: 'cleanup_failed',
-    durableError: CAMPAIGN_AGENT_CLEANUP_FAILED_ERROR,
+    durableError: CAMPAIGN_AGENT_CLEANUP_FAILED_ERROR
   }
 }
 
 export function preserveDurableCampaignAgentError(
   durableError: string | null,
-  reconciledError: string | null,
+  reconciledError: string | null
 ): string | null {
   return durableError ?? reconciledError
 }

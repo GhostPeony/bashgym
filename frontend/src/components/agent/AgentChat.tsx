@@ -1,5 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Send, MessageSquare, Loader2, AlertCircle, Plus, History, Trash2, Tag, ChevronRight, ArrowLeft, Terminal, CheckCircle, XCircle } from 'lucide-react'
+import {
+  X,
+  Send,
+  MessageSquare,
+  Loader2,
+  AlertCircle,
+  Plus,
+  History,
+  Trash2,
+  Tag,
+  ChevronRight,
+  ArrowLeft,
+  Terminal,
+  CheckCircle,
+  XCircle
+} from 'lucide-react'
 import { useUIStore, useAgentStore } from '../../stores'
 import { agentApi } from '../../services/api'
 import { clsx } from 'clsx'
@@ -26,10 +41,23 @@ export function AgentChat() {
   const { isAgentChatOpen, setAgentChatOpen } = useUIStore()
   const store = useAgentStore()
   const {
-    sessions, activeSessionId, messages, isLoading, error, pendingAction,
-    createSession, switchSession, deleteSession,
-    addUserMessage, addAssistantMessage, setLoading, setError, setPendingAction,
-    saveActiveSession, loadSessions, initializeDefaultSession,
+    sessions,
+    activeSessionId,
+    messages,
+    isLoading,
+    error,
+    pendingAction,
+    createSession,
+    switchSession,
+    deleteSession,
+    addUserMessage,
+    addAssistantMessage,
+    setLoading,
+    setError,
+    setPendingAction,
+    saveActiveSession,
+    loadSessions,
+    initializeDefaultSession
   } = store
 
   const [input, setInput] = useState('')
@@ -39,36 +67,39 @@ export function AgentChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const activeSession = sessions.find(s => s.sessionId === activeSessionId)
+  const activeSession = sessions.find((s) => s.sessionId === activeSessionId)
 
   // Initialize on mount
   useEffect(() => {
     initializeDefaultSession()
     loadSessions()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load active session messages from backend on mount
   useEffect(() => {
     if (activeSessionId && messages.length === 0) {
-      agentApi.loadSession(activeSessionId).then(result => {
-        if (result.ok && result.data && result.data.length > 0) {
-          for (const msg of result.data) {
-            if (msg.role === 'user') {
-              store.addUserMessage(msg.content)
-            } else if (msg.role === 'assistant') {
-              store.addAssistantMessage(msg.content, msg.context_used ?? [])
+      agentApi
+        .loadSession(activeSessionId)
+        .then((result) => {
+          if (result.ok && result.data && result.data.length > 0) {
+            for (const msg of result.data) {
+              if (msg.role === 'user') {
+                store.addUserMessage(msg.content)
+              } else if (msg.role === 'assistant') {
+                store.addAssistantMessage(msg.content, msg.context_used ?? [])
+              }
             }
           }
-        }
-      }).catch(() => {})
+        })
+        .catch(() => {})
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId])
 
   // Track latest context sources from assistant messages
   useEffect(() => {
-    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
     if (lastAssistant?.contextUsed?.length) {
       setContextSources(lastAssistant.contextUsed)
     }
@@ -110,8 +141,7 @@ export function AgentChat() {
     setLoading(true)
 
     try {
-      const history = messages
-        .map(m => ({ role: m.role, content: m.content }))
+      const history = messages.map((m) => ({ role: m.role, content: m.content }))
       history.push({ role: 'user', content: text })
 
       const result = await agentApi.chat(text, history)
@@ -177,12 +207,13 @@ export function AgentChat() {
 
   if (!isAgentChatOpen) return null
 
-  const sortedSessions = [...sessions].sort((a, b) =>
-    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  const sortedSessions = [...sessions].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   )
 
   return (
-    <div className="fixed bottom-20 right-6 z-50 w-[420px] max-w-[calc(100vw-3rem)] h-[600px] max-h-[calc(100vh-8rem)] flex flex-col
+    <div
+      className="fixed bottom-20 right-6 z-50 w-[420px] max-w-[calc(100vw-3rem)] h-[600px] max-h-[calc(100vh-8rem)] flex flex-col
       bg-background-card dark:bg-[#141418]
       border-brutal border-border rounded-brutal shadow-brutal
       dark:border-[rgba(255,255,255,0.12)] dark:shadow-[0_0_40px_hsla(var(--accent-hue),20%,50%,0.15)]
@@ -210,8 +241,7 @@ export function AgentChat() {
             <p className="font-mono text-[9px] uppercase tracking-[0.15em] text-white/50 truncate mt-0.5">
               {view === 'history'
                 ? `${sessions.length} conversation${sessions.length !== 1 ? 's' : ''}`
-                : (activeSession?.name ?? 'Botanical Assistant')
-              }
+                : (activeSession?.name ?? 'Botanical Assistant')}
             </p>
           </div>
         </div>
@@ -246,21 +276,25 @@ export function AgentChat() {
       {/* Context sources bar */}
       {view === 'chat' && contextSources.length > 0 && (
         <button
-          onClick={() => setShowContext(p => !p)}
+          onClick={() => setShowContext((p) => !p)}
           className="flex items-center gap-2 px-4 py-2 border-b border-border/50 dark:border-[rgba(255,255,255,0.06)] bg-accent/[0.04] dark:bg-accent/[0.03] text-left w-full hover:bg-accent/[0.07] transition-colors"
         >
-          <ChevronRight className={clsx(
-            'w-3 h-3 text-text-muted transition-transform duration-150 shrink-0',
-            showContext && 'rotate-90'
-          )} />
+          <ChevronRight
+            className={clsx(
+              'w-3 h-3 text-text-muted transition-transform duration-150 shrink-0',
+              showContext && 'rotate-90'
+            )}
+          />
           <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-text-muted">
-            {showContext ? 'Context Sources' : `${contextSources.length} context source${contextSources.length !== 1 ? 's' : ''}`}
+            {showContext
+              ? 'Context Sources'
+              : `${contextSources.length} context source${contextSources.length !== 1 ? 's' : ''}`}
           </span>
         </button>
       )}
       {view === 'chat' && showContext && contextSources.length > 0 && (
         <div className="flex gap-1.5 flex-wrap px-4 py-2 border-b border-border/50 dark:border-[rgba(255,255,255,0.06)] bg-accent/[0.04] dark:bg-accent/[0.03]">
-          {contextSources.map(ctx => (
+          {contextSources.map((ctx) => (
             <span key={ctx} className="tag text-[9px]">
               {ctx}
             </span>
@@ -294,13 +328,10 @@ I can help you with your training pipeline — from traces to fine-tuned models.
               </div>
             )}
 
-            {messages.map(msg => (
+            {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={clsx(
-                  'flex',
-                  msg.role === 'user' ? 'justify-end' : 'justify-start'
-                )}
+                className={clsx('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}
               >
                 <div className="max-w-[88%]">
                   <div
@@ -311,21 +342,25 @@ I can help you with your training pipeline — from traces to fine-tuned models.
                         : 'bg-background-primary dark:bg-[rgba(255,255,255,0.04)] text-text-primary border-brutal border-border dark:border-[rgba(255,255,255,0.08)] rounded-brutal'
                     )}
                   >
-                    <div className={clsx(
-                      'prose-brutal',
-                      msg.role === 'user' && 'prose-brutal-inverted'
-                    )}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {msg.content}
-                      </ReactMarkdown>
+                    <div
+                      className={clsx(
+                        'prose-brutal',
+                        msg.role === 'user' && 'prose-brutal-inverted'
+                      )}
+                    >
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                     </div>
                   </div>
                   {/* Context tags on assistant messages */}
                   {msg.role === 'assistant' && msg.contextUsed && msg.contextUsed.length > 0 && (
                     <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                      {msg.contextUsed.map(ctx => (
-                        <span key={ctx} className="inline-flex items-center font-mono text-[9px] uppercase tracking-wider text-accent/60 dark:text-accent/50">
-                          <Tag className="w-2.5 h-2.5 mr-1" />{ctx}
+                      {msg.contextUsed.map((ctx) => (
+                        <span
+                          key={ctx}
+                          className="inline-flex items-center font-mono text-[9px] uppercase tracking-wider text-accent/60 dark:text-accent/50"
+                        >
+                          <Tag className="w-2.5 h-2.5 mr-1" />
+                          {ctx}
                         </span>
                       ))}
                     </div>
@@ -338,7 +373,9 @@ I can help you with your training pipeline — from traces to fine-tuned models.
               <div className="flex justify-start">
                 <div className="bg-background-primary dark:bg-[rgba(255,255,255,0.04)] border-brutal border-border dark:border-[rgba(255,255,255,0.08)] rounded-brutal px-4 py-3 flex items-center gap-2">
                   <Loader2 className="w-4 h-4 text-accent animate-spin" />
-                  <span className="font-mono text-xs text-accent/70 uppercase tracking-widest">Thinking</span>
+                  <span className="font-mono text-xs text-accent/70 uppercase tracking-widest">
+                    Thinking
+                  </span>
                 </div>
               </div>
             )}
@@ -440,7 +477,7 @@ I can help you with your training pipeline — from traces to fine-tuned models.
             </div>
           ) : (
             <div className="divide-y divide-border/40 dark:divide-[rgba(255,255,255,0.06)]">
-              {sortedSessions.map(s => (
+              {sortedSessions.map((s) => (
                 <button
                   key={s.sessionId}
                   onClick={() => handleSwitchSession(s.sessionId)}
@@ -450,14 +487,19 @@ I can help you with your training pipeline — from traces to fine-tuned models.
                   )}
                 >
                   <div className="flex-1 min-w-0">
-                    <p className={clsx(
-                      'text-sm truncate',
-                      s.sessionId === activeSessionId ? 'text-accent font-medium' : 'text-text-primary'
-                    )}>
+                    <p
+                      className={clsx(
+                        'text-sm truncate',
+                        s.sessionId === activeSessionId
+                          ? 'text-accent font-medium'
+                          : 'text-text-primary'
+                      )}
+                    >
                       {s.name}
                     </p>
                     <p className="font-mono text-[10px] text-text-muted mt-0.5">
-                      {relativeTime(s.updatedAt)} · {s.messageCount} msg{s.messageCount !== 1 ? 's' : ''}
+                      {relativeTime(s.updatedAt)} · {s.messageCount} msg
+                      {s.messageCount !== 1 ? 's' : ''}
                     </p>
                   </div>
                   <button

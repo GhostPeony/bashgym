@@ -45,7 +45,7 @@ export function OnboardingModal() {
     if (isOnboardingOpen) {
       checkStatus()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnboardingOpen])
 
   const checkStatus = async () => {
@@ -159,8 +159,8 @@ export function OnboardingModal() {
                   step.completed
                     ? 'bg-status-success text-white border-status-success'
                     : idx === currentStep
-                    ? 'bg-accent text-white border-accent'
-                    : 'bg-background-secondary text-text-muted border-border'
+                      ? 'bg-accent text-white border-accent'
+                      : 'bg-background-secondary text-text-muted border-border'
                 )}
               >
                 {step.completed ? <Check className="w-4 h-4" /> : step.id}
@@ -183,18 +183,16 @@ export function OnboardingModal() {
             <div
               className={clsx(
                 'w-12 h-12 border-brutal border-border rounded-brutal flex items-center justify-center',
-                steps[currentStep].completed ? 'bg-status-success text-white border-status-success' : 'bg-accent-light text-accent-dark'
+                steps[currentStep].completed
+                  ? 'bg-status-success text-white border-status-success'
+                  : 'bg-accent-light text-accent-dark'
               )}
             >
               {steps[currentStep].icon}
             </div>
             <div className="flex-1">
-              <h3 className="font-brand text-lg text-text-primary">
-                {steps[currentStep].title}
-              </h3>
-              <p className="text-sm text-text-secondary mt-1">
-                {steps[currentStep].description}
-              </p>
+              <h3 className="font-brand text-lg text-text-primary">{steps[currentStep].title}</h3>
+              <p className="text-sm text-text-secondary mt-1">{steps[currentStep].description}</p>
 
               {/* Step-specific content */}
               <div className="mt-4">
@@ -208,8 +206,9 @@ export function OnboardingModal() {
                     ) : (
                       <>
                         <p className="text-sm text-text-muted">
-                          BashGym uses Claude Code hooks to capture your coding sessions automatically.
-                          Click the button below to install them, or copy the command to run manually.
+                          BashGym uses Claude Code hooks to capture your coding sessions
+                          automatically. Click the button below to install them, or copy the command
+                          to run manually.
                         </p>
                         <div className="flex items-center gap-2">
                           <Button
@@ -252,11 +251,15 @@ export function OnboardingModal() {
                 {currentStep === 1 && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-3 border-brutal border-border rounded-brutal bg-background-card">
-                      <span className="text-sm text-text-secondary font-mono">Traces collected</span>
-                      <span className={clsx(
-                        'text-lg font-brand',
-                        traceCount >= 10 ? 'text-status-success' : 'text-text-primary'
-                      )}>
+                      <span className="text-sm text-text-secondary font-mono">
+                        Traces collected
+                      </span>
+                      <span
+                        className={clsx(
+                          'text-lg font-brand',
+                          traceCount >= 10 ? 'text-status-success' : 'text-text-primary'
+                        )}
+                      >
                         {traceCount} / 10 minimum
                       </span>
                     </div>
@@ -265,10 +268,12 @@ export function OnboardingModal() {
                       <div className="flex items-start gap-2 p-3 border-brutal border-status-warning rounded-brutal bg-background-card">
                         <AlertCircle className="w-4 h-4 text-status-warning flex-shrink-0 mt-0.5" />
                         <div className="text-sm text-text-secondary">
-                          <p className="font-mono font-semibold text-text-primary mb-1">Keep working with Claude Code</p>
+                          <p className="font-mono font-semibold text-text-primary mb-1">
+                            Keep working with Claude Code
+                          </p>
                           <p>
-                            Each completed task generates a trace. Aim for at least 10-20 diverse traces
-                            before training for best results.
+                            Each completed task generates a trace. Aim for at least 10-20 diverse
+                            traces before training for best results.
                           </p>
                         </div>
                       </div>
@@ -280,7 +285,9 @@ export function OnboardingModal() {
                     )}
 
                     <Button variant="secondary" onClick={checkStatus} disabled={isCheckingStatus}>
-                      <RefreshCw className={clsx('w-4 h-4 mr-2', isCheckingStatus && 'animate-spin')} />
+                      <RefreshCw
+                        className={clsx('w-4 h-4 mr-2', isCheckingStatus && 'animate-spin')}
+                      />
                       Refresh Count
                     </Button>
                   </div>
@@ -318,13 +325,18 @@ export function OnboardingModal() {
                 {currentStep === 3 && (
                   <div className="space-y-4">
                     <p className="text-sm text-text-muted">
-                      Configure your training run and start fine-tuning your personal coding assistant.
-                      Choose from SFT, DPO, GRPO, or Knowledge Distillation strategies.
+                      Configure your training run and start fine-tuning your personal coding
+                      assistant. Choose from SFT, DPO, GRPO, or Knowledge Distillation strategies.
                     </p>
                     <div className="grid grid-cols-4 gap-2">
                       {['SFT', 'DPO', 'GRPO', 'KD'].map((strategy) => (
-                        <div key={strategy} className="p-2 text-center border-brutal border-border rounded-brutal bg-background-card">
-                          <span className="tag text-xs"><span>{strategy}</span></span>
+                        <div
+                          key={strategy}
+                          className="p-2 text-center border-brutal border-border rounded-brutal bg-background-card"
+                        >
+                          <span className="tag text-xs">
+                            <span>{strategy}</span>
+                          </span>
                         </div>
                       ))}
                     </div>

@@ -12,7 +12,8 @@ function fixture() {
 
 function executable(root, platform) {
   if (platform === 'win32') return join(root, 'win-unpacked', 'Bash Gym.exe')
-  if (platform === 'darwin') return join(root, 'mac-arm64', 'Bash Gym.app', 'Contents', 'MacOS', 'Bash Gym')
+  if (platform === 'darwin')
+    return join(root, 'mac-arm64', 'Bash Gym.app', 'Contents', 'MacOS', 'Bash Gym')
   return join(root, 'linux-arm64-unpacked', 'bash-gym')
 }
 
@@ -39,7 +40,10 @@ test('fails closed when an unpacked executable is missing or ambiguous', (t) => 
     mkdirSync(join(candidate, '..'), { recursive: true })
     writeFileSync(candidate, '')
   }
-  assert.throws(() => findPackagedExecutable(root, 'linux'), /found linux-arm64-unpacked\/bash-gym, linux-unpacked\/bash-gym/)
+  assert.throws(
+    () => findPackagedExecutable(root, 'linux'),
+    /found linux-arm64-unpacked\/bash-gym, linux-unpacked\/bash-gym/
+  )
 })
 
 test('launch environment preserves host execution settings without forwarding secrets', () => {
@@ -49,7 +53,7 @@ test('launch environment preserves host execution settings without forwarding se
     DISPLAY: ':99',
     GH_TOKEN: 'do-not-forward',
     BASHGYM_API_KEY: 'do-not-forward',
-    SERVICE_PASSWORD: 'do-not-forward',
+    SERVICE_PASSWORD: 'do-not-forward'
   })
 
   assert.equal(env.PATH, '/usr/bin')

@@ -79,3 +79,13 @@ def test_preference_pair_file_validation_reads_jsonl(tmp_path):
 
     assert result["ok"] is True
     assert result["path"] == str(path)
+
+
+def test_preference_pair_file_validation_reads_json_container(tmp_path):
+    path = tmp_path / "pairs.json"
+    path.write_text(json.dumps({"pairs": [_strict_record()]}), encoding="utf-8")
+
+    result = validate_preference_pairs_file(path, strict=True)
+
+    assert result["ok"] is True
+    assert result["total_records"] == 1

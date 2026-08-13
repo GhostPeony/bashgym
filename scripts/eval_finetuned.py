@@ -19,8 +19,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import torch
-
 # Add bashgym to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -74,9 +72,7 @@ def tier1_perplexity(models: dict, val_data: list[dict]) -> dict:
             ft_losses.append(fl)
 
             if (i + 1) % 10 == 0:
-                logger.info(
-                    f"  [{i+1}/{len(val_data)}] base_loss={bl:.4f} ft_loss={fl:.4f}"
-                )
+                logger.info(f"  [{i+1}/{len(val_data)}] base_loss={bl:.4f} ft_loss={fl:.4f}")
         except Exception as e:
             logger.warning(f"  Example {i}: failed — {e}")
 
@@ -89,7 +85,8 @@ def tier1_perplexity(models: dict, val_data: list[dict]) -> dict:
     logger.info(f"  Fine-tuned: avg_loss={ft_avg:.4f} perplexity={ft_ppl:.2f}")
     logger.info(
         f"  Improvement: {((base_avg - ft_avg) / base_avg * 100):.1f}% loss reduction"
-        if base_avg > 0 else ""
+        if base_avg > 0
+        else ""
     )
 
     return {
@@ -97,16 +94,14 @@ def tier1_perplexity(models: dict, val_data: list[dict]) -> dict:
         "base": {
             "avg_loss": round(base_avg, 4),
             "perplexity": round(base_ppl, 2) if base_ppl < 1e6 else "inf",
-            "losses": [round(l, 4) for l in base_losses],
+            "losses": [round(loss, 4) for loss in base_losses],
         },
         "finetuned": {
             "avg_loss": round(ft_avg, 4),
             "perplexity": round(ft_ppl, 2) if ft_ppl < 1e6 else "inf",
-            "losses": [round(l, 4) for l in ft_losses],
+            "losses": [round(loss, 4) for loss in ft_losses],
         },
-        "loss_reduction_pct": round(
-            (base_avg - ft_avg) / base_avg * 100, 1
-        ) if base_avg > 0 else 0,
+        "loss_reduction_pct": round((base_avg - ft_avg) / base_avg * 100, 1) if base_avg > 0 else 0,
         "winner": "finetuned" if ft_avg < base_avg else "base",
     }
 
@@ -165,7 +160,7 @@ def tier1_tool_prediction(models: dict, val_data: list[dict]) -> dict:
     base_acc = base_correct / total if total > 0 else 0
     ft_acc = ft_correct / total if total > 0 else 0
 
-    logger.info(f"\n  Tool prediction accuracy:")
+    logger.info("\n  Tool prediction accuracy:")
     logger.info(f"    Base:      {base_correct}/{total} ({base_acc:.1%})")
     logger.info(f"    Fine-tuned: {ft_correct}/{total} ({ft_acc:.1%})")
 
@@ -196,13 +191,15 @@ def load_gold_traces(traces_dir: Path, n: int = 25) -> list[dict]:
 
             trace_steps = data.get("trace", [])
             if prompt and len(trace_steps) >= 3:
-                traces.append({
-                    "trace_id": data.get("session_id", path.stem),
-                    "user_prompt": prompt,
-                    "trace": trace_steps,
-                    "summary": data.get("summary", {}),
-                    "primary_repo": data.get("primary_repo", {}),
-                })
+                traces.append(
+                    {
+                        "trace_id": data.get("session_id", path.stem),
+                        "user_prompt": prompt,
+                        "trace": trace_steps,
+                        "summary": data.get("summary", {}),
+                        "primary_repo": data.get("primary_repo", {}),
+                    }
+                )
         except (json.JSONDecodeError, OSError):
             continue
 
@@ -267,9 +264,7 @@ def tier2_task_completion(models: dict, num_traces: int = 25) -> dict:
             continue
 
         # Gold trace tool sequence for comparison
-        gold_tools = [
-            step.get("tool_name", "?") for step in trace["trace"][:10]
-        ]
+        gold_tools = [step.get("tool_name", "?") for step in trace["trace"][:10]]
 
         result = {
             "trace_id": trace["trace_id"],
@@ -301,7 +296,7 @@ def tier2_task_completion(models: dict, num_traces: int = 25) -> dict:
     ft_avg = sum(ft_scores) / len(ft_scores) if ft_scores else 0
 
     if base_scores:
-        logger.info(f"\n  LLM-as-Judge scores:")
+        logger.info("\n  LLM-as-Judge scores:")
         logger.info(f"    Base:       {base_avg:.2f}/5.0")
         logger.info(f"    Fine-tuned: {ft_avg:.2f}/5.0")
         wins = sum(1 for b, f in zip(base_scores, ft_scores) if f > b)
@@ -317,16 +312,20 @@ def tier2_task_completion(models: dict, num_traces: int = 25) -> dict:
         "finetuned": {
             "avg_judge_score": round(ft_avg, 2) if ft_scores else None,
         },
-        "head_to_head": {
-            "ft_wins": sum(1 for b, f in zip(base_scores, ft_scores) if f > b),
-            "ties": sum(1 for b, f in zip(base_scores, ft_scores) if f == b),
-            "base_wins": sum(1 for b, f in zip(base_scores, ft_scores) if f < b),
-        } if base_scores else None,
+        "head_to_head": (
+            {
+                "ft_wins": sum(1 for b, f in zip(base_scores, ft_scores) if f > b),
+                "ties": sum(1 for b, f in zip(base_scores, ft_scores) if f == b),
+                "base_wins": sum(1 for b, f in zip(base_scores, ft_scores) if f < b),
+            }
+            if base_scores
+            else None
+        ),
         "winner": (
-            "finetuned" if ft_avg > base_avg
-            else "base" if base_avg > ft_avg
-            else "tie"
-        ) if base_scores else "unknown",
+            ("finetuned" if ft_avg > base_avg else "base" if base_avg > ft_avg else "tie")
+            if base_scores
+            else "unknown"
+        ),
         "results": results,
     }
 
@@ -410,6 +409,7 @@ def tier3_humaneval(models: dict) -> dict:
 
     try:
         from datasets import load_dataset
+
         ds = load_dataset("openai_humaneval", split="test")
         logger.info(f"  Loaded {len(ds)} HumanEval problems")
     except Exception as e:
@@ -450,22 +450,23 @@ def tier3_humaneval(models: dict) -> dict:
             ft_passed += 1
         total += 1
 
-        results.append({
-            "task_id": task_id,
-            "base_passed": base_pass,
-            "ft_passed": ft_pass,
-        })
+        results.append(
+            {
+                "task_id": task_id,
+                "base_passed": base_pass,
+                "ft_passed": ft_pass,
+            }
+        )
 
         if (i + 1) % 20 == 0:
             logger.info(
-                f"  [{i+1}/{len(ds)}] base={base_passed}/{total} "
-                f"ft={ft_passed}/{total}"
+                f"  [{i+1}/{len(ds)}] base={base_passed}/{total} " f"ft={ft_passed}/{total}"
             )
 
     base_rate = base_passed / total if total > 0 else 0
     ft_rate = ft_passed / total if total > 0 else 0
 
-    logger.info(f"\n  HumanEval pass@1:")
+    logger.info("\n  HumanEval pass@1:")
     logger.info(f"    Base:       {base_passed}/{total} ({base_rate:.1%})")
     logger.info(f"    Fine-tuned: {ft_passed}/{total} ({ft_rate:.1%})")
 
@@ -474,17 +475,13 @@ def tier3_humaneval(models: dict) -> dict:
         "base": {"passed": base_passed, "pass_at_1": round(base_rate, 4)},
         "finetuned": {"passed": ft_passed, "pass_at_1": round(ft_rate, 4)},
         "winner": (
-            "finetuned" if ft_rate > base_rate
-            else "base" if base_rate > ft_rate
-            else "tie"
+            "finetuned" if ft_rate > base_rate else "base" if base_rate > ft_rate else "tie"
         ),
         "details": results,
     }
 
 
-def _test_solution(
-    prompt: str, generated: str, test_code: str, entry_point: str
-) -> bool:
+def _test_solution(prompt: str, generated: str, test_code: str, entry_point: str) -> bool:
     """Test a generated solution against HumanEval test cases."""
     import subprocess
     import tempfile
@@ -493,9 +490,7 @@ def _test_solution(
     full_code = prompt + generated + "\n\n" + test_code + f"\ncheck({entry_point})\n"
 
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(full_code)
             f.flush()
 
@@ -552,24 +547,16 @@ def generate_report(
         },
         "tier1_perplexity": tier1_ppl,
         "tier1_tool_prediction": tier1_tool,
-        "tier2_task_completion": {
-            k: v for k, v in (tier2 or {}).items() if k != "results"
-        },
-        "tier3_humaneval": {
-            k: v for k, v in (tier3 or {}).items() if k != "details"
-        },
+        "tier2_task_completion": {k: v for k, v in (tier2 or {}).items() if k != "results"},
+        "tier3_humaneval": {k: v for k, v in (tier3 or {}).items() if k != "details"},
         "verdict": {
             "winners_per_category": winners,
             "ft_wins": ft_wins,
             "base_wins": base_wins,
             "overall": (
-                "finetuned" if ft_wins > base_wins
-                else "base" if base_wins > ft_wins
-                else "mixed"
+                "finetuned" if ft_wins > base_wins else "base" if base_wins > ft_wins else "mixed"
             ),
-            "recommendation": _recommendation(
-                tier1_ppl, tier1_tool, tier2, tier3
-            ),
+            "recommendation": _recommendation(tier1_ppl, tier1_tool, tier2, tier3),
         },
     }
 
@@ -593,9 +580,7 @@ def _recommendation(ppl, tool, tier2, tier3) -> str:
         base_p = tier3.get("base", {}).get("pass_at_1", 0)
         ft_p = tier3.get("finetuned", {}).get("pass_at_1", 0)
         if ft_p < base_p * 0.9:
-            parts.append(
-                f"WARNING: Fine-tuning degraded HumanEval ({ft_p:.1%} vs {base_p:.1%})"
-            )
+            parts.append(f"WARNING: Fine-tuning degraded HumanEval ({ft_p:.1%} vs {base_p:.1%})")
         elif ft_p > base_p:
             parts.append("General coding ability maintained or improved")
 
@@ -615,7 +600,9 @@ def main():
     parser.add_argument("--skip-tier3", action="store_true")
     parser.add_argument("--num-traces", type=int, default=25)
     parser.add_argument(
-        "--adapter", type=str, default=str(ADAPTER_PATH),
+        "--adapter",
+        type=str,
+        default=str(ADAPTER_PATH),
         help="Path to LoRA adapter directory",
     )
     args = parser.parse_args()

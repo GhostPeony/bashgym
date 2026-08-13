@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   BarChart3,
   Play,
@@ -21,7 +21,9 @@ import {
   GitCompare
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, evaluatorApi } from '../../services/api'
+import { evaluatorApi, type EvaluationResponse } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import { evaluationsResource, registeredModelsResource } from '../../stores/factoryResources'
 import { HeldoutGatePanel } from './HeldoutGatePanel'
 
 // Benchmark categories and their benchmarks
@@ -35,8 +37,10 @@ const BENCHMARK_INFO: Record<string, { tooltip: string; example: string; evaluat
     evaluates: 'Tests run against generated code'
   },
   humaneval: {
-    tooltip: 'Complete Python functions from docstrings with examples. Industry standard for code generation.',
-    example: 'Given: def has_close_elements(numbers, threshold): """Check if any two numbers closer than threshold..."""',
+    tooltip:
+      'Complete Python functions from docstrings with examples. Industry standard for code generation.',
+    example:
+      'Given: def has_close_elements(numbers, threshold): """Check if any two numbers closer than threshold..."""',
     evaluates: 'Unit tests verify functional correctness'
   },
   mbpp: {
@@ -45,12 +49,14 @@ const BENCHMARK_INFO: Record<string, { tooltip: string; example: string; evaluat
     evaluates: 'Assert statements check output correctness'
   },
   bigcodebench: {
-    tooltip: 'Complex coding tasks requiring multiple libraries (numpy, pandas, etc). Tests real-world coding ability.',
+    tooltip:
+      'Complex coding tasks requiring multiple libraries (numpy, pandas, etc). Tests real-world coding ability.',
     example: 'Tasks involving data processing, file I/O, API calls',
     evaluates: 'Execution + output validation'
   },
   ds1000: {
-    tooltip: 'Data science problems using pandas, numpy, sklearn. Realistic data manipulation tasks.',
+    tooltip:
+      'Data science problems using pandas, numpy, sklearn. Realistic data manipulation tasks.',
     example: '"Filter dataframe where column X > threshold and sort by Y"',
     evaluates: 'Output comparison with reference solution'
   },
@@ -65,7 +71,8 @@ const BENCHMARK_INFO: Record<string, { tooltip: string; example: string; evaluat
     evaluates: 'Numeric answer extraction and comparison'
   },
   arc: {
-    tooltip: 'Science and reasoning questions (multiple choice). Tests factual knowledge and logic.',
+    tooltip:
+      'Science and reasoning questions (multiple choice). Tests factual knowledge and logic.',
     example: '"What causes day and night?" A) Sun moves B) Earth rotates C) Moon phases D) Seasons',
     evaluates: 'Correct option selection'
   },
@@ -88,7 +95,7 @@ const BENCHMARK_INFO: Record<string, { tooltip: string; example: string; evaluat
     tooltip: 'Real GitHub issues requiring code patches. Tests agentic coding ability.',
     example: 'Given issue description → Generate correct patch to fix the bug',
     evaluates: 'Patches that pass repository tests'
-  },
+  }
 }
 
 const BENCHMARK_CATEGORIES = {
@@ -97,11 +104,36 @@ const BENCHMARK_CATEGORIES = {
     icon: Code,
     description: 'Tests ability to write correct, functional code',
     benchmarks: [
-      { id: 'simple_test', name: 'Simple Test', description: 'Quick E2E validation (3 problems)', difficulty: 'easy' },
-      { id: 'humaneval', name: 'HumanEval', description: 'Python function synthesis (164 problems)', difficulty: 'medium' },
-      { id: 'mbpp', name: 'MBPP', description: 'Mostly Basic Python Problems (974 problems)', difficulty: 'easy' },
-      { id: 'bigcodebench', name: 'BigCodeBench', description: 'Multi-library code tasks (~1140 problems)', difficulty: 'hard' },
-      { id: 'ds1000', name: 'DS-1000', description: 'Data science code generation (1000 problems)', difficulty: 'medium' },
+      {
+        id: 'simple_test',
+        name: 'Simple Test',
+        description: 'Quick E2E validation (3 problems)',
+        difficulty: 'easy'
+      },
+      {
+        id: 'humaneval',
+        name: 'HumanEval',
+        description: 'Python function synthesis (164 problems)',
+        difficulty: 'medium'
+      },
+      {
+        id: 'mbpp',
+        name: 'MBPP',
+        description: 'Mostly Basic Python Problems (974 problems)',
+        difficulty: 'easy'
+      },
+      {
+        id: 'bigcodebench',
+        name: 'BigCodeBench',
+        description: 'Multi-library code tasks (~1140 problems)',
+        difficulty: 'hard'
+      },
+      {
+        id: 'ds1000',
+        name: 'DS-1000',
+        description: 'Data science code generation (1000 problems)',
+        difficulty: 'medium'
+      }
     ]
   },
   function_calling: {
@@ -109,9 +141,26 @@ const BENCHMARK_CATEGORIES = {
     icon: Zap,
     description: 'Tests ability to correctly invoke tools and APIs',
     benchmarks: [
-      { id: 'bfcl', name: 'BFCL', description: 'Berkeley Function Calling Leaderboard (~2000 problems)', difficulty: 'medium' },
-      { id: 'tool_use', name: 'Tool Use Accuracy', description: 'Coming soon', difficulty: 'medium', disabled: true },
-      { id: 'api_bench', name: 'API-Bench', description: 'Coming soon', difficulty: 'hard', disabled: true },
+      {
+        id: 'bfcl',
+        name: 'BFCL',
+        description: 'Berkeley Function Calling Leaderboard (~2000 problems)',
+        difficulty: 'medium'
+      },
+      {
+        id: 'tool_use',
+        name: 'Tool Use Accuracy',
+        description: 'Coming soon',
+        difficulty: 'medium',
+        disabled: true
+      },
+      {
+        id: 'api_bench',
+        name: 'API-Bench',
+        description: 'Coming soon',
+        difficulty: 'hard',
+        disabled: true
+      }
     ]
   },
   reasoning: {
@@ -119,10 +168,25 @@ const BENCHMARK_CATEGORIES = {
     icon: Brain,
     description: 'Tests logical thinking and problem solving',
     benchmarks: [
-      { id: 'gsm8k', name: 'GSM8K', description: 'Grade school math word problems (1319 test)', difficulty: 'medium' },
+      {
+        id: 'gsm8k',
+        name: 'GSM8K',
+        description: 'Grade school math word problems (1319 test)',
+        difficulty: 'medium'
+      },
       { id: 'math', name: 'MATH', description: 'Coming soon', difficulty: 'hard', disabled: true },
-      { id: 'arc', name: 'ARC Challenge', description: 'Science reasoning questions (1172 problems)', difficulty: 'hard' },
-      { id: 'hellaswag', name: 'HellaSwag', description: 'Commonsense sentence completion (10042)', difficulty: 'easy' },
+      {
+        id: 'arc',
+        name: 'ARC Challenge',
+        description: 'Science reasoning questions (1172 problems)',
+        difficulty: 'hard'
+      },
+      {
+        id: 'hellaswag',
+        name: 'HellaSwag',
+        description: 'Commonsense sentence completion (10042)',
+        difficulty: 'easy'
+      }
     ]
   },
   safety: {
@@ -130,9 +194,25 @@ const BENCHMARK_CATEGORIES = {
     icon: Shield,
     description: 'Tests for harmful or biased outputs',
     benchmarks: [
-      { id: 'toxigen', name: 'ToxiGen', description: 'Toxic language detection (~9,900 samples)', difficulty: 'medium' },
-      { id: 'bbq', name: 'BBQ', description: 'Bias Benchmark for QA (~58K samples)', difficulty: 'medium' },
-      { id: 'safety_harness', name: 'Safety Harness', description: 'Coming soon', difficulty: 'medium', disabled: true },
+      {
+        id: 'toxigen',
+        name: 'ToxiGen',
+        description: 'Toxic language detection (~9,900 samples)',
+        difficulty: 'medium'
+      },
+      {
+        id: 'bbq',
+        name: 'BBQ',
+        description: 'Bias Benchmark for QA (~58K samples)',
+        difficulty: 'medium'
+      },
+      {
+        id: 'safety_harness',
+        name: 'Safety Harness',
+        description: 'Coming soon',
+        difficulty: 'medium',
+        disabled: true
+      }
     ]
   },
   agentic: {
@@ -140,10 +220,33 @@ const BENCHMARK_CATEGORIES = {
     icon: Target,
     description: 'Tests multi-step task completion',
     benchmarks: [
-      { id: 'swe_bench', name: 'SWE-bench Lite', description: 'GitHub issue resolution (300 tasks)', difficulty: 'hard' },
-      { id: 'goal_accuracy', name: 'Goal Accuracy', description: 'Coming soon', difficulty: 'medium', disabled: true },
-      { id: 'topic_adherence', name: 'Topic Adherence', description: 'Coming soon', difficulty: 'easy', disabled: true },
-      { id: 'webagent', name: 'WebAgent', description: 'Coming soon', difficulty: 'hard', disabled: true },
+      {
+        id: 'swe_bench',
+        name: 'SWE-bench Lite',
+        description: 'GitHub issue resolution (300 tasks)',
+        difficulty: 'hard'
+      },
+      {
+        id: 'goal_accuracy',
+        name: 'Goal Accuracy',
+        description: 'Coming soon',
+        difficulty: 'medium',
+        disabled: true
+      },
+      {
+        id: 'topic_adherence',
+        name: 'Topic Adherence',
+        description: 'Coming soon',
+        difficulty: 'easy',
+        disabled: true
+      },
+      {
+        id: 'webagent',
+        name: 'WebAgent',
+        description: 'Coming soon',
+        difficulty: 'hard',
+        disabled: true
+      }
     ]
   },
   llm_judge: {
@@ -151,12 +254,36 @@ const BENCHMARK_CATEGORIES = {
     icon: MessageSquare,
     description: 'Quality assessment by another LLM',
     benchmarks: [
-      { id: 'helpfulness', name: 'Helpfulness', description: 'Coming soon', difficulty: 'easy', disabled: true },
-      { id: 'correctness', name: 'Correctness', description: 'Coming soon', difficulty: 'medium', disabled: true },
-      { id: 'coherence', name: 'Coherence', description: 'Coming soon', difficulty: 'easy', disabled: true },
-      { id: 'custom_rubric', name: 'Custom Rubric', description: 'Coming soon', difficulty: 'medium', disabled: true },
+      {
+        id: 'helpfulness',
+        name: 'Helpfulness',
+        description: 'Coming soon',
+        difficulty: 'easy',
+        disabled: true
+      },
+      {
+        id: 'correctness',
+        name: 'Correctness',
+        description: 'Coming soon',
+        difficulty: 'medium',
+        disabled: true
+      },
+      {
+        id: 'coherence',
+        name: 'Coherence',
+        description: 'Coming soon',
+        difficulty: 'easy',
+        disabled: true
+      },
+      {
+        id: 'custom_rubric',
+        name: 'Custom Rubric',
+        description: 'Coming soon',
+        difficulty: 'medium',
+        disabled: true
+      }
     ]
-  },
+  }
 }
 
 interface ErrorAnalysis {
@@ -202,84 +329,65 @@ const DEFAULT_CONFIG: EvalConfig = {
   temperature: 0.0
 }
 
+const mapEvaluation = (e: EvaluationResponse): EvalJob => ({
+  id: e.job_id,
+  model: e.model_id,
+  benchmarks: e.benchmarks,
+  status: e.status,
+  created_at: e.created_at || new Date().toISOString(),
+  results: e.results,
+  error: e.error
+})
+
 export function EvaluatorDashboard() {
   const [config, setConfig] = useState<EvalConfig>(DEFAULT_CONFIG)
-  const [jobs, setJobs] = useState<EvalJob[]>([])
+  const { data: modelsData } = useSessionResource(registeredModelsResource)
+  const { data: evaluations } = useSessionResource(evaluationsResource)
+  const [jobs, setJobs] = useState<EvalJob[]>(() =>
+    (evaluationsResource.getState().data ?? []).map(mapEvaluation)
+  )
   const [expandedCategory, setExpandedCategory] = useState<string | null>('code')
   const [isRunning, setIsRunning] = useState(false)
   const [selectedJob, setSelectedJob] = useState<EvalJob | null>(null)
-  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const availableModels = useMemo(
+    () => modelsData?.models.map((m) => m.model_id) ?? [],
+    [modelsData]
+  )
   const [mode, setMode] = useState<'benchmarks' | 'heldout'>('benchmarks')
 
+  // Sync the local job list (which absorbs optimistic/polled updates) from the cache
   useEffect(() => {
-    // Load available models from API
-    const loadModels = async () => {
-      console.log('[Evaluator] Loading models...')
-      try {
-        const result = await modelsApi.list()
-        console.log('[Evaluator] Models result:', result)
-        if (result.ok && result.data) {
-          // Extract model IDs from the response (API returns { models, total })
-          const models = result.data.models
-          setAvailableModels(models.map(m => m.model_id))
-          // Auto-select first model if none selected
-          if (models.length > 0 && !config.model) {
-            setConfig(prev => ({ ...prev, model: models[0].model_id }))
-          }
-        }
-      } catch (error) {
-        console.error('[Evaluator] Failed to load models:', error)
-      }
-    }
+    if (evaluations) setJobs(evaluations.map(mapEvaluation))
+  }, [evaluations])
 
-    // Load existing evaluation jobs from API
-    const loadEvaluations = async () => {
-      console.log('[Evaluator] Loading evaluations...')
-      try {
-        const result = await evaluatorApi.list()
-        console.log('[Evaluator] Evaluations result:', result)
-        if (result.ok && result.data) {
-          setJobs(result.data.map(e => ({
-            id: e.job_id,
-            model: e.model_id,
-            benchmarks: e.benchmarks,
-            status: e.status,
-            created_at: e.created_at || new Date().toISOString(),
-            results: e.results,
-            error: e.error
-          })))
-        }
-      } catch (error) {
-        console.error('[Evaluator] Failed to load evaluations:', error)
-      }
+  // Auto-select first model if none selected
+  useEffect(() => {
+    if (availableModels.length > 0) {
+      setConfig((prev) => (prev.model ? prev : { ...prev, model: availableModels[0] }))
     }
-
-    loadModels()
-    loadEvaluations()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [availableModels])
 
   const toggleBenchmark = (benchmarkId: string) => {
-    setConfig(prev => ({
+    setConfig((prev) => ({
       ...prev,
       benchmarks: prev.benchmarks.includes(benchmarkId)
-        ? prev.benchmarks.filter(b => b !== benchmarkId)
+        ? prev.benchmarks.filter((b) => b !== benchmarkId)
         : [...prev.benchmarks, benchmarkId]
     }))
   }
 
   const selectAllInCategory = (categoryKey: string) => {
     const category = BENCHMARK_CATEGORIES[categoryKey as keyof typeof BENCHMARK_CATEGORIES]
-    const benchmarkIds = category.benchmarks.map(b => b.id)
-    const allSelected = benchmarkIds.every(id => config.benchmarks.includes(id))
+    const benchmarkIds = category.benchmarks.map((b) => b.id)
+    const allSelected = benchmarkIds.every((id) => config.benchmarks.includes(id))
 
     if (allSelected) {
-      setConfig(prev => ({
+      setConfig((prev) => ({
         ...prev,
-        benchmarks: prev.benchmarks.filter(b => !benchmarkIds.includes(b))
+        benchmarks: prev.benchmarks.filter((b) => !benchmarkIds.includes(b))
       }))
     } else {
-      setConfig(prev => ({
+      setConfig((prev) => ({
         ...prev,
         benchmarks: [...new Set([...prev.benchmarks, ...benchmarkIds])]
       }))
@@ -291,11 +399,11 @@ export function EvaluatorDashboard() {
       const result = await evaluatorApi.getStatus(jobId)
       if (result.ok && result.data) {
         const { status, results, error } = result.data
-        setJobs(prev => prev.map(j =>
-          j.id === jobId ? { ...j, status, results, error } : j
-        ))
+        setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, status, results, error } : j)))
         if (status === 'running') {
           setTimeout(poll, 2000) // Poll every 2 seconds
+        } else {
+          void evaluationsResource.getState().refresh()
         }
       }
     }
@@ -303,7 +411,10 @@ export function EvaluatorDashboard() {
   }
 
   const runEvaluation = async () => {
-    console.log('[Evaluator] runEvaluation called', { model: config.model, benchmarks: config.benchmarks })
+    console.log('[Evaluator] runEvaluation called', {
+      model: config.model,
+      benchmarks: config.benchmarks
+    })
     if (!config.model || config.benchmarks.length === 0) {
       console.log('[Evaluator] Aborted: no model or benchmarks selected')
       return
@@ -317,7 +428,7 @@ export function EvaluatorDashboard() {
       status: 'running',
       created_at: new Date().toISOString()
     }
-    setJobs(prev => [newJob, ...prev])
+    setJobs((prev) => [newJob, ...prev])
 
     try {
       console.log('[Evaluator] Calling API...')
@@ -331,19 +442,19 @@ export function EvaluatorDashboard() {
       if (result.ok && result.data) {
         // Update job with server ID and poll for completion
         const serverJobId = result.data.job_id
-        setJobs(prev => prev.map(j =>
-          j.id === newJob.id ? { ...j, id: serverJobId } : j
-        ))
+        setJobs((prev) => prev.map((j) => (j.id === newJob.id ? { ...j, id: serverJobId } : j)))
         pollForCompletion(serverJobId)
       } else {
-        setJobs(prev => prev.map(j =>
-          j.id === newJob.id ? { ...j, status: 'failed', error: result.error || 'API error' } : j
-        ))
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === newJob.id ? { ...j, status: 'failed', error: result.error || 'API error' } : j
+          )
+        )
       }
     } catch (error) {
-      setJobs(prev => prev.map(j =>
-        j.id === newJob.id ? { ...j, status: 'failed', error: String(error) } : j
-      ))
+      setJobs((prev) =>
+        prev.map((j) => (j.id === newJob.id ? { ...j, status: 'failed', error: String(error) } : j))
+      )
     } finally {
       setIsRunning(false)
     }
@@ -351,10 +462,14 @@ export function EvaluatorDashboard() {
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
-      case 'easy': return 'text-status-success'
-      case 'medium': return 'text-status-warning'
-      case 'hard': return 'text-status-error'
-      default: return 'text-text-muted'
+      case 'easy':
+        return 'text-status-success'
+      case 'medium':
+        return 'text-status-warning'
+      case 'hard':
+        return 'text-status-error'
+      default:
+        return 'text-text-muted'
     }
   }
 
@@ -366,7 +481,9 @@ export function EvaluatorDashboard() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="font-brand text-2xl text-text-primary">Model Evaluator</h1>
-              <span className="tag"><span>EVALUATOR</span></span>
+              <span className="tag">
+                <span>EVALUATOR</span>
+              </span>
             </div>
             <p className="text-sm text-text-secondary mt-1">
               Benchmark suites and the held-out ship/no-ship gate for your trained models
@@ -424,351 +541,441 @@ export function EvaluatorDashboard() {
         {mode === 'heldout' ? (
           <HeldoutGatePanel />
         ) : (
-        <div className="grid grid-cols-3 gap-6">
-          {/* Left: Benchmark Selection */}
-          <div className="col-span-2 space-y-4">
-            {/* Model Selection */}
-            <div className="card p-4">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
-                  <BarChart3 className="w-5 h-5 text-accent" />
-                </div>
-                <div>
-                  <h3 className="font-brand text-lg text-text-primary">Model to Evaluate</h3>
-                  <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Select a trained model or checkpoint</p>
-                </div>
-              </div>
-              {availableModels.length > 0 ? (
-                <select
-                  value={config.model}
-                  onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
-                  className="input w-full"
-                >
-                  <option value="">Select a model...</option>
-                  {availableModels.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              ) : (
-                <div className="p-4 border-brutal border-border rounded-brutal bg-background-secondary text-center">
-                  <Brain className="w-8 h-8 text-text-muted mx-auto mb-2" />
-                  <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Train a model first to run evaluations</p>
-                </div>
-              )}
-            </div>
-
-            {/* Benchmark Categories */}
-            <div className="card">
-              <div className="p-4 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
-                      <Target className="w-5 h-5 text-accent" />
-                    </div>
-                    <div>
-                      <h3 className="font-brand text-lg text-text-primary">Benchmarks</h3>
-                      <p className="font-mono text-xs uppercase tracking-widest text-text-muted">{config.benchmarks.length} selected</p>
-                    </div>
+          <div className="grid grid-cols-3 gap-6">
+            {/* Left: Benchmark Selection */}
+            <div className="col-span-2 space-y-4">
+              {/* Model Selection */}
+              <div className="card p-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
+                    <BarChart3 className="w-5 h-5 text-accent" />
                   </div>
-                  <button
-                    onClick={() => setConfig(prev => ({ ...prev, benchmarks: [] }))}
-                    className="btn-ghost font-mono text-xs uppercase tracking-widest"
-                  >
-                    Clear all
-                  </button>
+                  <div>
+                    <h3 className="font-brand text-lg text-text-primary">Model to Evaluate</h3>
+                    <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Select a trained model or checkpoint
+                    </p>
+                  </div>
                 </div>
-              </div>
-
-              <div className="divide-y divide-border-subtle">
-                {Object.entries(BENCHMARK_CATEGORIES).map(([key, category]) => {
-                  const Icon = category.icon
-                  const selectedCount = category.benchmarks.filter(b => config.benchmarks.includes(b.id)).length
-                  const isExpanded = expandedCategory === key
-
-                  return (
-                    <div key={key}>
-                      <button
-                        onClick={() => setExpandedCategory(isExpanded ? null : key)}
-                        className="w-full flex items-center justify-between p-4 hover:bg-background-secondary transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Icon className="w-5 h-5 text-accent" />
-                          <span className="font-brand text-lg text-text-primary">{category.label}</span>
-                          {selectedCount > 0 && (
-                            <span className="tag"><span>{selectedCount}/{category.benchmarks.length}</span></span>
-                          )}
-                        </div>
-                        {isExpanded ? (
-                          <ChevronDown className="w-5 h-5 text-text-muted" />
-                        ) : (
-                          <ChevronRight className="w-5 h-5 text-text-muted" />
-                        )}
-                      </button>
-
-                      {isExpanded && (
-                        <div className="px-4 pb-4 space-y-2">
-                          <button
-                            onClick={() => selectAllInCategory(key)}
-                            className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline mb-2"
-                          >
-                            {category.benchmarks.every(b => config.benchmarks.includes(b.id))
-                              ? 'Deselect all'
-                              : 'Select all'}
-                          </button>
-                          {category.benchmarks.map(benchmark => {
-                            const isDisabled = 'disabled' in benchmark && benchmark.disabled
-                            const benchInfo = BENCHMARK_INFO[benchmark.id]
-                            return (
-                            <label
-                              key={benchmark.id}
-                              className={clsx(
-                                'flex items-center gap-3 p-3 border-brutal rounded-brutal transition-colors group',
-                                isDisabled
-                                  ? 'opacity-50 cursor-not-allowed border-border-subtle'
-                                  : 'cursor-pointer',
-                                config.benchmarks.includes(benchmark.id)
-                                  ? 'bg-accent-light border-border'
-                                  : 'bg-background-secondary border-border-subtle hover:border-border'
-                              )}
-                              title={benchInfo?.tooltip}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={config.benchmarks.includes(benchmark.id)}
-                                onChange={() => !isDisabled && toggleBenchmark(benchmark.id)}
-                                disabled={isDisabled}
-                                className="rounded-brutal"
-                              />
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className={clsx('font-mono text-sm font-semibold', isDisabled ? 'text-text-muted' : 'text-text-primary')}>{benchmark.name}</span>
-                                  <span className={clsx('font-mono text-xs uppercase', getDifficultyColor(benchmark.difficulty))}>
-                                    {benchmark.difficulty}
-                                  </span>
-                                </div>
-                                <p className="text-xs text-text-muted">{benchmark.description}</p>
-                              </div>
-                            </label>
-                          )})}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Evaluation Settings */}
-            <div className="card p-4">
-              <h3 className="font-brand text-lg text-text-primary mb-4">Evaluation Settings</h3>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Judge Model</label>
+                {availableModels.length > 0 ? (
                   <select
-                    value={config.judge_model}
-                    onChange={(e) => setConfig(prev => ({ ...prev, judge_model: e.target.value }))}
-                    className="input text-sm w-full"
+                    value={config.model}
+                    onChange={(e) => setConfig((prev) => ({ ...prev, model: e.target.value }))}
+                    className="input w-full"
                   >
-                    <optgroup label="Anthropic Claude">
-                      <option value="claude-opus-4-8">Claude Opus 4.8 (Best)</option>
-                      <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                      <option value="claude-haiku-4-5">Claude Haiku 4.5 (Fast)</option>
-                    </optgroup>
-                    <optgroup label="NVIDIA NIM">
-                      <option value="deepseek-ai/deepseek-v4-flash">DeepSeek V4 Flash</option>
-                      <option value="qwen/qwen3-next-80b-a3b-instruct">Qwen3 Next 80B</option>
-                      <option value="nvidia/nemotron-3-super-120b-a12b">Nemotron 3 Super 120B</option>
-                    </optgroup>
-                    <optgroup label="OpenAI">
-                      <option value="gpt-4o">GPT-4o</option>
-                    </optgroup>
+                    <option value="">Select a model...</option>
+                    {availableModels.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
                   </select>
-                </div>
-                <div>
-                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Samples per Benchmark</label>
-                  <input
-                    type="number"
-                    min="10"
-                    max="1000"
-                    value={config.num_samples}
-                    onChange={(e) => setConfig(prev => ({ ...prev, num_samples: parseInt(e.target.value) }))}
-                    className="input text-sm w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Temperature</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="2"
-                    step="0.1"
-                    value={config.temperature}
-                    onChange={(e) => setConfig(prev => ({ ...prev, temperature: parseFloat(e.target.value) }))}
-                    className="input text-sm w-full"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Job History & Results */}
-          <div className="space-y-4">
-            <div className="card">
-              <div className="p-4 border-b border-border">
-                <h3 className="font-brand text-lg text-text-primary">Evaluation History</h3>
-              </div>
-              <div className="divide-y divide-border-subtle max-h-96 overflow-auto">
-                {jobs.length === 0 ? (
-                  <div className="p-8 text-center">
-                    <BarChart3 className="w-10 h-10 text-text-muted mx-auto mb-2" />
-                    <p className="font-mono text-xs uppercase tracking-widest text-text-muted">No evaluations yet</p>
-                  </div>
                 ) : (
-                  jobs.map(job => (
-                    <button
-                      key={job.id}
-                      onClick={() => setSelectedJob(job)}
-                      className={clsx(
-                        'w-full p-4 text-left hover:bg-background-secondary transition-colors',
-                        selectedJob?.id === job.id && 'bg-accent-light'
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-mono text-sm font-semibold text-text-primary">{job.model}</span>
-                        {job.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-accent" />}
-                        {job.status === 'completed' && <CheckCircle className="w-4 h-4 text-status-success" />}
-                        {job.status === 'failed' && <AlertCircle className="w-4 h-4 text-status-error" />}
-                      </div>
-                      <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
-                        <span>{job.benchmarks.length} benchmarks</span>
-                        <span>|</span>
-                        <span>{new Date(job.created_at).toLocaleString()}</span>
-                      </div>
-                    </button>
-                  ))
+                  <div className="p-4 border-brutal border-border rounded-brutal bg-background-secondary text-center">
+                    <Brain className="w-8 h-8 text-text-muted mx-auto mb-2" />
+                    <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                      Train a model first to run evaluations
+                    </p>
+                  </div>
                 )}
               </div>
-            </div>
 
-            {/* Selected Job Results */}
-            {selectedJob?.results && (
-              <div className="card p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-brand text-lg text-text-primary">Results: {selectedJob.model}</h3>
-                  <button
-                    onClick={() => setSelectedJob(null)}
-                    className="btn-icon flex items-center justify-center w-8 h-8"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="space-y-3 overflow-visible">
-                  {Object.entries(selectedJob.results).map(([benchmark, result]) => {
-                    const benchInfo = BENCHMARK_INFO[benchmark]
-                    const hasErrors = result.errors && (result.errors.wrong_answer > 0 || result.errors.syntax_error > 0 || result.errors.runtime_error > 0 || result.errors.timeout > 0)
-                    return (
-                    <div key={benchmark} className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary overflow-visible">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-mono text-sm font-semibold text-text-primary">{benchmark}</span>
-                        <span className={clsx(
-                          'font-brand text-xl font-bold',
-                          result.score >= 0.8 ? 'text-status-success' :
-                          result.score >= 0.6 ? 'text-status-warning' :
-                          'text-status-error'
-                        )}>
-                          {(result.score * 100).toFixed(1)}%
-                        </span>
+              {/* Benchmark Categories */}
+              <div className="card">
+                <div className="p-4 border-b border-border">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
+                        <Target className="w-5 h-5 text-accent" />
                       </div>
-                      {/* Benchmark description */}
-                      {benchInfo && (
-                        <p className="text-xs text-text-muted mb-2">{benchInfo.tooltip}</p>
-                      )}
-                      <div className="progress-bar">
-                        <div
-                          className="progress-fill"
-                          style={{
-                            width: `${result.score * 100}%`,
-                            background: result.score >= 0.8
-                              ? 'var(--status-success)'
-                              : result.score >= 0.6
-                              ? 'var(--status-warning)'
-                              : 'var(--status-error)'
-                          }}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <p className="font-mono text-xs text-text-muted">
-                          {result.passed} / {result.total} passed
+                      <div>
+                        <h3 className="font-brand text-lg text-text-primary">Benchmarks</h3>
+                        <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                          {config.benchmarks.length} selected
                         </p>
-                        {result.duration_seconds && (
-                          <p className="font-mono text-xs text-text-muted flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {result.duration_seconds.toFixed(1)}s
-                          </p>
-                        )}
                       </div>
+                    </div>
+                    <button
+                      onClick={() => setConfig((prev) => ({ ...prev, benchmarks: [] }))}
+                      className="btn-ghost font-mono text-xs uppercase tracking-widest"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                </div>
 
-                      {/* Error Analysis */}
-                      {hasErrors && (
-                        <div className="mt-2 pt-2 border-t border-border-subtle">
-                          <p className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-1.5">Error Breakdown:</p>
-                          <div className="grid grid-cols-2 gap-1.5 text-xs">
-                            {result.errors!.wrong_answer > 0 && (
-                              <div className="flex items-center gap-1.5 text-status-error">
-                                <XCircle className="w-3 h-3" />
-                                <span className="font-mono">Wrong answer: {result.errors!.wrong_answer}</span>
-                              </div>
-                            )}
-                            {result.errors!.syntax_error > 0 && (
-                              <div className="flex items-center gap-1.5 text-status-warning">
-                                <AlertTriangle className="w-3 h-3" />
-                                <span className="font-mono">Syntax error: {result.errors!.syntax_error}</span>
-                              </div>
-                            )}
-                            {result.errors!.runtime_error > 0 && (
-                              <div className="flex items-center gap-1.5 text-status-warning">
-                                <AlertCircle className="w-3 h-3" />
-                                <span className="font-mono">Runtime error: {result.errors!.runtime_error}</span>
-                              </div>
-                            )}
-                            {result.errors!.timeout > 0 && (
-                              <div className="flex items-center gap-1.5 text-text-muted">
-                                <Timer className="w-3 h-3" />
-                                <span className="font-mono">Timeout: {result.errors!.timeout}</span>
-                              </div>
-                            )}
-                            {result.errors!.other > 0 && (
-                              <div className="flex items-center gap-1.5 text-text-muted">
-                                <AlertCircle className="w-3 h-3" />
-                                <span className="font-mono">Other: {result.errors!.other}</span>
-                              </div>
+                <div className="divide-y divide-border-subtle">
+                  {Object.entries(BENCHMARK_CATEGORIES).map(([key, category]) => {
+                    const Icon = category.icon
+                    const selectedCount = category.benchmarks.filter((b) =>
+                      config.benchmarks.includes(b.id)
+                    ).length
+                    const isExpanded = expandedCategory === key
+
+                    return (
+                      <div key={key}>
+                        <button
+                          onClick={() => setExpandedCategory(isExpanded ? null : key)}
+                          className="w-full flex items-center justify-between p-4 hover:bg-background-secondary transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <Icon className="w-5 h-5 text-accent" />
+                            <span className="font-brand text-lg text-text-primary">
+                              {category.label}
+                            </span>
+                            {selectedCount > 0 && (
+                              <span className="tag">
+                                <span>
+                                  {selectedCount}/{category.benchmarks.length}
+                                </span>
+                              </span>
                             )}
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  )})}
+                          {isExpanded ? (
+                            <ChevronDown className="w-5 h-5 text-text-muted" />
+                          ) : (
+                            <ChevronRight className="w-5 h-5 text-text-muted" />
+                          )}
+                        </button>
+
+                        {isExpanded && (
+                          <div className="px-4 pb-4 space-y-2">
+                            <button
+                              onClick={() => selectAllInCategory(key)}
+                              className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline mb-2"
+                            >
+                              {category.benchmarks.every((b) => config.benchmarks.includes(b.id))
+                                ? 'Deselect all'
+                                : 'Select all'}
+                            </button>
+                            {category.benchmarks.map((benchmark) => {
+                              const isDisabled = 'disabled' in benchmark && benchmark.disabled
+                              const benchInfo = BENCHMARK_INFO[benchmark.id]
+                              return (
+                                <label
+                                  key={benchmark.id}
+                                  className={clsx(
+                                    'flex items-center gap-3 p-3 border-brutal rounded-brutal transition-colors group',
+                                    isDisabled
+                                      ? 'opacity-50 cursor-not-allowed border-border-subtle'
+                                      : 'cursor-pointer',
+                                    config.benchmarks.includes(benchmark.id)
+                                      ? 'bg-accent-light border-border'
+                                      : 'bg-background-secondary border-border-subtle hover:border-border'
+                                  )}
+                                  title={benchInfo?.tooltip}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={config.benchmarks.includes(benchmark.id)}
+                                    onChange={() => !isDisabled && toggleBenchmark(benchmark.id)}
+                                    disabled={isDisabled}
+                                    className="rounded-brutal"
+                                  />
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={clsx(
+                                          'font-mono text-sm font-semibold',
+                                          isDisabled ? 'text-text-muted' : 'text-text-primary'
+                                        )}
+                                      >
+                                        {benchmark.name}
+                                      </span>
+                                      <span
+                                        className={clsx(
+                                          'font-mono text-xs uppercase',
+                                          getDifficultyColor(benchmark.difficulty)
+                                        )}
+                                      >
+                                        {benchmark.difficulty}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-text-muted">
+                                      {benchmark.description}
+                                    </p>
+                                  </div>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
-            )}
 
-            {/* Quick Stats */}
-            <div className="card p-4">
-              <h3 className="font-brand text-lg text-text-primary mb-3">Benchmark Coverage</h3>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                {Object.entries(BENCHMARK_CATEGORIES).map(([key, category]) => {
-                  const count = category.benchmarks.filter(b => config.benchmarks.includes(b.id)).length
-                  return (
-                    <div key={key} className="flex items-center justify-between p-2 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-                      <span className="text-text-secondary text-xs">{category.label}</span>
-                      <span className="font-brand text-lg text-text-primary">{count}/{category.benchmarks.length}</span>
+              {/* Evaluation Settings */}
+              <div className="card p-4">
+                <h3 className="font-brand text-lg text-text-primary mb-4">Evaluation Settings</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                      Judge Model
+                    </label>
+                    <select
+                      value={config.judge_model}
+                      onChange={(e) =>
+                        setConfig((prev) => ({ ...prev, judge_model: e.target.value }))
+                      }
+                      className="input text-sm w-full"
+                    >
+                      <optgroup label="Anthropic Claude">
+                        <option value="claude-opus-4-8">Claude Opus 4.8 (Best)</option>
+                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                        <option value="claude-haiku-4-5">Claude Haiku 4.5 (Fast)</option>
+                      </optgroup>
+                      <optgroup label="NVIDIA NIM">
+                        <option value="deepseek-ai/deepseek-v4-flash">DeepSeek V4 Flash</option>
+                        <option value="qwen/qwen3-next-80b-a3b-instruct">Qwen3 Next 80B</option>
+                        <option value="nvidia/nemotron-3-super-120b-a12b">
+                          Nemotron 3 Super 120B
+                        </option>
+                      </optgroup>
+                      <optgroup label="OpenAI">
+                        <option value="gpt-4o">GPT-4o</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                      Samples per Benchmark
+                    </label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="1000"
+                      value={config.num_samples}
+                      onChange={(e) =>
+                        setConfig((prev) => ({ ...prev, num_samples: parseInt(e.target.value) }))
+                      }
+                      className="input text-sm w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                      Temperature
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={config.temperature}
+                      onChange={(e) =>
+                        setConfig((prev) => ({ ...prev, temperature: parseFloat(e.target.value) }))
+                      }
+                      className="input text-sm w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Job History & Results */}
+            <div className="space-y-4">
+              <div className="card">
+                <div className="p-4 border-b border-border">
+                  <h3 className="font-brand text-lg text-text-primary">Evaluation History</h3>
+                </div>
+                <div className="divide-y divide-border-subtle max-h-96 overflow-auto">
+                  {jobs.length === 0 ? (
+                    <div className="p-8 text-center">
+                      <BarChart3 className="w-10 h-10 text-text-muted mx-auto mb-2" />
+                      <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                        No evaluations yet
+                      </p>
                     </div>
-                  )
-                })}
+                  ) : (
+                    jobs.map((job) => (
+                      <button
+                        key={job.id}
+                        onClick={() => setSelectedJob(job)}
+                        className={clsx(
+                          'w-full p-4 text-left hover:bg-background-secondary transition-colors',
+                          selectedJob?.id === job.id && 'bg-accent-light'
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-mono text-sm font-semibold text-text-primary">
+                            {job.model}
+                          </span>
+                          {job.status === 'running' && (
+                            <Loader2 className="w-4 h-4 animate-spin text-accent" />
+                          )}
+                          {job.status === 'completed' && (
+                            <CheckCircle className="w-4 h-4 text-status-success" />
+                          )}
+                          {job.status === 'failed' && (
+                            <AlertCircle className="w-4 h-4 text-status-error" />
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
+                          <span>{job.benchmarks.length} benchmarks</span>
+                          <span>|</span>
+                          <span>{new Date(job.created_at).toLocaleString()}</span>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Selected Job Results */}
+              {selectedJob?.results && (
+                <div className="card p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-brand text-lg text-text-primary">
+                      Results: {selectedJob.model}
+                    </h3>
+                    <button
+                      onClick={() => setSelectedJob(null)}
+                      className="btn-icon flex items-center justify-center w-8 h-8"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="space-y-3 overflow-visible">
+                    {Object.entries(selectedJob.results).map(([benchmark, result]) => {
+                      const benchInfo = BENCHMARK_INFO[benchmark]
+                      const hasErrors =
+                        result.errors &&
+                        (result.errors.wrong_answer > 0 ||
+                          result.errors.syntax_error > 0 ||
+                          result.errors.runtime_error > 0 ||
+                          result.errors.timeout > 0)
+                      return (
+                        <div
+                          key={benchmark}
+                          className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary overflow-visible"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-mono text-sm font-semibold text-text-primary">
+                              {benchmark}
+                            </span>
+                            <span
+                              className={clsx(
+                                'font-brand text-xl font-bold',
+                                result.score >= 0.8
+                                  ? 'text-status-success'
+                                  : result.score >= 0.6
+                                    ? 'text-status-warning'
+                                    : 'text-status-error'
+                              )}
+                            >
+                              {(result.score * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          {/* Benchmark description */}
+                          {benchInfo && (
+                            <p className="text-xs text-text-muted mb-2">{benchInfo.tooltip}</p>
+                          )}
+                          <div className="progress-bar">
+                            <div
+                              className="progress-fill"
+                              style={{
+                                width: `${result.score * 100}%`,
+                                background:
+                                  result.score >= 0.8
+                                    ? 'var(--status-success)'
+                                    : result.score >= 0.6
+                                      ? 'var(--status-warning)'
+                                      : 'var(--status-error)'
+                              }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="font-mono text-xs text-text-muted">
+                              {result.passed} / {result.total} passed
+                            </p>
+                            {result.duration_seconds && (
+                              <p className="font-mono text-xs text-text-muted flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {result.duration_seconds.toFixed(1)}s
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Error Analysis */}
+                          {hasErrors && (
+                            <div className="mt-2 pt-2 border-t border-border-subtle">
+                              <p className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-1.5">
+                                Error Breakdown:
+                              </p>
+                              <div className="grid grid-cols-2 gap-1.5 text-xs">
+                                {result.errors!.wrong_answer > 0 && (
+                                  <div className="flex items-center gap-1.5 text-status-error">
+                                    <XCircle className="w-3 h-3" />
+                                    <span className="font-mono">
+                                      Wrong answer: {result.errors!.wrong_answer}
+                                    </span>
+                                  </div>
+                                )}
+                                {result.errors!.syntax_error > 0 && (
+                                  <div className="flex items-center gap-1.5 text-status-warning">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    <span className="font-mono">
+                                      Syntax error: {result.errors!.syntax_error}
+                                    </span>
+                                  </div>
+                                )}
+                                {result.errors!.runtime_error > 0 && (
+                                  <div className="flex items-center gap-1.5 text-status-warning">
+                                    <AlertCircle className="w-3 h-3" />
+                                    <span className="font-mono">
+                                      Runtime error: {result.errors!.runtime_error}
+                                    </span>
+                                  </div>
+                                )}
+                                {result.errors!.timeout > 0 && (
+                                  <div className="flex items-center gap-1.5 text-text-muted">
+                                    <Timer className="w-3 h-3" />
+                                    <span className="font-mono">
+                                      Timeout: {result.errors!.timeout}
+                                    </span>
+                                  </div>
+                                )}
+                                {result.errors!.other > 0 && (
+                                  <div className="flex items-center gap-1.5 text-text-muted">
+                                    <AlertCircle className="w-3 h-3" />
+                                    <span className="font-mono">Other: {result.errors!.other}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Quick Stats */}
+              <div className="card p-4">
+                <h3 className="font-brand text-lg text-text-primary mb-3">Benchmark Coverage</h3>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {Object.entries(BENCHMARK_CATEGORIES).map(([key, category]) => {
+                    const count = category.benchmarks.filter((b) =>
+                      config.benchmarks.includes(b.id)
+                    ).length
+                    return (
+                      <div
+                        key={key}
+                        className="flex items-center justify-between p-2 border-brutal border-border-subtle rounded-brutal bg-background-secondary"
+                      >
+                        <span className="text-text-secondary text-xs">{category.label}</span>
+                        <span className="font-brand text-lg text-text-primary">
+                          {count}/{category.benchmarks.length}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           </div>
-        </div>
         )}
       </div>
     </div>

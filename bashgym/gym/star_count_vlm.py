@@ -123,9 +123,7 @@ def load_star_count_records(jsonl_path: str | Path) -> list[dict[str, Any]]:
     return records
 
 
-def extract_star_count_archive(
-    archive_path: str | Path, destination: str | Path
-) -> Path:
+def extract_star_count_archive(archive_path: str | Path, destination: str | Path) -> Path:
     """Extract one bounded dataset archive without links or path traversal."""
 
     archive = Path(archive_path).expanduser().resolve()
@@ -342,10 +340,7 @@ def train_star_count_lora(
 def summarize_star_count_predictions(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         raise ValueError("star-count evaluation requires examples")
-    scores = [
-        score_star_count_prediction(str(row["prediction"]), row["counts"])
-        for row in rows
-    ]
+    scores = [score_star_count_prediction(str(row["prediction"]), row["counts"]) for row in rows]
     count_accuracy = sum(score.count_accuracy for score in scores) / len(scores)
     format_accuracy = sum(score.format_accuracy for score in scores) / len(scores)
     return {
@@ -409,9 +404,7 @@ def evaluate_star_count_model(
     }
     destination = Path(output_path).expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return payload
 
 

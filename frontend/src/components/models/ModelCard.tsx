@@ -27,14 +27,14 @@ const STATUS_STYLES: Record<string, { className: string; icon: React.ElementType
   needs_eval: { className: 'quality-pending text-status-warning', icon: AlertCircle },
   training: { className: 'text-status-info', icon: Cpu },
   archived: { className: 'text-text-muted', icon: Archive },
-  regression_detected: { className: 'quality-failed text-status-error', icon: AlertCircle },
+  regression_detected: { className: 'quality-failed text-status-error', icon: AlertCircle }
 }
 
 const STRATEGY_LABELS: Record<string, string> = {
   sft: 'SFT',
   dpo: 'DPO',
   grpo: 'GRPO',
-  distillation: 'Distill',
+  distillation: 'Distill'
 }
 
 export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardProps) {
@@ -85,7 +85,9 @@ export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardPr
             <span className="font-mono text-xs text-text-muted">{baseModelShort}</span>
             <span className="text-text-muted">|</span>
             <span className="tag">
-              <span>{STRATEGY_LABELS[model.training_strategy] || model.training_strategy.toUpperCase()}</span>
+              <span>
+                {STRATEGY_LABELS[model.training_strategy] || model.training_strategy.toUpperCase()}
+              </span>
             </span>
           </div>
         </div>
@@ -104,7 +106,10 @@ export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardPr
           </button>
           <div className="relative">
             <button
-              onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu) }}
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowMenu(!showMenu)
+              }}
               className="btn-icon w-7 h-7 flex items-center justify-center text-text-muted"
             >
               <MoreVertical className="w-3.5 h-3.5" />
@@ -112,14 +117,21 @@ export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardPr
             {showMenu && (
               <div className="absolute right-0 top-9 z-10 bg-background-card border-brutal border-border shadow-brutal rounded-brutal py-1 min-w-[140px]">
                 <button
-                  onClick={(e) => { e.stopPropagation(); onCompare(model.model_id); setShowMenu(false) }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onCompare(model.model_id)
+                    setShowMenu(false)
+                  }}
                   className="menu-item w-full text-sm"
                 >
                   <BarChart3 className="w-4 h-4" />
                   Compare
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); handleArchive() }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleArchive()
+                  }}
                   className="menu-item w-full text-sm text-status-error"
                 >
                   <Archive className="w-4 h-4" />
@@ -135,7 +147,9 @@ export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardPr
       <div className="grid grid-cols-2 gap-2 mb-3">
         {/* Custom Eval */}
         <div className="p-2 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-0.5">Custom Eval</div>
+          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-0.5">
+            Custom Eval
+          </div>
           <div className="flex items-center gap-1">
             <span className="font-brand text-xl text-text-primary">
               {model.custom_eval_pass_rate !== null
@@ -150,7 +164,9 @@ export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardPr
 
         {/* Benchmark Avg */}
         <div className="p-2 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
-          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-0.5">Benchmark</div>
+          <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-0.5">
+            Benchmark
+          </div>
           <div className="flex items-center gap-1">
             <span className="font-brand text-xl text-text-primary">
               {model.benchmark_avg_score !== null
@@ -181,16 +197,18 @@ export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardPr
 
       {/* Status & Tags */}
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-border-subtle">
-        <div className={clsx('flex items-center gap-1 font-mono text-xs uppercase tracking-widest', statusStyle.className)}>
+        <div
+          className={clsx(
+            'flex items-center gap-1 font-mono text-xs uppercase tracking-widest',
+            statusStyle.className
+          )}
+        >
           <StatusIcon className="w-3 h-3" />
           {model.status.replace('_', ' ')}
         </div>
         <div className="flex items-center gap-1">
-          {model.tags.slice(0, 2).map(tag => (
-            <span
-              key={tag}
-              className="tag"
-            >
+          {model.tags.slice(0, 2).map((tag) => (
+            <span key={tag} className="tag">
               <span>{tag}</span>
             </span>
           ))}

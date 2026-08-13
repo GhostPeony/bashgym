@@ -1,8 +1,5 @@
 import { useState, useEffect } from 'react'
-import {
-  Trophy, FileStack, Award, Dumbbell, Sparkles, Puzzle,
-  RefreshCw,
-} from 'lucide-react'
+import { Trophy, FileStack, Award, Dumbbell, Sparkles, Puzzle, RefreshCw } from 'lucide-react'
 import { useAchievementStore } from '../../stores/achievementStore'
 import { AchievementCard } from './AchievementCard'
 import { StatCard } from './StatCard'
@@ -16,13 +13,20 @@ const CATEGORY_TABS: { id: CategoryFilter; label: string; icon: React.ReactNode 
   { id: 'quality', label: 'Quality', icon: <Award className="w-3.5 h-3.5" /> },
   { id: 'training', label: 'Training', icon: <Dumbbell className="w-3.5 h-3.5" /> },
   { id: 'factory', label: 'Factory', icon: <Sparkles className="w-3.5 h-3.5" /> },
-  { id: 'mastery', label: 'Mastery', icon: <Puzzle className="w-3.5 h-3.5" /> },
+  { id: 'mastery', label: 'Mastery', icon: <Puzzle className="w-3.5 h-3.5" /> }
 ]
 
 export function AchievementsView() {
   const {
-    stats, achievements, earnedCount, totalCount, totalPoints,
-    loading, fetchStats, fetchAchievements, refresh,
+    stats,
+    achievements,
+    earnedCount,
+    totalCount,
+    totalPoints,
+    loading,
+    fetchStats,
+    fetchAchievements,
+    refresh
   } = useAchievementStore()
   const [category, setCategory] = useState<CategoryFilter>('all')
   const [refreshing, setRefreshing] = useState(false)
@@ -38,9 +42,8 @@ export function AchievementsView() {
     setRefreshing(false)
   }
 
-  const filtered = category === 'all'
-    ? achievements
-    : achievements.filter(a => a.category === category)
+  const filtered =
+    category === 'all' ? achievements : achievements.filter((a) => a.category === category)
 
   // Sort: earned first (by date desc), then locked (by progress desc)
   const sorted = [...filtered].sort((a, b) => {
@@ -67,7 +70,7 @@ export function AchievementsView() {
           disabled={refreshing}
           className={clsx(
             'btn btn-secondary flex items-center gap-2',
-            refreshing && 'opacity-50 pointer-events-none',
+            refreshing && 'opacity-50 pointer-events-none'
           )}
         >
           <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
@@ -80,7 +83,9 @@ export function AchievementsView() {
       <div className="grid grid-cols-12 gap-6">
         {/* Left: Lifetime Stats */}
         <div className="col-span-12 lg:col-span-4">
-          <h2 className="font-mono text-xs uppercase tracking-widest text-text-muted mb-3">Lifetime Stats</h2>
+          <h2 className="font-mono text-xs uppercase tracking-widest text-text-muted mb-3">
+            Lifetime Stats
+          </h2>
 
           {stats ? (
             <div className="space-y-6">
@@ -88,10 +93,30 @@ export function AchievementsView() {
               <div>
                 <h3 className="font-brand text-lg text-text-secondary mb-2 px-1">Traces</h3>
                 <div className="grid grid-cols-2 gap-2">
-                  <StatCard icon={<FileStack className="w-4 h-4" />} label="Total Traces" value={stats.traces.total} color="blue" />
-                  <StatCard icon={<Award className="w-4 h-4" />} label="Gold" value={stats.traces.gold} color="green" />
-                  <StatCard icon={<Trophy className="w-4 h-4" />} label="Best Quality" value={stats.traces.highest_quality.toFixed(2)} color="purple" />
-                  <StatCard icon={<Puzzle className="w-4 h-4" />} label="Repos" value={stats.traces.unique_repos} color="default" />
+                  <StatCard
+                    icon={<FileStack className="w-4 h-4" />}
+                    label="Total Traces"
+                    value={stats.traces.total}
+                    color="blue"
+                  />
+                  <StatCard
+                    icon={<Award className="w-4 h-4" />}
+                    label="Gold"
+                    value={stats.traces.gold}
+                    color="green"
+                  />
+                  <StatCard
+                    icon={<Trophy className="w-4 h-4" />}
+                    label="Best Quality"
+                    value={stats.traces.highest_quality.toFixed(2)}
+                    color="purple"
+                  />
+                  <StatCard
+                    icon={<Puzzle className="w-4 h-4" />}
+                    label="Repos"
+                    value={stats.traces.unique_repos}
+                    color="default"
+                  />
                 </div>
               </div>
 
@@ -101,15 +126,34 @@ export function AchievementsView() {
               <div>
                 <h3 className="font-brand text-lg text-text-secondary mb-2 px-1">Training</h3>
                 <div className="grid grid-cols-2 gap-2">
-                  <StatCard icon={<Dumbbell className="w-4 h-4" />} label="Runs" value={stats.training.runs_completed} color="green" />
+                  <StatCard
+                    icon={<Dumbbell className="w-4 h-4" />}
+                    label="Runs"
+                    value={stats.training.runs_completed}
+                    color="green"
+                  />
                   <StatCard
                     icon={<Sparkles className="w-4 h-4" />}
                     label="Lowest Loss"
-                    value={stats.training.lowest_loss != null ? stats.training.lowest_loss.toFixed(3) : '---'}
+                    value={
+                      stats.training.lowest_loss != null
+                        ? stats.training.lowest_loss.toFixed(3)
+                        : '---'
+                    }
                     color="purple"
                   />
-                  <StatCard icon={<FileStack className="w-4 h-4" />} label="Examples" value={stats.training.total_examples_generated} color="blue" />
-                  <StatCard icon={<Award className="w-4 h-4" />} label="Exported" value={stats.training.models_exported} color="orange" />
+                  <StatCard
+                    icon={<FileStack className="w-4 h-4" />}
+                    label="Examples"
+                    value={stats.training.total_examples_generated}
+                    color="blue"
+                  />
+                  <StatCard
+                    icon={<Award className="w-4 h-4" />}
+                    label="Exported"
+                    value={stats.training.models_exported}
+                    color="orange"
+                  />
                 </div>
               </div>
 
@@ -119,14 +163,26 @@ export function AchievementsView() {
               <div>
                 <h3 className="font-brand text-lg text-text-secondary mb-2 px-1">Activity</h3>
                 <div className="grid grid-cols-2 gap-2">
-                  <StatCard icon={<Trophy className="w-4 h-4" />} label="Points" value={totalPoints} color="purple" />
-                  <StatCard icon={<FileStack className="w-4 h-4" />} label="Days Active" value={stats.days_active} color="blue" />
+                  <StatCard
+                    icon={<Trophy className="w-4 h-4" />}
+                    label="Points"
+                    value={totalPoints}
+                    color="purple"
+                  />
+                  <StatCard
+                    icon={<FileStack className="w-4 h-4" />}
+                    label="Days Active"
+                    value={stats.days_active}
+                    color="blue"
+                  />
                 </div>
               </div>
             </div>
           ) : (
             <div className="card p-8 text-center">
-              <p className="font-mono text-sm text-text-muted">{loading ? 'Loading stats...' : 'No data yet'}</p>
+              <p className="font-mono text-sm text-text-muted">
+                {loading ? 'Loading stats...' : 'No data yet'}
+              </p>
             </div>
           )}
         </div>
@@ -135,7 +191,7 @@ export function AchievementsView() {
         <div className="col-span-12 lg:col-span-8">
           {/* Category Tabs */}
           <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
-            {CATEGORY_TABS.map(tab => (
+            {CATEGORY_TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setCategory(tab.id)}
@@ -163,7 +219,7 @@ export function AchievementsView() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {sorted.map(a => (
+              {sorted.map((a) => (
                 <AchievementCard key={a.id} {...a} />
               ))}
             </div>

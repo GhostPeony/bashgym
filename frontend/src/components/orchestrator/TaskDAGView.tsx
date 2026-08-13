@@ -20,7 +20,7 @@ const priorityColors: Record<string, string> = {
   CRITICAL: 'bg-status-error/20 text-status-error border-status-error',
   HIGH: 'bg-status-warning/20 text-status-warning border-status-warning',
   NORMAL: 'bg-accent-light text-accent border-accent',
-  LOW: 'bg-background-secondary text-text-muted border-border',
+  LOW: 'bg-background-secondary text-text-muted border-border'
 }
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; bg: string }> = {
@@ -32,10 +32,20 @@ const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; b
   completed: { icon: CheckCircle2, color: 'text-status-success', bg: 'border-status-success' },
   failed: { icon: XCircle, color: 'text-status-error', bg: 'border-status-error' },
   retrying: { icon: RefreshCw, color: 'text-status-warning', bg: 'border-status-warning' },
-  cancelled: { icon: XCircle, color: 'text-text-muted', bg: 'border-border' },
+  cancelled: { icon: XCircle, color: 'text-text-muted', bg: 'border-border' }
 }
 
-const statusOrder = ['running', 'dispatched', 'pending', 'assigned', 'blocked', 'retrying', 'completed', 'failed', 'cancelled']
+const statusOrder = [
+  'running',
+  'dispatched',
+  'pending',
+  'assigned',
+  'blocked',
+  'retrying',
+  'completed',
+  'failed',
+  'cancelled'
+]
 
 function shortTerminalId(terminalId: string): string {
   // Extract a short display name: "terminal-3" → "T3", UUID → last 4 chars
@@ -52,7 +62,7 @@ export function TaskDAGView() {
     taskQueue,
     editedPrompts,
     setEditedPrompt,
-    resetEditedPrompt,
+    resetEditedPrompt
   } = useOrchestratorStore()
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
   const [retryPrompt, setRetryPrompt] = useState('')
@@ -87,7 +97,9 @@ export function TaskDAGView() {
     return (
       <div className="card p-4">
         <div className="flex items-center gap-2 mb-3">
-          <h3 className="font-mono text-xs uppercase tracking-widest text-text-muted">Task Graph</h3>
+          <h3 className="font-mono text-xs uppercase tracking-widest text-text-muted">
+            Task Graph
+          </h3>
         </div>
         <div className="section-divider mb-3" />
         <div className="flex items-center justify-center py-8 text-text-muted">
@@ -148,7 +160,9 @@ export function TaskDAGView() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm text-text-primary truncate">{task.title}</span>
-                    <span className={clsx('tag text-[10px] py-0 px-1.5', priorityColors[task.priority])}>
+                    <span
+                      className={clsx('tag text-[10px] py-0 px-1.5', priorityColors[task.priority])}
+                    >
                       <span>{task.priority}</span>
                     </span>
                     {hasEdits && (
@@ -177,15 +191,20 @@ export function TaskDAGView() {
                     </span>
                   )}
                   {task.cost_usd !== undefined && (
-                    <span className="font-mono text-xs text-text-secondary">${task.cost_usd.toFixed(3)}</span>
+                    <span className="font-mono text-xs text-text-secondary">
+                      ${task.cost_usd.toFixed(3)}
+                    </span>
                   )}
                   {task.duration_seconds !== undefined && (
-                    <span className="font-mono text-xs text-text-muted">{Math.round(task.duration_seconds)}s</span>
+                    <span className="font-mono text-xs text-text-muted">
+                      {Math.round(task.duration_seconds)}s
+                    </span>
                   )}
-                  {isExpanded
-                    ? <ChevronUp className="w-4 h-4 text-text-muted" />
-                    : <ChevronDown className="w-4 h-4 text-text-muted" />
-                  }
+                  {isExpanded ? (
+                    <ChevronUp className="w-4 h-4 text-text-muted" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-text-muted" />
+                  )}
                 </div>
               </button>
 
@@ -224,14 +243,20 @@ export function TaskDAGView() {
                   {/* Worker prompt read-only after dispatch */}
                   {!isAwaitingApproval && task.worker_prompt && (
                     <div className="mb-3 p-2 bg-background-secondary rounded-brutal border border-border">
-                      <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted block mb-1">Prompt</span>
-                      <p className="font-mono text-[11px] text-text-secondary leading-relaxed">{task.worker_prompt}</p>
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted block mb-1">
+                        Prompt
+                      </span>
+                      <p className="font-mono text-[11px] text-text-secondary leading-relaxed">
+                        {task.worker_prompt}
+                      </p>
                     </div>
                   )}
 
                   {task.files_touched.length > 0 && (
                     <div className="mb-3">
-                      <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">Files:</span>
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
+                        Files:
+                      </span>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {task.files_touched.map((f, i) => (
                           <span
@@ -275,7 +300,9 @@ export function TaskDAGView() {
                         disabled={retryingTask === task.id}
                         className="btn-secondary font-mono text-xs flex items-center gap-1.5"
                       >
-                        <RefreshCw className={clsx('w-3 h-3', retryingTask === task.id && 'animate-spin')} />
+                        <RefreshCw
+                          className={clsx('w-3 h-3', retryingTask === task.id && 'animate-spin')}
+                        />
                         {retryingTask === task.id ? 'Retrying...' : 'Retry Task'}
                       </button>
                     </div>

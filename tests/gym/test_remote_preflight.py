@@ -1,6 +1,6 @@
 """Tests for the pure remote-hardware preflight parsers.
 
-These cover the GB10/unified-memory case (user): nvidia-smi reports VRAM as
+These cover unified-memory accelerators where nvidia-smi reports VRAM as
 [N/A] on unified memory, so the effective training budget must fall back to
 system RAM.
 """
@@ -32,10 +32,12 @@ def test_parse_nvidia_smi_gpus_discrete():
 
 
 def test_parse_nvidia_smi_gpus_handles_na_on_unified_memory():
-    # GB10 / Spark unified memory: nvidia-smi cannot report a discrete VRAM total
-    gpus = parse_nvidia_smi_gpus("NVIDIA GB10, [N/A], [N/A]\n")
+    # Unified-memory accelerators may not report a discrete VRAM total.
+    gpus = parse_nvidia_smi_gpus("Unified Memory Accelerator, [N/A], [N/A]\n")
 
-    assert gpus == [{"name": "NVIDIA GB10", "vram_total_gb": None, "vram_free_gb": None}]
+    assert gpus == [
+        {"name": "Unified Memory Accelerator", "vram_total_gb": None, "vram_free_gb": None}
+    ]
 
 
 def test_parse_meminfo_gb():
@@ -54,7 +56,7 @@ def test_compute_budget_prefers_discrete_vram():
 
 def test_compute_budget_falls_back_to_ram_on_unified_memory():
     budget = remote_compute_budget_gb(
-        gpus=[{"name": "NVIDIA GB10", "vram_total_gb": None, "vram_free_gb": None}],
+        gpus=[{"name": "Unified Memory Accelerator", "vram_total_gb": None, "vram_free_gb": None}],
         ram_gb=128.0,
     )
 
@@ -65,7 +67,7 @@ def test_compute_budget_falls_back_to_ram_on_unified_memory():
 def _trainer():
     return RemoteTrainer(
         SSHConfig(
-            host="192.168.1.100",
+            host="192.0.2.10",
             username="remote-user",
             port=22,
             key_path="~/.ssh/id_rsa",
@@ -75,7 +77,7 @@ def _trainer():
 
 
 def test_preflight_without_unsloth_requirement_stays_ok_for_plain_backend():
-    # user (sm_121/GB10) uses the plain transformers backend; a missing Unsloth
+    # Newer unified-memory targets may use the plain transformers backend; a missing Unsloth
     # must not fail preflight when the caller does not require it.
     mock_conn = AsyncMock()
     mock_conn.run = AsyncMock(
@@ -99,7 +101,7 @@ def test_preflight_capabilities_persists_budget_fields_and_drops_none():
     result = PreflightResult(
         ok=True,
         python_version="Python 3.12.0",
-        gpus=[{"name": "NVIDIA GB10", "vram_total_gb": None, "vram_free_gb": None}],
+        gpus=[{"name": "Unified Memory Accelerator", "vram_total_gb": None, "vram_free_gb": None}],
         ram_gb=128.0,
         effective_vram_gb=128.0,
         unified_memory=True,

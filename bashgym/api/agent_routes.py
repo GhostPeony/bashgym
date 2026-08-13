@@ -1336,7 +1336,10 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
 
             elif name == "hf_get_job_status":
                 job_id = tool_input["job_id"]
-                resp = await client.get(f"{base_url}/api/hf/jobs/{job_id}")
+                params = {"jobs_access_confirmed": "true"}
+                if tool_input.get("namespace"):
+                    params["namespace"] = tool_input["namespace"]
+                resp = await client.get(f"{base_url}/api/hf/jobs/{job_id}", params=params)
                 resp.raise_for_status()
                 data = resp.json()
                 return json.dumps(data)

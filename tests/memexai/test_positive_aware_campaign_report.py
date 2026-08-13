@@ -10,9 +10,7 @@ from scripts.memexai.build_positive_aware_campaign_report import (
 
 
 def test_rolling_mean_uses_only_available_history() -> None:
-    assert rolling_mean([1.0, 2.0, 3.0, 4.0], 3) == pytest.approx(
-        [1.0, 1.5, 2.0, 3.0]
-    )
+    assert rolling_mean([1.0, 2.0, 3.0, 4.0], 3) == pytest.approx([1.0, 1.5, 2.0, 3.0])
 
 
 def test_training_summary_requires_a_complete_step_series() -> None:

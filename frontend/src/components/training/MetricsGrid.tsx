@@ -28,18 +28,19 @@ function MetricCard({ icon, label, value, subvalue, trend, color, isWaiting }: M
   }
 
   return (
-    <div className={clsx(
-      'card p-2.5 flex items-center gap-2.5',
-      isWaiting && 'opacity-50'
-    )}>
-      <div className={clsx(
-        'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary flex-shrink-0',
-        iconColorClasses[color]
-      )}>
+    <div className={clsx('card p-2.5 flex items-center gap-2.5', isWaiting && 'opacity-50')}>
+      <div
+        className={clsx(
+          'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary flex-shrink-0',
+          iconColorClasses[color]
+        )}
+      >
         {icon}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">{label}</p>
+        <p className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">
+          {label}
+        </p>
         <div className="flex items-baseline gap-1.5">
           <p className="font-brand text-lg leading-tight text-text-primary">{value}</p>
           {subvalue && <span className="font-mono text-xs text-text-muted">{subvalue}</span>}
@@ -76,8 +77,8 @@ export function MetricsGrid({ loss, learningRate, gradNorm, eta, isWaiting }: Me
   }
 
   // Format values with fallback for undefined
-  const formatLoss = (l?: number) => l !== undefined ? l.toFixed(3) : '—'
-  const formatGradNorm = (g?: number) => g !== undefined ? g.toFixed(2) : '—'
+  const formatLoss = (l?: number) => (l !== undefined ? l.toFixed(3) : '—')
+  const formatGradNorm = (g?: number) => (g !== undefined ? g.toFixed(2) : '—')
   const formatEta = (e?: string) => e ?? '—'
 
   return (

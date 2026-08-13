@@ -17,9 +17,7 @@ class FakeSources:
         return [json.loads((FIXTURES / "rich_model.json").read_text(encoding="utf-8"))]
 
     def discover_datasets(self, query: str, *, limit: int):
-        return [
-            json.loads((FIXTURES / "multi_config_dataset.json").read_text(encoding="utf-8"))
-        ]
+        return [json.loads((FIXTURES / "multi_config_dataset.json").read_text(encoding="utf-8"))]
 
 
 def client(tmp_path):
@@ -134,9 +132,7 @@ def test_workspace_context_exposes_only_active_visibility_safe_summary(tmp_path)
         json={"workspace_id": "workspace-a"},
     )
 
-    context = http.get(
-        "/api/workspace/context", params={"workspace_id": "workspace-a"}
-    ).json()
+    context = http.get("/api/workspace/context", params={"workspace_id": "workspace-a"}).json()
     summary = context["huggingface_context"]
     assert summary["bundle_id"] == bundle["bundle_id"]
     assert summary["evidence_counts"] == {"dataset": 1, "evaluation": 1, "model": 1}
@@ -162,9 +158,7 @@ def test_refresh_creates_collecting_successor_and_cancel_finalizes_collecting(tm
     assert ready["lifecycle"] == "ready"
 
     service = http.app.state.hf_context_service
-    collecting, _ = service.begin_refresh(
-        "workspace-a", first["bundle_id"], 2, expected_version=2
-    )
+    collecting, _ = service.begin_refresh("workspace-a", first["bundle_id"], 2, expected_version=2)
     cancelled = http.post(
         f"/api/hf/context/bundles/{first['bundle_id']}/versions/{collecting.version}/cancel",
         json={"workspace_id": "workspace-a"},

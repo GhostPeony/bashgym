@@ -2,12 +2,13 @@
 """Tests for synthetic task generation data structures."""
 
 import pytest
+
 from bashgym.factory.synthetic_generator import (
-    SyntheticTask,
-    GenerationStrategy,
-    GenerationPreset,
     PRESETS,
+    GenerationPreset,
+    GenerationStrategy,
     SyntheticGenerator,
+    SyntheticTask,
 )
 
 
@@ -197,7 +198,7 @@ class TestSyntheticGenerator:
             framework_hints=["fastapi", "pytest"],
             common_paths=["src/", "bashgym/"],
             languages={"python": 0.8},
-            prompt_keywords=["add", "fix", "implement"]
+            prompt_keywords=["add", "fix", "implement"],
         )
 
         seed_prompts = [
@@ -206,9 +207,7 @@ class TestSyntheticGenerator:
         ]
 
         prompt = generator._build_generation_prompt(
-            patterns=patterns,
-            task_type="feature",
-            seed_prompts=seed_prompts
+            patterns=patterns, task_type="feature", seed_prompts=seed_prompts
         )
 
         assert "ghostwork" in prompt
@@ -220,6 +219,7 @@ class TestSyntheticGenerator:
     async def test_generate_task_with_nim(self):
         """Should call NIM to generate a synthetic task."""
         from unittest.mock import AsyncMock, patch
+
         from bashgym.factory.pattern_extractor import TracePatterns
 
         generator = SyntheticGenerator()
@@ -228,18 +228,15 @@ class TestSyntheticGenerator:
             task_types={"feature": 1.0},
             repo_name="ghostwork",
             common_paths=["src/"],
-            languages={"python": 1.0}
+            languages={"python": 1.0},
         )
 
         # Mock the LLM client
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Add caching to the database queries"
 
             task = await generator.generate_task(
-                patterns=patterns,
-                task_type="feature",
-                seed_prompts=["Add logging"],
-                provider="nim"
+                patterns=patterns, task_type="feature", seed_prompts=["Add logging"], provider="nim"
             )
 
             assert task.prompt == "Add caching to the database queries"
@@ -251,6 +248,7 @@ class TestSyntheticGenerator:
     async def test_generate_task_with_anthropic(self):
         """Should call Anthropic to generate a synthetic task."""
         from unittest.mock import AsyncMock, patch
+
         from bashgym.factory.pattern_extractor import TracePatterns
 
         generator = SyntheticGenerator()
@@ -259,17 +257,17 @@ class TestSyntheticGenerator:
             task_types={"bugfix": 1.0},
             repo_name="test-repo",
             common_paths=["lib/"],
-            languages={"typescript": 1.0}
+            languages={"typescript": 1.0},
         )
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Fix memory leak in worker thread"
 
             task = await generator.generate_task(
                 patterns=patterns,
                 task_type="bugfix",
                 seed_prompts=["Fix timeout error"],
-                provider="anthropic"
+                provider="anthropic",
             )
 
             assert task.prompt == "Fix memory leak in worker thread"
@@ -284,7 +282,7 @@ class TestSyntheticGenerator:
 
         generator = SyntheticGenerator()
 
-        with patch.object(generator, '_call_nim', new_callable=AsyncMock) as mock_nim:
+        with patch.object(generator, "_call_nim", new_callable=AsyncMock) as mock_nim:
             mock_nim.return_value = "Generated task"
 
             result = await generator._call_llm("Test prompt", provider="nim")
@@ -299,7 +297,7 @@ class TestSyntheticGenerator:
 
         generator = SyntheticGenerator()
 
-        with patch.object(generator, '_call_anthropic', new_callable=AsyncMock) as mock_anthropic:
+        with patch.object(generator, "_call_anthropic", new_callable=AsyncMock) as mock_anthropic:
             mock_anthropic.return_value = "Generated task from Claude"
 
             result = await generator._call_llm("Test prompt", provider="anthropic")
@@ -318,8 +316,7 @@ class TestSyntheticGenerator:
     @pytest.mark.asyncio
     async def test_call_nim_makes_http_request(self):
         """_call_nim should make HTTP request to NIM endpoint."""
-        from unittest.mock import AsyncMock, patch, MagicMock
-        import httpx
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         generator = SyntheticGenerator()
 
@@ -328,12 +325,15 @@ class TestSyntheticGenerator:
             "choices": [{"message": {"content": "  Generated response  "}}]
         }
 
-        with patch.dict('os.environ', {
-            'NVIDIA_API_KEY': 'test-key',
-            'NIM_ENDPOINT': 'https://test.nvidia.com/v1',
-            'NIM_MODEL': 'test-model'
-        }):
-            with patch('httpx.AsyncClient') as mock_client_class:
+        with patch.dict(
+            "os.environ",
+            {
+                "NVIDIA_API_KEY": "test-key",
+                "NIM_ENDPOINT": "https://test.nvidia.com/v1",
+                "NIM_MODEL": "test-model",
+            },
+        ):
+            with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.post.return_value = mock_response
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -351,14 +351,14 @@ class TestSyntheticGenerator:
     @pytest.mark.asyncio
     async def test_call_anthropic_makes_api_request(self):
         """_call_anthropic should call Anthropic API."""
-        from unittest.mock import AsyncMock, patch, MagicMock
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         generator = SyntheticGenerator()
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock(text="  Claude response  ")]
 
-        with patch('anthropic.AsyncAnthropic') as mock_anthropic_class:
+        with patch("anthropic.AsyncAnthropic") as mock_anthropic_class:
             mock_client = MagicMock()
             mock_client.messages.create = AsyncMock(return_value=mock_response)
             mock_anthropic_class.return_value = mock_client
@@ -372,6 +372,7 @@ class TestSyntheticGenerator:
     async def test_generate_task_returns_synth_task_id(self):
         """generate_task should return SyntheticTask with synth_ prefixed task_id."""
         from unittest.mock import AsyncMock, patch
+
         from bashgym.factory.pattern_extractor import TracePatterns
 
         generator = SyntheticGenerator()
@@ -380,17 +381,17 @@ class TestSyntheticGenerator:
             task_types={"refactor": 1.0},
             repo_name="myrepo",
             common_paths=["src/"],
-            languages={"python": 1.0}
+            languages={"python": 1.0},
         )
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Refactor the module"
 
             task = await generator.generate_task(
                 patterns=patterns,
                 task_type="refactor",
                 seed_prompts=["Clean up code"],
-                provider="nim"
+                provider="nim",
             )
 
             assert task.task_id.startswith("synth_")
@@ -403,6 +404,7 @@ class TestSyntheticGenerator:
     async def test_generate_batch(self):
         """Should generate multiple tasks with progress callback."""
         from unittest.mock import AsyncMock, patch
+
         from bashgym.factory.pattern_extractor import TracePatterns
 
         generator = SyntheticGenerator()
@@ -410,7 +412,7 @@ class TestSyntheticGenerator:
         patterns = TracePatterns(
             task_types={"feature": 0.5, "bugfix": 0.5},
             repo_name="ghostwork",
-            languages={"python": 1.0}
+            languages={"python": 1.0},
         )
 
         progress_updates = []
@@ -418,7 +420,7 @@ class TestSyntheticGenerator:
         def on_progress(current: int, total: int):
             progress_updates.append((current, total))
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Generated task"
 
             tasks = await generator.generate_batch(
@@ -426,7 +428,7 @@ class TestSyntheticGenerator:
                 seed_prompts=["Add feature", "Fix bug"],
                 count=5,
                 provider="nim",
-                on_progress=on_progress
+                on_progress=on_progress,
             )
 
             assert len(tasks) == 5
@@ -437,25 +439,21 @@ class TestSyntheticGenerator:
     async def test_generate_batch_samples_task_types(self):
         """Should sample task types from the patterns distribution."""
         from unittest.mock import AsyncMock, patch
+
         from bashgym.factory.pattern_extractor import TracePatterns
 
         generator = SyntheticGenerator()
 
         # 100% bugfix to verify task type is passed correctly
         patterns = TracePatterns(
-            task_types={"bugfix": 1.0},
-            repo_name="testproject",
-            languages={"python": 1.0}
+            task_types={"bugfix": 1.0}, repo_name="testproject", languages={"python": 1.0}
         )
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Fix the bug"
 
             tasks = await generator.generate_batch(
-                patterns=patterns,
-                seed_prompts=["Fix issue"],
-                count=3,
-                provider="nim"
+                patterns=patterns, seed_prompts=["Fix issue"], count=3, provider="nim"
             )
 
             # All tasks should be bugfix type since distribution is 100% bugfix
@@ -464,15 +462,14 @@ class TestSyntheticGenerator:
     @pytest.mark.asyncio
     async def test_generate_batch_handles_errors_gracefully(self):
         """Should continue generating even if some tasks fail."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
+
         from bashgym.factory.pattern_extractor import TracePatterns
 
         generator = SyntheticGenerator()
 
         patterns = TracePatterns(
-            task_types={"feature": 1.0},
-            repo_name="ghostwork",
-            languages={"python": 1.0}
+            task_types={"feature": 1.0}, repo_name="ghostwork", languages={"python": 1.0}
         )
 
         call_count = 0
@@ -484,12 +481,9 @@ class TestSyntheticGenerator:
                 raise Exception("LLM error")
             return "Generated task"
 
-        with patch.object(generator, '_call_llm', side_effect=mock_call_llm):
+        with patch.object(generator, "_call_llm", side_effect=mock_call_llm):
             tasks = await generator.generate_batch(
-                patterns=patterns,
-                seed_prompts=["Add feature"],
-                count=3,
-                provider="nim"
+                patterns=patterns, seed_prompts=["Add feature"], count=3, provider="nim"
             )
 
             # Should have 2 successful tasks (first and third)
@@ -499,25 +493,19 @@ class TestSyntheticGenerator:
     async def test_generate_batch_defaults_to_feature(self):
         """Should default to 'feature' task type if no task_types in patterns."""
         from unittest.mock import AsyncMock, patch
+
         from bashgym.factory.pattern_extractor import TracePatterns
 
         generator = SyntheticGenerator()
 
         # Empty task_types
-        patterns = TracePatterns(
-            task_types={},
-            repo_name="ghostwork",
-            languages={"python": 1.0}
-        )
+        patterns = TracePatterns(task_types={}, repo_name="ghostwork", languages={"python": 1.0})
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Generated task"
 
             tasks = await generator.generate_batch(
-                patterns=patterns,
-                seed_prompts=["Do something"],
-                count=2,
-                provider="nim"
+                patterns=patterns, seed_prompts=["Do something"], count=2, provider="nim"
             )
 
             # All tasks should default to "feature"
@@ -527,25 +515,21 @@ class TestSyntheticGenerator:
     async def test_generate_batch_no_progress_callback(self):
         """Should work without a progress callback."""
         from unittest.mock import AsyncMock, patch
+
         from bashgym.factory.pattern_extractor import TracePatterns
 
         generator = SyntheticGenerator()
 
         patterns = TracePatterns(
-            task_types={"feature": 1.0},
-            repo_name="ghostwork",
-            languages={"python": 1.0}
+            task_types={"feature": 1.0}, repo_name="ghostwork", languages={"python": 1.0}
         )
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Generated task"
 
             # Should not raise even without on_progress
             tasks = await generator.generate_batch(
-                patterns=patterns,
-                seed_prompts=["Add feature"],
-                count=3,
-                provider="nim"
+                patterns=patterns, seed_prompts=["Add feature"], count=3, provider="nim"
             )
 
             assert len(tasks) == 3
@@ -563,16 +547,14 @@ class TestSyntheticGenerator:
                 "src/": ["api.py", "auth.py", "utils.py"],
                 "tests/": ["test_api.py", "test_auth.py"],
             },
-            "frameworks": ["fastapi", "pytest"]
+            "frameworks": ["fastapi", "pytest"],
         }
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Add rate limiting to the API endpoints"
 
             tasks = await generator.generate_from_schema(
-                repo_schema=repo_schema,
-                count=5,
-                provider="nim"
+                repo_schema=repo_schema, count=5, provider="nim"
             )
 
             assert len(tasks) == 5
@@ -593,13 +575,11 @@ class TestSyntheticGenerator:
             {"prompt": "Fix auth bug", "response": "I'll fix the bug..."},
         ]
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Add comprehensive logging to the API client"
 
             tasks = await generator.generate_augmented(
-                seed_examples=seed_examples,
-                variations_per_seed=2,
-                provider="nim"
+                seed_examples=seed_examples, variations_per_seed=2, provider="nim"
             )
 
             assert len(tasks) == 4  # 2 seeds * 2 variations
@@ -618,13 +598,11 @@ class TestSyntheticGenerator:
             {"prompt": "Implement caching", "id": "seed_001", "repo": "myrepo"},
         ]
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Add Redis caching layer"
 
             tasks = await generator.generate_augmented(
-                seed_examples=seed_examples,
-                variations_per_seed=1,
-                provider="nim"
+                seed_examples=seed_examples, variations_per_seed=1, provider="nim"
             )
 
             assert len(tasks) == 1
@@ -635,7 +613,7 @@ class TestSyntheticGenerator:
     @pytest.mark.asyncio
     async def test_augmented_strategy_handles_errors(self):
         """Augmented strategy should skip failed variations and continue."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         generator = SyntheticGenerator()
 
@@ -652,11 +630,9 @@ class TestSyntheticGenerator:
                 raise Exception("LLM error")
             return "Generated variation"
 
-        with patch.object(generator, '_call_llm', side_effect=mock_call_llm):
+        with patch.object(generator, "_call_llm", side_effect=mock_call_llm):
             tasks = await generator.generate_augmented(
-                seed_examples=seed_examples,
-                variations_per_seed=3,
-                provider="nim"
+                seed_examples=seed_examples, variations_per_seed=3, provider="nim"
             )
 
             # First call fails, next 2 succeed
@@ -673,13 +649,10 @@ class TestSyntheticGenerator:
             {"prompt": "Test prompt"},
         ]
 
-        with patch.object(generator, '_call_llm', new_callable=AsyncMock) as mock_llm:
+        with patch.object(generator, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Variation"
 
-            tasks = await generator.generate_augmented(
-                seed_examples=seed_examples,
-                provider="nim"
-            )
+            tasks = await generator.generate_augmented(seed_examples=seed_examples, provider="nim")
 
             # Default is 3 variations per seed
             assert len(tasks) == 3
@@ -705,7 +678,7 @@ class TestExportToNemo:
                 task_type="feature",
                 expected_tools=["Read", "Edit"],
                 source_pattern_id="p1",
-                repo="ghostwork"
+                repo="ghostwork",
             ),
             SyntheticTask(
                 task_id="synth_002",
@@ -714,17 +687,15 @@ class TestExportToNemo:
                 task_type="bugfix",
                 expected_tools=["Read", "Edit", "Bash"],
                 source_pattern_id="p2",
-                repo="ghostwork"
+                repo="ghostwork",
             ),
         ]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "output"
 
-            result = generator.export_to_nemo(
-                tasks=tasks,
-                output_dir=output_path,
-                train_ratio=0.5  # 50% train for this test
+            generator.export_to_nemo(
+                tasks=tasks, output_dir=output_path, train_ratio=0.5  # 50% train for this test
             )
 
             assert (output_path / "train.jsonl").exists()
@@ -754,7 +725,7 @@ class TestExportToNemo:
                 task_type="feature",
                 expected_tools=["Read", "Edit"],
                 source_pattern_id="p1",
-                repo="test-repo"
+                repo="test-repo",
             ),
         ]
 
@@ -783,7 +754,7 @@ class TestExportToNemo:
                 task_type="feature",
                 expected_tools=["Read", "Edit"],
                 source_pattern_id="p1",
-                repo="test-repo"
+                repo="test-repo",
             )
             for i in range(10)
         ]
@@ -791,11 +762,7 @@ class TestExportToNemo:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "output"
 
-            result = generator.export_to_nemo(
-                tasks=tasks,
-                output_dir=output_path,
-                train_ratio=0.8
-            )
+            result = generator.export_to_nemo(tasks=tasks, output_dir=output_path, train_ratio=0.8)
 
             # Check returned metadata
             assert result["total_examples"] == 10
@@ -826,7 +793,7 @@ class TestExportToNemo:
                 task_type="feature",
                 expected_tools=["Read", "Edit"],
                 source_pattern_id="pattern_123",
-                repo="myrepo"
+                repo="myrepo",
             ),
         ]
 
@@ -834,9 +801,7 @@ class TestExportToNemo:
             output_path = Path(tmpdir) / "output"
 
             generator.export_to_nemo(
-                tasks=tasks,
-                output_dir=output_path,
-                train_ratio=1.0  # All to train
+                tasks=tasks, output_dir=output_path, train_ratio=1.0  # All to train
             )
 
             with open(output_path / "train.jsonl") as f:
@@ -863,7 +828,7 @@ class TestExportToNemo:
                 task_type="bugfix",
                 expected_tools=["Read", "Edit"],
                 source_pattern_id="p1",
-                repo="test-repo"
+                repo="test-repo",
             ),
         ]
 
@@ -876,7 +841,7 @@ class TestExportToNemo:
                 tasks=tasks,
                 output_dir=output_path,
                 train_ratio=1.0,  # Ensure task goes to train.jsonl
-                system_prompt=custom_system
+                system_prompt=custom_system,
             )
 
             with open(output_path / "train.jsonl") as f:
@@ -893,10 +858,7 @@ class TestExportToNemo:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "output"
 
-            result = generator.export_to_nemo(
-                tasks=[],
-                output_dir=output_path
-            )
+            result = generator.export_to_nemo(tasks=[], output_dir=output_path)
 
             assert result["total_examples"] == 0
             assert result["train_examples"] == 0
@@ -921,7 +883,7 @@ class TestExportToNemo:
                 task_type="feature",
                 expected_tools=["Read"],
                 source_pattern_id="p1",
-                repo="test-repo"
+                repo="test-repo",
             )
             for i in range(100)
         ]
@@ -929,10 +891,7 @@ class TestExportToNemo:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "output"
 
-            result = generator.export_to_nemo(
-                tasks=tasks,
-                output_dir=output_path
-            )
+            result = generator.export_to_nemo(tasks=tasks, output_dir=output_path)
 
             # Default 0.9 ratio: 90 train, 10 val
             assert result["train_examples"] == 90

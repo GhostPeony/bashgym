@@ -443,10 +443,9 @@ class ConnectionManager:
         self.campaign_ticket_mint_windows[scope] = (started_at, count + 1)
         return True
 
-    def _binding_authorized(self, binding: CampaignLiveTicketBinding) -> bool:
-        now = datetime.now(UTC)
-        if binding.expires_at <= now:
-            return False
+    def _parent_credential_authorized(
+        self, binding: CampaignLiveTicketBinding, now: datetime
+    ) -> bool:
         parent = binding.repository.get_actor_credential(binding.credential_id)
         if parent is None or parent.revoked_at is not None or parent.expires_at <= now:
             return False
@@ -455,6 +454,18 @@ class ConnectionManager:
         return (
             "desktop-local" in parent.workspace_ids or binding.workspace_id in parent.workspace_ids
         )
+
+    def _binding_authorized(self, binding: CampaignLiveTicketBinding) -> bool:
+        now = datetime.now(UTC)
+        if binding.expires_at <= now:
+            return False
+        return self._parent_credential_authorized(binding, now)
+
+    def _subscription_authorized(self, binding: CampaignLiveTicketBinding) -> bool:
+        """The single-use ticket TTL gates consumption only; a consumed
+        subscription stays live for the parent credential's lifetime,
+        revocation state, and authorization revision."""
+        return self._parent_credential_authorized(binding, datetime.now(UTC))
 
     def consume_campaign_live_ticket(self, ticket: str | None) -> CampaignLiveTicketBinding | None:
         if not isinstance(ticket, str) or len(ticket) > 256:
@@ -522,7 +533,7 @@ class ConnectionManager:
         grouped: dict[str, list[tuple[WebSocket, CampaignLiveSubscription]]] = {}
         for websocket, subscriptions in tuple(self.campaign_subscriptions.items()):
             for workspace_id, subscription in tuple(subscriptions.items()):
-                if not self._binding_authorized(subscription.binding):
+                if not self._subscription_authorized(subscription.binding):
                     subscriptions.pop(workspace_id, None)
                     continue
                 grouped.setdefault(workspace_id, []).append((websocket, subscription))

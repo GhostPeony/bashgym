@@ -8,6 +8,6 @@ test('a fresh training canvas node never invents a base model', async () => {
   assert.doesNotMatch(source, /Qwen\/Qwen2\.5|Qwen2\.5-Coder/i)
   assert.match(
     source,
-    /baseModel:\s*config\?\.baseModel\s*\|\|\s*node\.baseModel\s*\|\|\s*DEFAULT_TRAINING_BASE_MODEL/,
+    /baseModel:\s*config\?\.baseModel\s*\|\|\s*node\.baseModel\s*\|\|\s*DEFAULT_TRAINING_BASE_MODEL/
   )
 })

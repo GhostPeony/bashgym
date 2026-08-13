@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   ArrowLeft,
   Plus,
@@ -13,7 +13,9 @@ import {
   Activity
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, ModelProfile as ModelProfileData } from '../../services/api'
+import { ModelProfile as ModelProfileData } from '../../services/api'
+import { modelComparisonKey, modelComparisonResource } from '../../stores/modelResources'
+import { useKeyedSessionResource } from '../../stores/sessionResource'
 
 interface ModelComparisonProps {
   modelIds: string[]
@@ -32,16 +34,64 @@ interface ComparisonMetric {
 
 const COMPARISON_METRICS: ComparisonMetric[] = [
   // Performance metrics
-  { key: 'custom_eval_pass_rate', label: 'Custom Eval', category: 'performance', format: 'percent', higherIsBetter: true },
-  { key: 'benchmark_avg_score', label: 'Benchmark Avg', category: 'performance', format: 'percent', higherIsBetter: true },
+  {
+    key: 'custom_eval_pass_rate',
+    label: 'Custom Eval',
+    category: 'performance',
+    format: 'percent',
+    higherIsBetter: true
+  },
+  {
+    key: 'benchmark_avg_score',
+    label: 'Benchmark Avg',
+    category: 'performance',
+    format: 'percent',
+    higherIsBetter: true
+  },
   // Training metrics
-  { key: 'final_loss', label: 'Final Loss', category: 'training', format: 'number', higherIsBetter: false },
-  { key: 'training_examples', label: 'Training Examples', category: 'training', format: 'number', higherIsBetter: true },
-  { key: 'num_epochs', label: 'Epochs', category: 'training', format: 'number', higherIsBetter: false },
-  { key: 'duration_seconds', label: 'Training Time', category: 'training', format: 'time', higherIsBetter: false },
+  {
+    key: 'final_loss',
+    label: 'Final Loss',
+    category: 'training',
+    format: 'number',
+    higherIsBetter: false
+  },
+  {
+    key: 'training_examples',
+    label: 'Training Examples',
+    category: 'training',
+    format: 'number',
+    higherIsBetter: true
+  },
+  {
+    key: 'num_epochs',
+    label: 'Epochs',
+    category: 'training',
+    format: 'number',
+    higherIsBetter: false
+  },
+  {
+    key: 'duration_seconds',
+    label: 'Training Time',
+    category: 'training',
+    format: 'time',
+    higherIsBetter: false
+  },
   // Operational metrics
-  { key: 'model_size_bytes', label: 'Model Size', category: 'operational', format: 'size', higherIsBetter: false },
-  { key: 'inference_latency_ms', label: 'Latency', category: 'operational', format: 'number', higherIsBetter: false },
+  {
+    key: 'model_size_bytes',
+    label: 'Model Size',
+    category: 'operational',
+    format: 'size',
+    higherIsBetter: false
+  },
+  {
+    key: 'inference_latency_ms',
+    label: 'Latency',
+    category: 'operational',
+    format: 'number',
+    higherIsBetter: false
+  }
 ]
 
 function formatValue(value: number | null | undefined, format: string): string {
@@ -89,7 +139,11 @@ function getMetricValue(profile: ModelProfileData, metric: ComparisonMetric): nu
   }
 }
 
-function ComparisonIndicator({ value, bestValue, metric }: {
+function ComparisonIndicator({
+  value,
+  bestValue,
+  metric
+}: {
   value: number | null
   bestValue: number | null
   metric: ComparisonMetric
@@ -98,7 +152,7 @@ function ComparisonIndicator({ value, bestValue, metric }: {
 
   const isBest = value === bestValue
   const diff = value - bestValue
-  const diffPercent = bestValue !== 0 ? Math.abs(diff / bestValue * 100) : 0
+  const diffPercent = bestValue !== 0 ? Math.abs((diff / bestValue) * 100) : 0
 
   if (isBest) {
     return (
@@ -121,59 +175,42 @@ function ComparisonIndicator({ value, bestValue, metric }: {
   )
 }
 
-export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }: ModelComparisonProps) {
-  const [profiles, setProfiles] = useState<Record<string, ModelProfileData>>({})
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [activeCategory, setActiveCategory] = useState<'all' | 'performance' | 'training' | 'operational'>('all')
+export function ModelComparison({
+  modelIds,
+  onBack,
+  onAddModel,
+  onRemoveModel
+}: ModelComparisonProps) {
+  const [activeCategory, setActiveCategory] = useState<
+    'all' | 'performance' | 'training' | 'operational'
+  >('all')
 
-  // Fetch all profiles
-  const fetchProfiles = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    const newProfiles: Record<string, ModelProfileData> = {}
-
-    for (const modelId of modelIds) {
-      const result = await modelsApi.get(modelId)
-      if (result.ok && result.data) {
-        newProfiles[modelId] = result.data
-      }
-    }
-
-    if (Object.keys(newProfiles).length === 0 && modelIds.length > 0) {
-      setError('Failed to load any models')
-    }
-
-    setProfiles(newProfiles)
-    setIsLoading(false)
-  }, [modelIds])
-
-  useEffect(() => {
-    if (modelIds.length > 0) {
-      fetchProfiles()
-    } else {
-      setProfiles({})
-      setIsLoading(false)
-    }
-  }, [modelIds, fetchProfiles])
+  const { data, loading, error } = useKeyedSessionResource(
+    modelComparisonResource,
+    modelComparisonKey(modelIds)
+  )
+  const profiles = data ?? {}
+  const isLoading = loading || (data === null && error === null)
 
   // Calculate best values for each metric
-  const bestValues = COMPARISON_METRICS.reduce((acc, metric) => {
-    const values = Object.values(profiles)
-      .map(p => getMetricValue(p, metric))
-      .filter((v): v is number => v !== null)
+  const bestValues = COMPARISON_METRICS.reduce(
+    (acc, metric) => {
+      const values = Object.values(profiles)
+        .map((p) => getMetricValue(p, metric))
+        .filter((v): v is number => v !== null)
 
-    if (values.length > 0) {
-      acc[metric.key] = metric.higherIsBetter
-        ? Math.max(...values)
-        : Math.min(...values)
-    }
-    return acc
-  }, {} as Record<string, number>)
+      if (values.length > 0) {
+        acc[metric.key] = metric.higherIsBetter ? Math.max(...values) : Math.min(...values)
+      }
+      return acc
+    },
+    {} as Record<string, number>
+  )
 
-  const filteredMetrics = activeCategory === 'all'
-    ? COMPARISON_METRICS
-    : COMPARISON_METRICS.filter(m => m.category === activeCategory)
+  const filteredMetrics =
+    activeCategory === 'all'
+      ? COMPARISON_METRICS
+      : COMPARISON_METRICS.filter((m) => m.category === activeCategory)
 
   if (modelIds.length === 0) {
     return (
@@ -220,7 +257,7 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
             { value: 'all', label: 'All Metrics', icon: BarChart3 },
             { value: 'performance', label: 'Performance', icon: Activity },
             { value: 'training', label: 'Training', icon: TrendingUp },
-            { value: 'operational', label: 'Operational', icon: Cpu },
+            { value: 'operational', label: 'Operational', icon: Cpu }
           ].map(({ value, label, icon: Icon }) => (
             <button
               key={value}
@@ -245,7 +282,7 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
           <div className="flex items-center justify-center h-64">
             <Loader2 className="w-8 h-8 text-accent animate-spin" />
           </div>
-        ) : error ? (
+        ) : error && data === null ? (
           <div className="flex flex-col items-center justify-center h-64">
             <AlertCircle className="w-12 h-12 text-status-error mb-4" />
             <p className="text-text-muted">{error}</p>
@@ -255,11 +292,16 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
             <table className="w-full">
               <thead>
                 <tr className="bg-background-secondary border-b border-border">
-                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted w-48">Metric</th>
-                  {modelIds.map(modelId => {
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted w-48">
+                    Metric
+                  </th>
+                  {modelIds.map((modelId) => {
                     const profile = profiles[modelId]
                     return (
-                      <th key={modelId} className="px-4 py-3 text-center relative border-l border-border">
+                      <th
+                        key={modelId}
+                        className="px-4 py-3 text-center relative border-l border-border"
+                      >
                         {profile && (
                           <button
                             onClick={() => onRemoveModel(modelId)}
@@ -274,7 +316,8 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                           </div>
                           {profile && (
                             <div className="font-mono text-xs text-text-muted mt-1">
-                              {profile.training_strategy.toUpperCase()} | {profile.base_model.split('/').pop()}
+                              {profile.training_strategy.toUpperCase()} |{' '}
+                              {profile.base_model.split('/').pop()}
                             </div>
                           )}
                         </div>
@@ -284,23 +327,30 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
-                {filteredMetrics.map(metric => (
+                {filteredMetrics.map((metric) => (
                   <tr key={metric.key} className="hover:bg-background-secondary transition-colors">
                     <td className="px-4 py-3">
                       <div className="font-brand text-text-primary">{metric.label}</div>
-                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted">{metric.category}</div>
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                        {metric.category}
+                      </div>
                     </td>
-                    {modelIds.map(modelId => {
+                    {modelIds.map((modelId) => {
                       const profile = profiles[modelId]
                       const value = profile ? getMetricValue(profile, metric) : null
                       const isBest = value === bestValues[metric.key]
 
                       return (
-                        <td key={modelId} className="px-4 py-3 text-center border-l border-border-subtle">
-                          <div className={clsx(
-                            'font-brand text-xl',
-                            isBest ? 'text-status-success' : 'text-text-primary'
-                          )}>
+                        <td
+                          key={modelId}
+                          className="px-4 py-3 text-center border-l border-border-subtle"
+                        >
+                          <div
+                            className={clsx(
+                              'font-brand text-xl',
+                              isBest ? 'text-status-success' : 'text-text-primary'
+                            )}
+                          >
                             {formatValue(value, metric.format)}
                           </div>
                           <ComparisonIndicator
@@ -316,41 +366,51 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
 
                 {/* Benchmark Results Section */}
                 <tr className="bg-background-secondary">
-                  <td colSpan={modelIds.length + 1} className="px-4 py-2 font-mono text-xs uppercase tracking-widest text-text-primary">
+                  <td
+                    colSpan={modelIds.length + 1}
+                    className="px-4 py-2 font-mono text-xs uppercase tracking-widest text-text-primary"
+                  >
                     Benchmark Breakdown
                   </td>
                 </tr>
                 {(() => {
                   // Collect all unique benchmark names
                   const benchmarkNames = new Set<string>()
-                  Object.values(profiles).forEach(p => {
-                    Object.keys(p.benchmarks).forEach(name => benchmarkNames.add(name))
+                  Object.values(profiles).forEach((p) => {
+                    Object.keys(p.benchmarks).forEach((name) => benchmarkNames.add(name))
                   })
 
-                  return Array.from(benchmarkNames).map(benchName => (
+                  return Array.from(benchmarkNames).map((benchName) => (
                     <tr key={benchName} className="hover:bg-background-secondary transition-colors">
                       <td className="px-4 py-3">
                         <div className="font-brand text-text-primary">{benchName}</div>
-                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Benchmark</div>
+                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                          Benchmark
+                        </div>
                       </td>
-                      {modelIds.map(modelId => {
+                      {modelIds.map((modelId) => {
                         const profile = profiles[modelId]
                         const bench = profile?.benchmarks[benchName]
                         const bestBenchScore = Math.max(
                           ...Object.values(profiles)
-                            .map(p => p.benchmarks[benchName]?.score)
+                            .map((p) => p.benchmarks[benchName]?.score)
                             .filter((v): v is number => v !== undefined)
                         )
                         const isBest = bench?.score === bestBenchScore
 
                         return (
-                          <td key={modelId} className="px-4 py-3 text-center border-l border-border-subtle">
+                          <td
+                            key={modelId}
+                            className="px-4 py-3 text-center border-l border-border-subtle"
+                          >
                             {bench ? (
                               <>
-                                <div className={clsx(
-                                  'font-brand text-xl',
-                                  isBest ? 'text-status-success' : 'text-text-primary'
-                                )}>
+                                <div
+                                  className={clsx(
+                                    'font-brand text-xl',
+                                    isBest ? 'text-status-success' : 'text-text-primary'
+                                  )}
+                                >
                                   {bench.score.toFixed(1)}%
                                 </div>
                                 <div className="font-mono text-xs text-text-muted">
@@ -369,51 +429,64 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
 
                 {/* Custom Eval Results Section */}
                 <tr className="bg-background-secondary">
-                  <td colSpan={modelIds.length + 1} className="px-4 py-2 font-mono text-xs uppercase tracking-widest text-text-primary">
+                  <td
+                    colSpan={modelIds.length + 1}
+                    className="px-4 py-2 font-mono text-xs uppercase tracking-widest text-text-primary"
+                  >
                     Custom Evaluations
                   </td>
                 </tr>
                 {(() => {
                   // Collect all unique eval set IDs
                   const evalSetIds = new Set<string>()
-                  Object.values(profiles).forEach(p => {
-                    Object.keys(p.custom_evals).forEach(id => evalSetIds.add(id))
+                  Object.values(profiles).forEach((p) => {
+                    Object.keys(p.custom_evals).forEach((id) => evalSetIds.add(id))
                   })
 
                   if (evalSetIds.size === 0) {
                     return (
                       <tr>
-                        <td colSpan={modelIds.length + 1} className="px-4 py-6 text-center text-text-muted font-mono text-xs">
+                        <td
+                          colSpan={modelIds.length + 1}
+                          className="px-4 py-6 text-center text-text-muted font-mono text-xs"
+                        >
                           No custom evaluations available
                         </td>
                       </tr>
                     )
                   }
 
-                  return Array.from(evalSetIds).map(evalId => (
+                  return Array.from(evalSetIds).map((evalId) => (
                     <tr key={evalId} className="hover:bg-background-secondary transition-colors">
                       <td className="px-4 py-3">
                         <div className="font-brand text-text-primary">{evalId}</div>
-                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Custom Eval</div>
+                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                          Custom Eval
+                        </div>
                       </td>
-                      {modelIds.map(modelId => {
+                      {modelIds.map((modelId) => {
                         const profile = profiles[modelId]
                         const eval_ = profile?.custom_evals[evalId]
                         const bestEvalScore = Math.max(
                           ...Object.values(profiles)
-                            .map(p => p.custom_evals[evalId]?.pass_rate)
+                            .map((p) => p.custom_evals[evalId]?.pass_rate)
                             .filter((v): v is number => v !== undefined)
                         )
                         const isBest = eval_?.pass_rate === bestEvalScore
 
                         return (
-                          <td key={modelId} className="px-4 py-3 text-center border-l border-border-subtle">
+                          <td
+                            key={modelId}
+                            className="px-4 py-3 text-center border-l border-border-subtle"
+                          >
                             {eval_ ? (
                               <>
-                                <div className={clsx(
-                                  'font-brand text-xl',
-                                  isBest ? 'text-status-success' : 'text-text-primary'
-                                )}>
+                                <div
+                                  className={clsx(
+                                    'font-brand text-xl',
+                                    isBest ? 'text-status-success' : 'text-text-primary'
+                                  )}
+                                >
                                   {eval_.pass_rate.toFixed(1)}%
                                 </div>
                                 <div className="font-mono text-xs text-text-muted">

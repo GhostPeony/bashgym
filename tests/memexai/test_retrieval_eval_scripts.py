@@ -108,9 +108,12 @@ def test_corpus_passage_format_matches_product_title_and_content() -> None:
     assert embed_corpus_with_model.format_passage_for_embedding(row) == (
         "Video One\n\nThe guest explains retrieval eval design and why local windows matter."
     )
-    assert embed_corpus_with_model.format_passage_for_embedding(
-        {**row, "embedding_text": "Pinned title\n\nPinned content"}
-    ) == "Pinned title\n\nPinned content"
+    assert (
+        embed_corpus_with_model.format_passage_for_embedding(
+            {**row, "embedding_text": "Pinned title\n\nPinned content"}
+        )
+        == "Pinned title\n\nPinned content"
+    )
 
 
 def test_query_ablation_rejects_matrix_id_length_mismatch() -> None:
@@ -148,8 +151,7 @@ def test_query_ablation_metrics_include_split_breakdown() -> None:
 def test_query_ablation_rejects_combined_file_before_model_import(tmp_path, monkeypatch) -> None:
     queries = tmp_path / "heldout-dev-test.jsonl"
     queries.write_text(
-        '{"eval_id":"dev-1","split":"dev"}\n'
-        '{"eval_id":"test-1","split":"test"}\n',
+        '{"eval_id":"dev-1","split":"dev"}\n' '{"eval_id":"test-1","split":"test"}\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -225,9 +227,7 @@ def test_unique_positive_batches_cover_rows_without_collisions() -> None:
         for positive_id in ("a", "a", "a", "b", "b", "c", "c", "d", "d")
     ]
 
-    batches = train_embedding_retriever.build_unique_positive_batches(
-        pairs, batch_size=3, seed=7
-    )
+    batches = train_embedding_retriever.build_unique_positive_batches(pairs, batch_size=3, seed=7)
 
     assert sorted(index for batch in batches for index in batch) == list(range(len(pairs)))
     assert all(len(batch) >= 2 for batch in batches)
@@ -239,12 +239,8 @@ def test_unique_positive_batches_cover_rows_without_collisions() -> None:
 def test_unique_positive_batches_are_seed_deterministic() -> None:
     pairs = [{"positive_chunk_id": str(index // 2)} for index in range(20)]
 
-    first = train_embedding_retriever.build_unique_positive_batches(
-        pairs, batch_size=4, seed=11
-    )
-    second = train_embedding_retriever.build_unique_positive_batches(
-        pairs, batch_size=4, seed=11
-    )
+    first = train_embedding_retriever.build_unique_positive_batches(pairs, batch_size=4, seed=11)
+    second = train_embedding_retriever.build_unique_positive_batches(pairs, batch_size=4, seed=11)
 
     assert first == second
 
@@ -296,9 +292,7 @@ def test_collision_safe_batches_separate_rows_from_same_positive_video() -> None
         for index, video in enumerate(("a", "a", "b", "b", "c", "c", "d", "d"))
     ]
 
-    batches = train_embedding_retriever.build_unique_positive_batches(
-        pairs, batch_size=4, seed=9
-    )
+    batches = train_embedding_retriever.build_unique_positive_batches(pairs, batch_size=4, seed=9)
 
     for batch in batches:
         groups = [pairs[index]["positive_collision_group"] for index in batch]
@@ -306,14 +300,12 @@ def test_collision_safe_batches_separate_rows_from_same_positive_video() -> None
 
 
 def test_expanded_batch_budget_counts_queries_positives_and_negatives() -> None:
-    pairs = [
-        {"negative_texts": [f"negative-{index}" for index in range(7)]}
-        for _ in range(16)
-    ]
+    pairs = [{"negative_texts": [f"negative-{index}" for index in range(7)]} for _ in range(16)]
 
-    assert train_embedding_retriever.expanded_sequences_per_batch_upper_bound(
-        pairs, batch_size=16
-    ) == 144
+    assert (
+        train_embedding_retriever.expanded_sequences_per_batch_upper_bound(pairs, batch_size=16)
+        == 144
+    )
     with pytest.raises(ValueError, match="upper bound 144 sequences exceeds limit 64"):
         train_embedding_retriever.validate_expanded_batch_budget(
             pairs,
@@ -326,12 +318,15 @@ def test_expanded_batch_budget_counts_queries_positives_and_negatives() -> None:
 def test_cached_mnrl_allows_large_logical_batch_under_minibatch_control() -> None:
     pairs = [{"negative_texts": ["a", "b", "c"]} for _ in range(16)]
 
-    assert train_embedding_retriever.validate_expanded_batch_budget(
-        pairs,
-        batch_size=16,
-        resolved_loss="cached_mnrl",
-        max_expanded_sequences=64,
-    ) == 80
+    assert (
+        train_embedding_retriever.validate_expanded_batch_budget(
+            pairs,
+            batch_size=16,
+            resolved_loss="cached_mnrl",
+            max_expanded_sequences=64,
+        )
+        == 80
+    )
 
 
 def test_collision_safe_batch_profile_reports_realized_not_configured_batch() -> None:
@@ -344,9 +339,7 @@ def test_collision_safe_batch_profile_reports_realized_not_configured_batch() ->
         for index in range(12)
     ]
 
-    profile = train_embedding_retriever.collision_safe_batch_profile(
-        pairs, batch_size=10, seed=7
-    )
+    profile = train_embedding_retriever.collision_safe_batch_profile(pairs, batch_size=10, seed=7)
 
     assert profile == {
         "batch_size_requested": 10,
@@ -422,9 +415,7 @@ def test_capped_synthetic_selection_is_balanced_and_order_independent() -> None:
         list(reversed(rows)), target=8, seed="fixture"
     )
 
-    assert [row["eval_id"] for row in selected] == [
-        row["eval_id"] for row in reversed_selected
-    ]
+    assert [row["eval_id"] for row in selected] == [row["eval_id"] for row in reversed_selected]
     assert len({row["positive_chunk_id"] for row in selected}) == 4
     assert max(Counter(row["positive_chunk_id"] for row in selected).values()) == 2
 

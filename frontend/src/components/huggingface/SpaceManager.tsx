@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Plus,
   Trash2,
@@ -11,61 +11,60 @@ import {
   Layers,
   Rocket
 } from 'lucide-react'
-import { hfApi, HFSpace, HFSpaceCreateRequest } from '../../services/api'
+import { hfApi, HFSpaceCreateRequest } from '../../services/api'
 import { wsService, MessageTypes } from '../../services/websocket'
 import { clsx } from 'clsx'
+import { hfSpacesResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 interface SpaceManagerProps {
   className?: string
 }
 
 export function SpaceManager({ className }: SpaceManagerProps) {
-  const [spaces, setSpaces] = useState<HFSpace[]>([])
-  const [loading, setLoading] = useState(true)
+  const {
+    data,
+    loading,
+    refreshing,
+    error: fetchError,
+    refresh
+  } = useSessionResource(hfSpacesResource)
+  const spaces = data ?? []
   const [creating, setCreating] = useState(false)
   const [showForm, setShowForm] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const error =
+    createError ||
+    (fetchError?.includes('403')
+      ? 'HuggingFace Pro subscription required for ZeroGPU Spaces'
+      : null)
 
   // Form state
   const [formData, setFormData] = useState<HFSpaceCreateRequest>({
     model_repo: '',
     space_name: '',
     private: true,
-    gpu_duration: 60,
+    gpu_duration: 60
   })
 
-  const fetchSpaces = useCallback(async () => {
-    const result = await hfApi.listSpaces()
-    if (result.ok && result.data) {
-      setSpaces(result.data)
-      setError(null)
-    } else if (result.error?.includes('403')) {
-      setError('HuggingFace Pro subscription required for ZeroGPU Spaces')
-    }
-    setLoading(false)
-  }, [])
-
   useEffect(() => {
-    fetchSpaces()
-
     // Subscribe to space events
-    const unsubscribeReady = wsService.subscribe(MessageTypes.HF_SPACE_READY, () => {
-      fetchSpaces()
-    })
-    const unsubscribeError = wsService.subscribe(MessageTypes.HF_SPACE_ERROR, () => {
-      fetchSpaces()
-    })
+    const refreshSpaces = () => {
+      void hfSpacesResource.getState().refresh()
+    }
+    const unsubscribeReady = wsService.subscribe(MessageTypes.HF_SPACE_READY, refreshSpaces)
+    const unsubscribeError = wsService.subscribe(MessageTypes.HF_SPACE_ERROR, refreshSpaces)
 
     return () => {
       unsubscribeReady()
       unsubscribeError()
     }
-  }, [fetchSpaces])
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setCreating(true)
-    setError(null)
+    setCreateError(null)
 
     const result = await hfApi.createSpace(formData)
     if (result.ok) {
@@ -74,11 +73,11 @@ export function SpaceManager({ className }: SpaceManagerProps) {
         model_repo: '',
         space_name: '',
         private: true,
-        gpu_duration: 60,
+        gpu_duration: 60
       })
-      fetchSpaces()
+      refresh()
     } else {
-      setError(result.error || 'Failed to create Space')
+      setCreateError(result.error || 'Failed to create Space')
     }
     setCreating(false)
   }
@@ -88,7 +87,7 @@ export function SpaceManager({ className }: SpaceManagerProps) {
 
     const result = await hfApi.deleteSpace(spaceName)
     if (result.ok) {
-      fetchSpaces()
+      refresh()
     }
   }
 
@@ -143,12 +142,10 @@ export function SpaceManager({ className }: SpaceManagerProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={fetchSpaces}
-            className="btn-icon"
-            title="Refresh"
-          >
-            <RefreshCw className="w-4 h-4 text-text-secondary" />
+          <button onClick={() => refresh()} className="btn-icon" title="Refresh">
+            <RefreshCw
+              className={clsx('w-4 h-4 text-text-secondary', refreshing && 'animate-spin')}
+            />
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
@@ -169,12 +166,17 @@ export function SpaceManager({ className }: SpaceManagerProps) {
 
       {/* Space Creation Form */}
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-6 p-4 border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+        <form
+          onSubmit={handleSubmit}
+          className="mb-6 p-4 border-brutal shadow-brutal-sm rounded-brutal bg-background-card"
+        >
           <h3 className="text-sm font-brand text-text-primary mb-4">Create Inference Space</h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Model Repo</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                Model Repo
+              </label>
               <input
                 type="text"
                 value={formData.model_repo}
@@ -185,7 +187,9 @@ export function SpaceManager({ className }: SpaceManagerProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Space Name</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                Space Name
+              </label>
               <input
                 type="text"
                 value={formData.space_name}
@@ -196,16 +200,22 @@ export function SpaceManager({ className }: SpaceManagerProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">GPU Duration (seconds)</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">
+                GPU Duration (seconds)
+              </label>
               <input
                 type="number"
                 value={formData.gpu_duration}
-                onChange={(e) => setFormData({ ...formData, gpu_duration: parseInt(e.target.value) })}
+                onChange={(e) =>
+                  setFormData({ ...formData, gpu_duration: parseInt(e.target.value) })
+                }
                 min={30}
                 max={300}
                 className="input w-full text-sm"
               />
-              <p className="text-xs text-text-secondary mt-1 font-mono">30-300 seconds per request</p>
+              <p className="text-xs text-text-secondary mt-1 font-mono">
+                30-300 seconds per request
+              </p>
             </div>
             <div className="flex items-center">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -221,11 +231,7 @@ export function SpaceManager({ className }: SpaceManagerProps) {
           </div>
 
           <div className="flex justify-end gap-2 mt-4">
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="btn-ghost"
-            >
+            <button type="button" onClick={() => setShowForm(false)} className="btn-ghost">
               Cancel
             </button>
             <button
@@ -249,15 +255,14 @@ export function SpaceManager({ className }: SpaceManagerProps) {
         <div className="text-center py-12 text-text-secondary">
           <Layers className="w-12 h-12 mx-auto mb-3 text-text-muted" />
           <p className="font-brand text-lg">No Spaces deployed</p>
-          <p className="text-sm mt-1 font-mono">Create a Space to deploy your model for inference</p>
+          <p className="text-sm mt-1 font-mono">
+            Create a Space to deploy your model for inference
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
           {spaces.map((space) => (
-            <div
-              key={space.space_name}
-              className="card p-4"
-            >
+            <div key={space.space_name} className="card p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {getStatusIcon(space.status)}
@@ -266,13 +271,18 @@ export function SpaceManager({ className }: SpaceManagerProps) {
                       <span className="text-sm font-mono text-text-primary">
                         {space.space_name}
                       </span>
-                      <span className={clsx(
-                        'tag',
-                        space.status === 'running' ? 'text-status-success' :
-                        space.status === 'building' ? 'text-status-warning' :
-                        space.status === 'error' ? 'text-status-error' :
-                        'text-text-secondary'
-                      )}>
+                      <span
+                        className={clsx(
+                          'tag',
+                          space.status === 'running'
+                            ? 'text-status-success'
+                            : space.status === 'building'
+                              ? 'text-status-warning'
+                              : space.status === 'error'
+                                ? 'text-status-error'
+                                : 'text-text-secondary'
+                        )}
+                      >
                         <span>{getStatusText(space.status)}</span>
                       </span>
                     </div>

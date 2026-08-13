@@ -9,7 +9,7 @@ const logoSurfaces = [
   '../layout/Sidebar.tsx',
   '../home/HomeScreen.tsx',
   '../auth/LoginPage.tsx',
-  '../download/DownloadPage.tsx',
+  '../download/DownloadPage.tsx'
 ]
 
 test('packaged renderer branding uses file-relative public assets', () => {

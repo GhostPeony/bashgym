@@ -32,7 +32,7 @@ export function FlywheelVisualization({
     text: 'var(--text-primary)',
     mutedText: 'var(--text-muted)',
     card: 'var(--bg-card)',
-    bg: 'var(--bg-secondary)',
+    bg: 'var(--bg-secondary)'
   }
 
   const radius = 120
@@ -178,8 +178,8 @@ export function FlywheelVisualization({
               labelPos.x < centerX
                 ? labelPos.x - labelOffset
                 : labelPos.x > centerX
-                ? labelPos.x + labelOffset - 100
-                : labelPos.x - 50
+                  ? labelPos.x + labelOffset - 100
+                  : labelPos.x - 50
             const labelY = labelPos.y < centerY ? labelPos.y - 20 : labelPos.y + 10
 
             return (
@@ -193,7 +193,8 @@ export function FlywheelVisualization({
                   left: `${(labelX / 300) * 100}%`,
                   top: `${(labelY / 300) * 100}%`,
                   width: '100px',
-                  textAlign: labelPos.x < centerX ? 'right' : labelPos.x > centerX ? 'left' : 'center'
+                  textAlign:
+                    labelPos.x < centerX ? 'right' : labelPos.x > centerX ? 'left' : 'center'
                 }}
               >
                 {stage.label}

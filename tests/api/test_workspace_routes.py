@@ -196,9 +196,7 @@ def test_workspace_context_exposes_provenance_and_conflicts(monkeypatch, tmp_pat
     _reset_state()
     monkeypatch.setattr("bashgym.api.training_state.list_run_states", lambda *_args: [])
     app.state.workspace_canvas_snapshots = {
-        "default": workspace_routes.WorkspaceCanvasSnapshot(
-            updated_at="2026-07-14T20:00:00+00:00"
-        )
+        "default": workspace_routes.WorkspaceCanvasSnapshot(updated_at="2026-07-14T20:00:00+00:00")
     }
     app.state.training_runs = {
         "run-x": {
@@ -327,9 +325,7 @@ def test_workspace_context_projects_scoped_runs_campaigns_runtime_and_reports(
         {
             "source_digest": "a" * 64,
             "quality_findings_available": True,
-            "files": [
-                {"name": "campaign_report.pdf", "sha256": "b" * 64, "size_bytes": 1024}
-            ],
+            "files": [{"name": "campaign_report.pdf", "sha256": "b" * 64, "size_bytes": 1024}],
         },
         expected_version=created.campaign.version,
         actor_id="hermes-agent",

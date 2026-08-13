@@ -99,18 +99,22 @@ test('profile input accepts reference names and refuses token-shaped values', ()
   })
   assert.deepEqual(safe.remote?.header_secret_refs, { Authorization: 'MCP_SEARCH_TOKEN' })
 
-  assert.throws(() => profileInputFromDraft({
-    ...EMPTY_MCP_PROFILE_DRAFT,
-    label: 'Unsafe',
-    transport: 'streamable_http',
-    remoteUrl: 'https://example.test/mcp',
-    headerSecretRefs: 'Authorization=sk-live-secret',
-    command: '',
-    args: '',
-    cwdPolicy: 'workspace',
-    envSecretRefs: '',
-    enabled: true
-  }), /Reference names must be uppercase identifiers/)
+  assert.throws(
+    () =>
+      profileInputFromDraft({
+        ...EMPTY_MCP_PROFILE_DRAFT,
+        label: 'Unsafe',
+        transport: 'streamable_http',
+        remoteUrl: 'https://example.test/mcp',
+        headerSecretRefs: 'Authorization=sk-live-secret',
+        command: '',
+        args: '',
+        cwdPolicy: 'workspace',
+        envSecretRefs: '',
+        enabled: true
+      }),
+    /Reference names must be uppercase identifiers/
+  )
 })
 
 test('profile draft changes are detected before a connection can test stale settings', () => {
@@ -122,7 +126,10 @@ test('profile draft changes are detected before a connection can test stale sett
     headerSecretRefs: 'Authorization=MCP_SEARCH_TOKEN'
   }
   assert.equal(isMcpProfileDraftDirty(savedDraft, profile), false)
-  assert.equal(isMcpProfileDraftDirty({ ...savedDraft, remoteUrl: 'https://other.test/mcp' }, profile), true)
+  assert.equal(
+    isMcpProfileDraftDirty({ ...savedDraft, remoteUrl: 'https://other.test/mcp' }, profile),
+    true
+  )
   assert.equal(isMcpProfileDraftDirty(savedDraft, null), true)
 })
 
@@ -173,10 +180,19 @@ test('tool filtering searches names, titles, and descriptions and removes duplic
 
 test('operation state mapping distinguishes empty, loading, connected, stale, and error', () => {
   assert.equal(operationToConnectionState(null, false, false, false), 'empty')
-  assert.equal(operationToConnectionState({ operation_id: '1', status: 'queued' }, true, false, false), 'loading')
-  assert.equal(operationToConnectionState({ operation_id: '1', status: 'succeeded' }, true, true, false), 'connected')
+  assert.equal(
+    operationToConnectionState({ operation_id: '1', status: 'queued' }, true, false, false),
+    'loading'
+  )
+  assert.equal(
+    operationToConnectionState({ operation_id: '1', status: 'succeeded' }, true, true, false),
+    'connected'
+  )
   assert.equal(operationToConnectionState(null, true, true, true), 'stale')
-  assert.equal(operationToConnectionState({ operation_id: '1', status: 'failed' }, true, false, false), 'error')
+  assert.equal(
+    operationToConnectionState({ operation_id: '1', status: 'failed' }, true, false, false),
+    'error'
+  )
 })
 
 test('verified connection requires both a live session and a fresh handshake snapshot', () => {

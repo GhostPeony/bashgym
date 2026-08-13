@@ -216,6 +216,30 @@ def _validate_definition_bindings(
         raise AutoResearchActivationError("activation executor does not match template")
     if not required_stages.issubset(configured_stages):
         raise AutoResearchActivationError("activation executor is missing required training stages")
+    if executor.registered_base_model is None or "development_evaluation" not in configured_stages:
+        raise AutoResearchActivationError(
+            "activation executor requires a registered base model and evaluation stage"
+        )
+    if (
+        executor.registered_base_model.schema_version
+        != "campaign_registered_remote_model_source.v2"
+        or executor.registered_base_model.artifact_receipt is None
+    ):
+        raise AutoResearchActivationError(
+            "activation executor requires a validated physical model receipt"
+        )
+    heldout = executor.registered_evaluation_dataset
+    if heldout is None:
+        raise AutoResearchActivationError(
+            "activation executor requires a registered held-out dataset"
+        )
+    if (
+        heldout.dataset_version_id != request.dataset_version.dataset_version_id
+        or heldout.content_digest != request.dataset_version.content_digest
+    ):
+        raise AutoResearchActivationError(
+            "activation executor held-out dataset does not match the ledger binding"
+        )
     for stage in executor.stages:
         if stage.stage.value not in required_stages:
             continue

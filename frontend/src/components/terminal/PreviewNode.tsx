@@ -143,7 +143,10 @@ function getSyntaxColor(language?: string): string {
   return 'border-l-border-subtle'
 }
 
-export const PreviewNode = memo(function PreviewNode({ data, selected }: NodeProps<PreviewNodeType>) {
+export const PreviewNode = memo(function PreviewNode({
+  data,
+  selected
+}: NodeProps<PreviewNodeType>) {
   const {
     panelId,
     filePath,
@@ -179,9 +182,8 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: NodePro
           window.bashgym?.files.stat(filePath)
         ])
         if (cancelled) return
-        const lines = fileResult?.success && fileResult.content
-          ? fileResult.content.split('\n')
-          : undefined
+        const lines =
+          fileResult?.success && fileResult.content ? fileResult.content.split('\n') : undefined
         setLoadedPreview({
           previewLines: lines?.slice(0, 20),
           lineCount: lines?.length,
@@ -194,7 +196,9 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: NodePro
     }
 
     load()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [filePath])
 
   // Use loaded data with fallback to props
@@ -208,20 +212,29 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: NodePro
     onFocus?.(panelId)
   }, [panelId, onFocus])
 
-  const handleClose = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onClose?.(panelId)
-  }, [panelId, onClose])
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onClose?.(panelId)
+    },
+    [panelId, onClose]
+  )
 
-  const handleCopyPath = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onCopyPath?.(filePath)
-  }, [filePath, onCopyPath])
+  const handleCopyPath = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onCopyPath?.(filePath)
+    },
+    [filePath, onCopyPath]
+  )
 
-  const handleOpenExternal = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onOpenExternal?.(filePath)
-  }, [filePath, onOpenExternal])
+  const handleOpenExternal = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onOpenExternal?.(filePath)
+    },
+    [filePath, onOpenExternal]
+  )
 
   const fileName = getFileName(filePath)
   const langName = getLanguageName(language, filePath)
@@ -254,7 +267,10 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: NodePro
           {getLanguageIcon(language, filePath)}
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-mono font-semibold text-text-primary truncate block" title={filePath}>
+          <span
+            className="text-sm font-mono font-semibold text-text-primary truncate block"
+            title={filePath}
+          >
             {fileName}
           </span>
           <span className="text-[10px] text-text-muted font-mono">{langName}</span>
@@ -318,11 +334,13 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: NodePro
       </div>
 
       {/* Code preview */}
-      <div className={clsx(
-        'px-3 py-2 font-mono text-[10px] leading-relaxed',
-        'border-l-3',
-        getSyntaxColor(language)
-      )}>
+      <div
+        className={clsx(
+          'px-3 py-2 font-mono text-[10px] leading-relaxed',
+          'border-l-3',
+          getSyntaxColor(language)
+        )}
+      >
         {isLoadingPreview ? (
           <div className="flex items-center justify-center gap-2 text-text-muted py-2">
             <Loader2 className="w-3 h-3 animate-spin" />
@@ -345,9 +363,7 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: NodePro
             )}
           </div>
         ) : (
-          <div className="text-text-muted text-center py-2">
-            No preview available
-          </div>
+          <div className="text-text-muted text-center py-2">No preview available</div>
         )}
       </div>
 

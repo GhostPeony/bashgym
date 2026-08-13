@@ -2,7 +2,13 @@
 """Tests for pattern extraction data structures."""
 
 import pytest
-from bashgym.factory.pattern_extractor import TracePatterns, FileCluster, ToolSequence, PatternExtractor
+
+from bashgym.factory.pattern_extractor import (
+    FileCluster,
+    PatternExtractor,
+    ToolSequence,
+    TracePatterns,
+)
 
 
 def test_trace_patterns_dataclass():
@@ -17,7 +23,7 @@ def test_trace_patterns_dataclass():
         prompt_templates=["Fix the {issue} in {file}"],
         prompt_keywords=["implement", "fix", "add"],
         repo_name="ghostwork",
-        framework_hints=["fastapi", "pytest"]
+        framework_hints=["fastapi", "pytest"],
     )
 
     assert patterns.task_types["feature"] == 0.4
@@ -125,13 +131,7 @@ def test_detect_languages():
     """Should detect languages from file paths."""
     extractor = PatternExtractor()
 
-    files = [
-        "src/main.py",
-        "src/utils.py",
-        "tests/test_main.py",
-        "frontend/App.tsx",
-        "README.md"
-    ]
+    files = ["src/main.py", "src/utils.py", "tests/test_main.py", "frontend/App.tsx", "README.md"]
 
     languages = extractor._detect_languages(files)
 
@@ -167,18 +167,18 @@ def test_detect_languages_all_supported():
     """Should detect all supported languages."""
     extractor = PatternExtractor()
     files = [
-        "main.py",      # python
-        "app.ts",       # typescript
-        "comp.tsx",     # typescript
-        "script.js",    # javascript
-        "comp.jsx",     # javascript
-        "README.md",    # markdown
+        "main.py",  # python
+        "app.ts",  # typescript
+        "comp.tsx",  # typescript
+        "script.js",  # javascript
+        "comp.jsx",  # javascript
+        "README.md",  # markdown
         "config.json",  # json
         "config.yaml",  # yaml
-        "config.yml",   # yaml
-        "setup.sh",     # bash
-        "main.rs",      # rust
-        "main.go",      # go
+        "config.yml",  # yaml
+        "setup.sh",  # bash
+        "main.rs",  # rust
+        "main.go",  # go
     ]
     languages = extractor._detect_languages(files)
 
@@ -319,7 +319,7 @@ def test_extract_patterns_from_traces():
                 {"tool": "Read", "input": {"file_path": "src/api.py"}},
                 {"tool": "Edit", "input": {"file_path": "src/api.py"}},
                 {"tool": "Bash", "input": {"command": "pytest tests/"}},
-            ]
+            ],
         },
         {
             "metadata": {"repo": "ghostwork"},
@@ -328,7 +328,7 @@ def test_extract_patterns_from_traces():
                 {"tool": "Glob", "input": {"pattern": "src/*.py"}},
                 {"tool": "Read", "input": {"file_path": "src/auth.py"}},
                 {"tool": "Edit", "input": {"file_path": "src/auth.py"}},
-            ]
+            ],
         },
     ]
 
@@ -362,14 +362,14 @@ def test_extract_patterns_extracts_common_paths():
                 {"tool": "Read", "input": {"file_path": "src/api/client.py"}},
                 {"tool": "Read", "input": {"file_path": "src/api/server.py"}},
                 {"tool": "Edit", "input": {"file_path": "src/api/utils.py"}},
-            ]
+            ],
         },
         {
             "summary": {"task_description": "More updates"},
             "trace": [
                 {"tool": "Read", "input": {"file_path": "src/api/models.py"}},
                 {"tool": "Edit", "input": {"file_path": "src/api/routes.py"}},
-            ]
+            ],
         },
     ]
 
@@ -405,7 +405,7 @@ def test_extract_patterns_handles_path_in_input():
             "trace": [
                 {"tool": "Glob", "input": {"path": "src/", "pattern": "*.py"}},
                 {"tool": "Grep", "input": {"path": "src/main.py", "pattern": "def"}},
-            ]
+            ],
         },
     ]
 

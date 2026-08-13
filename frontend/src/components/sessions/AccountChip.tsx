@@ -39,7 +39,10 @@ export function AccountChip() {
             {[account.billingType, account.seatTier, account.userRateLimitTier]
               .filter(Boolean)
               .map((tag) => (
-                <span key={String(tag)} className="px-1 border-brutal border-border-subtle rounded-brutal">
+                <span
+                  key={String(tag)}
+                  className="px-1 border-brutal border-border-subtle rounded-brutal"
+                >
                   {String(tag)}
                 </span>
               ))}

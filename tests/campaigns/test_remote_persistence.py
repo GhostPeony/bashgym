@@ -54,18 +54,14 @@ def _claimed_attempt(tmp_path):
 def test_remote_identity_registration_is_transactional_idempotent_and_evented(tmp_path):
     repository, attempt = _claimed_attempt(tmp_path)
     identity = _identity(attempt.attempt_id)
-    first = repository.register_remote_identity(
-        attempt, identity, now=START + timedelta(seconds=2)
-    )
+    first = repository.register_remote_identity(attempt, identity, now=START + timedelta(seconds=2))
     replay = repository.register_remote_identity(
         attempt, identity, now=START + timedelta(seconds=3)
     )
     assert replay == first
     assert repository.get_remote_run("workspace-a", attempt.attempt_id) == first
     events = repository.list_events("workspace-a", "campaign-1")
-    assert sum(
-        event.event_type == "campaign:remote-run-registered" for _, event in events
-    ) == 1
+    assert sum(event.event_type == "campaign:remote-run-registered" for _, event in events) == 1
 
     with pytest.raises(ActionIdentityMismatchError):
         repository.register_remote_identity(
@@ -99,9 +95,7 @@ def test_remote_observation_and_cursors_use_compare_and_swap(tmp_path):
     assert updated.last_observation == observation
 
     with pytest.raises(ActionIdentityMismatchError):
-        repository.update_remote_run(
-            record, observation, now=START + timedelta(seconds=4)
-        )
+        repository.update_remote_run(record, observation, now=START + timedelta(seconds=4))
     with pytest.raises(CampaignPersistenceError, match="cursor_regression"):
         repository.update_remote_run(
             updated,

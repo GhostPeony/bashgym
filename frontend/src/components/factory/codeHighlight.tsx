@@ -5,7 +5,7 @@ const CODE_PATTERNS = [
   /[{}();]/,
   /=>|->|::/,
   /^\s*(#|\/\/)/m,
-  /\.(py|js|ts|sh|yml|json|toml)$/m,
+  /\.(py|js|ts|sh|yml|json|toml)$/m
 ]
 
 export function looksLikeCode(text: string): boolean {
@@ -28,9 +28,12 @@ const HIGHLIGHT_RULES: [RegExp, string][] = [
   // Strings
   [/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/g, 'text-status-success'],
   // Keywords
-  [/\b(import|from|export|const|let|var|function|class|def|return|if|else|for|while|try|catch|async|await|yield|raise|except|finally|with|as)\b/g, 'text-accent'],
+  [
+    /\b(import|from|export|const|let|var|function|class|def|return|if|else|for|while|try|catch|async|await|yield|raise|except|finally|with|as)\b/g,
+    'text-accent'
+  ],
   // Numbers
-  [/\b(\d+\.?\d*)\b/g, 'text-status-warning'],
+  [/\b(\d+\.?\d*)\b/g, 'text-status-warning']
 ]
 
 export function highlightCode(text: string): ReactNode[] {
@@ -46,7 +49,11 @@ export function highlightCode(text: string): ReactNode[] {
     segments.forEach((seg, segIdx) => {
       const key = `${lineIdx}-${segIdx}`
       if (seg.className) {
-        result.push(<span key={key} className={seg.className}>{seg.text}</span>)
+        result.push(
+          <span key={key} className={seg.className}>
+            {seg.text}
+          </span>
+        )
       } else {
         result.push(<span key={key}>{seg.text}</span>)
       }
@@ -80,7 +87,10 @@ function highlightLine(line: string): Token[] {
       if (earliest.index > 0) {
         tokens.push({ text: remaining.slice(0, earliest.index) })
       }
-      tokens.push({ text: remaining.slice(earliest.index, earliest.index + earliest.length), className: earliest.className })
+      tokens.push({
+        text: remaining.slice(earliest.index, earliest.index + earliest.length),
+        className: earliest.className
+      })
       remaining = remaining.slice(earliest.index + earliest.length)
     } else {
       tokens.push({ text: remaining })

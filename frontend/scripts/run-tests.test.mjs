@@ -8,14 +8,14 @@ import { findTests, selectTests } from './run-tests.mjs'
 function run(...filters) {
   return spawnSync(process.execPath, ['scripts/run-tests.mjs', ...filters], {
     cwd: process.cwd(),
-    encoding: 'utf8',
+    encoding: 'utf8'
   })
 }
 
 test('an exact frontend test filter runs only the selected file', () => {
   const tests = [
     'C:\\repo\\src\\campaignApi.test.ts',
-    'C:\\repo\\src\\components\\TrainingRunNodeDefaults.test.ts',
+    'C:\\repo\\src\\components\\TrainingRunNodeDefaults.test.ts'
   ]
   const selected = selectTests(tests, ['TrainingRunNodeDefaults.test.ts'], 'C:\\repo')
 

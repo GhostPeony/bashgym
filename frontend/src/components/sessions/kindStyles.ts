@@ -9,6 +9,7 @@ export const KIND_CHIP_BASE =
  */
 export function kindChipClass(kind?: AgentSessionKind): string {
   if (kind === 'claude') return 'border-accent/60 bg-accent/10 text-accent'
-  if (kind === 'codex') return 'border-[hsl(210_45%_55%)]/60 bg-[hsl(210_45%_55%)]/10 text-[hsl(210_45%_55%)]'
+  if (kind === 'codex')
+    return 'border-[hsl(210_45%_55%)]/60 bg-[hsl(210_45%_55%)]/10 text-[hsl(210_45%_55%)]'
   return 'border-border-subtle bg-background-tertiary text-text-muted'
 }

@@ -48,9 +48,11 @@ function getStatusColor(statusCode?: number): string {
 // Get status badge color — solid backgrounds, hard borders
 function getStatusBadgeColor(statusCode?: number): string {
   if (!statusCode) return 'bg-background-tertiary text-text-muted border-border-subtle'
-  if (statusCode >= 200 && statusCode < 300) return 'bg-status-success text-white border-status-success'
+  if (statusCode >= 200 && statusCode < 300)
+    return 'bg-status-success text-white border-status-success'
   if (statusCode >= 300 && statusCode < 400) return 'bg-accent text-white border-accent'
-  if (statusCode >= 400 && statusCode < 500) return 'bg-status-warning text-white border-status-warning'
+  if (statusCode >= 400 && statusCode < 500)
+    return 'bg-status-warning text-white border-status-warning'
   if (statusCode >= 500) return 'bg-status-error text-white border-status-error'
   return 'bg-background-tertiary text-text-muted border-border-subtle'
 }
@@ -97,7 +99,9 @@ function truncateUrl(url: string, maxLength: number = 40): string {
 }
 
 // Parse URL into parts for visual display
-function parseUrlParts(url: string): { protocol: string; host: string; path: string; port: string } | null {
+function parseUrlParts(
+  url: string
+): { protocol: string; host: string; path: string; port: string } | null {
   try {
     const parsed = new URL(url)
     return {
@@ -111,7 +115,10 @@ function parseUrlParts(url: string): { protocol: string; host: string; path: str
   }
 }
 
-export const BrowserNode = memo(function BrowserNode({ data, selected }: NodeProps<BrowserNodeType>) {
+export const BrowserNode = memo(function BrowserNode({
+  data,
+  selected
+}: NodeProps<BrowserNodeType>) {
   const {
     panelId,
     url,
@@ -133,25 +140,37 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: NodePro
     onFocus?.(panelId)
   }, [panelId, onFocus])
 
-  const handleClose = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onClose?.(panelId)
-  }, [panelId, onClose])
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onClose?.(panelId)
+    },
+    [panelId, onClose]
+  )
 
-  const handleCopyUrl = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onCopyUrl?.(url)
-  }, [url, onCopyUrl])
+  const handleCopyUrl = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onCopyUrl?.(url)
+    },
+    [url, onCopyUrl]
+  )
 
-  const handleOpenExternal = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onOpenExternal?.(url)
-  }, [url, onOpenExternal])
+  const handleOpenExternal = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onOpenExternal?.(url)
+    },
+    [url, onOpenExternal]
+  )
 
-  const handleRefresh = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onRefresh?.(panelId)
-  }, [panelId, onRefresh])
+  const handleRefresh = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onRefresh?.(panelId)
+    },
+    [panelId, onRefresh]
+  )
 
   const domain = getDomain(url)
   const secure = isSecure(url)
@@ -183,15 +202,23 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: NodePro
       <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
         <div className="p-1.5 border-brutal border-border-subtle rounded-brutal bg-background-tertiary">
           {favicon ? (
-            <img src={favicon} alt="" className="w-4 h-4" onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none'
-            }} />
+            <img
+              src={favicon}
+              alt=""
+              className="w-4 h-4"
+              onError={(e) => {
+                ;(e.target as HTMLImageElement).style.display = 'none'
+              }}
+            />
           ) : (
             <Globe className="w-4 h-4 text-text-muted" />
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-mono font-semibold text-text-primary truncate block" title={pageTitle || url}>
+          <span
+            className="text-sm font-mono font-semibold text-text-primary truncate block"
+            title={pageTitle || url}
+          >
             {pageTitle || domain}
           </span>
           <div className="flex items-center gap-1 text-[10px] text-text-muted font-mono">
@@ -278,11 +305,13 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: NodePro
         ) : statusCode ? (
           <>
             <CheckCircle2 className={clsx('w-3 h-3', getStatusColor(statusCode))} />
-            <span className={clsx(
-              'px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase',
-              'border-brutal rounded-brutal',
-              getStatusBadgeColor(statusCode)
-            )}>
+            <span
+              className={clsx(
+                'px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase',
+                'border-brutal rounded-brutal',
+                getStatusBadgeColor(statusCode)
+              )}
+            >
               {statusCode} {getStatusText(statusCode)}
             </span>
           </>
@@ -299,7 +328,7 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: NodePro
             alt="Page preview"
             className="w-full h-full object-cover object-top"
             onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none'
+              ;(e.target as HTMLImageElement).style.display = 'none'
             }}
           />
         ) : isLoading ? (
@@ -315,23 +344,31 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: NodePro
         ) : urlParts ? (
           <div className="h-full flex flex-col justify-center px-4 gap-2">
             <div className="flex items-center gap-2">
-              <span className={clsx(
-                'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 border-brutal rounded-brutal flex-shrink-0',
-                secure
-                  ? 'text-status-success border-status-success bg-status-success/10'
-                  : 'text-status-warning border-status-warning bg-status-warning/10'
-              )}>
+              <span
+                className={clsx(
+                  'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 border-brutal rounded-brutal flex-shrink-0',
+                  secure
+                    ? 'text-status-success border-status-success bg-status-success/10'
+                    : 'text-status-warning border-status-warning bg-status-warning/10'
+                )}
+              >
                 {urlParts.protocol}
               </span>
               {urlParts.port && (
                 <span className="text-[9px] font-mono text-text-muted">:{urlParts.port}</span>
               )}
             </div>
-            <div className="font-mono font-semibold text-sm text-text-primary truncate" title={urlParts.host}>
+            <div
+              className="font-mono font-semibold text-sm text-text-primary truncate"
+              title={urlParts.host}
+            >
               {urlParts.host}
             </div>
             {urlParts.path && (
-              <div className="font-mono text-[10px] text-text-secondary truncate" title={urlParts.path}>
+              <div
+                className="font-mono text-[10px] text-text-secondary truncate"
+                title={urlParts.path}
+              >
                 {urlParts.path}
               </div>
             )}

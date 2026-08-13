@@ -13,7 +13,7 @@
  * web-build tree-shaking is preserved; otherwise it falls back to detecting the
  * bridge at runtime, so `npm run dev` works correctly in a browser.
  */
-const isWebBuild = import.meta.env.VITE_MODE === 'web'
+const isWebBuild = import.meta.env?.VITE_MODE === 'web'
 const hasElectronBridge =
   typeof window !== 'undefined' && Boolean((window as { bashgym?: unknown }).bashgym)
 

@@ -36,9 +36,7 @@ export function GhostPeonyIcon({
   className,
   title
 }: GhostPeonyIconProps) {
-  const style = hue == null
-    ? undefined
-    : ({ '--ghost-peony-icon-hue': hue } as CSSProperties)
+  const style = hue == null ? undefined : ({ '--ghost-peony-icon-hue': hue } as CSSProperties)
 
   return (
     <span

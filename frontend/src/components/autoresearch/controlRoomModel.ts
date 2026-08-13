@@ -2,8 +2,10 @@ import type {
   CampaignControlRoomSnapshotV1,
   CandidateSummaryV1,
   DecisionSurfaceV1,
+  HumanWorkSummaryV1,
   JourneyPhaseSummaryV1,
   MetricDescriptorV1,
+  ReadinessSummaryV1
 } from '../../services/api'
 import type { CampaignFreshness } from '../../stores/campaignFreshness'
 
@@ -27,7 +29,8 @@ export type PresentationTone = 'success' | 'warning' | 'error' | 'info' | 'neutr
 export function campaignStatusTone(status: string): PresentationTone {
   if (status === 'failed') return 'error'
   if (status === 'completed' || status === 'exhausted') return 'success'
-  if (status === 'paused' || status === 'awaiting_authority' || status === 'cancelling') return 'warning'
+  if (status === 'paused' || status === 'awaiting_authority' || status === 'cancelling')
+    return 'warning'
   if (status === 'validating' || status === 'ready' || status === 'active') return 'info'
   return 'neutral'
 }
@@ -43,11 +46,6 @@ export interface JourneyPhaseViewModel {
   blocker: ReturnType<typeof presentBlocker>
 }
 
-export interface OwnerViewModel {
-  execution: string
-  attention: string
-}
-
 export interface BlockerViewModel {
   code: string
   summary: string
@@ -55,13 +53,9 @@ export interface BlockerViewModel {
   secondaryCodes: string[]
 }
 
-export interface ActionViewModel {
-  id: string
-  label: string
-  kind: 'next' | 'recovery'
-  capability: string | null
-  requiresHumanWork: boolean
-  enabled: false
+export interface NeedsYouViewModel {
+  sentence: string
+  code: string | null
 }
 
 export interface MetricViewModel {
@@ -88,9 +82,7 @@ export type ControlRoomViewModel =
       controllerLabel: string
       error: string | null
       journey: JourneyPhaseViewModel[]
-      owner: OwnerViewModel
-      blocker: BlockerViewModel | null
-      actions: ActionViewModel[]
+      needsYou: NeedsYouViewModel | null
       metrics: MetricViewModel[]
     }
 
@@ -99,7 +91,7 @@ const PHASE_LABELS: Record<string, string> = {
   baseline: 'Baseline',
   experiments: 'Experiments',
   human_review: 'Human review',
-  decision: 'Decision',
+  decision: 'Decision'
 }
 
 const STATE_TONES: Record<string, PresentationTone> = {
@@ -109,7 +101,7 @@ const STATE_TONES: Record<string, PresentationTone> = {
   blocked: 'warning',
   complete: 'success',
   failed: 'error',
-  skipped: 'neutral',
+  skipped: 'neutral'
 }
 
 function readable(value: string): string {
@@ -122,9 +114,7 @@ function ownerLabel(value: string): string {
   return readable(value)
 }
 
-export function presentJourney(
-  phases: readonly JourneyPhaseSummaryV1[],
-): JourneyPhaseViewModel[] {
+export function presentJourney(phases: readonly JourneyPhaseSummaryV1[]): JourneyPhaseViewModel[] {
   return phases.map((phase) => ({
     id: phase.phase_id,
     label: PHASE_LABELS[phase.phase_id] || readable(phase.phase_id),
@@ -133,60 +123,74 @@ export function presentJourney(
     evidenceCount: phase.evidence_count,
     executionOwner: ownerLabel(phase.execution_owner),
     attentionOwner: ownerLabel(phase.attention_owner),
-    blocker: phase.primary_blocker ? {
-      code: phase.primary_blocker.code,
-      summary: phase.primary_blocker.summary,
-      evidenceIds: [...phase.primary_blocker.evidence_ids],
-      secondaryCodes: [...phase.primary_blocker.secondary_codes],
-    } : null,
+    blocker: phase.primary_blocker
+      ? {
+          code: phase.primary_blocker.code,
+          summary: phase.primary_blocker.summary,
+          evidenceIds: [...phase.primary_blocker.evidence_ids],
+          secondaryCodes: [...phase.primary_blocker.secondary_codes]
+        }
+      : null
   }))
-}
-
-export function presentOwner(surface: DecisionSurfaceV1): OwnerViewModel {
-  return {
-    execution: ownerLabel(surface.execution_owner),
-    attention: ownerLabel(surface.attention_owner),
-  }
 }
 
 export function presentBlocker(surface: DecisionSurfaceV1): BlockerViewModel | null {
   const blocker = surface.blocker
-  return blocker ? {
-    code: blocker.code,
-    summary: blocker.summary,
-    evidenceIds: [...blocker.evidence_ids],
-    secondaryCodes: [...blocker.secondary_codes],
-  } : null
+  return blocker
+    ? {
+        code: blocker.code,
+        summary: blocker.summary,
+        evidenceIds: [...blocker.evidence_ids],
+        secondaryCodes: [...blocker.secondary_codes]
+      }
+    : null
 }
 
-export function presentActions(
-  surface: DecisionSurfaceV1,
-  _freshness: ControlRoomFreshness,
-): ActionViewModel[] {
-  return [
-    ...surface.next_actions.map((action) => ({
-      id: action.action,
-      label: readable(action.action),
-      kind: 'next' as const,
-      capability: action.capability,
-      requiresHumanWork: action.requires_human_work,
-      enabled: false as const,
-    })),
-    ...surface.recovery_actions.map((action) => ({
-      id: action,
-      label: readable(action),
-      kind: 'recovery' as const,
-      capability: null,
-      requiresHumanWork: false,
-      enabled: false as const,
-    })),
-  ]
+/**
+ * Distils the one thing (if any) that is waiting on the human into a plain
+ * sentence plus the trailing machine code. Combines the server's primary
+ * blocker, the launch-readiness block, and pending human review. Returns null
+ * when nothing needs the user, so the caller can render nothing at all.
+ */
+export function presentNeedsYou(input: {
+  surface: DecisionSurfaceV1
+  readiness: ReadinessSummaryV1
+  humanWork: HumanWorkSummaryV1
+  status: string
+}): NeedsYouViewModel | null {
+  const { surface, readiness, humanWork, status } = input
+  if (surface.blocker) {
+    return { sentence: surface.blocker.summary, code: surface.blocker.code }
+  }
+  if (humanWork.blocking_count > 0) {
+    const noun = humanWork.blocking_count === 1 ? 'review is' : 'reviews are'
+    return {
+      sentence: `${humanWork.blocking_count} blinded ${noun} waiting on your decision before this campaign can continue.`,
+      code: 'human_review_required'
+    }
+  }
+  if (status === 'ready' && !readiness.launch_ready) {
+    const code = readiness.blocking_codes[0] ?? null
+    const detail = code ? readable(code) : 'a readiness check'
+    return {
+      sentence: `Readiness is blocked by ${detail}. Fix it and readiness re-verifies automatically before Start unlocks.`,
+      code
+    }
+  }
+  if (humanWork.open_count > 0) {
+    const noun = humanWork.open_count === 1 ? 'review is' : 'reviews are'
+    return {
+      sentence: `${humanWork.open_count} human ${noun} open for you to pick up.`,
+      code: 'human_review_open'
+    }
+  }
+  return null
 }
 
 export function presentMetrics(
   metrics: readonly MetricDescriptorV1[],
   _champion: CandidateSummaryV1 | null,
-  _candidate: CandidateSummaryV1 | null,
+  _candidate: CandidateSummaryV1 | null
 ): MetricViewModel[] {
   return metrics.map((metric) => ({
     id: metric.metric_id,
@@ -196,7 +200,7 @@ export function presentMetrics(
     target: metric.target,
     value: 'Unavailable',
     delta: null,
-    comparabilityKey: metric.comparability_key,
+    comparabilityKey: metric.comparability_key
   }))
 }
 
@@ -206,7 +210,7 @@ function freshnessLabel(freshness: ControlRoomFreshness): string {
     reconciling: 'Reconciling campaign state',
     stale: 'Cached campaign state · stale',
     offline: 'Cached campaign state · offline',
-    error: 'Campaign state error',
+    error: 'Campaign state error'
   }[freshness]
 }
 
@@ -220,10 +224,18 @@ export function buildControlRoomModel(input: {
       return { kind: 'loading', message: 'Loading campaign state…', authoritative: false }
     }
     if (input.freshness === 'offline') {
-      return { kind: 'offline', message: input.error || 'BashGym desktop is offline.', authoritative: false }
+      return {
+        kind: 'offline',
+        message: input.error || 'BashGym desktop is offline.',
+        authoritative: false
+      }
     }
     if (input.freshness === 'error') {
-      return { kind: 'error', message: input.error || 'Unable to load campaign state.', authoritative: false }
+      return {
+        kind: 'error',
+        message: input.error || 'Unable to load campaign state.',
+        authoritative: false
+      }
     }
     return { kind: 'empty', message: 'No durable campaign is selected.', authoritative: false }
   }
@@ -237,9 +249,16 @@ export function buildControlRoomModel(input: {
     controllerLabel: readable(input.snapshot.controller.state),
     error: input.error,
     journey: presentJourney(input.snapshot.journey),
-    owner: presentOwner(input.snapshot.decision_surface),
-    blocker: presentBlocker(input.snapshot.decision_surface),
-    actions: presentActions(input.snapshot.decision_surface, input.freshness),
-    metrics: presentMetrics(input.snapshot.metrics, input.snapshot.champion, input.snapshot.candidate),
+    needsYou: presentNeedsYou({
+      surface: input.snapshot.decision_surface,
+      readiness: input.snapshot.readiness,
+      humanWork: input.snapshot.human_work,
+      status: input.snapshot.campaign.status
+    }),
+    metrics: presentMetrics(
+      input.snapshot.metrics,
+      input.snapshot.champion,
+      input.snapshot.candidate
+    )
   }
 }

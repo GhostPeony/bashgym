@@ -1,42 +1,21 @@
-"""
-HuggingFace Jobs (Cloud Training)
+"""Honest, opt-in Hugging Face Jobs seam for cloud training.
 
-Provides cloud training capabilities using HuggingFace Spaces.
-Requires HuggingFace Pro subscription for all operations.
-
-Features:
-- Submit training jobs to HuggingFace cloud infrastructure
-- Monitor job status and retrieve logs
-- Cancel running jobs
-- Support for various hardware configurations (T4, A10G, A100, H100)
-
-Usage:
-    from bashgym.integrations.huggingface import get_hf_client
-    from bashgym.integrations.huggingface.jobs import HFJobRunner, HFJobConfig
-
-    client = get_hf_client()
-    runner = HFJobRunner(client)
-
-    config = HFJobConfig(hardware="a10g-large", timeout_minutes=60)
-    job = runner.submit_training_job(
-        script_path="train.py",
-        repo_id="myorg/mymodel",
-        config=config
-    )
-
-    # Monitor progress
-    status = runner.get_job_status(job.job_id)
-    logs = runner.get_job_logs(job.job_id)
+The adapter projects BashGym training inputs onto ``HfApi.run_uv_job`` and
+uses the provider's returned identity for all subsequent observation. It does
+not invent job IDs, prices, URLs, status, logs, or a successful simulation.
 """
 
-import logging
-import re
-import subprocess
+from __future__ import annotations
+
+import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, version
+from inspect import Parameter, signature
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .client import (
     HF_HUB_AVAILABLE,
@@ -45,16 +24,72 @@ from .client import (
     HuggingFaceClient,
 )
 
-logger = logging.getLogger(__name__)
+try:  # Optional dependency: keep importing BashGym useful without the Hub SDK.
+    from huggingface_hub import HfApi as _ProviderHfApi
+    from huggingface_hub import SpaceHardware as _ProviderSpaceHardware
+except ImportError:  # pragma: no cover - exercised by availability monkeypatch tests.
+    _ProviderHfApi = None
+    _ProviderSpaceHardware = None
 
 
-# =============================================================================
-# Enums and Constants
-# =============================================================================
+def _provider_version() -> str | None:
+    try:
+        return version("huggingface_hub")
+    except PackageNotFoundError:
+        return None
 
 
-class JobStatus(Enum):
-    """Status of a HuggingFace job."""
+def _provider_hardware_flavors() -> tuple[str, ...]:
+    if _ProviderSpaceHardware is None:
+        return ()
+    return tuple(item.value for item in _ProviderSpaceHardware)
+
+
+_HARDWARE_FLAVORS = _provider_hardware_flavors()
+
+# Compatibility projection for existing callers. Provider pricing and capacity
+# are intentionally absent because the installed SDK does not authoritatively
+# expose them. The accepted IDs are derived from its SpaceHardware enum.
+HARDWARE_SPECS: dict[str, dict[str, Any]] = {
+    flavor: {
+        "provider_value": flavor,
+        "source": "huggingface_hub.SpaceHardware",
+        "gpu": None,
+        "vram_gb": None,
+        "memory_gb": None,
+        "cost_per_hour": None,
+        "pro_required": True,
+    }
+    for flavor in _HARDWARE_FLAVORS
+}
+
+HF_JOB_LOG_DEFAULT_TAIL_LINES = 200
+HF_JOB_LOG_MAX_TAIL_LINES = 2_000
+HF_JOB_LOG_MAX_BYTES = 256 * 1024
+_HF_JOB_LOG_CHUNK_CHARACTERS = 4_096
+
+
+def _bounded_log_tail(logs: str | Iterable[str], *, tail_lines: int) -> str:
+    """Collect the final log suffix without retaining the complete response."""
+
+    retained = bytearray()
+    chunks: Iterable[str] = (logs,) if isinstance(logs, str) else logs
+    for chunk in chunks:
+        if not isinstance(chunk, str):
+            raise TypeError("Hugging Face Jobs logs must contain text chunks")
+        for offset in range(0, len(chunk), _HF_JOB_LOG_CHUNK_CHARACTERS):
+            encoded = chunk[offset : offset + _HF_JOB_LOG_CHUNK_CHARACTERS].encode("utf-8")
+            retained.extend(encoded)
+            overflow = len(retained) - HF_JOB_LOG_MAX_BYTES
+            if overflow > 0:
+                del retained[:overflow]
+
+    text = retained.decode("utf-8", errors="ignore")
+    return "".join(text.splitlines(keepends=True)[-tail_lines:])
+
+
+class JobStatus(str, Enum):
+    """Stable BashGym projection of Hugging Face job stages."""
 
     PENDING = "pending"
     RUNNING = "running"
@@ -63,158 +98,188 @@ class JobStatus(Enum):
     CANCELLED = "cancelled"
 
 
-# Hardware tier pricing and specs (as of 2026)
-HARDWARE_SPECS = {
-    "cpu-basic": {
-        "gpu": None,
-        "vram_gb": 0,
-        "memory_gb": 2,
-        "cost_per_hour": 0.0,
-        "pro_required": False,
-    },
-    "cpu-upgrade": {
-        "gpu": None,
-        "vram_gb": 0,
-        "memory_gb": 8,
-        "cost_per_hour": 0.0,
-        "pro_required": False,
-    },
-    "t4-small": {
-        "gpu": "T4",
-        "vram_gb": 16,
-        "memory_gb": 16,
-        "cost_per_hour": 0.60,
-        "pro_required": True,
-    },
-    "t4-medium": {
-        "gpu": "T4",
-        "vram_gb": 16,
-        "memory_gb": 32,
-        "cost_per_hour": 0.90,
-        "pro_required": True,
-    },
-    "a10g-small": {
-        "gpu": "A10G",
-        "vram_gb": 24,
-        "memory_gb": 24,
-        "cost_per_hour": 1.05,
-        "pro_required": True,
-    },
-    "a10g-large": {
-        "gpu": "A10G",
-        "vram_gb": 24,
-        "memory_gb": 48,
-        "cost_per_hour": 1.80,
-        "pro_required": True,
-    },
-    "a100-large": {
-        "gpu": "A100",
-        "vram_gb": 80,
-        "memory_gb": 80,
-        "cost_per_hour": 4.50,
-        "pro_required": True,
-    },
-    "h100": {
-        "gpu": "H100",
-        "vram_gb": 80,
-        "memory_gb": 80,
-        "cost_per_hour": 10.00,
-        "pro_required": True,
-    },
+class HFJobLogsNotReadyError(HFJobFailedError):
+    """Stable refusal returned before an active provider log stream is opened."""
+
+    reason_code = "hf_job_logs_not_ready"
+
+    def __init__(self, job_id: str, status: JobStatus):
+        super().__init__(
+            f"{self.reason_code}: job status is {status.value}",
+            job_id=job_id,
+        )
+        self.status = status
+
+
+_PROVIDER_STATUS = {
+    "SCHEDULING": JobStatus.PENDING,
+    "RUNNING": JobStatus.RUNNING,
+    "COMPLETED": JobStatus.COMPLETED,
+    "ERROR": JobStatus.FAILED,
+    "CANCELED": JobStatus.CANCELLED,
+    "CANCELLED": JobStatus.CANCELLED,
+    "DELETED": JobStatus.CANCELLED,
 }
 
 
-# =============================================================================
-# Data Classes
-# =============================================================================
+@dataclass(frozen=True)
+class HFJobsAvailability:
+    """Local SDK capability only; it never probes credentials or the network."""
+
+    dependency_available: bool
+    api_available: bool
+    provider_version: str | None
+    api_method: str
+    hardware_flavors: tuple[str, ...]
+
+
+def detect_hf_jobs_availability() -> HFJobsAvailability:
+    """Report whether the installed SDK exposes the canonical Jobs methods."""
+
+    api_available = bool(
+        HF_HUB_AVAILABLE
+        and _ProviderHfApi is not None
+        and callable(getattr(_ProviderHfApi, "run_uv_job", None))
+        and callable(getattr(_ProviderHfApi, "inspect_job", None))
+        and callable(getattr(_ProviderHfApi, "fetch_job_logs", None))
+        and callable(getattr(_ProviderHfApi, "cancel_job", None))
+        and callable(getattr(_ProviderHfApi, "list_jobs", None))
+    )
+    return HFJobsAvailability(
+        dependency_available=bool(HF_HUB_AVAILABLE and _ProviderHfApi is not None),
+        api_available=api_available,
+        provider_version=_provider_version(),
+        api_method="HfApi.run_uv_job",
+        hardware_flavors=_HARDWARE_FLAVORS,
+    )
 
 
 @dataclass
 class HFJobConfig:
-    """Configuration for a HuggingFace training job."""
+    """Explicit inputs that map directly onto ``HfApi.run_uv_job``."""
 
     hardware: str = "a10g-small"
-    """Hardware tier for the job. See HARDWARE_SPECS for options."""
-
     timeout_minutes: int = 30
-    """Maximum job runtime in minutes."""
-
     docker_image: str | None = None
-    """Custom Docker image. If None, uses HF default training image."""
-
     environment: dict[str, str] = field(default_factory=dict)
-    """Environment variables to set in the job."""
-
-    secrets: dict[str, str] = field(default_factory=dict)
-    """Secret environment variables (not logged). Keys are secret names."""
-
+    secrets: dict[str, str] = field(default_factory=dict, repr=False)
+    dependencies: tuple[str, ...] = ()
+    python: str | None = None
+    namespace: str | None = None
     requirements: str | None = None
-    """Path to requirements.txt or pip install string."""
-
     dataset_repo: str | None = None
-    """HuggingFace dataset repository to use."""
+    """Dataset declaration injected into the job as ``BASHGYM_DATASET_REPO``."""
 
     output_repo: str | None = None
-    """Repository to push trained model to."""
+    """Output declaration injected into the job as ``BASHGYM_OUTPUT_REPO``."""
 
     def validate(self) -> list[str]:
-        """Validate the configuration."""
-        errors = []
-
-        if self.hardware not in HARDWARE_SPECS:
-            valid = ", ".join(HARDWARE_SPECS.keys())
-            errors.append(f"Invalid hardware '{self.hardware}'. Valid options: {valid}")
-
-        if self.timeout_minutes < 1:
+        errors: list[str] = []
+        if _HARDWARE_FLAVORS and self.hardware not in _HARDWARE_FLAVORS:
+            errors.append(
+                f"Invalid hardware {self.hardware!r}; use an installed SpaceHardware value"
+            )
+        if not isinstance(self.timeout_minutes, int) or self.timeout_minutes < 1:
             errors.append("timeout_minutes must be at least 1")
-
-        if self.timeout_minutes > 720:  # 12 hours max
-            errors.append("timeout_minutes cannot exceed 720 (12 hours)")
-
+        if self.requirements is not None:
+            errors.append(
+                "requirements is not supported by HfApi.run_uv_job; use PEP 723 or dependencies"
+            )
+        if not all(isinstance(item, str) and item.strip() for item in self.dependencies):
+            errors.append("dependencies must contain non-empty package requirements")
+        if self.secrets.get("HF_TOKEN") == "$HF_TOKEN":
+            errors.append(
+                "literal $HF_TOKEN is MCP-only; HfApi.run_uv_job requires an injected secret value"
+            )
         return errors
+
+
+@dataclass(frozen=True)
+class HFJobRequest:
+    """Secret-redacted projection of a future ``run_uv_job`` request."""
+
+    script: str
+    script_args: tuple[str, ...]
+    dependencies: tuple[str, ...]
+    image: str | None
+    env: dict[str, str]
+    secret_names: tuple[str, ...]
+    flavor: str
+    timeout: str
+    python: str | None
+    namespace: str | None
+    dataset_repo: str | None
+    output_repo: str
+
+    def to_dict(self) -> dict[str, Any]:
+        projection: dict[str, Any] = {
+            "api_method": "HfApi.run_uv_job",
+            "script": self.script,
+            "script_args": list(self.script_args),
+            "dependencies": list(self.dependencies),
+            "image": self.image,
+            "env": dict(self.env),
+            "secret_names": list(self.secret_names),
+            "flavor": self.flavor,
+            "timeout": self.timeout,
+            "namespace": self.namespace,
+            "dataset_repo": self.dataset_repo,
+            "output_repo": self.output_repo,
+        }
+        if self.python is not None:
+            projection["python"] = self.python
+        return projection
+
+
+@dataclass(frozen=True)
+class HFJobsPreflight:
+    """Fail-closed readiness result for one exact training request."""
+
+    availability: HFJobsAvailability
+    ready: bool
+    reason_codes: tuple[str, ...]
+    config_errors: tuple[str, ...]
+    request: HFJobRequest | None
 
 
 @dataclass
 class HFJobInfo:
-    """Information about a HuggingFace job."""
+    """Provider-derived job identity and state; no fields are synthesized."""
 
     job_id: str
-    """Unique job identifier."""
-
     status: JobStatus
-    """Current job status."""
-
     hardware: str
-    """Hardware tier used for the job."""
-
-    created_at: datetime
-    """When the job was created."""
-
+    created_at: datetime | None
+    namespace: str | None = None
     started_at: datetime | None = None
-    """When the job started running."""
-
     completed_at: datetime | None = None
-    """When the job finished (completed, failed, or cancelled)."""
-
     logs_url: str | None = None
-    """URL to view job logs on HuggingFace."""
-
     error_message: str | None = None
-    """Error message if job failed."""
-
     metrics: dict[str, Any] = field(default_factory=dict)
-    """Training metrics reported by the job."""
-
     output_repo: str | None = None
-    """Repository where output was pushed."""
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in {
+            JobStatus.COMPLETED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        }
+
+    @property
+    def duration_seconds(self) -> float | None:
+        if self.started_at is None:
+            return None
+        end = self.completed_at or datetime.now(timezone.utc)
+        return (end - self.started_at).total_seconds()
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
         return {
             "job_id": self.job_id,
             "status": self.status.value,
             "hardware": self.hardware,
-            "created_at": self.created_at.isoformat(),
+            "namespace": self.namespace,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "logs_url": self.logs_url,
@@ -224,114 +289,188 @@ class HFJobInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "HFJobInfo":
-        """Create from dictionary."""
-
-        def parse_datetime(val: str | None) -> datetime | None:
-            if val is None:
+    def from_dict(cls, data: dict[str, Any]) -> HFJobInfo:
+        def parse_datetime(value: Any) -> datetime | None:
+            if not isinstance(value, str):
                 return None
             try:
-                return datetime.fromisoformat(val.replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
                 return None
 
         return cls(
-            job_id=data.get("job_id", ""),
-            status=JobStatus(data.get("status", "pending")),
-            hardware=data.get("hardware", "unknown"),
-            created_at=parse_datetime(data.get("created_at")) or datetime.now(timezone.utc),
+            job_id=str(data.get("job_id", "")),
+            status=JobStatus(str(data.get("status", "pending"))),
+            hardware=str(data.get("hardware", "unknown")),
+            created_at=parse_datetime(data.get("created_at")),
+            namespace=data.get("namespace"),
             started_at=parse_datetime(data.get("started_at")),
             completed_at=parse_datetime(data.get("completed_at")),
             logs_url=data.get("logs_url"),
             error_message=data.get("error_message"),
-            metrics=data.get("metrics", {}),
+            metrics=dict(data.get("metrics") or {}),
             output_repo=data.get("output_repo"),
         )
 
-    @property
-    def is_terminal(self) -> bool:
-        """Check if job is in a terminal state."""
-        return self.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
-
-    @property
-    def duration_seconds(self) -> float | None:
-        """Get job duration in seconds."""
-        if self.started_at and self.completed_at:
-            return (self.completed_at - self.started_at).total_seconds()
-        elif self.started_at:
-            return (datetime.now(timezone.utc) - self.started_at).total_seconds()
-        return None
-
-
-# =============================================================================
-# Job Runner
-# =============================================================================
+    @classmethod
+    def from_provider(
+        cls,
+        job: Any,
+        *,
+        output_repo: str | None = None,
+        namespace: str | None = None,
+    ) -> HFJobInfo:
+        job_id = getattr(job, "id", None)
+        stage = getattr(getattr(job, "status", None), "stage", None)
+        stage = getattr(stage, "value", stage)
+        if not isinstance(job_id, str) or not job_id or stage not in _PROVIDER_STATUS:
+            raise HFJobFailedError("Hugging Face Jobs returned an invalid job projection.")
+        status = _PROVIDER_STATUS[stage]
+        message = getattr(getattr(job, "status", None), "message", None)
+        owner_namespace = getattr(getattr(job, "owner", None), "name", None)
+        flavor = getattr(job, "flavor", None)
+        flavor = getattr(flavor, "value", flavor)
+        return cls(
+            job_id=job_id,
+            status=status,
+            hardware=str(flavor or "unknown"),
+            created_at=getattr(job, "created_at", None),
+            namespace=(
+                owner_namespace
+                if isinstance(owner_namespace, str) and owner_namespace
+                else namespace
+            ),
+            started_at=getattr(job, "started_at", None),
+            completed_at=getattr(job, "finished_at", None),
+            logs_url=getattr(job, "url", None),
+            error_message=str(message) if status is JobStatus.FAILED and message else None,
+            output_repo=output_repo,
+        )
 
 
 class HFJobRunner:
-    """
-    Runs training jobs on HuggingFace cloud infrastructure.
-
-    Requires HuggingFace Pro subscription for GPU hardware access.
-    Uses HuggingFace Spaces or Jobs API for execution.
-
-    Example:
-        client = get_hf_client()
-        runner = HFJobRunner(client)
-
-        job = runner.submit_training_job(
-            script_path="train.py",
-            repo_id="myorg/mymodel",
-            config=HFJobConfig(hardware="a10g-small")
-        )
-
-        while not job.is_terminal:
-            job = runner.get_job_status(job.job_id)
-            print(f"Status: {job.status.value}")
-            time.sleep(30)
-    """
+    """Thin adapter over an explicitly configured Hugging Face Jobs API."""
 
     def __init__(
         self,
         client: HuggingFaceClient | None = None,
         token: str | None = None,
         pro_enabled: bool = False,
-    ):
-        """
-        Initialize the job runner.
-
-        Args:
-            client: HuggingFaceClient instance. If None, creates one with token.
-            token: HF API token (used if client is None).
-            pro_enabled: Override for Pro status (useful for testing).
-        """
-        if client is not None:
-            self._client = client
-        else:
-            self._client = HuggingFaceClient(token=token)
-
-        self._pro_enabled_override = pro_enabled
-        self._jobs: dict[str, HFJobInfo] = {}
+        *,
+        api: Any | None = None,
+        jobs_access_confirmed: bool | None = None,
+    ) -> None:
+        self._client = client or (HuggingFaceClient(token=token) if token else None)
+        self._api = api
+        self._jobs_access_confirmed = (
+            pro_enabled if jobs_access_confirmed is None else jobs_access_confirmed
+        )
 
     @property
     def client(self) -> HuggingFaceClient:
-        """Get the HuggingFace client."""
+        if self._client is None:
+            raise HFJobFailedError("Hugging Face client is not configured.")
         return self._client
 
     @property
     def is_pro(self) -> bool:
-        """Check if Pro features are available."""
-        if self._pro_enabled_override:
-            return True
-        return self._client.is_pro
+        """Compatibility alias for explicit eligible Jobs-plan confirmation."""
 
-    def _require_pro(self, operation: str = "This operation") -> None:
-        """Require Pro subscription for an operation."""
-        if not self.is_pro:
-            raise HFProRequiredError(
-                f"{operation} requires HuggingFace Pro subscription. "
-                f"Upgrade at https://huggingface.co/subscribe/pro"
+        return self._jobs_access_confirmed
+
+    def preflight(
+        self,
+        script_path: str | Path,
+        *,
+        repo_id: str | None = None,
+        config: HFJobConfig | None = None,
+        script_args: list[str] | None = None,
+    ) -> HFJobsPreflight:
+        config = config or HFJobConfig()
+        availability = detect_hf_jobs_availability()
+        reasons: list[str] = []
+        config_errors = config.validate()
+        path = Path(script_path)
+        output_repo = repo_id or config.output_repo
+        request_environment = dict(config.environment)
+
+        if not availability.dependency_available:
+            reasons.append("huggingface_hub_not_installed")
+        elif not availability.api_available:
+            reasons.append("huggingface_jobs_api_unavailable")
+        if not self._jobs_access_confirmed:
+            reasons.append("jobs_access_not_confirmed")
+        if self._api is None and self._client is None:
+            reasons.append("jobs_api_not_configured")
+        if not path.is_file():
+            reasons.append("training_script_not_found")
+        if config_errors:
+            reasons.append("job_config_invalid")
+        if repo_id and config.output_repo and repo_id != config.output_repo:
+            reasons.append("output_repo_mismatch")
+        if not output_repo:
+            reasons.append("output_repo_missing")
+        token_secret = config.secrets.get("HF_TOKEN")
+        if not token_secret:
+            reasons.append("hf_token_secret_missing")
+        declarations = {
+            "BASHGYM_DATASET_REPO": config.dataset_repo,
+            "BASHGYM_OUTPUT_REPO": output_repo,
+        }
+        for name, value in declarations.items():
+            if not value:
+                continue
+            existing = request_environment.get(name)
+            if existing is not None and existing != value:
+                config_errors.append(f"{name} conflicts with the declared repository")
+                if "job_config_invalid" not in reasons:
+                    reasons.append("job_config_invalid")
+                continue
+            request_environment[name] = value
+
+        request = None
+        if not reasons and output_repo is not None:
+            request = HFJobRequest(
+                script=str(path.resolve()),
+                script_args=tuple(script_args or ()),
+                dependencies=tuple(config.dependencies),
+                image=config.docker_image,
+                env=request_environment,
+                secret_names=tuple(sorted(config.secrets)),
+                flavor=config.hardware,
+                timeout=f"{config.timeout_minutes}m",
+                python=config.python,
+                namespace=config.namespace,
+                dataset_repo=config.dataset_repo,
+                output_repo=output_repo,
             )
+        return HFJobsPreflight(
+            availability=availability,
+            ready=not reasons,
+            reason_codes=tuple(reasons),
+            config_errors=tuple(config_errors),
+            request=request,
+        )
+
+    def _resolve_api(self) -> Any:
+        if self._api is not None:
+            return self._api
+        if self._client is None:
+            raise HFJobFailedError("jobs_api_not_configured")
+        api = self._client.api
+        if api is None:
+            raise HFJobFailedError("jobs_api_not_authenticated")
+        return api
+
+    def _require_observation_api(self, operation: str) -> Any:
+        availability = detect_hf_jobs_availability()
+        if not availability.api_available:
+            raise HFJobFailedError("huggingface_jobs_api_unavailable")
+        if not self._jobs_access_confirmed:
+            raise HFProRequiredError(
+                f"{operation} requires explicit confirmation of eligible Hugging Face Jobs access"
+            )
+        return self._resolve_api()
 
     def submit_training_job(
         self,
@@ -341,376 +480,162 @@ class HFJobRunner:
         script_args: list[str] | None = None,
         description: str | None = None,
     ) -> HFJobInfo:
-        """
-        Submit a training job to HuggingFace cloud.
+        """Submit through ``run_uv_job`` only after an exact preflight succeeds."""
 
-        Args:
-            script_path: Path to the training script.
-            repo_id: Repository ID for the job (e.g., "username/training-job").
-                     If None, auto-generates from client namespace.
-            config: Job configuration. Uses defaults if None.
-            script_args: Arguments to pass to the training script.
-            description: Human-readable job description.
-
-        Returns:
-            HFJobInfo with job details.
-
-        Raises:
-            HFProRequiredError: If Pro subscription is not available.
-            HFJobFailedError: If job submission fails.
-            ValueError: If configuration is invalid.
-        """
-        self._require_pro("Submitting training jobs")
-
+        if description is not None:
+            raise ValueError("HfApi.run_uv_job does not support a description field")
         config = config or HFJobConfig()
-
-        # Validate configuration
-        errors = config.validate()
-        if errors:
-            raise ValueError(f"Invalid job configuration: {'; '.join(errors)}")
-
-        # Check hardware requires Pro
-        hw_spec = HARDWARE_SPECS.get(config.hardware, {})
-        if hw_spec.get("pro_required", True) and not self.is_pro:
-            raise HFProRequiredError(
-                f"Hardware '{config.hardware}' requires HuggingFace Pro subscription"
-            )
-
-        # Validate script exists
-        script_path = Path(script_path)
-        if not script_path.exists():
+        preflight = self.preflight(
+            script_path,
+            repo_id=repo_id,
+            config=config,
+            script_args=script_args,
+        )
+        if preflight.config_errors:
+            raise ValueError(f"Invalid job configuration: {'; '.join(preflight.config_errors)}")
+        if "training_script_not_found" in preflight.reason_codes:
             raise FileNotFoundError(f"Training script not found: {script_path}")
-
-        # Generate repo ID if not provided
-        if repo_id is None:
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-            repo_id = self._client.get_repo_id(f"training-job-{timestamp}")
-
-        # Generate job ID
-        job_id = f"job_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-
-        logger.info(f"Submitting training job: {job_id}")
-        logger.info(f"  Script: {script_path}")
-        logger.info(f"  Repo: {repo_id}")
-        logger.info(f"  Hardware: {config.hardware}")
-        logger.info(f"  Timeout: {config.timeout_minutes} minutes")
-
-        # Create job info
-        job_info = HFJobInfo(
-            job_id=job_id,
-            status=JobStatus.PENDING,
-            hardware=config.hardware,
-            created_at=datetime.now(timezone.utc),
-            logs_url=f"https://huggingface.co/spaces/{repo_id}/logs",
-        )
-
-        # Store job locally for tracking
-        self._jobs[job_id] = job_info
-
-        # Submit via `hf jobs` CLI
-        try:
-            self._submit_via_cli(job_info, script_path, config)
-        except FileNotFoundError:
-            logger.warning("hf CLI not found, falling back to simulation")
-            self._simulate_job_submission(job_info)
-        except subprocess.SubprocessError as e:
-            logger.error(f"CLI submission failed: {e}")
+        if not preflight.ready or preflight.request is None:
             raise HFJobFailedError(
-                f"Failed to submit job via CLI: {e}",
-                job_id=job_info.job_id,
+                "HF Jobs launch preflight failed: " + ", ".join(preflight.reason_codes)
             )
 
-        return job_info
-
-    def _submit_via_cli(
-        self,
-        job_info: HFJobInfo,
-        script_path: Path,
-        config: HFJobConfig,
-    ) -> None:
-        """Submit job via `hf jobs uv run` CLI."""
-        cmd = [
-            "hf",
-            "jobs",
-            "uv",
-            "run",
-            str(script_path),
-            "--flavor",
-            config.hardware,
-            "--secret",
-            "HF_TOKEN",
-        ]
-
-        logger.info(f"Running CLI command: {' '.join(cmd)}")
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
+        request = preflight.request
+        kwargs: dict[str, Any] = {
+            "script_args": list(request.script_args),
+            "dependencies": list(request.dependencies),
+            "env": dict(request.env),
+            "secrets": dict(config.secrets),
+            "flavor": request.flavor,
+            "timeout": request.timeout,
+        }
+        if request.image is not None:
+            kwargs["image"] = request.image
+        if request.python is not None:
+            kwargs["python"] = request.python
+        if request.namespace is not None:
+            kwargs["namespace"] = request.namespace
+        try:
+            provider_job = self._resolve_api().run_uv_job(request.script, **kwargs)
+        except HFJobFailedError:
+            raise
+        except Exception as exc:
+            raise HFJobFailedError("Hugging Face Jobs submission failed.") from exc
+        return HFJobInfo.from_provider(
+            provider_job,
+            output_repo=request.output_repo,
+            namespace=request.namespace,
         )
 
-        if result.returncode != 0:
-            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
-            raise subprocess.SubprocessError(
-                f"hf jobs command failed (exit {result.returncode}): {error_msg}"
-            )
+    @staticmethod
+    def _namespace_kwargs(namespace: str | None) -> dict[str, str]:
+        return {"namespace": namespace} if namespace else {}
 
-        # Parse job ID from CLI output
-        output = result.stdout.strip()
-        logger.info(f"CLI output: {output}")
+    @staticmethod
+    def _is_not_found(error: Exception) -> bool:
+        if isinstance(error, KeyError):
+            return True
+        response = getattr(error, "response", None)
+        return getattr(response, "status_code", None) == 404
 
-        # Try to extract job ID from output (format varies)
-        job_id_match = re.search(r"(?:job[_\s-]?(?:id)?[:\s]+)(\S+)", output, re.IGNORECASE)
-        if job_id_match:
-            job_info.job_id = job_id_match.group(1)
-
-        # Try to extract URL from output
-        url_match = re.search(r"(https://huggingface\.co/\S+)", output)
-        if url_match:
-            job_info.logs_url = url_match.group(1)
-
-        job_info.status = JobStatus.PENDING
-        logger.info(f"Job submitted successfully: {job_info.job_id}")
-
-    def _simulate_job_submission(self, job_info: HFJobInfo) -> None:
-        """Simulate job submission for testing (when CLI is unavailable)."""
-        logger.info(f"Simulating job submission for {job_info.job_id}")
-        job_info.status = JobStatus.PENDING
-
-    def get_job_status(self, job_id: str) -> HFJobInfo:
-        """
-        Get the current status of a job.
-
-        Args:
-            job_id: The job identifier.
-
-        Returns:
-            HFJobInfo with current status.
-
-        Raises:
-            HFProRequiredError: If Pro subscription is not available.
-            KeyError: If job not found.
-        """
-        self._require_pro("Checking job status")
-
-        # Check local cache first
-        if job_id in self._jobs:
-            job_info = self._jobs[job_id]
-
-            # If job is not terminal, try to refresh from API
-            if not job_info.is_terminal and HF_HUB_AVAILABLE and self._client.api is not None:
-                try:
-                    self._refresh_job_status(job_info)
-                except Exception as e:
-                    logger.debug(f"Could not refresh job status: {e}")
-
-            return job_info
-
-        # Try to fetch from API
-        if HF_HUB_AVAILABLE and self._client.api is not None:
-            try:
-                return self._fetch_job_from_api(job_id)
-            except Exception as e:
-                logger.debug(f"Could not fetch job from API: {e}")
-
-        raise KeyError(f"Job not found: {job_id}")
-
-    def _refresh_job_status(self, job_info: HFJobInfo) -> None:
-        """Refresh job status via `hf jobs status` CLI."""
+    @staticmethod
+    def _supports_parameter(operation: Any, name: str) -> bool:
         try:
-            result = subprocess.run(
-                ["hf", "jobs", "status", job_info.job_id],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                output = result.stdout.strip().lower()
-                if "completed" in output or "success" in output:
-                    job_info.status = JobStatus.COMPLETED
-                    job_info.completed_at = datetime.now(timezone.utc)
-                elif "failed" in output or "error" in output:
-                    job_info.status = JobStatus.FAILED
-                    job_info.completed_at = datetime.now(timezone.utc)
-                    job_info.error_message = result.stdout.strip()
-                elif "running" in output:
-                    job_info.status = JobStatus.RUNNING
-                    if job_info.started_at is None:
-                        job_info.started_at = datetime.now(timezone.utc)
-                # Parse metrics from logs if available
-                self._poll_job_metrics(job_info)
-        except (FileNotFoundError, subprocess.SubprocessError, subprocess.TimeoutExpired) as e:
-            logger.debug(f"Could not refresh job status via CLI: {e}")
+            parameter = signature(operation).parameters.get(name)
+        except (TypeError, ValueError):
+            return False
+        return parameter is not None and parameter.kind is not Parameter.VAR_KEYWORD
 
-    def _poll_job_metrics(self, job_info: HFJobInfo) -> None:
-        """Poll job logs via CLI and parse training metrics."""
+    def get_job_status(self, job_id: str, *, namespace: str | None = None) -> HFJobInfo:
+        api = self._require_observation_api("Checking job status")
         try:
-            result = subprocess.run(
-                ["hf", "jobs", "logs", job_info.job_id],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                # Parse training metrics from log output
-                for line in result.stdout.strip().split("\n"):
-                    # Match common training log patterns like: loss=0.1234, epoch=1
-                    loss_match = re.search(r"['\"]?loss['\"]?\s*[:=]\s*([\d.]+)", line)
-                    epoch_match = re.search(r"['\"]?epoch['\"]?\s*[:=]\s*([\d.]+)", line)
-                    if loss_match:
-                        job_info.metrics["loss"] = float(loss_match.group(1))
-                    if epoch_match:
-                        job_info.metrics["epoch"] = float(epoch_match.group(1))
-        except (FileNotFoundError, subprocess.SubprocessError, subprocess.TimeoutExpired):
-            pass  # Metrics are best-effort
-
-    def _fetch_job_from_api(self, job_id: str) -> HFJobInfo:
-        """Fetch job info from API or CLI."""
-        # Try CLI first
-        try:
-            result = subprocess.run(
-                ["hf", "jobs", "status", job_id],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                job_info = HFJobInfo(
-                    job_id=job_id,
-                    status=JobStatus.PENDING,
-                    hardware="unknown",
-                    created_at=datetime.now(timezone.utc),
-                )
-                self._refresh_job_status(job_info)
-                self._jobs[job_id] = job_info
-                return job_info
-        except (FileNotFoundError, subprocess.SubprocessError, subprocess.TimeoutExpired):
-            pass
-
-        # Fall back to API
-        api = self._client.api
-        if hasattr(api, "get_job"):
-            result = api.get_job(job_id)
-            job_info = HFJobInfo.from_dict(result)
-            self._jobs[job_id] = job_info
-            return job_info
-        raise KeyError(f"Job not found: {job_id}")
+            job = api.inspect_job(job_id=job_id, **self._namespace_kwargs(namespace))
+            return HFJobInfo.from_provider(job, namespace=namespace)
+        except HFJobFailedError:
+            raise
+        except Exception as exc:
+            if self._is_not_found(exc):
+                raise KeyError(f"Job not found: {job_id}") from exc
+            raise HFJobFailedError(
+                "Hugging Face Jobs status request failed.", job_id=job_id
+            ) from exc
 
     def get_job_logs(
         self,
         job_id: str,
         tail: int | None = None,
         since: datetime | None = None,
+        *,
+        namespace: str | None = None,
     ) -> str:
-        """
-        Get logs from a job.
+        if since is not None:
+            raise ValueError("HfApi.fetch_job_logs does not support a since filter")
+        if isinstance(tail, bool) or (tail is not None and not isinstance(tail, int)):
+            raise ValueError("tail must be an integer")
+        if tail is not None and tail < 1:
+            raise ValueError("tail must be at least 1")
+        effective_tail = min(
+            tail if tail is not None else HF_JOB_LOG_DEFAULT_TAIL_LINES,
+            HF_JOB_LOG_MAX_TAIL_LINES,
+        )
+        current = self.get_job_status(job_id, namespace=namespace)
+        if not current.is_terminal:
+            raise HFJobLogsNotReadyError(job_id, current.status)
+        api = self._require_observation_api("Retrieving job logs")
+        try:
+            operation = api.fetch_job_logs
+            kwargs: dict[str, Any] = self._namespace_kwargs(namespace)
+            if self._supports_parameter(operation, "follow"):
+                kwargs["follow"] = False
+            if self._supports_parameter(operation, "tail"):
+                kwargs["tail"] = effective_tail
+            logs = operation(job_id=job_id, **kwargs)
+            return _bounded_log_tail(logs, tail_lines=effective_tail)
+        except Exception as exc:
+            if self._is_not_found(exc):
+                raise KeyError(f"Job not found: {job_id}") from exc
+            raise HFJobFailedError("Hugging Face Jobs log request failed.", job_id=job_id) from exc
 
-        Args:
-            job_id: The job identifier.
-            tail: Only return the last N lines.
-            since: Only return logs after this timestamp.
-
-        Returns:
-            Log content as a string.
-
-        Raises:
-            HFProRequiredError: If Pro subscription is not available.
-            KeyError: If job not found.
-        """
-        self._require_pro("Retrieving job logs")
-
-        # Verify job exists
-        job_info = self.get_job_status(job_id)
-
-        # Try to fetch logs from API
-        if HF_HUB_AVAILABLE and self._client.api is not None:
-            try:
-                api = self._client.api
-                if hasattr(api, "get_job_logs"):
-                    logs = api.get_job_logs(
-                        job_id,
-                        tail=tail,
-                        since=since.isoformat() if since else None,
-                    )
-                    return logs
-            except Exception as e:
-                logger.debug(f"Could not fetch logs from API: {e}")
-
-        # Return placeholder for simulation
-        return f"[Logs for job {job_id}]\nStatus: {job_info.status.value}\n"
-
-    def cancel_job(self, job_id: str) -> HFJobInfo:
-        """
-        Cancel a running job.
-
-        Args:
-            job_id: The job identifier.
-
-        Returns:
-            Updated HFJobInfo.
-
-        Raises:
-            HFProRequiredError: If Pro subscription is not available.
-            KeyError: If job not found.
-            HFJobFailedError: If job cannot be cancelled.
-        """
-        self._require_pro("Cancelling jobs")
-
-        job_info = self.get_job_status(job_id)
-
-        if job_info.is_terminal:
+    def cancel_job(self, job_id: str, *, namespace: str | None = None) -> HFJobInfo:
+        api = self._require_observation_api("Cancelling jobs")
+        current = self.get_job_status(job_id, namespace=namespace)
+        if current.is_terminal:
             raise HFJobFailedError(
-                f"Cannot cancel job in terminal state: {job_info.status.value}",
+                f"Cannot cancel job in terminal state: {current.status.value}",
                 job_id=job_id,
             )
-
-        logger.info(f"Cancelling job: {job_id}")
-
-        # Try to cancel via API
-        if HF_HUB_AVAILABLE and self._client.api is not None:
-            try:
-                api = self._client.api
-                if hasattr(api, "cancel_job"):
-                    api.cancel_job(job_id)
-            except Exception as e:
-                logger.warning(f"Could not cancel via API: {e}")
-
-        # Update local state
-        job_info.status = JobStatus.CANCELLED
-        job_info.completed_at = datetime.now(timezone.utc)
-        self._jobs[job_id] = job_info
-
-        return job_info
+        try:
+            resolved_namespace = current.namespace or namespace
+            namespace_kwargs = self._namespace_kwargs(resolved_namespace)
+            api.cancel_job(job_id=job_id, **namespace_kwargs)
+            job = api.inspect_job(job_id=job_id, **namespace_kwargs)
+            return HFJobInfo.from_provider(job, namespace=resolved_namespace)
+        except HFJobFailedError:
+            raise
+        except Exception as exc:
+            raise HFJobFailedError("Hugging Face Jobs cancellation failed.", job_id=job_id) from exc
 
     def list_jobs(
         self,
         status: JobStatus | None = None,
         limit: int = 100,
+        *,
+        namespace: str | None = None,
     ) -> list[HFJobInfo]:
-        """
-        List jobs, optionally filtered by status.
-
-        Args:
-            status: Filter by job status.
-            limit: Maximum number of jobs to return.
-
-        Returns:
-            List of HFJobInfo objects.
-
-        Raises:
-            HFProRequiredError: If Pro subscription is not available.
-        """
-        self._require_pro("Listing jobs")
-
-        jobs = list(self._jobs.values())
-
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        api = self._require_observation_api("Listing jobs")
+        try:
+            jobs = [
+                HFJobInfo.from_provider(item, namespace=namespace)
+                for item in api.list_jobs(**self._namespace_kwargs(namespace))
+            ]
+        except HFJobFailedError:
+            raise
+        except Exception as exc:
+            raise HFJobFailedError("Hugging Face Jobs listing failed.") from exc
         if status is not None:
-            jobs = [j for j in jobs if j.status == status]
-
-        # Sort by creation time (newest first)
-        jobs.sort(key=lambda j: j.created_at, reverse=True)
-
+            jobs = [job for job in jobs if job.status is status]
         return jobs[:limit]
 
     def wait_for_completion(
@@ -718,73 +643,61 @@ class HFJobRunner:
         job_id: str,
         poll_interval: int = 30,
         timeout: int | None = None,
+        *,
+        namespace: str | None = None,
     ) -> HFJobInfo:
-        """
-        Wait for a job to complete.
+        """Explicit compatibility helper; callers should prefer agent-driven observation."""
 
-        Args:
-            job_id: The job identifier.
-            poll_interval: Seconds between status checks.
-            timeout: Maximum seconds to wait (None = no timeout).
-
-        Returns:
-            Final HFJobInfo.
-
-        Raises:
-            HFProRequiredError: If Pro subscription is not available.
-            TimeoutError: If timeout exceeded.
-            HFJobFailedError: If job failed.
-        """
-        import time
-
-        self._require_pro("Waiting for job completion")
-
-        start_time = datetime.now(timezone.utc)
-
+        started = datetime.now(timezone.utc)
         while True:
-            job_info = self.get_job_status(job_id)
-
-            if job_info.is_terminal:
-                if job_info.status == JobStatus.FAILED:
-                    raise HFJobFailedError(
-                        job_info.error_message or "Job failed",
-                        job_id=job_id,
-                    )
-                return job_info
-
-            # Check timeout
+            job = self.get_job_status(job_id, namespace=namespace)
+            if job.is_terminal:
+                if job.status is JobStatus.FAILED:
+                    raise HFJobFailedError(job.error_message or "Job failed", job_id=job_id)
+                return job
             if timeout is not None:
-                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                elapsed = (datetime.now(timezone.utc) - started).total_seconds()
                 if elapsed > timeout:
                     raise TimeoutError(f"Job {job_id} did not complete within {timeout} seconds")
-
             time.sleep(poll_interval)
 
     def __repr__(self) -> str:
-        """String representation."""
-        pro_str = " [Pro]" if self.is_pro else ""
-        return f"<HFJobRunner{pro_str} jobs={len(self._jobs)}>"
-
-
-# =============================================================================
-# Convenience Functions
-# =============================================================================
+        readiness = "confirmed" if self._jobs_access_confirmed else "unconfirmed"
+        return f"<HFJobRunner jobs_access={readiness}>"
 
 
 def create_job_runner(
-    client: Optional["HuggingFaceClient"] = None,
+    client: HuggingFaceClient | None = None,
     token: str | None = None,
     pro_enabled: bool = False,
+    *,
+    api: Any | None = None,
+    jobs_access_confirmed: bool | None = None,
 ) -> HFJobRunner:
-    """
-    Create a job runner with the specified configuration.
+    """Create the concrete Hugging Face Jobs adapter; no provider call occurs."""
 
-    Args:
-        client: HuggingFaceClient instance (preferred).
-        token: HuggingFace API token (used if client not provided).
-        pro_enabled: Override Pro status (for testing).
+    return HFJobRunner(
+        client=client,
+        token=token,
+        pro_enabled=pro_enabled,
+        api=api,
+        jobs_access_confirmed=jobs_access_confirmed,
+    )
 
-    Returns:
-        Configured HFJobRunner instance.
-    """
-    return HFJobRunner(client=client, token=token, pro_enabled=pro_enabled)
+
+__all__ = [
+    "HARDWARE_SPECS",
+    "HF_JOB_LOG_DEFAULT_TAIL_LINES",
+    "HF_JOB_LOG_MAX_BYTES",
+    "HF_JOB_LOG_MAX_TAIL_LINES",
+    "HFJobConfig",
+    "HFJobInfo",
+    "HFJobLogsNotReadyError",
+    "HFJobRequest",
+    "HFJobRunner",
+    "HFJobsAvailability",
+    "HFJobsPreflight",
+    "JobStatus",
+    "create_job_runner",
+    "detect_hf_jobs_availability",
+]

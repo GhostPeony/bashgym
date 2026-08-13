@@ -71,7 +71,7 @@ function bigSessionMeta(cwd: string, padTo: number): string {
 }
 
 test('codex ingest recovers cwd when session_meta exceeds the old 16KB head cap', async () => {
-  const cwd = 'C:\\Users\\Cade\\Projects\\ghostwork'
+  const cwd = 'C:\\Users\\Operator\\Projects\\research-app'
   const lines = [
     bigSessionMeta(cwd, 20_000), // ~20KB first line — over the retired 16KB cap
     JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }),
@@ -103,12 +103,12 @@ test('codex ingest recovers cwd when session_meta exceeds the old 16KB head cap'
 
   assert.ok(snap, 'expected a snapshot')
   assert.equal(snap?.cwd, cwd, 'cwd must survive an oversized session_meta line')
-  assert.equal(snap?.title, 'ghostwork')
+  assert.equal(snap?.title, 'research-app')
   assert.equal(snap?.gitBranch, 'main')
 })
 
 test('codex ingest recovers cwd from a tail turn_context when the meta line is unreadably large', async () => {
-  const cwd = 'C:\\Users\\Cade\\Projects\\ghostwork'
+  const cwd = 'C:\\Users\\Operator\\Projects\\research-app'
   // A meta line larger than the IPC hard cap can never be captured by the head
   // read; the session must still surface via turn_context events in the tail.
   const meta = bigSessionMeta('', HARD_CAP + 50_000).replace('"cwd":""', '"cwd":null')
@@ -132,5 +132,5 @@ test('codex ingest recovers cwd from a tail turn_context when the meta line is u
 
   assert.ok(snap, 'expected a snapshot')
   assert.equal(snap?.cwd, cwd, 'cwd must be recovered from a tail turn_context event')
-  assert.equal(snap?.title, 'ghostwork')
+  assert.equal(snap?.title, 'research-app')
 })

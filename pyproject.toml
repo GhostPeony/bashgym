@@ -128,22 +128,13 @@ include-package-data = false
 
 [tool.setuptools.data-files]
 "share/bashgym/docs/training" = [
-    "docs/training/overview.md",
-    "docs/training/capability-map.md",
-    "docs/training/training-methods-reference.md",
-    "docs/training/external-review-packet.md",
-    "docs/training/rlhf-handbook-comparison.md",
     "docs/training/strategy-guide.md",
     "docs/training/world-models.md",
     "docs/training/metrics-runbook.md",
     "docs/training/glossary.md",
-    "docs/training/agent-cli.md",
     "docs/training/tmax-terminal-rl-recipe.md",
     "docs/training/session-distillation.md",
-    "docs/training/private-compute-eval-checklist.md",
-    "docs/training/platform-flywheels.md",
     "docs/training/autoresearch-campaign.md",
-    "docs/training/bashgym-autoresearch-nvidia-brief.md",
 ]
 
 [tool.pytest.ini_options]

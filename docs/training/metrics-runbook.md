@@ -404,7 +404,7 @@ Likely causes:
 Actions:
 
 1. Treat `contract_ready=true` as proof that replay handoff is shaped correctly.
-2. Use `docs/training/private-compute-eval-checklist.md` to move artifacts to the compute target.
+2. Verify the selected stage adapter with its installation-specific preflight before a full run.
 3. Provide `--command-template` if the backend launcher is custom.
 4. Keep `max_steps=1` until the backend reads replay and logs metrics cleanly.
 

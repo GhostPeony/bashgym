@@ -2,7 +2,7 @@
 """Build the evidence-backed MemexAI embedding automation implementation report.
 
 The report intentionally separates the complete Candidate B quality experiment from
-the one-step Ponyo campaign smoke. The former can support retrieval findings; the
+the one-step registered-compute campaign smoke. The former can support retrieval findings; the
 latter proves remote campaign ownership, restart adoption, sealing, and accounting.
 """
 
@@ -24,7 +24,7 @@ from typing import Any
 REPORT_STEM = "MemexAI_Embedding_Automation_Implementation_Report"
 REPORT_TITLE = "MemexAI Embedding Automation Campaign"
 REPORT_SUBTITLE = (
-    "Candidate B training and retrieval findings, durable Ponyo orchestration proof, "
+    "Candidate B training and retrieval findings, durable campaign execution proof, "
     "milestone audit, and next-iteration plan"
 )
 
@@ -202,7 +202,7 @@ def milestone_rows(facts: dict[str, Any]) -> list[dict[str, str]]:
             "evidence": "Candidate B fixture passed; treated as saturated compatibility evidence",
         },
         {
-            "milestone": "Server-owned Ponyo campaign smoke",
+            "milestone": "Server-owned campaign smoke",
             "status": "complete",
             "evidence": f"attempt {campaign['attempt_id']} completed with one remote launch",
         },
@@ -584,11 +584,11 @@ def build_resource_chart(output_dir: Path, facts: dict[str, Any]) -> tuple[Path,
         ),
     ]
     image, draw = _canvas(
-        "Candidate B Ponyo resource trace",
+        "Candidate B compute resource trace",
         f"{resources['sample_count']} samples across the full training run; panels use independent labeled scales.",
     )
     svg_body = [
-        _svg_text(88, 92, "Candidate B Ponyo resource trace", 42, bold=True),
+        _svg_text(88, 92, "Candidate B compute resource trace", 42, bold=True),
         _svg_text(
             88,
             140,
@@ -655,11 +655,11 @@ def build_campaign_chart(output_dir: Path, facts: dict[str, Any]) -> tuple[Path,
         ),
     ]
     image, draw = _canvas(
-        "Durable Ponyo campaign smoke proof",
+        "Durable campaign smoke proof",
         "One training step proves orchestration semantics only; it is not a retrieval-quality result.",
     )
     svg_body = [
-        _svg_text(88, 92, "Durable Ponyo campaign smoke proof", 42, bold=True),
+        _svg_text(88, 92, "Durable campaign smoke proof", 42, bold=True),
         _svg_text(
             88,
             140,
@@ -706,7 +706,7 @@ def build_campaign_chart(output_dir: Path, facts: dict[str, Any]) -> tuple[Path,
         )
     )
     image.save(png, format="PNG", dpi=(180, 180), optimize=False)
-    _write_svg(svg, svg_body, "Durable Ponyo campaign smoke proof")
+    _write_svg(svg, svg_body, "Durable campaign smoke proof")
     return png, svg
 
 
@@ -872,7 +872,7 @@ Candidate B improves broad recall and same-video ranking, but misses the exact a
 
 Candidate B passed the product fixture: MRR {product["mrr"]:.3f}, Recall@1 {product["recallAt1"]:.3f}, nDCG@5 {product["ndcgAt5"]:.6f}, wrong-top rate {product["wrongTopRate"]:.3f}, and hard-negative-above-positive rate {product["hardNegativeAbovePositiveRate"]:.3f}. Because the fixture is saturated, this is compatibility evidence only and cannot select a champion.
 
-## Ponyo resource envelope
+## Compute resource envelope
 
 Across {resources["sample_count"]} samples, available unified memory reached {resources["available_memory_floor_gib"]:.2f} GiB, swap grew {resources["swap_growth_gib"]:.2f} GiB, mean GPU utilization was {resources["gpu_utilization_mean_pct"]:.1f}%, and peak temperature was {resources["temperature_peak_c"]:.0f} C.
 
@@ -1265,7 +1265,7 @@ def build_docx(path: Path, facts: dict[str, Any], charts: dict[str, dict[str, Pa
     )
 
     doc.add_page_break()
-    _docx_heading(doc, "Ponyo resource envelope", 1)
+    _docx_heading(doc, "Compute resource envelope", 1)
     _docx_figure(
         doc,
         charts["resources"]["png"],
@@ -1348,7 +1348,7 @@ def build_docx(path: Path, facts: dict[str, Any], charts: dict[str, dict[str, Pa
     doc.core_properties.title = REPORT_TITLE
     doc.core_properties.subject = REPORT_SUBTITLE
     doc.core_properties.author = "BashGym / MemexAI"
-    doc.core_properties.keywords = "MemexAI, embeddings, automation, Ponyo, evaluation"
+    doc.core_properties.keywords = "MemexAI, embeddings, automation, evaluation"
     doc.core_properties.created = fixed_dt
     doc.core_properties.modified = fixed_dt
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1484,7 +1484,7 @@ def build_pdf(path: Path, facts: dict[str, Any], charts: dict[str, dict[str, Pat
                 body,
             ),
             PageBreak(),
-            Paragraph("Ponyo resource envelope", styles["Heading1"]),
+            Paragraph("Compute resource envelope", styles["Heading1"]),
             Image(str(charts["resources"]["png"]), width=6.5 * inch, height=3.66 * inch),
             Paragraph("Figure 3. Full-run unified-memory and GPU trace.", styles["ReportCaption"]),
             PageBreak(),

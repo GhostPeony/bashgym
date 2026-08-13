@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,16 +37,18 @@ class RecordingClient:
         query=None,
         payload=None,
         headers=None,
+        timeout=None,
     ) -> Any:
-        self.calls.append(
-            {
-                "method": method,
-                "path": path,
-                "query": query,
-                "payload": payload,
-                "headers": headers,
-            }
-        )
+        call = {
+            "method": method,
+            "path": path,
+            "query": query,
+            "payload": payload,
+            "headers": headers,
+        }
+        if timeout is not None:
+            call["timeout"] = timeout
+        self.calls.append(call)
         if path == "/campaigns":
             return {"campaigns": [{"campaign_id": f"campaign-{index}"} for index in range(5)]}
         if path.endswith("/events"):
@@ -112,6 +115,19 @@ class RecordingClient:
                 "source": "metrics.jsonl",
                 "values": [{"step": index, "value": 1 / index} for index in range(1, 5)],
                 "next_after_step": 4,
+            }
+        if path.endswith("/research-wait"):
+            return {
+                "schema_version": "bashgym.research_wait.v1",
+                "status": "changed",
+                "after_cursor": 3,
+                "next_cursor": 4,
+                "research": {
+                    "schema_version": "bashgym.research.v1",
+                    "campaign_id": "campaign-1",
+                    "workspace_id": "workspace-a",
+                    "next_action": "propose_candidate",
+                },
             }
         if method == "POST":
             return {
@@ -220,6 +236,42 @@ class PaginatedArtifactClient(RecordingClient):
         raise AssertionError(f"unexpected request: {method} {path}")
 
 
+class OversizedResearchClient(RecordingClient):
+    def request_json(self, method: str, path: str, **kwargs) -> Any:
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "query": kwargs.get("query"),
+                "payload": kwargs.get("payload"),
+                "headers": kwargs.get("headers"),
+            }
+        )
+        if path.endswith("/research-state"):
+            deeply_nested: Any = "leaf"
+            for _ in range(20):
+                deeply_nested = {"nested": deeply_nested}
+            return {
+                "long_summary": "x" * 10_000,
+                "many_items": list(range(200)),
+                "many_fields": {f"field-{index}": index for index in range(200)},
+                "deeply_nested": deeply_nested,
+            }
+        if path == "/campaigns/setup/context":
+            return {f"section-{index}": "y" * 10_000 for index in range(100)}
+        if path == "/campaigns":
+            return {
+                "campaigns": [
+                    {
+                        "campaign_id": f"campaign-{index}",
+                        "summary": "z" * 10_000,
+                    }
+                    for index in range(100)
+                ]
+            }
+        return super().request_json(method, path, **kwargs)
+
+
 async def call_tool(server, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return await server._tool_manager.call_tool(name, arguments, convert_result=False)
 
@@ -245,6 +297,12 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
     try:
         tools = {tool["name"]: tool for tool in connected["inventory"]["tools"]}
         assert set(tools) == {
+            "research_prepare",
+            "research_state",
+            "research_wait",
+            "research_start",
+            "research_submit_iteration",
+            "research_report",
             "campaign_list",
             "campaign_inspect",
             "campaign_manifest",
@@ -285,6 +343,20 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
             assert properties.isdisjoint(PROHIBITED_SCOPE_FIELDS)
 
         assert tools["campaign_list"]["annotations"]["readOnlyHint"] is True
+        assert tools["research_prepare"]["annotations"]["readOnlyHint"] is True
+        assert tools["research_state"]["annotations"]["readOnlyHint"] is True
+        assert tools["research_wait"]["annotations"]["readOnlyHint"] is True
+        assert tools["research_wait"]["inputSchema"]["properties"]["after_cursor"]["minimum"] == 0
+        assert tools["research_wait"]["inputSchema"]["properties"]["timeout_seconds"] == {
+            "default": 30,
+            "maximum": 55,
+            "minimum": 1,
+            "title": "Timeout Seconds",
+            "type": "integer",
+        }
+        assert tools["research_start"]["annotations"]["openWorldHint"] is True
+        assert tools["research_submit_iteration"]["annotations"]["openWorldHint"] is True
+        assert tools["research_report"]["annotations"]["openWorldHint"] is True
         assert tools["campaign_metrics"]["annotations"]["openWorldHint"] is False
         assert tools["campaign_start"]["annotations"]["destructiveHint"] is False
         assert tools["campaign_start"]["annotations"]["openWorldHint"] is True
@@ -414,6 +486,291 @@ async def test_campaign_tools_bind_workspace_bound_arrays_and_mutation_headers()
         "expected_version": 3,
         "stop_reason": "Operator ended this bounded study.",
     }
+
+
+async def test_research_facade_delegates_to_canonical_campaign_api():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+    proposal = {
+        "proposal_id": "candidate-2",
+        "hypothesis": "Verified recovery traces improve held-out completion.",
+        "evidence_references": ["evaluation-1"],
+        "study_family": "verified-trajectory-sft",
+        "primary_variable": "dataset_recipe",
+        "controlled_variables": ["evaluation_recipe"],
+        "expected_outcome": "Held-out completion improves.",
+        "falsification_criterion": "Held-out completion does not improve.",
+        "estimated_cost": 0.5,
+        "dataset_recipe": {"source": "verified-bashgym-trajectories"},
+        "training_recipe": {"method": "sft"},
+        "evaluation_recipe": {"suite": "terminal-heldout-v1"},
+        "stage_plan": {"stages": ["full_training", "evaluation"]},
+        "rationale": "Change one bounded variable after reviewing the baseline.",
+    }
+
+    prepared = await call_tool(
+        server,
+        "research_prepare",
+        {"session_id": "setupsess_0123456789abcdef0123456789abcdef"},
+    )
+    state = await call_tool(server, "research_state", {"campaign_id": "campaign-1"})
+    waited = await call_tool(
+        server,
+        "research_wait",
+        {"campaign_id": "campaign-1", "after_cursor": 3, "timeout_seconds": 55},
+    )
+    started = await call_tool(
+        server,
+        "research_start",
+        {"campaign_id": "campaign-1", "expected_version": 2},
+    )
+    submitted = await call_tool(
+        server,
+        "research_submit_iteration",
+        {
+            "campaign_id": "campaign-1",
+            "expected_version": 3,
+            "role": "candidate",
+            "proposal": proposal,
+            "parent_proposal_id": "baseline-1",
+        },
+    )
+    reported = await call_tool(
+        server,
+        "research_report",
+        {
+            "campaign_id": "campaign-1",
+            "expected_version": 4,
+            "formats": ["markdown", "json"],
+        },
+    )
+
+    assert prepared["ok"] is True and prepared["context"]["campaign_id"] == "campaign-1"
+    assert state["ok"] is True and state["research"]["campaign_id"] == "campaign-1"
+    assert waited["ok"] is True
+    assert waited["wait"]["status"] == "changed"
+    assert waited["wait"]["next_cursor"] == 4
+    assert started["ok"] is True
+    assert submitted["ok"] is True
+    assert reported["ok"] is True
+    prepare_call, state_call, wait_call, start_call, submit_call, report_call = client.calls
+    assert prepare_call == {
+        "method": "GET",
+        "path": "/campaigns/setup/context",
+        "query": {
+            "workspace_id": "workspace-a",
+            "session_id": "setupsess_0123456789abcdef0123456789abcdef",
+        },
+        "payload": None,
+        "headers": None,
+    }
+    assert state_call["method"] == "GET"
+    assert state_call["path"] == "/campaigns/campaign-1/research-state"
+    assert state_call["query"] == {"workspace_id": "workspace-a"}
+    assert wait_call == {
+        "method": "GET",
+        "path": "/campaigns/campaign-1/research-wait",
+        "query": {
+            "workspace_id": "workspace-a",
+            "after_cursor": 3,
+            "timeout_seconds": 55,
+        },
+        "payload": None,
+        "headers": None,
+        "timeout": 60,
+    }
+    assert start_call["path"] == "/campaigns/campaign-1/start"
+    assert start_call["payload"] == {"workspace_id": "workspace-a", "expected_version": 2}
+    assert submit_call["path"] == "/campaigns/campaign-1/autoresearch/candidates"
+    assert submit_call["payload"] == {
+        "workspace_id": "workspace-a",
+        "expected_version": 3,
+        **proposal,
+        "parent_proposal_id": "baseline-1",
+    }
+    assert report_call["path"] == "/campaigns/campaign-1/export"
+    assert report_call["payload"] == {
+        "workspace_id": "workspace-a",
+        "expected_version": 4,
+        "formats": ["markdown", "json"],
+    }
+    for call in (start_call, submit_call, report_call):
+        assert set(call["headers"]) == {"Idempotency-Key", "X-Correlation-ID"}
+
+
+async def test_research_state_bounds_nested_api_payloads():
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=OversizedResearchClient(),
+    )
+
+    result = await call_tool(server, "research_state", {"campaign_id": "campaign-1"})
+
+    assert result["ok"] is True
+    research = result["research"]
+    assert research["long_summary"].endswith("[truncated]")
+    assert len(research["long_summary"]) <= 4096
+    assert len(research["many_items"]) <= 100
+    assert research["many_items"][-1] == "[truncated]"
+    assert len(research["many_fields"]) <= 100
+    assert research["many_fields"]["_truncated"] == "101 entries omitted"
+    nested = research["deeply_nested"]
+    for _ in range(8):
+        nested = nested["nested"]
+    assert nested == "[truncated]"
+    assert len(json.dumps(result, separators=(",", ":")).encode("utf-8")) <= 65_536
+
+
+async def test_research_prepare_enforces_a_total_serialized_payload_limit():
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=OversizedResearchClient(),
+    )
+
+    result = await call_tool(server, "research_prepare", {})
+
+    assert result == {
+        "ok": True,
+        "context": {
+            "_truncated": "payload exceeded 65536 serialized bytes",
+        },
+    }
+    assert len(json.dumps(result, separators=(",", ":")).encode("utf-8")) <= 65_536
+
+
+async def test_campaign_list_enforces_one_total_serialized_payload_limit():
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=OversizedResearchClient(),
+    )
+
+    result = await call_tool(server, "campaign_list", {"limit": 100})
+
+    assert result == {
+        "ok": True,
+        "campaigns": [
+            {"_truncated": "payload exceeded 65536 serialized bytes"},
+        ],
+        "count": 1,
+        "truncated": True,
+    }
+    assert len(json.dumps(result, separators=(",", ":")).encode("utf-8")) <= 65_536
+
+
+async def test_research_submit_iteration_routes_explicit_baseline_without_parent():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    result = await call_tool(
+        server,
+        "research_submit_iteration",
+        {
+            "campaign_id": "campaign-1",
+            "expected_version": 2,
+            "role": "baseline",
+            "proposal": {"proposal_id": "baseline-1"},
+        },
+    )
+
+    assert result["ok"] is True
+    assert client.calls[0]["path"] == "/campaigns/campaign-1/autoresearch/baseline"
+    assert client.calls[0]["payload"] == {
+        "workspace_id": "workspace-a",
+        "expected_version": 2,
+        "proposal_id": "baseline-1",
+    }
+
+
+@pytest.mark.parametrize(
+    "server_owned_field",
+    [
+        "workspace_id",
+        "campaign_id",
+        "expected_version",
+        "role",
+        "parent_proposal_id",
+        "planner_actor_id",
+        "creation_sequence",
+        "status",
+        "actor",
+        "profile",
+        "autonomy_profile",
+        "capabilities",
+        "authorization",
+    ],
+)
+async def test_research_submit_iteration_rejects_server_owned_proposal_fields(
+    server_owned_field: str,
+):
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    result = await call_tool(
+        server,
+        "research_submit_iteration",
+        {
+            "campaign_id": "campaign-1",
+            "expected_version": 2,
+            "role": "baseline",
+            "proposal": {"proposal_id": "baseline-1", server_owned_field: "injected"},
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "campaign_request_invalid"
+    assert client.calls == []
+
+
+@pytest.mark.parametrize(
+    ("role", "parent_proposal_id"),
+    [("candidate", None), ("baseline", "baseline-1")],
+)
+async def test_research_submit_iteration_rejects_invalid_parent_relationship(
+    role: str,
+    parent_proposal_id: str | None,
+):
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+    arguments = {
+        "campaign_id": "campaign-1",
+        "expected_version": 2,
+        "role": role,
+        "proposal": {"proposal_id": "proposal-1"},
+    }
+    if parent_proposal_id is not None:
+        arguments["parent_proposal_id"] = parent_proposal_id
+
+    result = await call_tool(server, "research_submit_iteration", arguments)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "campaign_request_invalid"
+    assert client.calls == []
 
 
 async def test_campaign_events_tool_reprojects_untrusted_event_responses():

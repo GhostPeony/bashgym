@@ -262,6 +262,8 @@ PUBLIC_CAMPAIGN_BLOCKER_CODES = frozenset(
     }
 )
 
+AUTORESEARCH_EVALUATION_SCHEMA = "autoresearch_evaluation_evidence.v1"
+
 PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES = frozenset(
     {
         "campaign_development_comparison.v1",
@@ -278,6 +280,7 @@ PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES = frozenset(
         "huggingface_model_file.v1",
         "memexai_query_format_ablation_manifest.v1",
         "nemo_gym_campaign_evidence.v1",
+        AUTORESEARCH_EVALUATION_SCHEMA,
         "query_format_ablation_manifest.v2",
         "training_manifest.v1",
         "training_metrics_jsonl.v1",
@@ -1489,6 +1492,7 @@ class BudgetLedgerEntry(FrozenContractModel):
 
 
 __all__ = [
+    "AUTORESEARCH_EVALUATION_SCHEMA",
     "ActionStatus",
     "ActionAttempt",
     "ActiveWorkSummaryV1",

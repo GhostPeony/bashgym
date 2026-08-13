@@ -135,6 +135,7 @@ class CampaignApiClient:
         query: Mapping[str, Any] | None = None,
         payload: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
     ) -> Any:
         """Send one authenticated API request, refreshing once after a 401."""
 
@@ -147,6 +148,7 @@ class CampaignApiClient:
                 payload=payload,
                 headers=headers,
                 token=access_token,
+                timeout=timeout,
             )
         except CampaignClientError as exc:
             if exc.status_code != 401:
@@ -160,6 +162,7 @@ class CampaignApiClient:
             payload=payload,
             headers=headers,
             token=access_token,
+            timeout=timeout,
         )
 
     def _exchange_refresh(self) -> str:
@@ -200,6 +203,7 @@ class CampaignApiClient:
         payload: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
         token: str,
+        timeout: float | None = None,
     ) -> Any:
         if not path.startswith("/") or path.startswith("//"):
             raise ValueError("campaign API paths must be relative to the configured API base")
@@ -230,7 +234,10 @@ class CampaignApiClient:
             method=method.upper(),
         )
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
+            request_timeout = self._timeout if timeout is None else timeout
+            if request_timeout <= 0:
+                raise ValueError("campaign request timeout must be positive")
+            with urllib.request.urlopen(request, timeout=request_timeout) as response:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             raise self._http_error(exc) from exc

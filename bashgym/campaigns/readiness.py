@@ -23,8 +23,11 @@ from bashgym.campaigns.worker_service import ControllerStatusProjection
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 
 _IMMUTABLE_REVISION = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64}|sha256:[0-9a-f]{64})$")
-_DEFAULT_COMPUTE_STAGES = frozenset({StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING})
-_REMOTE_COMPUTE_STAGES = frozenset({*_DEFAULT_COMPUTE_STAGES, StageKind.DEVELOPMENT_EVALUATION})
+_DEFAULT_COMPUTE_STAGES = frozenset({StageKind.DEVELOPMENT_EVALUATION, StageKind.FULL_TRAINING})
+_REMOTE_COMPUTE_STAGES = frozenset(
+    {*_DEFAULT_COMPUTE_STAGES, StageKind.DATA_BUILD, StageKind.SMOKE_TRAINING}
+)
+_NEMO_TRAINING_STAGES = frozenset({StageKind.FULL_TRAINING, StageKind.SMOKE_TRAINING})
 
 
 class AutoResearchDoctorCheck(FrozenContractModel):
@@ -98,7 +101,9 @@ def _required_compute_stages(definition: AutoResearchTemplateDefinition) -> froz
         stages = frozenset(StageKind(str(value)) for value in configured)
     except ValueError:
         return frozenset()
-    return stages if stages and stages.issubset(_REMOTE_COMPUTE_STAGES) else frozenset()
+    if not stages or not stages.issubset(_REMOTE_COMPUTE_STAGES):
+        return frozenset()
+    return frozenset({*stages, StageKind.DEVELOPMENT_EVALUATION})
 
 
 def doctor_autoresearch_template(
@@ -144,6 +149,7 @@ def doctor_autoresearch_template(
 
         evaluation_plan = definition.manifest.evaluation_plan
         dataset_binding_id = evaluation_plan.get("dataset_binding_id")
+        dataset_version_record = None
         data_ready = (
             isinstance(dataset_binding_id, str)
             and dataset_binding_id in definition.manifest.approved_data_scopes
@@ -151,7 +157,7 @@ def doctor_autoresearch_template(
         )
         if data_ready:
             try:
-                ledger.get_dataset_version(
+                dataset_version_record = ledger.get_dataset_version(
                     workspace_id, policy.ledger_project_id, dataset_binding_id
                 )
             except RecordNotFoundError:
@@ -201,11 +207,20 @@ def doctor_autoresearch_template(
         profile = executor_profiles.get(profile_key)
         compute_ready = profile is not None
         required_compute_stages = _required_compute_stages(definition)
+        required_training_stages = required_compute_stages - {StageKind.DEVELOPMENT_EVALUATION}
         if profile is not None:
             expected_target_digest = canonical_hash(definition.target_model.model_dump(mode="json"))
             compute_ready = bool(
                 required_compute_stages
                 and profile.target_model_digest == expected_target_digest
+                and profile.registered_base_model is not None
+                and profile.registered_evaluation_dataset is not None
+                and dataset_version_record is not None
+                and profile.registered_evaluation_dataset.compute_profile_id
+                == profile.compute_profile_id
+                and profile.registered_evaluation_dataset.dataset_version_id == dataset_binding_id
+                and profile.registered_evaluation_dataset.content_digest
+                == dataset_version_record.get("content_digest")
                 and required_compute_stages.issubset({stage.stage for stage in profile.stages})
             )
             if compute_ready:
@@ -219,12 +234,13 @@ def doctor_autoresearch_template(
                 compute_ready,
                 "compute_binding_ready",
                 "compute_binding_unresolved",
-                "Install an exact registered-training profile for this model contract and verify every pinned script, input, credential, and stage.",
+                "Register the base model, held-out dataset, and exact training/evaluation stages for this model contract.",
             )
         )
         if profile is not None and profile.nemo_rl is not None:
             nemo = profile.nemo_rl
             receipt = nemo.runtime_receipt
+            required_nemo_stages = required_compute_stages & _NEMO_TRAINING_STAGES
             model_location, _, model_revision = definition.target_model.base_model_ref.rpartition(
                 "@"
             )
@@ -299,21 +315,27 @@ def doctor_autoresearch_template(
                     ),
                     _check(
                         "nemo_execution_contract",
-                        all(
-                            stage.output_paths
-                            == (
-                                NEMO_GYM_STAGE_OUTPUT_PATHS
-                                if nemo.nemo_gym is not None
-                                else NEMO_RL_STAGE_OUTPUT_PATHS
+                        bool(
+                            StageKind.FULL_TRAINING in required_nemo_stages
+                            and required_nemo_stages.issubset(
+                                {stage.stage for stage in profile.stages}
                             )
-                            and stage.budget_reservation > 0
-                            and stage.script_args
-                            == (
-                                "--contract-json",
-                                nemo.container_contract(stage.stage).model_dump_json(),
+                            and all(
+                                stage.output_paths
+                                == (
+                                    NEMO_GYM_STAGE_OUTPUT_PATHS
+                                    if nemo.nemo_gym is not None
+                                    else NEMO_RL_STAGE_OUTPUT_PATHS
+                                )
+                                and stage.budget_reservation > 0
+                                and stage.script_args
+                                == (
+                                    "--contract-json",
+                                    nemo.container_contract(stage.stage).model_dump_json(),
+                                )
+                                for stage in profile.stages
+                                if stage.stage in required_nemo_stages
                             )
-                            for stage in profile.stages
-                            if stage.stage in required_compute_stages
                         ),
                         "nemo_execution_contract_ready",
                         "nemo_execution_contract_unresolved",
@@ -337,7 +359,7 @@ def doctor_autoresearch_template(
                                 == gym.bundle_archive_sha256
                                 and nemo.container_contract(stage.stage).nemo_gym is not None
                                 for stage in profile.stages
-                                if stage.stage in required_compute_stages
+                                if stage.stage in required_nemo_stages
                             )
                         ),
                         "nemo_gym_execution_contract_ready",
@@ -370,7 +392,7 @@ def doctor_autoresearch_template(
             source_ready
             and profile is not None
             and source_profile is not None
-            and required_compute_stages
+            and required_training_stages
             and all(
                 stage.code_lineage_binding is not None
                 and stage.code_lineage_binding.source_repository_profile_id
@@ -379,9 +401,9 @@ def doctor_autoresearch_template(
                     source_profile, stage.code_lineage_binding.entrypoint_path
                 )
                 for stage in profile.stages
-                if stage.stage in required_compute_stages
+                if stage.stage in required_training_stages
             )
-            and required_compute_stages.issubset(
+            and required_training_stages.issubset(
                 {stage.stage for stage in profile.stages if stage.code_lineage_binding is not None}
             )
         )

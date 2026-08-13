@@ -76,7 +76,7 @@ _BASHGYM_METRICS_KEYS = ("tokens_per_second", "gpu_memory_gb", "gpu_utilization"
 # scripts. On each logging step it emits a parseable "[bashgym-metrics]" line
 # with live tokens/sec (from state.num_input_tokens_seen deltas), peak VRAM
 # (torch.cuda), and GPU utilization (nvidia-ml-py / pynvml). Every device read
-# is guarded so CPU smokes and unified-memory GB10 (where NVML is unsupported)
+# is guarded so CPU smokes and platforms where NVML is unsupported
 # degrade to omitting that metric instead of crashing. Requires `torch` already
 # imported in the host script. Braces are single — this is interpolated as a
 # value into the generated f-string, not parsed as f-string syntax.
@@ -421,7 +421,7 @@ class TrainerConfig:
     grpo_reward_mode: str = "syntax"  # "syntax", "execution", "verification"
     grpo_use_vllm: bool = False  # vLLM-backed generation (TRL GRPO); requires vllm in env
     grpo_backend: str = "auto"  # auto|unsloth|plain|trl_vllm — set by ModelProfile + platform (S1)
-    sft_backend: str = "auto"  # auto|unsloth|plain — plain is the GB10/sm_121 fallback (S1)
+    sft_backend: str = "auto"  # auto|unsloth|plain — plain is the compatibility fallback (S1)
     dpo_backend: str = "auto"  # auto|unsloth|plain
     use_liger: bool = False  # plain backend: Liger fused-linear-CE (use_liger_kernel) — the
     # 262k-vocab (Gemma) fused-CE OOM fix; requires liger-kernel in the training env
@@ -1150,7 +1150,7 @@ class Trainer:
     def _auto_deploy_to_ollama(self, run: TrainingRun) -> None:
         """Deploy GGUF model to Ollama after training."""
         try:
-            from bashgym.api.models_routes import deploy_gguf_to_ollama
+            from bashgym.models.deployment import deploy_gguf_to_ollama
 
             model_name = self.config.ollama_model_name
             if not model_name:
@@ -1621,7 +1621,7 @@ class Trainer:
 
         Mirrors the GRPO dispatch: explicit ``sft_backend`` > family default >
         platform probe. Unsloth where available; the plain transformers+peft path
-        on GB10/sm_121 where Unsloth can't load (unslothai#4867).
+        where Unsloth cannot load (unslothai#4867).
         """
         from bashgym.families import resolve_family_profile, select_backend
 
@@ -1644,7 +1644,7 @@ class Trainer:
     def _generate_sft_script_plain(self, run: TrainingRun, profile) -> str:
         """Generate an SFT script using plain transformers + peft (no Unsloth).
 
-        The GB10/sm_121 fallback. Family-correct LoRA targets/excludes, attention
+        The plain-backend fallback. Family-correct LoRA targets/excludes, attention
         impl, and correctness patches come from the ModelFamilyProfile; Liger
         fused-linear-CE is enabled via ``use_liger_kernel`` when ``use_liger`` is
         set (the 262k-vocab fused-CE OOM fix).
@@ -1660,8 +1660,8 @@ Auto-generated SFT Training Script for BashGym (plain transformers+peft backend)
 Run ID: {run.run_id}
 Generated: {datetime.now(timezone.utc).isoformat()}
 
-Plain HuggingFace transformers + peft + trl (no Unsloth) — the GB10/sm_121
-fallback for when Unsloth can't load (unslothai#4867). Liger fused-linear-CE is
+Plain HuggingFace transformers + peft + trl (no Unsloth), used when Unsloth
+cannot load (unslothai#4867). Liger fused-linear-CE is
 enabled via use_liger_kernel={self.config.use_liger}.
 Family: {profile.family}; patches: {list(profile.patches)}
 """
@@ -1820,7 +1820,7 @@ if __name__ == "__main__":
     def _generate_dpo_script_plain(self, run: TrainingRun, profile) -> str:
         """Generate a DPO script using plain transformers + peft (no Unsloth).
 
-        The GB10/sm_121 fallback. Implicit-reference DPO (``ref_model=None``);
+        The plain-backend fallback. Implicit-reference DPO (``ref_model=None``);
         dataset columns are passed straight to ``DPOTrainer`` (same as the Unsloth
         path). Liger fused-linear-CE via ``use_liger_kernel`` when ``use_liger``.
         """
@@ -1833,8 +1833,8 @@ Auto-generated DPO Training Script for BashGym (plain transformers+peft backend)
 Run ID: {run.run_id}
 Generated: {datetime.now(timezone.utc).isoformat()}
 
-Plain HuggingFace transformers + peft + trl (no Unsloth) — the GB10/sm_121
-fallback. Liger fused-linear-CE enabled via use_liger_kernel={self.config.use_liger}.
+Plain HuggingFace transformers + peft + trl (no Unsloth). Liger fused-linear-CE
+enabled via use_liger_kernel={self.config.use_liger}.
 Family: {profile.family}; patches: {list(profile.patches)}
 """
 
@@ -3341,9 +3341,9 @@ print("DPO training complete!")
 
         # Remote scripts execute inside the uploaded run directory, so the
         # generated script must reference the dataset by bare filename and
-        # write artifacts to "." (final/, merged/) — the locations
-        # _upload_files and _download_artifacts use. The validation file is
-        # not uploaded, so it is dropped from the generated script.
+        # write artifacts to "." (final/, merged/). Those artifacts stay on
+        # the compute target. The validation file is not uploaded, so it is
+        # dropped from the generated script.
         local_dataset_path = run.dataset_path
         local_output_path = run.output_path
         local_val_path = run.val_dataset_path
@@ -3411,6 +3411,12 @@ print("DPO training complete!")
 
         if not result["success"]:
             raise RuntimeError(f"Remote training failed: {result.get('error')}")
+
+        run.training_metadata["remote_execution"] = {
+            "schema_version": "bashgym.remote_training_reference.v1",
+            "run_ref": result["remote_run_ref"],
+            "artifact_refs": list(result.get("artifact_refs", ())),
+        }
 
     def _remote_launch_spec(self, run: TrainingRun) -> tuple[str, str, bool]:
         """Resolve the remote training script for a run.
@@ -3813,7 +3819,7 @@ class GRPOTrainer(Trainer):
         logger.info(f"Script: {script_path}")
         logger.info(f"Python: {python_exe}")
 
-        # GB10/sm_121 Triton compatibility fix:
+        # sm_121 Triton toolchain compatibility fix:
         # Triton ships with ptxas from CUDA 12.8 which doesn't recognize sm_121a.
         # Point it at the system CUDA 13 ptxas which has full sm_121 support.
         # See: https://github.com/triton-lang/triton/issues/9181
@@ -4008,8 +4014,8 @@ class GRPOTrainer(Trainer):
 
         Resolves a ModelFamilyProfile from base_model and selects the backend
         (explicit grpo_backend > family default > platform probe): Unsloth where
-        available (the GB10 path), else the plain transformers+peft generator
-        (the sm_121 fallback for when Unsloth can't load — unslothai#4867).
+        available, else the plain transformers+peft generator when Unsloth cannot
+        load (unslothai#4867).
         """
         from bashgym.families import resolve_family_profile, select_backend
 
@@ -4199,7 +4205,7 @@ REWARD_FN = {{"syntax": syntax_reward, "execution": execution_reward, "verificat
     def _generate_grpo_script_plain(self, run: TrainingRun, profile) -> str:
         """Generate GRPO training script using plain transformers + peft (no Unsloth).
 
-        The sm_121 / GB10 fallback for when Unsloth can't load (unslothai#4867).
+        The plain-backend fallback for when Unsloth cannot load (unslothai#4867).
         Family correctness patches are applied via bashgym.families.patches, and all
         model-specific values (LoRA targets/excludes, attention impl) come from the
         ModelFamilyProfile.
@@ -4217,10 +4223,10 @@ GRPO: Group Relative Policy Optimization with tiered rewards
 - Reward mode: {self.config.grpo_reward_mode}
 - Generations per prompt: {self.config.effective_grpo_group_size()}
 - Training profile: {self.config.training_profile}
-- Quantization: load_in_4bit={self.config.load_in_4bit} (GB10/sm_121 trains in bf16)
+- Quantization: load_in_4bit={self.config.load_in_4bit}
 - Family: {profile.family}; patches: {list(profile.patches)}
 
-NOTE: plain HuggingFace transformers + peft + trl (no Unsloth) for GB10/sm_121.
+NOTE: plain HuggingFace transformers + peft + trl (no Unsloth).
 """
 
 import ast

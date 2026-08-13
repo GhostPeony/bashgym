@@ -63,6 +63,9 @@ def bind_nemo_rl_profile(
         raise ValueError("NeMo RL profile does not match the selected executor")
 
     stages: list[PinnedRemoteStageProfile] = []
+    uses_resident_data_build = any(
+        configured.stage == StageKind.DATA_BUILD for configured in executor.stages
+    )
     for configured in executor.stages:
         if configured.stage not in {
             StageKind.SMOKE_TRAINING,
@@ -71,10 +74,14 @@ def bind_nemo_rl_profile(
             stages.append(configured)
             continue
         contract = nemo_profile.container_contract(configured.stage)
-        input_files = [nemo_profile.dataset_path]
-        input_sha256 = {
-            nemo_profile.dataset_path.name: nemo_profile.dataset_sha256,
-        }
+        if uses_resident_data_build:
+            input_files = list(configured.input_files)
+            input_sha256 = dict(configured.input_sha256)
+        else:
+            input_files = [nemo_profile.dataset_path]
+            input_sha256 = {
+                nemo_profile.dataset_path.name: nemo_profile.dataset_sha256,
+            }
         if nemo_profile.nemo_gym is not None:
             input_files.append(nemo_profile.nemo_gym.bundle_archive_path)
             input_sha256[nemo_profile.nemo_gym.bundle_archive_path.name] = (
@@ -117,6 +124,8 @@ def bind_nemo_rl_profile(
         remote_work_dir=executor.remote_work_dir,
         stages=tuple(stages),
         nemo_rl=nemo_profile,
+        registered_base_model=executor.registered_base_model,
+        registered_evaluation_dataset=executor.registered_evaluation_dataset,
     )
 
 

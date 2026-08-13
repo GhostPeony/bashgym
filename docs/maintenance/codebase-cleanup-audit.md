@@ -28,3 +28,54 @@ AutoResearch campaign product:
 No other deletions are authorized by this audit. Any future deletion must first
 document production, public API/CLI, documentation, and test reference checks,
 then add focused verification for the changed behavior.
+
+## 2026-08-09 architecture and duplication pass
+
+### Reference architecture
+
+The pass used the framework maintainers' own guidance as the baseline:
+
+- FastAPI's [Bigger Applications](https://fastapi.tiangolo.com/tutorial/bigger-applications/)
+  guidance keeps the application entry point small, groups endpoints in
+  `APIRouter` modules, and moves reusable dependencies outside routers.
+- React's [state-structure guidance](https://react.dev/learn/choosing-the-state-structure)
+  recommends avoiding redundant and duplicate state.
+- Electron's [process model](https://www.electronjs.org/docs/latest/tutorial/process-model)
+  keeps privileged operations in the main/preload boundary rather than the
+  renderer.
+
+The current codebase largely follows those boundaries: most backend domains
+have dedicated router modules, frontend session data is normalized through the
+`stores/*Resources.ts` layer, and production renderer code has no direct Node or
+Electron imports. The main remaining concentration points are the legacy
+`bashgym/api/routes.py` application module, `frontend/src/services/api.ts`, and
+several large workflow components. Splitting those files mechanically would
+create broad regression risk, so this pass did not change them without a
+feature-scoped reason.
+
+### Changes made
+
+| Area | Evidence | Decision |
+| --- | --- | --- |
+| Model deployment boundary | `bashgym/gym/trainer.py` imported Ollama deployment from `bashgym/api/models_routes.py`, making the training domain depend on FastAPI. | Moved the operation to `bashgym/models/deployment.py`; both the API adapter and trainer now depend on the model domain. Added focused success, missing-file, and temporary-file-cleanup tests. |
+| Preference validators | DPO and reward validators duplicated text extraction, metadata normalization, strict-level selection, and JSON/JSONL loading. | Extracted private primitives to `bashgym/preferences/_validation.py` while retaining domain-specific rules and error messages. Added JSON-container coverage for both public validators. |
+| Hugging Face client imports | Repository-wide reference search and Vulture found three imported exception types and fallback aliases with no consumers. | Removed the unused imports and aliases; optional `huggingface_hub` availability behavior is unchanged. |
+| Ollama temporary files | The deployment path removed its temporary Modelfile only after `subprocess.run` returned, leaking it when Ollama was missing or timed out. | Centralized cleanup in `finally` and covered the missing-executable path. |
+
+### Conservative retain decisions
+
+- A repository-wide JSCPD scan reported 1.15% duplicated lines. Most large
+  matches are parallel provider/importer implementations, generated training
+  scripts, or similar UI markup with different behavior. They were retained
+  because a shared abstraction would couple independent workflows for little
+  benefit.
+- Knip was run without a repository-specific entrypoint configuration and
+  therefore marked Electron entry modules, dynamically loaded native
+  dependencies, tests, and public barrels as unused. None were removed from
+  that heuristic alone.
+- Vulture's remaining high-confidence findings are callback/protocol parameters
+  or documented compatibility inputs. Renaming or removing public inputs does
+  not reduce runtime code and could break callers, so they remain.
+- Legacy orchestrator-to-WebSocket imports remain a known compatibility-layer
+  inversion. Removing them belongs with the already documented orchestrator
+  retirement decision, not a behavior-preserving cleanup pass.

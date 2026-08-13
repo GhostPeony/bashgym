@@ -189,6 +189,8 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
         "/api/campaigns/templates",
         "/api/campaigns/templates/{template_id}/doctor",
         "/api/campaigns/{campaign_id}/control-room-snapshot",
+        "/api/campaigns/{campaign_id}/research-state",
+        "/api/campaigns/{campaign_id}/research-wait",
         "/api/campaigns/{campaign_id}/human-work",
         "/api/campaigns/{campaign_id}/human-work/{work_id}/claim",
         "/api/campaigns/{campaign_id}/human-work/{work_id}/submit",
@@ -1307,6 +1309,195 @@ def test_control_room_snapshot_requires_auth_and_sets_private_cache_headers(tmp_
     assert payload["controller"]["heartbeat_age_seconds"] == 7.5
 
 
+def test_research_state_projects_the_same_control_room_into_agent_goal_and_markdown(
+    tmp_path, monkeypatch
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    autoresearch = AutoResearchRepository(repository.db_path)
+    autoresearch.initialize()
+    autoresearch.create_autoresearch_spec(
+        AutoResearchCampaignSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            primary_metric="mrr_at_10",
+            metric_direction=MetricDirection.MAXIMIZE,
+            stop_rules=AutoResearchStopRules(
+                max_attempts=3,
+                budget_unit="gpu_hours",
+                max_total_cost=3.0,
+            ),
+        )
+    )
+    current = repository.get_campaign("workspace-a", "campaign-1")
+    repository.record_export(
+        "workspace-a",
+        "campaign-1",
+        "export-research-state",
+        ("markdown", "json"),
+        {
+            "source_digest": "a" * 64,
+            "files": [{"name": "campaign_report.md", "sha256": "b" * 64, "size_bytes": 256}],
+        },
+        expected_version=current.version,
+        actor_id="codex-agent",
+        credential_kind=CredentialKind.ACCESS,
+        correlation_id="research-state-export",
+        idempotency_key="research-state-export",
+    )
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    route = "/api/campaigns/campaign-1/research-state"
+
+    denied = http.get(route, params={"workspace_id": "workspace-a"})
+    response = http.get(
+        route,
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+
+    assert denied.status_code == 401
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    payload = response.json()
+    assert payload["schema_version"] == "bashgym.research.v1"
+    assert payload["workspace_id"] == "workspace-a"
+    assert payload["campaign_id"] == "campaign-1"
+    assert payload["goal"]["objective"] == campaign().objective
+    assert payload["goal"]["resume"]["reference"] == "workspace-a/campaign-1"
+    assert payload["goal"]["resume"]["aggregate_version"] == 2
+    assert payload["goal"]["stop_conditions"] == [
+        "At most 3 experiment attempts",
+        "At most 3 gpu_hours",
+    ]
+    assert payload["autoresearch"]["next_action"] == "prepare_campaign"
+    assert payload["control_room"] == {
+        "api_path": "/api/campaigns/campaign-1/control-room-snapshot",
+        "url": (
+            "http://testserver/?view=training&tab=autoresearch"
+            "&workspace_id=workspace-a&campaign_id=campaign-1"
+        ),
+        "view": "training",
+        "tab": "autoresearch",
+        "workspace_id": "workspace-a",
+        "campaign_id": "campaign-1",
+    }
+    assert payload["report"] == {
+        "export_id": "export-research-state",
+        "formats": ["markdown", "json"],
+        "manifest": {
+            "source_digest": "a" * 64,
+            "files": [{"name": "campaign_report.md", "sha256": "b" * 64, "size_bytes": 256}],
+        },
+        "actor_id": "codex-agent",
+        "created_at": payload["report"]["created_at"],
+    }
+    assert "### AutoResearch" in payload["markdown"]
+    assert "**Timeline:**" in payload["markdown"]
+    assert "**Next action:**" in payload["markdown"]
+    assert "[Open experiment view](http://testserver/" in payload["markdown"]
+
+
+def test_research_wait_returns_action_required_with_the_existing_agent_brief(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    autoresearch = AutoResearchRepository(repository.db_path)
+    autoresearch.initialize()
+    autoresearch.create_autoresearch_spec(
+        AutoResearchCampaignSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            primary_metric="mrr_at_10",
+            metric_direction=MetricDirection.MAXIMIZE,
+            stop_rules=AutoResearchStopRules(
+                max_attempts=3,
+                budget_unit="gpu_hours",
+                max_total_cost=3.0,
+            ),
+        )
+    )
+    cursor = repository.list_events("workspace-a", "campaign-1")[-1][0]
+    route = "/api/campaigns/campaign-1/research-wait"
+
+    denied = http.get(
+        route,
+        params={
+            "workspace_id": "workspace-a",
+            "after_cursor": cursor,
+            "timeout_seconds": 55,
+        },
+    )
+    response = http.get(
+        route,
+        headers=bearer(access),
+        params={
+            "workspace_id": "workspace-a",
+            "after_cursor": cursor,
+            "timeout_seconds": 55,
+        },
+    )
+
+    assert denied.status_code == 401
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    payload = response.json()
+    assert payload["schema_version"] == "bashgym.research_wait.v1"
+    assert payload["status"] == "agent_action_required"
+    assert payload["after_cursor"] == cursor
+    assert payload["next_cursor"] == cursor
+    assert payload["research"]["next_action"] == "prepare_campaign"
+    assert payload["research"]["goal"]["resume"]["reference"] == "workspace-a/campaign-1"
+    assert "### AutoResearch" in payload["research"]["markdown"]
+
+
+def test_research_wait_times_out_without_a_durable_change(tmp_path, monkeypatch):
+    from tests.campaigns.test_autoresearch_loop import _active_proposal
+
+    repository, core, _attempt = _active_proposal(tmp_path)
+    assert core.state("workspace-a", "campaign-1").next_action.value == "wait_for_result"
+    auth = CampaignAuthService(repository)
+    refresh = auth.issue_refresh_credential(
+        actor_id="codex-agent",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-a",),
+    )
+    app = FastAPI()
+    app.state.campaign_repository = repository
+    app.state.campaign_auth_service = auth
+    app.state.campaign_service = CampaignService(repository)
+    app.state.campaign_worker_config_path = tmp_path / "worker-config.v1.json"
+    app.include_router(campaign_auth_router)
+    app.include_router(campaign_router)
+    http = TestClient(app)
+    access = exchange(http, refresh.raw_token)
+    cursor = repository.list_events("workspace-a", "campaign-1")[-1][0]
+    ticks = iter((0.0, 1.0))
+    monkeypatch.setattr(campaign_routes, "monotonic", lambda: next(ticks), raising=False)
+
+    response = http.get(
+        "/api/campaigns/campaign-1/research-wait",
+        headers=bearer(access),
+        params={
+            "workspace_id": "workspace-a",
+            "after_cursor": cursor,
+            "timeout_seconds": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "timeout"
+    assert payload["after_cursor"] == cursor
+    assert payload["next_cursor"] == cursor
+    assert payload["research"]["next_action"] == "wait_for_result"
+
+
 def test_control_room_snapshot_loads_legacy_v1_manifest_without_rewriting_digest(
     tmp_path, monkeypatch
 ):
@@ -2071,7 +2262,7 @@ def test_artifact_preview_is_scoped_verified_bounded_and_redacted(tmp_path):
     content = (
         "step=0 loss=1.0000\n"
         + "".join(f"step={step} loss={1 / (step + 1):.4f}\n" for step in range(1, 601))
-        + "step=601 loss=0.0017 host=user@10.42.0.7 "
+        + "step=601 loss=0.0017 host=user@192.0.2.42 "
         "path=C:\\private\\campaign\\training.log "
         "token=Bearer private-token-canary output=/srv/private/run/model.bin\n"
     ).encode()
@@ -2132,8 +2323,8 @@ def test_artifact_preview_is_scoped_verified_bounded_and_redacted(tmp_path):
         str(config.artifact_root),
         "C:\\private",
         "/srv/private",
-        "user@10.42.0.7",
-        "10.42.0.7",
+        "user@192.0.2.42",
+        "192.0.2.42",
         "private-token-canary",
         "private-host-canary",
         "uri",

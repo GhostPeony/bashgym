@@ -56,7 +56,7 @@ export function ResourceTiles({
   const fmtTps = (v?: number) =>
     v === undefined ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v).toString()
   const fmtGb = (v?: number) => (v === undefined ? '—' : v.toFixed(2))
-  // GPU utilization is unavailable on CPU smokes and unified-memory GB10 (NVML unsupported).
+  // GPU utilization can be unavailable when the selected runtime does not expose NVML metrics.
   const fmtUtil = (v?: number) => (v === undefined ? 'N/A' : `${Math.round(v)}%`)
 
   return (

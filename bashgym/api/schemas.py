@@ -779,6 +779,7 @@ class HealthCheck(BaseModel):
     status: str
     timestamp: str
     version: str
+    state_root_digest: str
 
 
 class SystemStats(BaseModel):

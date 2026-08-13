@@ -217,7 +217,7 @@ test('parses unknown panel input and withholds every unsafe value in a fully vis
     bindings: {
       ...recovery().bindings,
       model_id: 'mdl_ghp_visible_secret',
-      compute_id: 'cpu_cades-macbook'
+      compute_id: 'cpu_operator-laptop'
     },
     ssh_private_key: 'ghp_visible_secret'
   }
@@ -226,7 +226,7 @@ test('parses unknown panel input and withholds every unsafe value in a fully vis
   assert.match(html, /Read-only/)
   assert.match(html, /Immutable bindings unavailable/)
   assert.match(html, /disabled=""/)
-  assert.doesNotMatch(html, /mdl_ghp_visible_secret|cpu_cades-macbook|ghp_visible_secret/)
+  assert.doesNotMatch(html, /mdl_ghp_visible_secret|cpu_operator-laptop|ghp_visible_secret/)
 })
 
 test('withholds unsafe model display labels at the panel boundary', () => {
@@ -239,9 +239,9 @@ test('withholds unsafe model display labels at the panel boundary', () => {
     'AIza0123456789abcdefghijklmnop',
     'ssh-private-key',
     'BEGIN PRIVATE KEY',
-    'C:\\Users\\Cade',
+    'C:\\Users\\Operator',
     'ssh://private-host',
-    'cades-macbook',
+    'operator-laptop',
     'dev-laptop',
     'home-workstation'
   ]) {
@@ -261,8 +261,8 @@ test('withholds embedded credential tokens and collapsed device names from panel
     'Model AKIAIOSFODNN7EXAMPLE',
     'Qwen xoxb-0123456789-secret',
     'Model AIza0123456789abcdefghijklmnop',
-    'CadesMacBookPro',
-    'CadesLaptop',
+    'OperatorLaptopPro',
+    'ResearcherLaptop',
     'HomeWorkstation'
   ]) {
     const html = render({

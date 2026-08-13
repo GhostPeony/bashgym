@@ -7,7 +7,16 @@ tags: [bashgym, training, evaluation, agents, artifacts]
 
 # BashGym
 
-BashGym is the shared ML workspace. It stores the authoritative operational record for datasets, model/config revisions, runs, metrics, evaluations, artifacts, budgets, and reports. Hermes, Codex, Claude Code, Discord, and canvas nodes are operator/interface choices over that workspace, not separate training systems.
+BashGym runs a repeatable model-improvement loop: evaluate a starting model on
+a fixed suite, inspect failures, change one declared part of the data or
+training process, train a candidate, evaluate it against the same suite, then
+keep, discard, iterate, or report. The host agent forms hypotheses and authors
+the next intervention; BashGym executes and records the experiment.
+
+The same experiment record contains dataset and model revisions, exact configs,
+runs, metrics, evaluations, artifacts, budgets, and reports. Codex, Cursor,
+Claude Code, terminals, and canvas nodes are interfaces to that loop rather
+than separate research systems.
 
 The project-isolated experiment ledger extends the existing campaign SQLite
 database. Every official run carries `workspace_id`, `project_id`,

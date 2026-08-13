@@ -266,7 +266,7 @@ def build_charts(output_dir: Path, facts: dict[str, Any]) -> dict[str, Path]:
 
     memory_path = output_dir / "09_expanded_batch_memory_guard.png"
     image, draw = chart_canvas(
-        "Why the first Ponyo batch probe was rejected",
+        "Why the first compute batch probe was rejected",
         "Explicit negatives expand the physical query batch before the encoder forward pass.",
     )
     bars = [
@@ -421,7 +421,7 @@ def build_charts(output_dir: Path, facts: dict[str, Any]) -> dict[str, Path]:
 
     resource_path = output_dir / "12_candidate_a_resource_trace.png"
     image, draw = chart_canvas(
-        "Candidate A Ponyo resource trace",
+        "Candidate A compute resource trace",
         "Two-second samples across training, checkpointing, and final export; panels use independent labeled scales.",
     )
     minutes = [float(value) for value in facts["resource_minutes"]]
@@ -627,7 +627,7 @@ The SearchTube fixture passes: MRR and Recall@1 remain 1.0, wrong-top and hard-n
 
 The corrected failed batch-16 probe contained 80 encoder sequences, not 144: the legacy Sentence Transformers path silently truncated variable negative lanes to three. The direct trainer now enforces exactly three lanes, uses the collision-safe sampler at runtime, and rejects non-cached batches above 64 sequences before loading model weights. Candidate A therefore ran at 20 sequences per batch.
 
-![Ponyo resource trace]({relative['resources']})
+![Compute resource trace]({relative['resources']})
 
 Across {facts['resource_sample_count']} two-second samples, available unified memory reached a {facts['available_memory_floor_gib']:.2f} GiB floor, swap grew by {facts['swap_growth_gib']:.2f} GiB, mean GPU utilization was {facts['gpu_utilization_mean_pct']:.1f}%, and peak temperature was {facts['temperature_peak_c']:.0f} C. Batch 4 remains the safe explicit-negative envelope while the resident services share unified memory.
 
@@ -737,7 +737,7 @@ def extend_docx(
     add_figure(
         doc,
         charts["memory"],
-        "Figure 9. Expanded-sequence memory guard derived from the Ponyo batch probe.",
+        "Figure 9. Expanded-sequence memory guard derived from the compute batch probe.",
     )
     doc.add_page_break()
     add_heading(doc, "Full Candidate A training run", 1)
@@ -820,7 +820,7 @@ def extend_docx(
         fill=COLORS["sage_light"],
     )
     doc.add_page_break()
-    add_heading(doc, "Ponyo resource envelope and next experiment", 1)
+    add_heading(doc, "Compute resource envelope and next experiment", 1)
     add_figure(
         doc,
         charts["resources"],
@@ -828,7 +828,7 @@ def extend_docx(
     )
     add_body(
         doc,
-        f"Available unified memory reached {facts['available_memory_floor_gib']:.2f} GiB, swap grew {facts['swap_growth_gib']:.2f} GiB, mean GPU utilization was {facts['gpu_utilization_mean_pct']:.1f}%, and peak temperature was {facts['temperature_peak_c']:.0f} C. Batch 4 remains the safe explicit-negative envelope while Ponyo's resident services share unified memory.",
+        f"Available unified memory reached {facts['available_memory_floor_gib']:.2f} GiB, swap grew {facts['swap_growth_gib']:.2f} GiB, mean GPU utilization was {facts['gpu_utilization_mean_pct']:.1f}%, and peak temperature was {facts['temperature_peak_c']:.0f} C. Batch 4 remains the safe explicit-negative envelope while resident services share unified memory.",
     )
     add_callout(
         doc,
@@ -994,7 +994,7 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
             ),
             Image(str(charts["memory"]), width=6.5 * inch, height=3.66 * inch),
             Paragraph(
-                "Figure 3. The memory guard converts the failed Ponyo probe into a launch invariant.",
+                "Figure 3. The memory guard converts the failed compute probe into a launch invariant.",
                 styles["CampaignCaption"],
             ),
             Spacer(1, 0.15 * inch),
@@ -1084,7 +1084,7 @@ def write_pdf(path: Path, facts: dict[str, Any], charts: dict[str, Path]) -> Non
                 styles["BodyText"],
             ),
             PageBreak(),
-            Paragraph("Ponyo resource envelope", styles["Heading1"]),
+            Paragraph("Compute resource envelope", styles["Heading1"]),
             Image(str(charts["resources"]), width=6.5 * inch, height=3.66 * inch),
             Paragraph(
                 "Figure 6. Unified-memory availability and GPU utilization across the full run.",

@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -25,6 +26,7 @@ const trackedFiles = execFileSync('git', ['ls-files', '-z'], {
   .toString()
   .split('\0')
   .filter(Boolean)
+  .filter((file) => existsSync(path.join(repositoryRoot, file)))
 
 const files = trackedFiles.filter((file) => {
   const extension = path.extname(file)

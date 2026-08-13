@@ -7,6 +7,7 @@ and sensible defaults. Supports .env files for local development.
 Config Module
 """
 
+import hashlib
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -58,11 +59,22 @@ def get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
     import platform
 
+    configured = os.environ.get("BASHGYM_DIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
     if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
     return base / ".bashgym"
+
+
+def state_root_digest(path: Path | None = None) -> str:
+    """Return an opaque identity for the configured persistent state root."""
+
+    root = (path or get_bashgym_dir()).expanduser().resolve()
+    payload = f"bashgym-state-root.v1\0{root}".encode()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def get_default_data_dir() -> str:

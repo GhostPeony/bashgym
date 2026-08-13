@@ -565,7 +565,7 @@ test('renders durable zero-campaign and initial error explanations', () => {
       onLoadArtifacts: () => {}
     })
   )
-  assert.match(errorHtml, /AutoResearch control room unavailable/)
+  assert.match(errorHtml, /AutoResearch unavailable/)
   assert.match(errorHtml, /authenticated campaign service could not start/)
   assert.doesNotMatch(errorHtml, /snapshot unavailable/i)
   assert.match(errorHtml, />Retry</)
@@ -599,7 +599,7 @@ test('initial fleet loading does not flash the zero-campaign explanation', () =>
       onLoadArtifacts: () => {}
     })
   )
-  assert.match(html, /Loading AutoResearch control room/)
+  assert.match(html, /Loading AutoResearch/)
   assert.doesNotMatch(html, /snapshot/i)
   assert.doesNotMatch(html, /No durable AutoResearch campaigns yet/)
   assert.match(html, /<select/)

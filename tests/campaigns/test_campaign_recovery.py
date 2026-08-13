@@ -292,7 +292,7 @@ def test_portable_parent_campaign_identity_must_be_public_safe(repositories):
 @pytest.mark.parametrize(
     "label",
     [
-        "Cade MacBook Pro",
+        "Researcher laptop",
         "sk-proj-AbCdEf123456",
         "github_pat_private_token",
         "Operator laptop",

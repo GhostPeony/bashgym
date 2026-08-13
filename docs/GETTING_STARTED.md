@@ -1,245 +1,240 @@
-# Getting Started with Bash Gym
+# Getting started
 
-This guide walks you from a fresh install to your first trained model.
+This guide installs BashGym, opens the experiment workspace, and shows the two
+execution paths:
 
----
+- **AutoResearch** for a baseline, candidate comparisons, and repeated
+  experiments driven by an agent;
+- **direct training** for one known model, dataset, and recipe.
 
-## Prerequisites
+## Install
 
-- **Python 3.10+** — Backend and training
-- **Node.js 22+** (LTS) — Frontend and native Electron packaging
-- **Git** — Version control
-- **CUDA-capable GPU** (optional) — Needed only for real local training. Private hardware over SSH and explicitly selected hosted backends are alternatives.
-- **Provider API keys** (optional) — Add credentials only for teacher, augmentation, hosted training, or publication features you use.
+Requirements:
 
----
-
-## Step 1: Install and Configure (10 minutes)
+- Python 3.10 or newer;
+- Node.js 22 LTS or newer for the frontend;
+- Git;
+- a compatible training environment when you run a real fine-tune.
 
 ```bash
-# Clone the repository
 git clone https://github.com/GhostPeony/bashgym.git
 cd bashgym
 
-# Create and activate an isolated environment
 python -m venv .venv
 # Windows: .\.venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
 
-# Install BashGym and register its CLI
 python -m pip install -e .
+python -m pip install -e ".[training]"  # only when this checkout runs training
 
-# Optional real local/private training dependencies
-python -m pip install -e ".[training]"
+cd frontend
+npm ci
+cd ..
 
-# Install frontend dependencies
-cd frontend && npm ci && cd ..
-
-# Create your environment file
 cp .env.example .env
 ```
 
-The copied file contains no credential or model default. Add only the provider
-credentials you intend to use. Verify the package and durable AutoResearch
-control plane without a GPU or API key:
+The default configuration selects no model and contains no credential. Add only
+what the features you use require.
+
+Verify the install:
 
 ```bash
 bashgym --help
-bashgym campaign control-smoke --json
+bashgym research --help
+bashgym training --help
 ```
 
-The control smoke proves the durable controller without claiming model quality.
-To graduate it to a real local/private AutoResearch campaign, keep the full
-values in the canonical guide and use this order:
+## Open BashGym
 
 ```bash
-bashgym campaign inspect-model-artifact --help
-bashgym campaign setup-autoresearch --help
-bashgym campaign activate-autoresearch --help
-bashgym campaign doctor --help
+# Windows
+.\dev.ps1
+
+# macOS/Linux
+./dev.sh
 ```
 
-Inspect an operator-selected trainable snapshot, create the portable definition,
-run activation once as a non-applying plan, repeat with `--apply`, and then run
-`campaign doctor`. Require `materializable`, bring the resident controller
-online through `--install-worker` or an existing service, then re-run doctor and
-require `launch_ready`. A bounded real baseline comes before any candidate. See
-[Durable AutoResearch Campaigns](training/autoresearch-campaign.md) for the exact
-flags and evidence contract.
+Open `http://localhost:5173`. Generated API documentation is available at
+`http://localhost:8003/api/docs`.
 
----
+## Bring a dataset
 
-## Step 2: Install Trace Capture Hooks (2 minutes)
+BashGym is not limited to coding traces. A training dataset can come from a
+researcher-provided JSONL file, imported traces, generated examples, preference
+pairs, or executable environment tasks.
 
-These hooks silently capture sessions from all your AI coding tools as training data:
+For SFT, the common format is one JSON object per line with a `messages` array:
+
+```json
+{
+  "messages": [
+    { "role": "user", "content": "Solve the task." },
+    { "role": "assistant", "content": "The verified response." }
+  ]
+}
+```
+
+DPO requires a prompt with preferred and rejected responses. GRPO/RLVR requires
+prompts that can produce multiple attempts plus a reward or deterministic
+verifier that distinguishes them. See
+[Training data](TRAINING_DATA_GUIDE.md) and
+[Training strategy](training/strategy-guide.md) before converting data between
+methods.
+
+Keep a fixed held-out split out of the training dataset. It is the basis for
+the baseline and every candidate comparison.
+
+## Run a direct training job
+
+Use direct training when the model, dataset, and method are already known.
+Inspect the supported request before submitting it:
 
 ```bash
-# Auto-detect installed tools and install hooks for all of them
+bashgym training plan --strategy sft --data custom_jsonl --json
+bashgym training start --help
+```
+
+Example request shape:
+
+```bash
+bashgym training start \
+  --strategy sft \
+  --model <trainable-model-id-or-path> \
+  --dataset-path <train.jsonl> \
+  --compute-target <registered-target> \
+  --checkpoint-limit 1 \
+  --artifact-retention adapter_only \
+  --json
+```
+
+For an official experiment, also supply `--tracking-context` with the exact
+project, experiment, model-version, dataset-version, environment, and source
+identities. BashGym does not infer them from the current chat.
+
+After the run:
+
+```bash
+bashgym training analyze --run-id <run-id> --models-dir <models-directory> --json
+```
+
+Training loss describes optimization. It does not establish that the candidate
+is better. Run the declared held-out evaluation and compare it with the starting
+model before selecting the result.
+
+## Run an AutoResearch experiment
+
+AutoResearch is the repeated path:
+
+```text
+baseline → failure analysis → one intervention → training → fixed evaluation
+        → comparison → next intervention or stop → report
+```
+
+The agent uses its own goal, plan, editor, terminal, browser, and subagents for
+failure analysis and hypothesis work. BashGym exposes the experiment actions:
+
+```bash
+bashgym research prepare --help
+bashgym research onboard --help
+bashgym research state --help
+bashgym research wait --help
+bashgym research start --help
+bashgym research submit-iteration --help
+bashgym research report --help
+```
+
+Start preparation with the selected workspace and a secret-store reference:
+
+```bash
+bashgym research prepare \
+  --workspace-id <workspace> \
+  --credential-ref <secret-store-key> \
+  --json
+```
+
+Preparation discovers registered model, dataset, evaluator, training, and
+execution choices. It resumes its setup session instead of making the agent ask
+for the same choice again.
+
+After the exact choices have been reviewed, preview and apply one onboarding
+contract:
+
+```bash
+bashgym research onboard --contract <onboarding.json> --json
+bashgym research onboard --contract <onboarding.json> --apply --json
+```
+
+The first command returns the deterministic preparation plan without applying
+it. `--apply` resumes or completes model registration/acquisition on the chosen
+execution target, installation activation, resident API and worker startup,
+registry sync, guided setup, and creation of one `READY` campaign. It does not
+run `research start`.
+
+Read the `READY` state, present its exact contract, and wait for a later
+explicit Start. After Start, keep reading state and wait by durable event cursor
+while BashGym is working:
+
+```bash
+bashgym research state \
+  --workspace-id <workspace> \
+  --credential-ref <secret-store-key> \
+  --campaign <campaign-id> \
+  --json
+
+bashgym research wait \
+  --workspace-id <workspace> \
+  --credential-ref <secret-store-key> \
+  --campaign <campaign-id> \
+  --after-cursor <cursor> \
+  --json
+```
+
+`research state` contains the objective, current work, latest comparison,
+budget, next action, and resume identity. `research wait` is a read-only
+long-poll; its `next_cursor` lets the host agent continue after a change,
+requested action, timeout, or terminal state without inventing a second session
+record. The agent submits the baseline first, then one candidate at a time
+against the current reference. The onboarding contract fields and exact
+proposal, start, and report commands are in
+[AutoResearch campaigns](training/autoresearch-campaign.md).
+
+## Use an Agent Skill
+
+```bash
+# Codex
+bashgym operator skills install --host codex
+bashgym operator skills check --host codex
+
+# Claude Code
+bashgym operator skills install --host claude
+bashgym operator skills check --host claude
+
+# Project-local Agent Skills, including Cursor-compatible discovery
+bashgym operator skills install --host agents
+bashgym operator skills check --host agents
+```
+
+The skill teaches the host agent to read and mutate BashGym experiments. It does
+not replace the host's native goal or planning system.
+
+## Use traces when they are useful
+
+Trace capture is one data source, not an onboarding requirement.
+
+```bash
 python -m bashgym.trace_capture.setup
-
-# Or bulk-import historical sessions (last 60 days)
 python -m bashgym.trace_capture.setup import-all --days 60
 ```
 
-Or use the dashboard **Settings > Agents** tab for one-click installation. Verify by checking that each configured tool shows "Installed."
+Review imported sessions before generating examples. Successful traces can
+provide SFT demonstrations; failed or contrasting attempts may provide
+preference or failure-analysis data when they are labeled correctly.
 
----
+## Next
 
-## Step 3: Launch the App
-
-```bash
-# Windows (PowerShell) — backend + frontend together
-.\dev.ps1
-
-# macOS / Linux
-./dev.sh
-
-# For the full desktop experience (any platform)
-.\dev.ps1 -Electron    # Windows
-./dev.sh --electron     # macOS/Linux
-
-# Docker backend API only (any platform)
-docker compose up bashgym-api
-```
-
-Open `http://localhost:5173` in your browser (or the Electron window opens automatically).
-Docker Compose does not currently package the frontend, so run the Vite or
-Electron command separately when using the containerized API.
-
----
-
-## Step 4: Accumulate Traces (Days 1-7)
-
-Just use Claude Code normally on your projects. Every session is automatically captured. Check the **Home** screen to see your trace count grow, or open the **Traces** browser to see individual sessions with their quality scores.
-
-Each trace is scored on 6 metrics and classified:
-
-| Tier | Threshold | Usage |
-|------|-----------|-------|
-| **Gold** | >=90% success | Ready for SFT training |
-| **Silver** | >=75% success | Good but not great |
-| **Bronze** | >=60% success | Acceptable |
-| **Failed** | <60% success | Used as negative examples for DPO training |
-
----
-
-## Step 5: Review and Curate Traces
-
-Open the **Traces** dashboard from the sidebar or home screen:
-
-1. Browse traces by status (Gold/Silver/Bronze/Failed)
-2. Filter by repository to focus on specific projects
-3. Click a trace to see quality metrics breakdown
-4. Manually **promote** good traces to Gold or **demote** bad ones
-5. Use **Auto-Classify** to batch-sort traces with configurable thresholds
-
----
-
-## Step 6: Generate Training Examples
-
-From the **Traces** dashboard:
-
-1. Click **Generate Examples** on individual gold traces, or
-2. Open the **Data Factory** and run batch generation across all gold traces
-
-The factory segments multi-task sessions into individual training examples, scrubs PII, and exports in NeMo JSONL format.
-
----
-
-## Step 7: Train Your First Model
-
-Open the **Training** dashboard:
-
-1. Select **SFT** (Supervised Fine-Tuning) as the strategy
-2. Choose a compatible, registered trainable base supported by an installed backend. Pin its immutable revision for a durable campaign; adapters and inference quants are not substitutes. Smaller models train on consumer GPUs, while larger ones use private or explicitly selected hosted targets.
-3. Select which repos to train on (or use all gold traces)
-4. Click **Start Training**
-5. Watch the live loss curve and training logs
-
-Training a small model with LoRA typically takes 30-90 minutes depending on your GPU and trace count. The model auto-exports to GGUF when complete.
-
-### Optional Hosted Training
-
-If you explicitly choose a supported hosted backend instead of registered
-local/private hardware:
-
-1. Configure the credential and account entitlement required by the selected provider
-2. Open the **HuggingFace** dashboard from the sidebar
-3. Review the current hardware and price at submission, then submit the job
-
----
-
-## Step 8: Evaluate the Model
-
-Open the **Models** dashboard to see your trained model. From there:
-
-1. Run **Custom Eval** (replays your own traces to test the student)
-2. Run **Benchmarks** (HumanEval, MBPP, etc.) for standardized scores
-3. Compare against previous models on the **Leaderboard**
-
----
-
-## Step 9: Deploy and Route
-
-1. Click **Deploy to Ollama** on your model to make it available locally
-2. Open the **Router** dashboard
-3. Set the strategy to **Progressive Handoff** (starts at 20% student, increases over time)
-4. Monitor success rates — the router will only send tasks to the student when it's confident
-
----
-
-## Step 10: Repeat
-
-Every week, retrain with your accumulated traces. Each cycle produces a better student model that handles more tasks, reducing your API costs further.
-
----
-
-## Next Steps
-
-- **[Durable AutoResearch](training/autoresearch-campaign.md)** — Run the no-GPU control smoke, bind local/private compute, and execute a real baseline/candidate campaign
-- **[Peony Assistant](../README.md#agent-peony)** — Control Bash Gym via Discord or Telegram
-- **[Optional hosted training](../README.md#optional-hosted-training)** — Explicit hosted training and model sharing
-- **[API Reference](API.md)** — Full REST and WebSocket endpoint documentation
-
----
-
-## Common Issues
-
-**Port 8003 is already in use:**
-```bash
-# Windows (PowerShell)
-$listener = Get-NetTCPConnection -LocalPort 8003 -State Listen
-Get-Process -Id $listener.OwningProcess
-# After verifying that PID belongs to BashGym:
-Stop-Process -Id <verified-PID>
-
-# macOS/Linux
-lsof -nP -iTCP:8003 -sTCP:LISTEN
-# After verifying that PID belongs to BashGym:
-kill <verified-PID>
-```
-
-**Frontend can't connect to the API:**
-Check that the backend is running. If using a different port, update `frontend/.env.local`:
-```
-VITE_API_URL=http://localhost:YOUR_PORT/api
-VITE_WS_URL=ws://localhost:YOUR_PORT/ws
-```
-
-**Hooks show "Not installed":**
-```bash
-python -m bashgym.trace_capture.setup
-```
-Or use **Settings > Agents** in the app to install hooks from the UI.
-
-**`npm install` fails:**
-The frontend uses `node-pty` which requires native compilation. Ensure you have:
-- Node.js 22+ (LTS recommended)
-- Python 3.10+ (for node-gyp)
-- On Windows: Visual Studio Build Tools with "Desktop development with C++"
-
-**Training fails with "CUDA out of memory":**
-1. Enable QLoRA/4-bit quantization when the selected model/backend supports it
-2. Reduce batch size to 1-2
-3. Select a smaller compatible operator-approved trainable base
-4. Close other GPU-consuming applications
+- [Architecture](PLATFORM_OVERVIEW.md)
+- [Training data](TRAINING_DATA_GUIDE.md)
+- [Training strategy](training/strategy-guide.md)
+- [AutoResearch campaigns](training/autoresearch-campaign.md)
+- [Metrics runbook](training/metrics-runbook.md)

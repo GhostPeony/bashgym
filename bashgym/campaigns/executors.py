@@ -14,8 +14,18 @@ from uuid import uuid4
 from pydantic import Field, model_validator
 
 from bashgym.campaigns.artifacts import ArtifactSealer
+from bashgym.campaigns.autoresearch_dataset import (
+    AUTORESEARCH_DATASET_FILE_SCHEMA,
+    AUTORESEARCH_DATASET_RECEIPT_FILENAME,
+    AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
+)
+from bashgym.campaigns.autoresearch_evidence import (
+    AUTORESEARCH_EVALUATION_FILENAME,
+    AUTORESEARCH_EVALUATION_SCHEMA,
+)
 from bashgym.campaigns.contracts import (
     ActionAttempt,
+    ArtifactOutput,
     ContractModel,
     ResourceUsage,
     SealedActionResult,
@@ -41,7 +51,11 @@ from bashgym.campaigns.nemo_gym_ingestion import (
     NEMO_GYM_TRAJECTORIES_FILENAME,
     convert_nemo_gym_outputs,
 )
-from bashgym.campaigns.remote import RemoteObservation, RemoteRunIdentity
+from bashgym.campaigns.remote import (
+    RemoteObservation,
+    RemoteOutputInventory,
+    RemoteRunIdentity,
+)
 
 
 @dataclass(frozen=True)
@@ -152,6 +166,104 @@ class RemoteOutputSealer:
     def __init__(self, artifact_root: Path, sealer: ArtifactSealer):
         self.artifact_root = artifact_root.resolve()
         self.sealer = sealer
+
+    def completed_manifest(
+        self,
+        attempt: ActionAttempt,
+        identity: RemoteRunIdentity,
+        observation: RemoteObservation,
+        inventory: RemoteOutputInventory,
+    ) -> SealedActionResult:
+        """Build a seal manifest from hashes computed on private compute."""
+
+        if observation.exit_code != 0 or observation.state.value != "completed":
+            raise ValueError("remote completion must have a proven zero exit code")
+        return self._inventory_manifest(
+            attempt,
+            identity,
+            observation,
+            inventory,
+            outcome="completed",
+        )
+
+    def terminal_manifest(
+        self,
+        attempt: ActionAttempt,
+        identity: RemoteRunIdentity,
+        observation: RemoteObservation,
+        inventory: RemoteOutputInventory,
+        *,
+        outcome: Literal["failed", "cancelled", "force_stopped"],
+    ) -> SealedActionResult:
+        """Build failure/cancellation metadata without copying its raw evidence."""
+
+        if observation.state.value != "failed" or observation.exit_code in {0, None}:
+            raise ValueError("remote terminal evidence requires a proven failing exit code")
+        required = {"training.log", "exit_code", "launch_manifest.json"}
+        if not required.issubset(item.path for item in inventory.files):
+            raise ValueError("remote terminal evidence is incomplete")
+        return self._inventory_manifest(
+            attempt,
+            identity,
+            observation,
+            inventory,
+            outcome=outcome,
+        )
+
+    def _inventory_manifest(
+        self,
+        attempt: ActionAttempt,
+        identity: RemoteRunIdentity,
+        observation: RemoteObservation,
+        inventory: RemoteOutputInventory,
+        *,
+        outcome: Literal["completed", "failed", "cancelled", "force_stopped"],
+    ) -> SealedActionResult:
+        if (
+            inventory.compute_profile_id != identity.compute_profile_id
+            or inventory.run_id != identity.run_id
+        ):
+            raise ValueError("remote output inventory identity mismatch")
+        outputs = tuple(
+            ArtifactOutput(
+                path=item.path,
+                sha256=item.sha256,
+                size_bytes=item.size_bytes,
+                schema_name=self._schema_for_relative(item.path),
+            )
+            for item in inventory.files
+        )
+        elapsed_seconds = max(0.0, (observation.observed_at - identity.launched_at).total_seconds())
+        return SealedActionResult(
+            workspace_id=attempt.workspace_id,
+            campaign_id=attempt.campaign_id,
+            study_id=attempt.study_id,
+            action_id=attempt.action_id,
+            attempt_id=attempt.attempt_id,
+            manifest_revision=attempt.manifest_revision,
+            candidate_digest=attempt.candidate_digest,
+            input_digest=attempt.input_digest,
+            claim_generation=attempt.claim_generation,
+            executor_id=self.executor_id,
+            executor_version=self.executor_version,
+            compute_profile_id=identity.compute_profile_id,
+            remote_process_identity=identity.model_dump(mode="json"),
+            started_at=identity.launched_at,
+            ended_at=observation.observed_at,
+            outcome=outcome,
+            exit_code=observation.exit_code,
+            exit_reason=observation.safe_reason,
+            resource_usage=(
+                ResourceUsage(
+                    unit="wall_clock_seconds",
+                    amount=elapsed_seconds,
+                    source="remote_supervisor",
+                    confidence="measured",
+                ),
+            ),
+            log_reference=("training.log" if outcome != "completed" else None),
+            outputs=outputs,
+        )
 
     def seal_completed(
         self,
@@ -359,9 +471,65 @@ class RemoteOutputSealer:
         self.sealer.seal(temporary, sealed, manifest)
         return sealed, manifest
 
+    def unlaunched_cancelled_manifest(
+        self,
+        attempt: ActionAttempt,
+        *,
+        compute_profile_id: str,
+    ) -> SealedActionResult:
+        """Represent a pre-launch cancellation as authenticated controller state only."""
+
+        observed_at = utc_now()
+        payload = json.dumps(
+            {
+                "schema_version": "campaign_unlaunched_cancellation.v1",
+                "attempt_id": attempt.attempt_id,
+                "reason": "campaign_cancelled_before_remote_launch",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return SealedActionResult(
+            workspace_id=attempt.workspace_id,
+            campaign_id=attempt.campaign_id,
+            study_id=attempt.study_id,
+            action_id=attempt.action_id,
+            attempt_id=attempt.attempt_id,
+            manifest_revision=attempt.manifest_revision,
+            candidate_digest=attempt.candidate_digest,
+            input_digest=attempt.input_digest,
+            claim_generation=attempt.claim_generation,
+            executor_id=self.executor_id,
+            executor_version=self.executor_version,
+            compute_profile_id=compute_profile_id,
+            remote_process_identity={"kind": "unlaunched"},
+            started_at=observed_at,
+            ended_at=observed_at,
+            outcome="cancelled",
+            exit_reason="campaign_cancelled_before_remote_launch",
+            outputs=(
+                ArtifactOutput(
+                    path="cancellation.json",
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    size_bytes=len(payload),
+                    schema_name="campaign_unlaunched_cancellation.v1",
+                ),
+            ),
+        )
+
     @staticmethod
     def _schema_for(path: Path, root: Path) -> str:
         relative = path.relative_to(root).as_posix()
+        return RemoteOutputSealer._schema_for_relative(relative)
+
+    @staticmethod
+    def _schema_for_relative(relative: str) -> str:
+        if relative == AUTORESEARCH_DATASET_RECEIPT_FILENAME:
+            return AUTORESEARCH_DATASET_RECEIPT_SCHEMA
+        if relative.startswith("dataset/"):
+            return AUTORESEARCH_DATASET_FILE_SCHEMA
+        if relative == AUTORESEARCH_EVALUATION_FILENAME:
+            return AUTORESEARCH_EVALUATION_SCHEMA
         if relative == NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME:
             return NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
         if relative == "training_metrics.jsonl":

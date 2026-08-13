@@ -1,190 +1,170 @@
-# BashGym — Platform Overview
+# BashGym architecture
 
-BashGym is a self-improving agentic development gym. It captures your AI coding
-sessions, turns the successful ones into training data, fine-tunes specialist
-models on that data, and routes live inference between a frontier teacher model
-and your trained student — then feeds the new sessions back in. The result is a
-closed loop that gets cheaper and more capable the more you code.
+BashGym coordinates repeated model-training and evaluation experiments through
+an existing coding agent. The agent analyzes results and chooses the next
+scientific intervention. BashGym executes the registered stages, preserves the
+experiment record, compares candidates, and returns the next action.
 
-This document explains what the platform is, how the pieces fit, and the design
-decisions behind them. For step-by-step setup see [GETTING_STARTED.md](GETTING_STARTED.md);
-for the training stack in depth see [TRAINING_SETUP.md](TRAINING_SETUP.md).
-
----
-
-## The core idea
-
-Every coding session an AI agent runs is latent training data. The agent reads
-files, runs commands, edits code, and either succeeds (tests pass, the task is
-done) or fails. That trajectory — the reasoning, the tool calls, the outcome — is
-exactly the supervision signal you need to train a model to do the same work.
-
-Most of that signal is thrown away. BashGym keeps it. It ingests the trace
-backlog already sitting in your agent histories (`~/.claude/projects/` for Claude
-Code, plus Codex, Gemini, and Copilot stores), classifies each session by
-quality, synthesizes clean training examples from the good ones, fine-tunes a
-small open-weight model, and deploys it as a "student" that handles the work it
-has learned — falling back to the teacher when it is unsure.
-
-You do not start from zero. The first action is `import`, not "install hooks":
-the platform reads your existing history so the flywheel starts with data on day
-one. Hooks are for capturing *future* sessions, not a prerequisite.
-
----
-
-## The Ouroboros flywheel
-
-```
-        ┌──────────┐     ┌──────────┐     ┌────────────┐     ┌──────────┐
-        │   ACT    │────▶│  VERIFY  │────▶│ SYNTHESIZE │────▶│  TRAIN   │
-        │ (Arena)  │     │ (Judge)  │     │ (Factory)  │     │  (Gym)   │
-        └──────────┘     └──────────┘     └────────────┘     └──────────┘
-             ▲                                                     │
-             │                                                     ▼
-             │                                              ┌────────────┐
-             └──────────────────── DEPLOY ◀─────────────────│  (Router)  │
-                                                            └────────────┘
+```mermaid
+flowchart LR
+    R["Researcher"] --> A["Codex, Cursor, Claude, or another agent"]
+    A --> T["BashGym research tools"]
+    T --> C["Campaign rules and experiment state"]
+    C --> W["Worker and stage scheduler"]
+    W --> X["Data, training, and evaluation programs"]
+    X --> E["Evaluation result and evidence projection"]
+    E --> D["Keep, discard, repeat, or stop"]
+    D --> A
+    C --> V["Canvas and AutoResearch view"]
+    E --> V
 ```
 
-| Stage | Layer | What happens |
-|-------|-------|--------------|
-| **ACT** | Arena | An agent runs a task — live in your editor (captured via hooks) or in an isolated Docker sandbox driven by the Claude CLI. |
-| **VERIFY** | Judge | Tests run (pytest / bats / `verify.sh`), exit codes and pass rates are recorded, and an LLM-as-judge scores quality across multiple dimensions. |
-| **SYNTHESIZE** | Factory | Verified sessions become structured training examples (tool-call messages with `<thinking>`/`<plan>`/`<reflection>` tags), optionally augmented with synthetic data. |
-| **TRAIN** | Gym | SFT / DPO / GRPO / distillation / Cascade RL fine-tune an open-weight base model, locally or on a remote training host. |
-| **DEPLOY** | Router | The trained student is served (GGUF → Ollama) and the router sends inference to it, falling back to the teacher (Claude) on low confidence. |
+The Canvas and AutoResearch view display the experiment. They are not a second
+experiment engine and they do not choose hypotheses.
 
-Each turn of the loop improves the student, which lets the router send it more
-traffic, which lowers cost — while the new sessions it produces become the next
-round of training data.
+## One iteration
 
----
+1. The agent reads the objective, fixed evaluation, current reference model,
+   previous candidates, failure evidence, budget, and stop rules.
+2. If no baseline exists, the agent submits the starting model for the fixed
+   evaluation.
+3. The agent groups failures and chooses one supported change to the dataset,
+   training recipe, reward, evaluator, or training code.
+4. BashGym validates the proposal against the current reference and schedules
+   the required stages.
+5. The registered programs build data when requested, train the candidate, and
+   evaluate it on the same held-out tasks.
+6. BashGym verifies the result lineage, records the configured primary metric,
+   and compares the candidate with the current reference.
+7. The agent reads the comparison, regressions, and failure slices, then
+   proposes the next experiment or stops.
+8. BashGym exports the experiment history and report.
 
-## Architecture
+## Executable path
 
-The codebase is organized as a Python package (`bashgym/`) behind a FastAPI
-backend, with a React/Electron front end. The layers map directly to the flywheel.
+| Responsibility          | Code                                                                                                              | What it does                                                                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Agent tools             | `bashgym/mcp/campaign_server.py`, `bashgym/cli.py`                                                                | Exposes `research prepare`, `state`, `start`, `submit-iteration`, and `report`.                                                            |
+| HTTP boundary           | `bashgym/api/campaign_routes.py`                                                                                  | Creates, starts, reads, mutates, and exports campaigns.                                                                                    |
+| Experiment rules        | `bashgym/campaigns/autoresearch.py`                                                                               | Requires a baseline, binds a candidate to the current reference, limits the declared change, records keep/discard, and applies stop rules. |
+| Proposal checks         | `bashgym/campaigns/proposals.py`                                                                                  | Checks stage shape, registered runtimes, recipe contracts, and code-lineage requirements.                                                  |
+| Stage scheduling        | `bashgym/campaigns/runtime.py`                                                                                    | Produces an evaluation-only baseline or candidate data-build, training, and evaluation actions.                                            |
+| Worker                  | `bashgym/campaigns/worker.py`, `worker_service.py`                                                                | Leases work, schedules and runs stages, reconciles restarts, and completes actions.                                                        |
+| Stage adapter           | `bashgym/campaigns/remote.py`                                                                                     | Runs pinned programs in the registered training environment and retains large datasets, logs, checkpoints, and evaluation files there.     |
+| Result ingestion        | `bashgym/campaigns/autoresearch_evidence.py`                                                                      | Verifies model, dataset, evaluator, attempt, and artifact lineage and commits the normalized evaluation result.                            |
+| Mechanical continuation | `bashgym/campaigns/autoresearch_loop.py`                                                                          | Ingests completed evaluations, retries mechanical failures, applies stop rules, or reports that agent judgment is required.                |
+| Agent projection        | `bashgym/campaigns/agent_brief.py`                                                                                | Projects the current objective, work, comparison, finding, next action, and resume identity.                                               |
+| Observation             | `frontend/src/components/training/AutoResearchControlRoom.tsx`, `frontend/src/components/canvas/CampaignNode.tsx` | Renders current work, history, evidence, and actions from the same campaign state.                                                         |
 
-| Layer | Package | Responsibility | Key files |
-|-------|---------|----------------|-----------|
-| **Arena** | `bashgym/arena/` | Docker sandbox lifecycle + Claude CLI agent runner with guardrails and PII filtering. | `sandbox.py`, `runner.py` |
-| **Judge** | `bashgym/judge/` | Test execution, LLM-as-judge scoring, benchmark harnesses, guardrails. | `verifier.py`, `evaluator.py`, `semantic_judge.py` |
-| **Factory** | `bashgym/factory/` | Trace → training-example synthesis, quality scoring, synthetic data generation, DPO-pair extraction. | `trace_processor.py`, `example_generator.py`, `data_factory.py`, `data_designer.py` |
-| **Gym** | `bashgym/gym/` | SFT/DPO/GRPO/distillation trainers, Cascade RL scheduler, compatibility search engines, teacher/student router. | `trainer.py`, `cascade_scheduler.py`, `autoresearch.py`, `router.py` |
-| **Campaigns** | `bashgym/campaigns/` | Durable AutoResearch control plane: registered bindings, bounded hypotheses, execution leases, evidence, human oversight, recovery, and decisions. | `control_room.py`, `worker.py`, `guided_setup.py`, `campaign_recovery.py` |
-| **Providers** | `bashgym/providers/` | Pluggable inference behind one interface — Anthropic (teacher), NVIDIA NIM and Ollama (student), with live model discovery. | `base.py`, `registry.py`, `anthropic.py`, `nim.py`, `ollama.py` |
-| **Trace capture** | `bashgym/trace_capture/` | Importers for Claude Code, Codex, Gemini, and Copilot histories; hook-based live capture. | `importers/claude_history.py` |
-| **Orchestrator (legacy)** | `bashgym/orchestrator/` | Retained compatibility code that is not wired into the current desktop product or AutoResearch authority path; candidate for removal after dependency audit. | `task_dag.py`, `dispatcher.py` |
-| **Pipeline** | `bashgym/pipeline/` | Watches agent history, imports/classifies new traces, and auto-triggers downstream stages on thresholds. | `orchestrator.py`, `threshold_monitor.py` |
+## Agent and BashGym responsibilities
 
-The backend exposes ~130 REST endpoints plus a WebSocket for live training-log
-and event streaming. The front end ships in two modes from one codebase: an
-Electron desktop app (native terminals, canvas workspace) and a browser web app.
+The host agent owns scientific judgment:
 
----
+- inspect failed tasks and traces;
+- form a hypothesis;
+- curate or generate a dataset revision;
+- choose one training, reward, evaluator, or code change;
+- interpret aggregate metrics and regressions;
+- decide whether another experiment is justified.
 
-## What makes the design hold up
+BashGym owns deterministic experiment mechanics:
 
-These are the parts a technical reader should look at closely.
+- model, dataset, evaluator, recipe, and source identities;
+- baseline and candidate relationships;
+- stage scheduling, retries, and restart recovery;
+- run, attempt, metric, evaluation, and artifact records;
+- candidate comparison and stopping rules;
+- state and report projection for the agent and UI.
 
-### Provider abstraction with live model discovery
-Inference is hidden behind one `InferenceProvider` interface (`generate`,
-`health_check`, `list_models`, `warm_up`). A `ProviderRegistry` maps each model
-to its provider and monitors health. Catalogs are **discovered live** from each
-provider's `/v1/models` endpoint at runtime, with a current static fallback, so
-the available-model list never silently rots to a retired model. Adding a new
-backend is implementing one class.
+`AutoResearchLoopCoordinator` intentionally does not invent the next
+hypothesis. It returns `agent_action_required`; Codex, Cursor, Claude, or another
+host agent uses its native goal, plan, tools, and subagents to do that work.
 
-### The AutoCurriculum Compiler
-Synthetic training data is generated with NVIDIA NeMo Data Designer — a column
-DAG of samplers, LLM text/structured columns, LLM-as-judge columns, and Jinja2
-expression columns. The novel part is the **SchemaResearcher**: an evolutionary
-search that treats a Data Designer pipeline config as a genome, mutates it
-(temperatures, judge thresholds, column topology), generates real training data
-from each candidate, and scores it — first by a fast judge-score filter, then by
-a 50-step micro-train that measures actual downstream loss. The system searches
-for data-generation recipes that produce measurably better models, instead of
-hand-tuning prompts.
+## Models, data, and training methods
 
-### Cascade RL with multi-objective distillation
-Rather than one monolithic fine-tune, the Cascade scheduler trains
-domain-specialist stages sequentially (file operations → bash → search →
-multi-step reasoning), chaining each stage's checkpoint into the next, then
-optionally distills the experts back into one unified student via multi-objective
-policy distillation. Domains can be tool-defined or auto-discovered per repository.
+AutoResearch is not tied to one model family or one dataset source. A campaign
+binds the exact model, dataset, evaluator, and installed stage programs selected
+for that experiment.
 
-### AutoResearch
-The official path is a durable, baseline-first campaign over explicitly
-registered model, data, evaluator, compute, and source bindings. It preserves
-bounded hypotheses, budgets, leases, sealed evidence, human decisions, and
-restart recovery in one authoritative Control Room projection. The earlier
-population-based hyperparameter, trace, and schema-search engines are hidden,
-unsupported compatibility code. Their `/api/autoresearch/*` routes are absent
-by default and register only when
-`BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`; they are not a durable campaign or
-Control Room capability. See
-[Durable AutoResearch Campaigns](training/autoresearch-campaign.md).
+Training data can come from:
 
-### Two-tier hardware, one workflow
-The trainer runs LoRA fine-tunes on a consumer GPU and full or larger fine-tunes
-on a remote unified-memory training host over SSH — streaming logs back to the
-same dashboard, with pause/resume/cancel via process signals. The user picks the
-backend; the workflow is identical.
+- researcher-provided datasets;
+- verified agent or tool-use traces;
+- preference pairs;
+- generated examples that pass validation and decontamination;
+- executable environments with deterministic verification.
 
-### Trace quality as a first-class signal
-Sessions are scored across multiple dimensions (success rate, verification,
-complexity, tool diversity, efficiency, length) and classified into gold / silver
-/ bronze / failed / pending tiers. Only high-quality trajectories become training
-data, and the same judge scores drive both the dataset filter and the
-SchemaResearcher's fitness function.
+The direct training system in `bashgym/gym/trainer.py` implements SFT, DPO,
+GRPO, RLVR, session distillation, and an offline teacher-output/SFT
+compatibility path. It does not yet wire teacher logits into a proven KL-loss
+distillation run. A durable campaign
+does not call that class directly. Its installed training entrypoint determines
+which methods are executable for that campaign. Method support must therefore
+be checked at the selected installation, not inferred from the existence of a
+trainer class elsewhere in the repository.
 
----
+The campaign evaluator keeps held-out data outside the training recipe. The
+same evaluation suite and metric definition are used for the baseline and each
+candidate so that the comparison remains meaningful.
 
-## Design decisions and trade-offs
+## Evaluation
 
-**Teacher/student split, not replacement.** The student never has to be as good
-as the teacher everywhere — only good enough on the work it has seen, with a
-confidence-gated fallback. This makes a small open-weight model useful long
-before it is "done," and it makes the cost curve bend down gradually rather than
-requiring a big-bang cutover.
+The campaign decision currently consumes the configured primary scalar metric
+from a completed, lineage-verified evaluation. BashGym also contains standalone
+evaluation code for holdouts, pass@k, bootstrap comparisons, reward-hacking
+canaries, spurious-reward analysis, and release gates. Those standalone checks
+are useful evidence, but they are not all wired into the campaign keep/discard
+decision yet.
 
-**Drive the backend, don't fork it.** Every workflow goes through the FastAPI
-backend, which owns the hard parts (training-subprocess lifecycle, registry init,
-WebSocket streaming, orphaned-process recovery). The UI and any future CLI are
-clients of that one contract, which keeps behavior consistent and avoids drift.
+For terminal or tool-using models, a useful comparison normally includes:
 
-**Verify before you train.** A trajectory is only training data if it passed
-verification. Exit-code-zero (or LLM-judged quality above threshold) is the gate;
-failed trajectories are kept separately for DPO negatives, not discarded.
+- held-out task success;
+- deterministic verifier pass rate;
+- valid tool-call rate;
+- recovery after failed actions;
+- pass@k when multiple attempts are sampled;
+- protected regressions and runtime or resource changes.
 
-**Start from the backlog.** Requiring hooks-first onboarding would mean every
-user starts with an empty gym. Ingesting existing agent history means the flywheel
-has thousands of sessions to work with immediately.
+See [strategy-guide.md](training/strategy-guide.md) for method selection and
+[metrics-runbook.md](training/metrics-runbook.md) for metric interpretation.
 
-**Trade-off accepted: classification cost.** LLM-as-judge quality scoring is an
-API call per trace, which makes bulk classification slow. The platform mitigates
-with fast heuristic pre-filters and tiered thresholds, but high-fidelity scoring
-is deliberately not free — quality of the training set is worth the spend.
+## Current implementation boundaries
 
----
+These are code boundaries, not roadmap labels:
 
-## Where the platform stands
+- The durable campaign executor is currently the registered SSH stage adapter.
+  The direct trainer and its separate SSH implementation are a different path.
+- There is no resident model that autonomously proposes scientific changes.
+  The host agent supplies that reasoning through the research tools.
+- `tests/campaigns/test_autoresearch_discovery_loop.py` proves the complete
+  scheduling, evaluation, comparison, repeat, stop, and report wiring with a
+  deterministic fake stage adapter. It is orchestration evidence, not evidence
+  that a real model improved.
+- The typed TMax recipe is an argument contract. It becomes real training only
+  when an installed runner consumes it. The NeMo RL runner currently rejects
+  the optional SFT composition.
+- Data Designer utilities can generate and validate candidate data, but the
+  legacy schema-search API is not the current AutoResearch data-build path.
+- DPPO launchers and several backend integrations produce plans or smoke
+  evidence; they are not interchangeable with an executed campaign training
+  stage.
 
-| Signal | Value |
-|--------|-------|
-| Gold traces available | ~3,140 |
-| Training strategies | 6 (SFT, DPO, GRPO, RLVR, Distillation, Cascade RL) |
-| Synthetic-data pipeline types | 5 (SFT, DPO, tool-use, external, unstructured) |
-| Inference providers | 3 (Anthropic, NVIDIA NIM, Ollama) behind one interface |
-| Cascade RL domains | 4 (file ops, bash, search, multi-step) |
-| Front-end views | 14 dashboards (one React codebase, desktop + web) |
-| Test coverage | Hundreds of tests across factory, gym, providers, and API layers |
+## Architecture cleanup priorities
 
----
+The code currently has duplicate execution and evaluation paths. The shortest
+way to simplify it is:
+
+1. Define one stage-job interface implemented by local, SSH, and hosted
+   adapters, then have both direct training and campaigns use it.
+2. Keep one small agent driver: read state, inspect evidence, submit one change,
+   wait, and repeat. Do not add a second planner inside BashGym.
+3. Feed the existing holdout, pass@k, uncertainty, contamination, and regression
+   results through one campaign evaluation decision contract.
 
 ## Read next
 
-- [GETTING_STARTED.md](GETTING_STARTED.md) — install to first trained model, step by step.
-- [TRAINING_SETUP.md](TRAINING_SETUP.md) — the training stack in technical depth (hardware tiers, strategies, the data factory, remote training).
-- [TRAINING_DATA_GUIDE.md](TRAINING_DATA_GUIDE.md) — trace format, quality tiers, and the example-generation pipeline.
-- [API.md](API.md) — REST API reference.
+- [GETTING_STARTED.md](GETTING_STARTED.md) — install and run a first experiment.
+- [TRAINING_DATA_GUIDE.md](TRAINING_DATA_GUIDE.md) — dataset formats, sources, and quality checks.
+- [strategy-guide.md](training/strategy-guide.md) — choose SFT, DPO, GRPO, RLVR, or distillation.
+- [autoresearch-campaign.md](training/autoresearch-campaign.md) — exact campaign commands and lifecycle.
+- [metrics-runbook.md](training/metrics-runbook.md) — inspect training and evaluation evidence.

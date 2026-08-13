@@ -217,7 +217,7 @@ function ControlRoomHeader(
   return (
     <header className="flex flex-col gap-3 border-b border-border-subtle pb-3 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
-        <h1 className="font-brand text-2xl text-text-primary">AutoResearch Control Room</h1>
+        <h1 className="font-brand text-2xl text-text-primary">AutoResearch</h1>
         <p className="mt-1 text-sm text-text-secondary">
           Run bounded experiments on registered private compute with durable evidence and human
           oversight.
@@ -318,11 +318,11 @@ function ControlRoomStateNotice({
     noCampaigns && model.kind === 'empty'
       ? 'No durable AutoResearch campaigns yet'
       : loading
-        ? 'Loading AutoResearch control room'
+        ? 'Loading AutoResearch'
         : offline
           ? 'AutoResearch service is offline'
           : error
-            ? 'AutoResearch control room unavailable'
+            ? 'AutoResearch unavailable'
             : model.kind === 'empty'
               ? 'Select a campaign'
               : 'No durable AutoResearch campaigns yet'
@@ -1437,12 +1437,12 @@ export function AutoResearchControlRoom() {
         } else if (response.code === 'campaign_desktop_bridge_required') {
           setRecoveryUnregistered(false)
           setRecoveryError(
-            "Recovery is read-only — the desktop connection isn't available. The rest of the Control Room still works."
+            "Recovery is read-only — the desktop connection isn't available. The experiment view still works."
           )
         } else {
           setRecoveryUnregistered(false)
           setRecoveryError(
-            `Recovery state couldn't be loaded${response.code ? ` (${response.code})` : ''}. The rest of the Control Room still works.`
+            `Recovery state couldn't be loaded${response.code ? ` (${response.code})` : ''}. The experiment view still works.`
           )
         }
         setRecoveryLoading(false)

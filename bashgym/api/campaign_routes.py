@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -15,6 +19,7 @@ from typing_extensions import Never
 
 from bashgym._compat import UTC
 from bashgym.api.websocket import manager as websocket_manager
+from bashgym.campaigns.agent_brief import build_agent_brief
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthenticationError, CampaignAuthService
 from bashgym.campaigns.autoresearch import (
@@ -30,6 +35,7 @@ from bashgym.campaigns.autoresearch import (
     builtin_autoresearch_template_definitions,
     load_autoresearch_template_definitions,
 )
+from bashgym.campaigns.autoresearch_loop import observe_research_wait
 from bashgym.campaigns.contracts import (
     ActorPrincipal,
     Campaign,
@@ -1519,30 +1525,12 @@ def get_control_room_snapshot(
     try:
         repository, _auth, _service = _services(request)
         principal = _principal(request)
-        principal.require(workspace_id, Capability.CAMPAIGN_READ)
-        durable = repository.read_control_room_projection(workspace_id, campaign_id)
-        controller_status = project_controller_status(repository, get_bashgym_dir())
-        controller = ControllerObservationV1(
-            controller_observation_version=controller_status.controller_observation_version,
-            state=controller_status.state,
-            observed_at=controller_status.observed_at,
-            heartbeat_age_seconds=controller_status.heartbeat_age_seconds,
-            lease_expires_at=controller_status.expires_at,
-            controller_instance_id=controller_status.owner_id,
-            safe_guidance=controller_status.guidance,
-        )
-        readiness, readiness_revision = _control_room_readiness(
-            request,
-            durable,
-            controller_status,
-            checked_at=utc_now(),
-        )
-        snapshot = build_control_room_snapshot(
-            durable,
-            controller,
-            readiness,
+        snapshot, readiness_revision = _build_control_room_snapshot(
+            request=request,
+            repository=repository,
             principal=principal,
-            snapshot_at=utc_now(),
+            workspace_id=workspace_id,
+            campaign_id=campaign_id,
         )
         etag = principal_control_room_etag(
             snapshot,
@@ -1556,6 +1544,231 @@ def get_control_room_snapshot(
             content=snapshot.model_dump_json(),
             media_type="application/json",
             headers=headers,
+        )
+    except Exception as exc:
+        _raise_api(exc)
+
+
+def _build_control_room_snapshot(
+    *,
+    request: Request,
+    repository: CampaignRuntimeRepository,
+    principal: ActorPrincipal,
+    workspace_id: str,
+    campaign_id: str,
+) -> tuple[CampaignControlRoomSnapshotV1, str]:
+    """Build the single authoritative visual projection used by every surface."""
+
+    principal.require(workspace_id, Capability.CAMPAIGN_READ)
+    durable = repository.read_control_room_projection(workspace_id, campaign_id)
+    controller_status = project_controller_status(repository, get_bashgym_dir())
+    controller = ControllerObservationV1(
+        controller_observation_version=controller_status.controller_observation_version,
+        state=controller_status.state,
+        observed_at=controller_status.observed_at,
+        heartbeat_age_seconds=controller_status.heartbeat_age_seconds,
+        lease_expires_at=controller_status.expires_at,
+        controller_instance_id=controller_status.owner_id,
+        safe_guidance=controller_status.guidance,
+    )
+    snapshot_at = utc_now()
+    readiness, readiness_revision = _control_room_readiness(
+        request,
+        durable,
+        controller_status,
+        checked_at=snapshot_at,
+    )
+    return (
+        build_control_room_snapshot(
+            durable,
+            controller,
+            readiness,
+            principal=principal,
+            snapshot_at=snapshot_at,
+        ),
+        readiness_revision,
+    )
+
+
+def _autoresearch_stop_conditions(spec) -> tuple[str, ...]:
+    rules = spec.stop_rules
+    conditions = [
+        f"At most {rules.max_attempts} experiment attempts",
+        f"At most {rules.max_total_cost:g} {rules.budget_unit}",
+    ]
+    if rules.deadline is not None:
+        conditions.append(f"Stop at {rules.deadline.isoformat()}")
+    if rules.target_metric is not None:
+        direction = "at least" if spec.metric_direction.value == "maximize" else "at most"
+        conditions.append(f"Stop when {spec.primary_metric} is {direction} {rules.target_metric:g}")
+    return tuple(conditions)
+
+
+def _research_state_payload(
+    *,
+    request: Request,
+    repository: CampaignRuntimeRepository,
+    principal: ActorPrincipal,
+    workspace_id: str,
+    campaign_id: str,
+) -> dict[str, Any]:
+    snapshot, _readiness_revision = _build_control_room_snapshot(
+        request=request,
+        repository=repository,
+        principal=principal,
+        workspace_id=workspace_id,
+        campaign_id=campaign_id,
+    )
+    core = _autoresearch_core(repository)
+    state = core.state(workspace_id, campaign_id)
+    spec = core.repository.get_autoresearch_spec(workspace_id, campaign_id)
+    control_room_url = f"{str(request.base_url).rstrip('/')}/?{urlencode({'view': 'training', 'tab': 'autoresearch', 'workspace_id': workspace_id, 'campaign_id': campaign_id})}"
+    control_room = {
+        "api_path": f"/api/campaigns/{campaign_id}/control-room-snapshot",
+        "url": control_room_url,
+        "view": "training",
+        "tab": "autoresearch",
+        "workspace_id": workspace_id,
+        "campaign_id": campaign_id,
+    }
+    brief = build_agent_brief(
+        snapshot,
+        control_room_url=control_room_url,
+        stop_conditions=_autoresearch_stop_conditions(spec),
+    )
+    goal = brief["goal"]
+    current_work = goal.get("current_work") if isinstance(goal, dict) else None
+    phase = current_work.get("phase") if isinstance(current_work, dict) else None
+    exports = repository.list_exports(workspace_id, campaign_id, limit=1)
+    return {
+        "schema_version": "bashgym.research.v1",
+        "workspace_id": workspace_id,
+        "campaign_id": campaign_id,
+        "summary": snapshot.campaign.objective,
+        "phase": phase,
+        "iteration": state.attempts_used,
+        "metric_comparison": {
+            "best_metric": state.best_metric,
+            "latest_decision": state.latest_decision.value if state.latest_decision else None,
+        },
+        "cost": {
+            "unit": spec.stop_rules.budget_unit,
+            "used": state.budget_used,
+            "remaining": state.budget_remaining,
+        },
+        "runtime": {
+            "campaign_status": state.campaign_status.value,
+            "active_work": (
+                snapshot.active_work.model_dump(mode="json")
+                if snapshot.active_work is not None
+                else None
+            ),
+        },
+        "next_action": state.next_action.value,
+        "reason_code": state.reason_code,
+        "report": exports[0] if exports else None,
+        "control_room": control_room,
+        "goal": goal,
+        "markdown": brief["markdown"],
+        "autoresearch": state.model_dump(mode="json"),
+    }
+
+
+def _private_json_response(payload: Mapping[str, Any]) -> Response:
+    return Response(
+        content=json.dumps(payload, sort_keys=True, separators=(",", ":")),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store", "Vary": "Authorization"},
+    )
+
+
+@campaign_router.get("/{campaign_id}/research-state")
+def get_research_state(
+    campaign_id: str,
+    request: Request,
+    workspace_id: str = Query(..., min_length=1, max_length=160),
+):
+    """Return one compact experiment state for native agent goals and visuals."""
+
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        return _private_json_response(
+            _research_state_payload(
+                request=request,
+                repository=repository,
+                principal=principal,
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+            )
+        )
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.get("/{campaign_id}/research-wait")
+async def wait_for_research_state(
+    campaign_id: str,
+    request: Request,
+    workspace_id: str = Query(..., min_length=1, max_length=160),
+    after_cursor: int = Query(default=0, ge=0),
+    timeout_seconds: int = Query(default=30, ge=1, le=55),
+):
+    """Wait briefly for durable research progress, then return canonical agent state."""
+
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        principal.require(workspace_id, Capability.CAMPAIGN_READ)
+        core = _autoresearch_core(repository)
+        deadline = monotonic() + timeout_seconds
+        observation = await asyncio.to_thread(
+            observe_research_wait,
+            core.repository,
+            core,
+            workspace_id=workspace_id,
+            campaign_id=campaign_id,
+            after_cursor=after_cursor,
+        )
+        while observation.status == "waiting":
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(0.25, remaining))
+            observation = await asyncio.to_thread(
+                observe_research_wait,
+                core.repository,
+                core,
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                after_cursor=after_cursor,
+            )
+
+        # Re-read after the wake boundary so the returned state and watermark are
+        # canonical even when several mutations land during one poll interval.
+        observation = await asyncio.to_thread(
+            observe_research_wait,
+            core.repository,
+            core,
+            workspace_id=workspace_id,
+            campaign_id=campaign_id,
+            after_cursor=after_cursor,
+        )
+        status = "timeout" if observation.status == "waiting" else observation.status
+        return _private_json_response(
+            {
+                "schema_version": "bashgym.research_wait.v1",
+                "status": status,
+                "after_cursor": after_cursor,
+                "next_cursor": observation.next_cursor,
+                "research": _research_state_payload(
+                    request=request,
+                    repository=repository,
+                    principal=principal,
+                    workspace_id=workspace_id,
+                    campaign_id=campaign_id,
+                ),
+            }
         )
     except Exception as exc:
         _raise_api(exc)

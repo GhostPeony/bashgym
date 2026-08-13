@@ -76,3 +76,13 @@ def test_reward_example_file_validation_reads_jsonl(tmp_path):
 
     assert result["ok"] is True
     assert result["path"] == str(path)
+
+
+def test_reward_example_file_validation_reads_json_container(tmp_path):
+    path = tmp_path / "reward_examples.json"
+    path.write_text(json.dumps({"examples": [_strict_reward_record()]}), encoding="utf-8")
+
+    result = validate_reward_examples_file(path, strict=True)
+
+    assert result["ok"] is True
+    assert result["total_records"] == 1

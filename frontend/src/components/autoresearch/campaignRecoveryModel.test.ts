@@ -283,12 +283,12 @@ test('rejects credential, key, path, URI, and personal-device signatures in the 
     'ssh-private-key',
     'BEGIN PRIVATE KEY',
     'client-secret',
-    'C:\\Users\\Cade\\models',
-    '/Users/cade/models',
+    'C:\\Users\\Operator\\models',
+    '/Users/operator/models',
     'ssh://private-host',
     'file:///private/model',
-    'cades-macbook',
-    'Cade MacBook Pro',
+    'operator-laptop',
+    'Researcher laptop',
     'dev-laptop',
     'home-workstation',
     'localhost'
@@ -311,8 +311,8 @@ test('rejects embedded credential tokens and collapsed personal-device names in 
     'Model AKIAIOSFODNN7EXAMPLE',
     'Qwen xoxb-0123456789-secret',
     'Model AIza0123456789abcdefghijklmnop',
-    'CadesMacBookPro',
-    'CadesLaptop',
+    'OperatorLaptopPro',
+    'ResearcherLaptop',
     'HomeWorkstation'
   ]
   for (const label of adversarialLabels) {
@@ -418,8 +418,8 @@ test('rejects additive secret/path fields and unprefixed values in opaque recove
     for (const canary of [
       'ghp_0123456789secret',
       'ssh://private-host',
-      'C:\\Users\\Cade\\.ssh',
-      'cades-macbook'
+      'C:\\Users\\Operator\\.ssh',
+      'operator-laptop'
     ]) {
       const copy = structuredClone(value)
       set(copy, canary)
@@ -510,7 +510,7 @@ test('rejects credential and personal-hardware suffix bypasses for every opaque 
       ]
     ]
   for (const [field, prefix, set] of setters) {
-    for (const suffix of ['ghp_0123456789secret', 'cades-macbook', 'AKIAIOSFODNN7EXAMPLE']) {
+    for (const suffix of ['ghp_0123456789secret', 'operator-laptop', 'AKIAIOSFODNN7EXAMPLE']) {
       const copy = structuredClone(recovery())
       set(copy, `${prefix}${suffix}`)
       assert.equal(parseCampaignRecovery(copy), null, `${field} accepted ${prefix}${suffix}`)

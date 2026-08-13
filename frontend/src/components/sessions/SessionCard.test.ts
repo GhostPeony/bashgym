@@ -9,7 +9,7 @@ import { SessionCard } from './SessionCard'
 const session: TerminalSession = {
   id: 'terminal-1',
   title: 'Codex',
-  cwd: 'F:\\File location\\repos\\ghostwork',
+  cwd: 'X:\\fixtures\\repos\\sample-project',
   isActive: true,
   attention: 'none',
   showBanner: false,
@@ -30,8 +30,8 @@ test('SessionCard is frameless, bounded, and shows folder-only project identity'
 
   assert.match(markup, /w-full min-w-0 overflow-hidden/)
   assert.doesNotMatch(markup, /class="card(?:\s|")/)
-  assert.match(markup, />ghostwork</)
-  assert.doesNotMatch(markup, /File location/)
+  assert.match(markup, />sample-project</)
+  assert.doesNotMatch(markup, /fixtures/)
   assert.match(markup, /OpenAI Codex/)
 })
 

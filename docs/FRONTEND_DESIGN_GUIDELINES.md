@@ -16,22 +16,22 @@ Reference for maintaining visual and interaction consistency across the bashgym 
 
 The app uses CSS custom properties (defined in `frontend/src/index.css` or Tailwind config) with a dark-first palette. Reference these via Tailwind classes:
 
-| Token | Class | Usage |
-|---|---|---|
-| `--background` | `bg-background` | Page background |
-| `--background-card` | `bg-background-card` | Card/panel surfaces |
-| `--background-secondary` | `bg-background-secondary` | Hover states, subtle fills |
-| `--text-primary` | `text-text-primary` | Primary text |
-| `--text-secondary` | `text-text-secondary` | Secondary/label text |
-| `--text-muted` | `text-text-muted` | Hints, timestamps, metadata |
-| `--accent` | `text-accent`, `bg-accent` | Primary action color |
-| `--accent-dark` | `border-accent-dark` | Active tab borders |
-| `--accent-light` | `bg-accent-light` | Active tab background tint |
-| `--border` | `border-border` | Standard borders |
-| `--border-subtle` | `border-border-subtle` | Subtle/inner borders |
-| `--status-success` | `text-status-success` | Success states |
-| `--status-error` | `text-status-error` | Error states |
-| `--status-warning` | `text-status-warning` | Warning states |
+| Token                    | Class                      | Usage                       |
+| ------------------------ | -------------------------- | --------------------------- |
+| `--background`           | `bg-background`            | Page background             |
+| `--background-card`      | `bg-background-card`       | Card/panel surfaces         |
+| `--background-secondary` | `bg-background-secondary`  | Hover states, subtle fills  |
+| `--text-primary`         | `text-text-primary`        | Primary text                |
+| `--text-secondary`       | `text-text-secondary`      | Secondary/label text        |
+| `--text-muted`           | `text-text-muted`          | Hints, timestamps, metadata |
+| `--accent`               | `text-accent`, `bg-accent` | Primary action color        |
+| `--accent-dark`          | `border-accent-dark`       | Active tab borders          |
+| `--accent-light`         | `bg-accent-light`          | Active tab background tint  |
+| `--border`               | `border-border`            | Standard borders            |
+| `--border-subtle`        | `border-border-subtle`     | Subtle/inner borders        |
+| `--status-success`       | `text-status-success`      | Success states              |
+| `--status-error`         | `text-status-error`        | Error states                |
+| `--status-warning`       | `text-status-warning`      | Warning states              |
 
 ## Component Patterns
 
@@ -45,12 +45,12 @@ The app uses CSS custom properties (defined in `frontend/src/index.css` or Tailw
 
 ### Buttons
 
-| Variant | Class | When to use |
-|---|---|---|
-| Primary | `btn-primary` | Main actions (Create, Upload, Start) |
-| Ghost | `btn-ghost` | Secondary actions (Disconnect, Cancel) |
-| Icon | `btn-icon` | Toolbar icons (Refresh, Settings) |
-| Destructive | `btn-ghost text-status-error` | Delete, Disconnect |
+| Variant     | Class                         | When to use                            |
+| ----------- | ----------------------------- | -------------------------------------- |
+| Primary     | `btn-primary`                 | Main actions (Create, Upload, Start)   |
+| Ghost       | `btn-ghost`                   | Secondary actions (Disconnect, Cancel) |
+| Icon        | `btn-icon`                    | Toolbar icons (Refresh, Settings)      |
+| Destructive | `btn-ghost text-status-error` | Delete, Disconnect                     |
 
 ### Form inputs
 
@@ -81,13 +81,17 @@ The app uses CSS custom properties (defined in `frontend/src/index.css` or Tailw
 ### Error/success banners
 
 ```tsx
-{/* Error */}
-<div className="p-3 border-2 border-status-error rounded-brutal text-sm text-status-error">
+{
+  /* Error */
+}
+;<div className="p-3 border-2 border-status-error rounded-brutal text-sm text-status-error">
   {error}
 </div>
 
-{/* Success */}
-<div className="p-3 border-2 border-status-success rounded-brutal text-sm text-status-success">
+{
+  /* Success */
+}
+;<div className="p-3 border-2 border-status-success rounded-brutal text-sm text-status-success">
   {message}
 </div>
 ```
@@ -152,7 +156,10 @@ Use the existing `<Modal>` component from `components/common/Modal.tsx`, or for 
 
 ```tsx
 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-  <div className="bg-background-card border-2 border-border rounded-brutal p-6 w-full max-w-lg shadow-brutal" onClick={e => e.stopPropagation()}>
+  <div
+    className="bg-background-card border-2 border-border rounded-brutal p-6 w-full max-w-lg shadow-brutal"
+    onClick={(e) => e.stopPropagation()}
+  >
     {/* content */}
   </div>
 </div>
@@ -200,6 +207,7 @@ import { Server, Database, Loader2 } from 'lucide-react'
 ```
 
 Standard sizes:
+
 - `w-3 h-3` — inline with text
 - `w-4 h-4` — buttons, tabs, list items
 - `w-5 h-5` — section headers

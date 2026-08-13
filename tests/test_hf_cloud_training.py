@@ -280,40 +280,27 @@ class TestAdaptForCloud:
 
 
 class TestHardwareSpecs:
-    """Tests for HARDWARE_SPECS pricing data."""
+    """Tests for provider-derived hardware IDs without embedded price claims."""
 
-    def test_hardware_specs_has_gpu_tiers(self):
-        gpu_tiers = [k for k, v in HARDWARE_SPECS.items() if v.get("gpu")]
-        assert len(gpu_tiers) >= 4
+    def test_hardware_specs_come_from_installed_provider_sdk(self):
+        from bashgym.integrations.huggingface.jobs import detect_hf_jobs_availability
 
-    def test_all_gpu_tiers_have_cost(self):
-        for tier_id, specs in HARDWARE_SPECS.items():
-            if specs.get("gpu"):
-                assert "cost_per_hour" in specs, f"{tier_id} missing cost_per_hour"
-                assert specs["cost_per_hour"] > 0, f"{tier_id} has zero cost"
+        availability = detect_hf_jobs_availability()
+        assert set(HARDWARE_SPECS) == set(availability.hardware_flavors)
 
-    def test_all_gpu_tiers_have_vram(self):
-        for tier_id, specs in HARDWARE_SPECS.items():
-            if specs.get("gpu"):
-                assert "vram_gb" in specs, f"{tier_id} missing vram_gb"
-                assert specs["vram_gb"] > 0, f"{tier_id} has zero vram"
+    def test_hardware_specs_do_not_claim_provider_prices(self):
+        assert all(specs["cost_per_hour"] is None for specs in HARDWARE_SPECS.values())
 
-    def test_all_gpu_tiers_require_pro(self):
-        for tier_id, specs in HARDWARE_SPECS.items():
-            if specs.get("gpu"):
-                assert specs.get("pro_required", False), f"{tier_id} should require Pro"
+    def test_hardware_specs_are_labeled_with_their_source(self):
+        assert all(
+            specs["source"] == "huggingface_hub.SpaceHardware" for specs in HARDWARE_SPECS.values()
+        )
+
+    def test_jobs_access_requires_an_eligible_paid_plan(self):
+        assert all(specs["pro_required"] is True for specs in HARDWARE_SPECS.values())
 
     def test_known_tiers_exist(self):
         assert "t4-small" in HARDWARE_SPECS
         assert "a10g-small" in HARDWARE_SPECS
         assert "a10g-large" in HARDWARE_SPECS
         assert "a100-large" in HARDWARE_SPECS
-        assert "h100" in HARDWARE_SPECS
-
-    def test_cost_ordering(self):
-        """Higher-tier GPUs should cost more per hour."""
-        t4_cost = HARDWARE_SPECS["t4-small"]["cost_per_hour"]
-        a10g_cost = HARDWARE_SPECS["a10g-small"]["cost_per_hour"]
-        a100_cost = HARDWARE_SPECS["a100-large"]["cost_per_hour"]
-        h100_cost = HARDWARE_SPECS["h100"]["cost_per_hour"]
-        assert t4_cost < a10g_cost < a100_cost < h100_cost

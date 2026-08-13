@@ -35,6 +35,7 @@ from bashgym.campaigns.remote import (
     ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
+    RegisteredRemoteModelSource,
 )
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignControllerService, CampaignService
@@ -124,16 +125,24 @@ def approved_lineage_remote_profile(
         budget_reservation=0.25,
         code_lineage_binding=binding,
     )
+    target_model_digest = canonical_hash(campaign().target_model.model_dump(mode="json"))
     return ApprovedRemoteExecutorProfile(
         profile_id="memexai-approved-v1",
         profile_revision=1,
         compute_profile_id="ssh-gpu-lab",
         target_contract_key="memexai-embedding-v1",
-        target_model_digest=canonical_hash(campaign().target_model.model_dump(mode="json")),
+        target_model_digest=target_model_digest,
         host="192.0.2.10",
         username="trainer",
         key_path=str(key),
         stages=(stage,),
+        registered_base_model=RegisteredRemoteModelSource(
+            source_id="registered-base-v1",
+            compute_profile_id="ssh-gpu-lab",
+            target_contract_key="memexai-embedding-v1",
+            model_digest=target_model_digest,
+            remote_model_path="/models/registered-base-v1",
+        ),
     )
 
 
@@ -529,13 +538,27 @@ def test_captured_lineage_requires_then_uses_registered_executor_binding(
                 "schema_version": "recipe.v1",
                 "runtime": {"executor_kind": "registered_training"},
             },
-            "required_capabilities": frozenset({Capability.COMPUTE_TRAIN_WITHIN_BUDGET}),
+            "evaluation_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "required_capabilities": frozenset(
+                {
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
             "stage_plan": StagePlan(
                 items=(
                     StagePlanItem(
                         stage=StageKind.FULL_TRAINING,
                         disposition=StageDisposition.REQUIRED,
                         reason="Run the captured code hypothesis.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Compare the candidate on the fixed development suite.",
                     ),
                 )
             ),
@@ -637,13 +660,27 @@ def test_worker_materializes_captured_commit_into_remote_launch_request(
                 "schema_version": "recipe.v1",
                 "runtime": {"executor_kind": "registered_training"},
             },
-            "required_capabilities": frozenset({Capability.COMPUTE_TRAIN_WITHIN_BUDGET}),
+            "evaluation_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "required_capabilities": frozenset(
+                {
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
             "stage_plan": StagePlan(
                 items=(
                     StagePlanItem(
                         stage=StageKind.FULL_TRAINING,
                         disposition=StageDisposition.REQUIRED,
                         reason="Run the captured code hypothesis.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Compare the candidate on the fixed development suite.",
                     ),
                 )
             ),

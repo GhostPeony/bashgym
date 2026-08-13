@@ -28,10 +28,13 @@ _CONTROLLER_OWNED_OVERRIDES = frozenset(
     {
         "checkpointing.checkpoint_dir",
         "grpo.max_num_steps",
+        "grpo.num_generations_per_prompt",
         "logger.log_dir",
+        "policy.generation.temperature",
         "policy.model_name",
         "policy.optimizer.kwargs.lr",
         "policy.tokenizer.name",
+        "grpo.seed",
     }
 )
 

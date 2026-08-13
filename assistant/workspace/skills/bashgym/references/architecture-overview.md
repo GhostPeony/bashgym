@@ -1,6 +1,18 @@
 # BashGym Architecture Overview
 
-BashGym is a task-general ML workspace with specialized data, training, evaluation, model, artifact, research, runtime, campaign, agent, and reporting surfaces. Canvas nodes are views/tools over shared durable state; they are not separate orchestration systems.
+BashGym starts from one experiment cycle:
+
+1. evaluate the starting model on a fixed suite;
+2. inspect failures and choose one controlled change;
+3. prepare data, a training recipe, a reward, an evaluator, or approved code;
+4. train one candidate;
+5. evaluate it on the same suite and compare it with the current reference;
+6. keep or discard it, then iterate or report.
+
+The host agent makes the scientific decisions. BashGym's data, training,
+evaluation, runtime, campaign, and reporting modules execute and preserve the
+same experiment. Canvas nodes are views over that state, not a separate
+research system.
 
 ## Responsibility split
 

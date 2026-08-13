@@ -23,6 +23,7 @@ from bashgym.models import (
     get_eval_generator,
     get_registry,
 )
+from bashgym.models.deployment import deploy_gguf_to_ollama
 
 # Pydantic models for API
 
@@ -777,78 +778,6 @@ class DeployOllamaRequest(BaseModel):
 
     model_name: str | None = None  # Default: use display_name
     quantization: str = "q4_k_m"
-
-
-def deploy_gguf_to_ollama(
-    gguf_path: str,
-    model_name: str,
-    *,
-    base_ollama_tag: str | None = None,
-    template: str | None = None,
-    stop_tokens: tuple[str, ...] = (),
-    system: str | None = "You are a helpful coding assistant trained with Bash Gym.",
-) -> dict[str, Any]:
-    """Deploy a GGUF file to Ollama with a CORRECT Modelfile template.
-
-    When ``base_ollama_tag`` is given, reuses that base model's known-good Ollama
-    TEMPLATE (via ``ollama show``) so served chat/tool-call formatting matches
-    training — fixing the #1 deploy bug where a template-less Modelfile makes Ollama
-    infer a wrong Go template (double-BOS, broken Gemma 4 tool calls).
-
-    Standalone function usable from both the API endpoint and the trainer auto-deploy.
-    """
-    import logging
-    import subprocess
-    import tempfile
-
-    from bashgym.export.gguf import ModelfileSpec, build_modelfile, template_from_ollama_base
-
-    _log = logging.getLogger(__name__)
-    gguf_file = Path(gguf_path)
-    if not gguf_file.exists():
-        return {"success": False, "error": f"GGUF file not found: {gguf_path}"}
-
-    resolved_template = template or ""
-    resolved_stops = tuple(stop_tokens)
-    if base_ollama_tag and not resolved_template:
-        try:
-            resolved_template, base_stops = template_from_ollama_base(base_ollama_tag)
-            resolved_stops = resolved_stops or base_stops
-        except Exception as exc:  # degrade to template-less deploy rather than fail
-            _log.warning("Could not reuse base template from %s: %s", base_ollama_tag, exc)
-
-    modelfile_content = build_modelfile(
-        ModelfileSpec(
-            from_path=gguf_path,
-            template=resolved_template,
-            system=system,
-            stop_tokens=resolved_stops,
-            parameters={"temperature": 0.7, "num_ctx": 8192},
-        )
-    )
-
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".modelfile", delete=False) as f:
-            f.write(modelfile_content)
-            modelfile_path = f.name
-
-        result = subprocess.run(
-            ["ollama", "create", model_name, "-f", modelfile_path],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        Path(modelfile_path).unlink(missing_ok=True)
-
-        if result.returncode != 0:
-            return {"success": False, "error": f"Ollama create failed: {result.stderr}"}
-        return {"success": True, "model_name": model_name}
-    except FileNotFoundError:
-        return {"success": False, "error": "Ollama not installed"}
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": "Ollama create timed out"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
 
 
 @router.post("/{model_id}/deploy-ollama")

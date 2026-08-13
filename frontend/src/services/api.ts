@@ -4291,30 +4291,16 @@ export interface HFJob {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   hardware: string
   created_at: string
+  namespace?: string
   logs_url?: string
   error_message?: string
   metrics?: Record<string, number>
 }
 
-export interface HFJobSubmitRequest {
-  dataset_repo: string
-  output_repo: string
-  hardware?: string
-  base_model?: string
-  num_epochs?: number
-  learning_rate?: number
-  strategy?: 'sft' | 'dpo' | 'distillation' | 'session_distillation'
-  batch_size?: number
-  lora_r?: number
-  lora_alpha?: number
-  max_seq_length?: number
-}
-
 export interface HFHardwareTier {
   id: string
-  gpu: string | null
-  vram_gb: number
-  cost_per_hour: number
+  provider_value: string
+  source: string
 }
 
 export interface HFSpace {
@@ -4652,25 +4638,27 @@ export const hfApi = {
     }),
 
   // Jobs
-  listJobs: () => request<HFJob[]>('/hf/jobs'),
+  listJobs: (namespace?: string) => {
+    const params = new URLSearchParams({ jobs_access_confirmed: 'true' })
+    if (namespace) params.set('namespace', namespace)
+    return request<HFJob[]>(`/hf/jobs?${params.toString()}`)
+  },
 
   getHardware: () => request<HFHardwareTier[]>('/hf/jobs/hardware'),
 
-  submitJob: (req: HFJobSubmitRequest) =>
-    request<HFJob>('/hf/jobs', {
-      method: 'POST',
-      body: JSON.stringify(req)
-    }),
+  getJob: (jobId: string, namespace?: string) => {
+    const params = new URLSearchParams({ jobs_access_confirmed: 'true' })
+    if (namespace) params.set('namespace', namespace)
+    return request<HFJob>(`/hf/jobs/${encodeURIComponent(jobId)}?${params.toString()}`)
+  },
 
-  getJob: (jobId: string) => request<HFJob>(`/hf/jobs/${encodeURIComponent(jobId)}`),
-
-  getJobLogs: (jobId: string) =>
-    request<{ logs: string }>(`/hf/jobs/${encodeURIComponent(jobId)}/logs`),
-
-  cancelJob: (jobId: string) =>
-    request<{ status: string; job_id: string }>(`/hf/jobs/${encodeURIComponent(jobId)}`, {
-      method: 'DELETE'
-    }),
+  getJobLogs: (jobId: string, namespace?: string) => {
+    const params = new URLSearchParams({ jobs_access_confirmed: 'true' })
+    if (namespace) params.set('namespace', namespace)
+    return request<{ logs: string }>(
+      `/hf/jobs/${encodeURIComponent(jobId)}/logs?${params.toString()}`
+    )
+  },
 
   // Spaces
   listSpaces: () => request<HFSpace[]>('/hf/spaces'),

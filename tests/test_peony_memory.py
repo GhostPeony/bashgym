@@ -24,9 +24,9 @@ class TestProfile:
 
     def test_update_profile_field(self, memory_dir):
         mem = PeonyMemory(memory_dir)
-        mem.update_profile("hf_username", "cadebrown")
+        mem.update_profile("hf_username", "sample-researcher")
         profile = mem.load_profile()
-        assert profile["hf_username"] == "cadebrown"
+        assert profile["hf_username"] == "sample-researcher"
 
     def test_update_profile_persists_to_disk(self, memory_dir):
         mem = PeonyMemory(memory_dir)
@@ -150,10 +150,10 @@ class TestMemoryPrompt:
 
     def test_build_memory_prompt_with_data(self, memory_dir):
         mem = PeonyMemory(memory_dir)
-        mem.update_profile("hf_username", "cadebrown")
+        mem.update_profile("hf_username", "sample-researcher")
         mem.remember_fact("project", "Building a code assistant")
         mem.save_episode("s1", "Imported traces and started training.")
         prompt = mem.build_memory_prompt()
-        assert "cadebrown" in prompt
+        assert "sample-researcher" in prompt
         assert "Building a code assistant" in prompt
         assert "Imported traces and started training." in prompt

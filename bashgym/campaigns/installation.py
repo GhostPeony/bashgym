@@ -29,7 +29,11 @@ from bashgym.campaigns.contracts import (
 from bashgym.campaigns.readiness import has_immutable_model_revision
 
 _MAX_INSTALLATION_TEMPLATE_BYTES = 64 * 1024
-_REQUIRED_TRAINING_STAGES = (StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING)
+_REQUIRED_TRAINING_STAGES = (StageKind.FULL_TRAINING,)
+_REQUIRED_COMPUTE_STAGES = (
+    StageKind.DEVELOPMENT_EVALUATION,
+    StageKind.FULL_TRAINING,
+)
 
 
 class AutoResearchInstallationError(ValueError):
@@ -93,6 +97,7 @@ def build_quality_autoresearch_definition(
     target_metric: float | None = None,
     deadline: datetime | None = None,
     retention_days_failed: int = 90,
+    include_data_build: bool = False,
 ) -> AutoResearchTemplateDefinition:
     """Build a quality template only from explicit installation-owned bindings.
 
@@ -124,6 +129,11 @@ def build_quality_autoresearch_definition(
         require_sealed_artifact=True,
         quality_claim_eligible=True,
     )
+    required_compute_stages = (
+        (StageKind.DATA_BUILD, *_REQUIRED_COMPUTE_STAGES)
+        if include_data_build
+        else _REQUIRED_COMPUTE_STAGES
+    )
     return AutoResearchTemplateDefinition(
         template_id=template_id,
         objective=objective,
@@ -148,6 +158,7 @@ def build_quality_autoresearch_definition(
                 "primary_metric": primary_metric,
                 "metric_direction": direction.value,
                 "required_training_stages": [stage.value for stage in _REQUIRED_TRAINING_STAGES],
+                "required_compute_stages": [stage.value for stage in required_compute_stages],
             },
             promotion_gates={
                 "quality_claim_eligible": True,

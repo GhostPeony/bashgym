@@ -20,19 +20,11 @@ logger = logging.getLogger(__name__)
 # Try to import huggingface_hub
 try:
     from huggingface_hub import HfApi
-    from huggingface_hub.utils import (
-        GatedRepoError,
-        HfHubHTTPError,
-        RepositoryNotFoundError,
-    )
 
     HF_HUB_AVAILABLE = True
 except ImportError:
     HF_HUB_AVAILABLE = False
     HfApi = None
-    HfHubHTTPError = Exception
-    RepositoryNotFoundError = Exception
-    GatedRepoError = Exception
 
 
 # =============================================================================

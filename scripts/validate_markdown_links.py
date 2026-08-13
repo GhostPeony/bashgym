@@ -102,12 +102,16 @@ def validate_markdown_links(paths: list[Path]) -> list[str]:
 
 def _tracked_markdown_files() -> list[Path]:
     result = subprocess.run(
-        ["git", "ls-files", "-z", "--", "*.md"],
+        ["git", "ls-files", "-z"],
         cwd=ROOT,
         check=True,
         capture_output=True,
     )
-    return [ROOT / path for path in result.stdout.decode().split("\0") if path]
+    return [
+        ROOT / path
+        for path in result.stdout.decode().split("\0")
+        if path and Path(path).suffix.casefold() == ".md" and (ROOT / path).is_file()
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:

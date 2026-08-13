@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from io import StringIO
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from bashgym.campaigns import nemo_rl_runner
 from bashgym.campaigns.contracts import StageKind
+from bashgym.campaigns.metrics import parse_metric_lines
 from bashgym.campaigns.nemo_rl import (
     ApprovedNemoGymBinding,
     ApprovedNemoRLProfile,
@@ -17,14 +20,22 @@ from bashgym.campaigns.nemo_rl import (
     sha256_file,
 )
 from bashgym.campaigns.nemo_rl_installation import bind_nemo_rl_profile
-from bashgym.campaigns.nemo_rl_runner import ModelMount, docker_argv
+from bashgym.campaigns.nemo_rl_runner import (
+    DatasetMount,
+    ModelMount,
+    docker_argv,
+    resolve_dataset_mount,
+)
 from bashgym.campaigns.remote import (
     ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
+    RegisteredRemoteEvaluationDatasetSource,
+    RegisteredRemoteModelSource,
     RemoteCommandResult,
     RemoteTrainingAdapter,
 )
+from bashgym.campaigns.tmax_recipe import TMaxCompositeTrainingRecipe
 from bashgym.environments.nemo_gym import (
     create_nemo_gym_bundle_archive,
     export_star_count_nemo_gym_bundle,
@@ -199,6 +210,16 @@ def test_contract_rejects_mutable_image_and_controller_override(dataset: Path):
     with pytest.raises(ValidationError):
         NemoRLContainerContract.model_validate(payload)
 
+    for key in (
+        "grpo.num_generations_per_prompt",
+        "policy.generation.temperature",
+        "grpo.seed",
+    ):
+        payload = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING).model_dump()
+        payload["overrides"] = (f"{key}=1",)
+        with pytest.raises(ValidationError, match="controller-owned"):
+            NemoRLContainerContract.model_validate(payload)
+
 
 def test_docker_wrapper_uses_typed_bounded_argv(dataset: Path, tmp_path: Path):
     contract = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING)
@@ -218,6 +239,205 @@ def test_docker_wrapper_uses_typed_bounded_argv(dataset: Path, tmp_path: Path):
     assert contract.image_reference in argv
     assert argv[argv.index("uv") : argv.index("uv") + 3] == ("uv", "run", "--no-sync")
     assert all(";" not in value for value in argv)
+
+
+def test_tmax_recipe_drives_nemo_grpo_argv(dataset: Path, tmp_path: Path):
+    contract = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING)
+    recipe = TMaxCompositeTrainingRecipe(
+        algorithm="grpo",
+        sft_enabled=False,
+        learning_rate=3e-6,
+        max_steps=17,
+        group_size=6,
+        temperature=0.4,
+        seed=9,
+    )
+
+    argv = docker_argv(
+        contract,
+        run_directory=tmp_path,
+        model_mount=ModelMount(
+            host_directory=tmp_path / "model",
+            container_path="/bashgym/model-repo",
+        ),
+        container_name="bashgym-nemo-tmax-recipe",
+        experiment_recipe=recipe,
+    )
+
+    assert "policy.optimizer.kwargs.lr=3e-06" in argv
+    assert "grpo.max_num_steps=17" in argv
+    assert "grpo.num_generations_per_prompt=6" in argv
+    assert "policy.generation.temperature=0.4" in argv
+    assert "grpo.seed=9" in argv
+
+
+def test_nemo_runner_rejects_unimplemented_sft_composition(dataset: Path, tmp_path: Path):
+    del dataset, tmp_path
+    with pytest.raises(ValidationError, match="False"):
+        TMaxCompositeTrainingRecipe(sft_enabled=True)
+
+
+def test_nemo_metrics_use_campaign_wide_stream_shape():
+    stream = StringIO()
+    nemo_rl_runner._append_metric(stream, name="loss", value=1.25, step=3)
+    nemo_rl_runner._append_metric(stream, name="reward", value=0.75, step=3)
+
+    points = parse_metric_lines(tuple(stream.getvalue().splitlines()))
+
+    assert [point.step for point in points] == [3, 3]
+    assert [point.values for point in points] == [{"loss": 1.25}, {"reward": 0.75}]
+
+
+def test_worker_owned_resident_model_and_dataset_paths_reach_runner(
+    dataset: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    contract = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING)
+    model_dir = tmp_path / "registered-model"
+    dataset_dir = tmp_path / "generated-dataset"
+    observed = {}
+
+    def fake_run_contract(
+        received: NemoRLContainerContract,
+        run_directory: Path,
+        *,
+        model_directory: Path | None = None,
+        dataset_directory: Path | None = None,
+        experiment_recipe: TMaxCompositeTrainingRecipe | None = None,
+    ) -> int:
+        observed.update(
+            contract=received,
+            run_directory=run_directory,
+            model_directory=model_directory,
+            dataset_directory=dataset_directory,
+            experiment_recipe=experiment_recipe,
+        )
+        return 17
+
+    monkeypatch.setattr(nemo_rl_runner, "run_contract", fake_run_contract)
+
+    result = nemo_rl_runner.main(
+        (
+            "--model-dir",
+            str(model_dir),
+            "--dataset-dir",
+            str(dataset_dir),
+            "--contract-json",
+            contract.model_dump_json(),
+        )
+    )
+
+    assert result == 17
+    assert observed == {
+        "contract": contract,
+        "run_directory": Path.cwd(),
+        "model_directory": model_dir,
+        "dataset_directory": dataset_dir,
+        "experiment_recipe": None,
+    }
+
+
+def test_worker_tmax_recipe_arguments_reach_nemo_runner(
+    dataset: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    contract = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING)
+    observed = {}
+
+    def fake_run_contract(
+        received: NemoRLContainerContract,
+        run_directory: Path,
+        *,
+        model_directory: Path | None = None,
+        dataset_directory: Path | None = None,
+        experiment_recipe: TMaxCompositeTrainingRecipe | None = None,
+    ) -> int:
+        observed.update(
+            contract=received,
+            run_directory=run_directory,
+            experiment_recipe=experiment_recipe,
+        )
+        return 19
+
+    monkeypatch.setattr(nemo_rl_runner, "run_contract", fake_run_contract)
+    recipe = TMaxCompositeTrainingRecipe(
+        algorithm="grpo",
+        learning_rate=4e-6,
+        max_steps=23,
+        group_size=4,
+        temperature=0.6,
+        seed=11,
+    )
+
+    result = nemo_rl_runner.main(
+        ("--contract-json", contract.model_dump_json(), *recipe.script_args())
+    )
+
+    assert result == 19
+    assert observed["contract"] == contract
+    assert observed["run_directory"] == Path.cwd()
+    assert observed["experiment_recipe"] == recipe
+
+
+def test_resident_dataset_mount_uses_generated_train_rows_in_place(dataset: Path, tmp_path: Path):
+    contract = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING)
+    resident = tmp_path / "generated-dataset"
+    resident.mkdir()
+    train = resident / "train.jsonl"
+    validation = resident / "validation.jsonl"
+    train.write_text('{"prompt":"generated"}\n', encoding="utf-8")
+    validation.write_text('{"prompt":"validation"}\n', encoding="utf-8")
+
+    mount = resolve_dataset_mount(
+        contract,
+        run_directory=tmp_path / "attempt",
+        dataset_directory=resident,
+    )
+
+    assert mount.host_directory == resident.resolve()
+    assert mount.container_train_path == "/bashgym/dataset/train.jsonl"
+    assert mount.container_validation_path == "/bashgym/dataset/validation.jsonl"
+    assert mount.sha256 == sha256_file(train)
+    assert not (tmp_path / "attempt" / "train.jsonl").exists()
+
+
+def test_docker_wrapper_mounts_resident_dataset_read_only(dataset: Path, tmp_path: Path):
+    contract = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING)
+    resident = (tmp_path / "generated-dataset").resolve()
+    mount = DatasetMount(
+        host_directory=resident,
+        container_train_path="/bashgym/dataset/train.jsonl",
+        container_validation_path="/bashgym/dataset/validation.jsonl",
+        sha256="1" * 64,
+    )
+
+    argv = docker_argv(
+        contract,
+        run_directory=tmp_path,
+        model_mount=ModelMount(
+            host_directory=tmp_path / "model",
+            container_path="/bashgym/model-repo",
+        ),
+        dataset_mount=mount,
+        container_name="bashgym-nemo-resident-dataset",
+    )
+
+    assert f"type=bind,src={resident},dst=/bashgym/dataset,readonly" in argv
+    assert "data.train.data_path=/bashgym/dataset/train.jsonl" in argv
+    assert "data.validation.data_path=/bashgym/dataset/validation.jsonl" in argv
+
+
+def test_resident_training_paths_are_rejected_for_nemo_gym(dataset: Path, tmp_path: Path):
+    contract = _nemo_profile(dataset, nemo_gym=_nemo_gym_binding(tmp_path)).container_contract(
+        StageKind.FULL_TRAINING
+    )
+    resident = tmp_path / "generated"
+    resident.mkdir()
+
+    with pytest.raises(RuntimeError, match="nemo_gym_resident_dataset_override_unsupported"):
+        resolve_dataset_mount(
+            contract,
+            run_directory=tmp_path / "attempt",
+            dataset_directory=resident,
+        )
 
 
 def test_nemo_gym_profile_uses_exact_entrypoint_bundle_and_rollout_settings(
@@ -290,6 +510,43 @@ def test_binding_reuses_registered_executor_lifecycle(dataset: Path, tmp_path: P
         assert stage.code_lineage_binding.entrypoint_path == "bashgym/campaigns/nemo_rl_runner.py"
         parsed = NemoRLContainerContract.model_validate_json(stage.script_args[1])
         assert parsed.stage == stage.stage
+
+
+def test_binding_preserves_registered_base_model(dataset: Path, tmp_path: Path):
+    executor = _executor(tmp_path, dataset)
+    evaluator_payload = executor.stages[0].model_dump(mode="python")
+    evaluator_payload["stage"] = StageKind.DEVELOPMENT_EVALUATION
+    evaluator = PinnedRemoteStageProfile.model_validate(evaluator_payload)
+    base_model = RegisteredRemoteModelSource(
+        source_id="modern-open-model-v1",
+        compute_profile_id=executor.compute_profile_id,
+        target_contract_key=executor.target_contract_key,
+        model_digest=executor.target_model_digest,
+        remote_model_path="/srv/bashgym/models/modern-open-model-v1",
+    )
+    heldout = RegisteredRemoteEvaluationDatasetSource(
+        source_id="terminal-heldout-v1",
+        compute_profile_id=executor.compute_profile_id,
+        dataset_version_id="terminal-heldout-v1",
+        content_digest="1" * 64,
+        remote_dataset_path="/srv/bashgym/datasets/terminal-heldout-v1.jsonl",
+    )
+    executor_payload = executor.model_dump(mode="python", exclude={"profile_digest"})
+    executor_payload["stages"] = (evaluator, *executor.stages)
+    executor_payload["registered_base_model"] = base_model
+    executor_payload["registered_evaluation_dataset"] = heldout
+    executor = ApprovedRemoteExecutorProfile.model_validate(executor_payload)
+
+    revised = bind_nemo_rl_profile(
+        executor,
+        _nemo_profile(dataset),
+        replace=False,
+        allow_training_stage_replacement=True,
+    )
+
+    assert revised.registered_base_model == base_model
+    assert revised.registered_evaluation_dataset == heldout
+    assert revised.stage_profile(StageKind.DEVELOPMENT_EVALUATION) == evaluator
 
 
 def test_initial_binding_refuses_to_replace_existing_training_stages(

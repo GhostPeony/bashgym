@@ -176,13 +176,13 @@ def test_training_python_can_be_overridden_for_runtime_smokes(tmp_path, monkeypa
 
 
 def test_training_subprocess_env_strips_quoted_hf_cache_paths(monkeypatch):
-    monkeypatch.setenv("HF_HOME", r'"F:\huggingface"')
-    monkeypatch.setenv("TRANSFORMERS_CACHE", r'"F:\huggingface"')
+    monkeypatch.setenv("HF_HOME", r'"X:\fixture-cache"')
+    monkeypatch.setenv("TRANSFORMERS_CACHE", r'"X:\fixture-cache"')
 
     env = Trainer(TrainerConfig(base_model="tiny-local-model"))._training_subprocess_env()
 
-    assert env["HF_HOME"] == r"F:\huggingface"
-    assert env["TRANSFORMERS_CACHE"] == r"F:\huggingface"
+    assert env["HF_HOME"] == r"X:\fixture-cache"
+    assert env["TRANSFORMERS_CACHE"] == r"X:\fixture-cache"
 
 
 def test_parse_session_distillation_metrics_extracts_all_keys():
@@ -243,7 +243,7 @@ def test_session_distillation_script_emits_throughput_telemetry():
     assert "BashGymThroughputCallback" in script
     assert "include_num_input_tokens_seen" in script
     assert "[bashgym-metrics]" in script
-    # VRAM + GPU-util reads must be guarded so CPU smokes / GB10 degrade gracefully.
+    # VRAM + GPU-util reads must be guarded so CPU and unified-memory smokes degrade gracefully.
     assert "reset_peak_memory_stats" in script
     assert "pynvml" in script
 

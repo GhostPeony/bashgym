@@ -26,31 +26,27 @@ frontend.env.local
 cleancontrol.json
 jepa_paper_extract.txt
 
-# Docs (internal reference, not for public repo)
+# Docs: expose the maintained public set; keep local research notes out of Git.
 docs/
 !docs/
 docs/*
-!docs/TRAINING_SETUP.md
-!docs/PRODUCTIZATION.md
-!docs/hermes-agent-endpoints.md
-!docs/training-config-guide.md
+!docs/autoresearch-architecture.html
+!docs/assets/
+docs/assets/*
+!docs/assets/autoresearch-architecture.png
+!docs/FRONTEND_DESIGN_GUIDELINES.md
+!docs/GETTING_STARTED.md
+!docs/PLATFORM_OVERVIEW.md
+!docs/TRAINING_DATA_GUIDE.md
 !docs/training/
 docs/training/*
-!docs/training/overview.md
 !docs/training/strategy-guide.md
-!docs/training/training-methods-reference.md
-!docs/training/external-review-packet.md
-!docs/training/rlhf-handbook-comparison.md
 !docs/training/tmax-terminal-rl-recipe.md
 !docs/training/session-distillation.md
-!docs/training/private-compute-eval-checklist.md
-!docs/training/platform-flywheels.md
 !docs/training/world-models.md
 !docs/training/metrics-runbook.md
 !docs/training/glossary.md
-!docs/training/agent-cli.md
 !docs/training/autoresearch-campaign.md
-!docs/training/bashgym-autoresearch-nvidia-brief.md
 
 # IDE
 .vscode/
@@ -63,6 +59,9 @@ docs/training/*
 .DS_Store
 
 # Data and models (large/local)
+# Exact names also cover Windows directory junctions, for which a trailing
+# slash pattern is not sufficient.
+data
 data/
 data-fixed/
 data-pipeline-fixed/
@@ -86,6 +85,7 @@ output/
 outputs/
 diagrams/
 # NeMo Data Designer create() default artifact output
+artifacts
 artifacts/
 frontend/test-results/
 # DataDesignerPipeline.export_nemo default output

@@ -65,7 +65,7 @@ class TestOllamaNetworkSecurity:
         assert provider.is_remote is True
 
     def test_external_ip_is_remote(self):
-        provider = OllamaProvider(base_url="http://192.168.1.100:11434")
+        provider = OllamaProvider(base_url="http://192.0.2.10:11434")
         assert provider.is_remote is True
 
 

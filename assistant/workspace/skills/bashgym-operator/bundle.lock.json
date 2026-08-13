@@ -1,13 +1,13 @@
 {
   "schema_version": "bashgym.operator-bundle-lock.v2",
   "files": {
-    "SKILL.md": "c4e11fa1d53da72556e195f385b2acc216e10a111db66da5c5812cc419b4cdba",
+    "SKILL.md": "3eba87d2400891107dc2f0d33ae9f12dea3dcf6997c54c0ceecf8d6c5eabdd05",
     "references/operator-contract.md": "14d202a2c9a116c300fbd9a1bf76cee83ac6ea6385bd4252094a8ea0317b092a",
-    "scripts/operator_context.py": "01b787d536a14b3730b5b08ca453f012c6095fcfb45aa10216eea23eb4d0b291",
+    "scripts/operator_context.py": "e3ed9f81532711e7d98ca96ff2da89f5ec43a06726696bc8856be88737af9b3e",
     "scripts/curate_activity.py": "4c6bc70990af8ba7671c2e6da4ec2601fe0c615cef959092e69b2d4ac5d52752",
     "scripts/gbrain_bridge.py": "9356708c9c6e7a3294b539753ec8b335b5707d6d1d88bce68c5f59d45d5ca1ee",
-    "../bashgym/SKILL.md": "018a21231fd5fb458097dc596ae2a7269b88374db8b9c3b2f8a8fd96277c6f9f",
-    "../bashgym/references/architecture-overview.md": "81a065af96ecc2e200492dc0f1fe803deaa81a326d6cfd18ae999978f3f70fdb",
+    "../bashgym/SKILL.md": "9493e213e5957f680ae663ea8819beec91573996bb46f8e4e79bc568433a1d47",
+    "../bashgym/references/architecture-overview.md": "19556a488217fde771c703f3a4ecee5e81e003ac95c9bfd18a51f644216cc8a7",
     "../bashgym/references/eval-capabilities.md": "48b7ea276c174a8d649ab1dd12d333cc9f8b06fe76f9e843d482a296be8f4c60",
     "../factory/SKILL.md": "7309d201b607e66b2d94bac349bd292bc163b2ae1c1aabe0d1df410b3707c4f7",
     "../models/SKILL.md": "cafcf3ca58bcb4519b85d1ec59447dff9cef4eefaa7735dde193e590b124a0e0",

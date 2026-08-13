@@ -302,7 +302,7 @@ export function DeviceManager() {
                 value={formHost}
                 onChange={(e) => setFormHost(e.target.value)}
                 className="input w-full"
-                placeholder="192.168.1.100"
+                placeholder="192.0.2.10"
                 required
               />
             </div>

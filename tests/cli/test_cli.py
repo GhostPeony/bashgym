@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+from bashgym.campaigns.contracts import StageKind
 from bashgym.cli import DOCS, build_parser, main
 from bashgym.environments.contracts import EnvironmentSpec
 from bashgym.environments.rollout import (
@@ -21,6 +22,18 @@ def test_manifest_json_is_agent_readable(capsys):
     assert "campaign list" in payload["commands"]
     assert "campaign provision-local-operator" in payload["commands"]
     assert "campaign status" in payload["commands"]
+    assert payload["commands"]["campaign control-room"] == (
+        "Read the authoritative visual campaign snapshot for native agent goals and resume."
+    )
+    assert payload["commands"]["research prepare"] == (
+        "Resume guided AutoResearch preparation without starting compute."
+    )
+    assert "research onboard" in payload["commands"]
+    assert "research state" in payload["commands"]
+    assert "research wait" in payload["commands"]
+    assert "research start" in payload["commands"]
+    assert "research submit-iteration" in payload["commands"]
+    assert "research report" in payload["commands"]
     assert "campaign study status" in payload["commands"]
     assert "campaign attempts" in payload["commands"]
     assert "campaign comparisons" in payload["commands"]
@@ -46,18 +59,250 @@ def test_manifest_json_is_agent_readable(capsys):
     assert "sources list" in payload["commands"]
     assert "compute targets" in payload["commands"]
     assert "replay scrub" in payload["commands"]
-    assert any(doc["topic"] == "capabilities" for doc in payload["docs"])
-    assert any(doc["topic"] == "methods-reference" for doc in payload["docs"])
-    assert any(doc["topic"] == "external-review" for doc in payload["docs"])
-    assert any(doc["topic"] == "rlhf-handbook-comparison" for doc in payload["docs"])
-    assert any(doc["topic"] == "terminal-rl-recipe" for doc in payload["docs"])
-    assert any(doc["topic"] == "private-compute-checklist" for doc in payload["docs"])
-    assert all("experiment-ledger.md" not in doc["path"] for doc in payload["docs"])
-    assert any(doc["topic"] == "session-distillation" for doc in payload["docs"])
-    assert any(doc["topic"] == "artifacts" for doc in payload["docs"])
-    assert any(doc["topic"] == "world-models" for doc in payload["docs"])
+    assert {doc["topic"] for doc in payload["docs"]} == {
+        "autoresearch-campaign",
+        "glossary",
+        "metrics",
+        "session-distillation",
+        "strategy",
+        "terminal-rl-recipe",
+        "world-models",
+    }
     assert all(isinstance(doc["exists"], bool) for doc in payload["docs"])
     assert payload["next"][0]["command"].startswith("bashgym ")
+
+
+def test_activate_autoresearch_parser_binds_an_existing_model_and_evaluator():
+    args = build_parser().parse_args(
+        [
+            "campaign",
+            "activate-autoresearch",
+            "--template",
+            "terminal-agent-v1",
+            "--workspace-id",
+            "workspace-a",
+            "--device-id",
+            "research-device",
+            "--project-name",
+            "AutoResearch study",
+            "--owner-actor-id",
+            "codex",
+            "--dataset-id",
+            "terminal-data",
+            "--dataset-name",
+            "Terminal data",
+            "--remote-dataset-path",
+            "/srv/bashgym/datasets/terminal-heldout-v1.jsonl",
+            "--dataset-content-digest",
+            "b" * 64,
+            "--dataset-source-id",
+            "terminal-heldout-v1",
+            "--evaluator-file",
+            "evaluate.py",
+            "--evaluation-budget-reservation",
+            "0.1",
+            "--evaluation-name",
+            "Terminal heldout",
+            "--remote-model-path",
+            "/srv/bashgym/models/research-model",
+            "--model-source-id",
+            "registered-base-v1",
+            "--source-repository",
+            ".",
+            "--source-entrypoint",
+            "bashgym/gym/trainer.py",
+            "--mutation-path",
+            "trainer=bashgym/gym/trainer.py",
+            "--training-script",
+            "train.py",
+            "--training-input",
+            "tmax-runner-config.json",
+            "--data-build-script",
+            "build_data.py",
+            "--data-build-input",
+            "data-designer-config.json",
+            "--data-build-budget-reservation",
+            "0.05",
+            "--executor-profile",
+            "registered-training-v1",
+            "--full-budget-reservation",
+            "0.5",
+        ]
+    )
+
+    assert args.remote_model_path == "/srv/bashgym/models/research-model"
+    assert args.remote_dataset_path == ("/srv/bashgym/datasets/terminal-heldout-v1.jsonl")
+    assert args.dataset_content_digest == "b" * 64
+    assert args.dataset_source_id == "terminal-heldout-v1"
+    assert args.model_source_id == "registered-base-v1"
+    assert args.evaluation_budget_reservation == 0.1
+    assert args.training_input == ["tmax-runner-config.json"]
+    assert args.data_build_script == "build_data.py"
+    assert args.data_build_budget_reservation == 0.05
+    assert args.smoke_budget_reservation is None
+
+
+def test_activate_autoresearch_plan_binds_remote_heldout_without_ssh_or_local_rows(
+    monkeypatch, tmp_path: Path, capsys
+):
+    from types import SimpleNamespace
+
+    from bashgym.campaigns.installation import build_quality_autoresearch_definition
+
+    definition = build_quality_autoresearch_definition(
+        template_id="terminal-agent-v1",
+        template_revision="1",
+        objective="Improve terminal task success.",
+        model_ref=f"hf://example/research-model@{'a' * 40}",
+        target_contract_key="research-model-v1",
+        task="terminal-agent-sft",
+        dataset_version_id="terminal-heldout-v1",
+        compute_profile_id="research-compute",
+        source_repository_profile_id="bashgym-source-v1",
+        ledger_project_id="terminal-research",
+        evaluation_suite_id="terminal-heldout-suite-v1",
+        primary_metric="task_success_rate",
+        metric_direction="maximize",
+        budget_unit="gpu_hours",
+        budget_limit=1.0,
+        max_attempts=2,
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.autoresearch.load_autoresearch_template_definitions",
+        lambda _directory: (definition,),
+    )
+
+    key = tmp_path / "id_ed25519"
+    key.write_text("test-only-key\n", encoding="utf-8")
+
+    async def registered_device(_self, _device_id):
+        return SimpleNamespace(
+            id="research-device",
+            host="192.0.2.10",
+            port=22,
+            username="trainer",
+            key_path=str(key),
+            work_dir="/srv/bashgym/runs",
+        )
+
+    monkeypatch.setattr("bashgym.device_registry.DeviceRegistry.get_device", registered_device)
+
+    async def unexpected_preflight(_self, *, require_unsloth=True):
+        del require_unsloth
+        raise AssertionError("SSH preflight ran during plan mode")
+
+    monkeypatch.setattr(
+        "bashgym.gym.remote_trainer.RemoteTrainer.preflight_check",
+        unexpected_preflight,
+    )
+
+    async def unexpected_remote_model_verification(_self, _source):
+        raise AssertionError("remote model verification ran during plan mode")
+
+    monkeypatch.setattr(
+        "bashgym.campaigns.remote.RemoteTrainingAdapter.verify_registered_base_model",
+        unexpected_remote_model_verification,
+    )
+
+    async def unexpected_remote_dataset_verification(_self, _source):
+        raise AssertionError("remote dataset verification ran during plan mode")
+
+    monkeypatch.setattr(
+        "bashgym.campaigns.remote.RemoteTrainingAdapter.verify_registered_evaluation_dataset",
+        unexpected_remote_dataset_verification,
+        raising=False,
+    )
+
+    captured = {}
+
+    def fake_activate(_definition, request, *, data_directory, apply, install_service):
+        captured["request"] = request
+        captured["data_directory"] = data_directory
+        captured["apply"] = apply
+        captured["install_service"] = install_service
+        return SimpleNamespace(
+            doctor=None,
+            model_dump=lambda **_kwargs: {"applied": apply},
+        )
+
+    monkeypatch.setattr(
+        "bashgym.campaigns.activation.activate_autoresearch",
+        fake_activate,
+    )
+
+    evaluator = tmp_path / "evaluate.py"
+    trainer = tmp_path / "train.py"
+    runner_config = tmp_path / "runner-config.json"
+    for path, content in (
+        (evaluator, "print('evaluate')\n"),
+        (trainer, "print('train')\n"),
+        (runner_config, "{}\n"),
+    ):
+        path.write_text(content, encoding="utf-8")
+
+    args = build_parser().parse_args(
+        [
+            "campaign",
+            "activate-autoresearch",
+            "--template",
+            definition.template_id,
+            "--workspace-id",
+            "workspace-a",
+            "--device-id",
+            "research-device",
+            "--project-name",
+            "AutoResearch study",
+            "--owner-actor-id",
+            "codex",
+            "--dataset-id",
+            "terminal-heldout",
+            "--dataset-name",
+            "Terminal heldout",
+            "--remote-dataset-path",
+            "/srv/bashgym/datasets/terminal-heldout-v1.jsonl",
+            "--dataset-content-digest",
+            "b" * 64,
+            "--dataset-source-id",
+            "terminal-heldout-v1",
+            "--evaluator-file",
+            str(evaluator),
+            "--evaluation-budget-reservation",
+            "0.1",
+            "--evaluation-name",
+            "Terminal heldout",
+            "--remote-model-path",
+            "/srv/bashgym/models/research-model",
+            "--source-repository",
+            str(tmp_path),
+            "--source-entrypoint",
+            "bashgym/gym/trainer.py",
+            "--mutation-path",
+            "trainer=bashgym/gym/trainer.py",
+            "--training-script",
+            str(trainer),
+            "--training-input",
+            str(runner_config),
+            "--executor-profile",
+            "registered-training-v1",
+            "--full-budget-reservation",
+            "0.5",
+            "--data-dir",
+            str(tmp_path / "bashgym-data"),
+            "--json",
+        ]
+    )
+
+    assert args.func(args) == 0
+    capsys.readouterr()
+    request = captured["request"]
+    assert captured["apply"] is False
+    assert request.dataset_version.content_digest == "b" * 64
+    assert request.dataset_version.source_uri == ("bashgym-remote-dataset://terminal-heldout-v1")
+    resident = request.executor_profile.registered_evaluation_dataset
+    assert resident.remote_dataset_path == ("/srv/bashgym/datasets/terminal-heldout-v1.jsonl")
+    assert resident.dataset_version_id == "terminal-heldout-v1"
+    evaluation_stage = request.executor_profile.stage_profile(StageKind.DEVELOPMENT_EVALUATION)
+    assert evaluation_stage.input_files == ()
 
 
 def test_canvas_action_commands_send_origin_and_runtime_metadata(monkeypatch, capsys):
@@ -378,6 +623,27 @@ def test_campaign_read_commands_preserve_workspace_and_pagination(monkeypatch, c
         main(
             [
                 "campaign",
+                "control-room",
+                *connection,
+                "--campaign",
+                "campaign:1",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+    assert client.calls[-1] == {
+        "method": "GET",
+        "path": "/campaigns/campaign%3A1/control-room-snapshot",
+        "query": {"workspace_id": "workspace-a"},
+        "payload": None,
+        "headers": None,
+    }
+
+    assert (
+        main(
+            [
+                "campaign",
                 "manifest",
                 *connection,
                 "--campaign",
@@ -478,6 +744,165 @@ def test_campaign_read_commands_preserve_workspace_and_pagination(monkeypatch, c
         "after_step": 50,
         "limit": 500,
     }
+
+
+def test_research_commands_are_thin_aliases_for_the_campaign_api(monkeypatch, capsys, tmp_path):
+    class FakeCampaignClient:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(
+            self, method, path, *, query=None, payload=None, headers=None, timeout=None
+        ):
+            call = {
+                "method": method,
+                "path": path,
+                "query": query,
+                "payload": payload,
+                "headers": headers,
+            }
+            if timeout is not None:
+                call["timeout"] = timeout
+            self.calls.append(call)
+            return {"ok": True}
+
+    client = FakeCampaignClient()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+    connection = [
+        "--workspace-id",
+        "workspace-a",
+        "--credential-ref",
+        "BASHGYM_CAMPAIGN_CODEX_REFRESH",
+        "--json",
+    ]
+    proposal = {
+        "proposal_id": "candidate-2",
+        "hypothesis": "Verified recovery trajectories improve held-out task success.",
+        "study_family": "terminal-agent",
+        "primary_variable": "dataset_recipe",
+        "expected_outcome": "Higher held-out success rate.",
+        "falsification_criterion": "No held-out improvement.",
+        "estimated_cost": 0.25,
+        "dataset_recipe": {},
+        "training_recipe": {},
+        "evaluation_recipe": {},
+        "stage_plan": {"items": []},
+        "rationale": "Change one data recipe and compare on the fixed suite.",
+    }
+    proposal_path = tmp_path / "candidate.json"
+    proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
+
+    assert main(["research", "prepare", *connection, "--session-id", "setup-1"]) == 0
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1] == {
+        "method": "GET",
+        "path": "/campaigns/setup/context",
+        "query": {"workspace_id": "workspace-a", "session_id": "setup-1"},
+        "payload": None,
+        "headers": None,
+    }
+
+    assert main(["research", "state", *connection, "--campaign", "campaign:1"]) == 0
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == "/campaigns/campaign%3A1/research-state"
+    assert client.calls[-1]["query"] == {"workspace_id": "workspace-a"}
+
+    assert (
+        main(
+            [
+                "research",
+                "wait",
+                *connection,
+                "--campaign",
+                "campaign:1",
+                "--after-cursor",
+                "12",
+                "--timeout-seconds",
+                "55",
+            ]
+        )
+        == 0
+    )
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == "/campaigns/campaign%3A1/research-wait"
+    assert client.calls[-1]["query"] == {
+        "workspace_id": "workspace-a",
+        "after_cursor": 12,
+        "timeout_seconds": 55,
+    }
+    assert client.calls[-1]["timeout"] == 60
+
+    assert (
+        main(
+            [
+                "research",
+                "start",
+                *connection,
+                "--campaign",
+                "campaign:1",
+                "--expected-version",
+                "3",
+                "--idempotency-key",
+                "start-1",
+            ]
+        )
+        == 0
+    )
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == "/campaigns/campaign%3A1/start"
+
+    assert (
+        main(
+            [
+                "research",
+                "submit-iteration",
+                *connection,
+                "--campaign",
+                "campaign:1",
+                "--expected-version",
+                "4",
+                "--role",
+                "candidate",
+                "--parent-proposal",
+                "baseline-1",
+                "--proposal",
+                str(proposal_path),
+                "--idempotency-key",
+                "candidate-2",
+            ]
+        )
+        == 0
+    )
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == "/campaigns/campaign%3A1/autoresearch/candidates"
+    assert client.calls[-1]["payload"] == {
+        "workspace_id": "workspace-a",
+        "expected_version": 4,
+        **proposal,
+        "parent_proposal_id": "baseline-1",
+    }
+
+    assert (
+        main(
+            [
+                "research",
+                "report",
+                *connection,
+                "--campaign",
+                "campaign:1",
+                "--expected-version",
+                "5",
+                "--formats",
+                "markdown,json",
+                "--idempotency-key",
+                "report-1",
+            ]
+        )
+        == 0
+    )
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == "/campaigns/campaign%3A1/export"
+    assert client.calls[-1]["payload"]["formats"] == ["markdown", "json"]
 
 
 def test_ledger_read_commands_require_project_and_preserve_sync_cursor(monkeypatch, capsys):
@@ -897,10 +1322,7 @@ def test_campaign_setup_autoresearch_installs_explicit_binding_without_credentia
     assert payload["binding_plan"]["model_ref"].endswith(f"@{revision}")
     assert payload["binding_plan"]["compute_profile_id"] == "private-training-1"
     assert payload["binding_plan"]["source_repository_profile_id"] == "bashgym-source-1"
-    assert payload["binding_plan"]["required_training_stages"] == [
-        "smoke_training",
-        "full_training",
-    ]
+    assert payload["binding_plan"]["required_training_stages"] == ["full_training"]
     assert (install_dir / "autoresearch-installed-v1.json").is_file()
 
 
@@ -2599,38 +3021,25 @@ def test_training_docs_topic_returns_content_in_json(capsys):
     assert "Training Glossary" in payload["content"]
 
 
-def test_training_docs_capabilities_topic_maps_full_spread(capsys):
-    assert main(["training", "docs", "--topic", "capabilities", "--json"]) == 0
+def test_training_docs_registry_exposes_only_tracked_training_pages(capsys):
+    expected_topics = {
+        "autoresearch-campaign",
+        "glossary",
+        "metrics",
+        "session-distillation",
+        "strategy",
+        "terminal-rl-recipe",
+        "world-models",
+    }
 
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True
-    assert payload["topic"] == "capabilities"
-    assert "Training Capability Map" in payload["content"]
-    assert "DPPO replay" in payload["content"]
-    assert "ECHO" in payload["content"]
-
-
-def test_training_docs_methods_and_review_packet_are_readable(capsys):
-    assert main(["training", "docs", "--topic", "methods-reference", "--json"]) == 0
-    methods = json.loads(capsys.readouterr().out)
-    assert methods["ok"] is True
-    assert "Training Methods Reference" in methods["content"]
-    assert "DPPO Replay / Backend Path" in methods["content"]
-    assert "JEPA-Style World Models" in methods["content"]
-
-    assert main(["training", "docs", "--topic", "external-review", "--json"]) == 0
-    review = json.loads(capsys.readouterr().out)
-    assert review["ok"] is True
-    assert "BashGym External AI/ML Review Packet" in review["content"]
-    assert "Claims We Are Not Making Yet" in review["content"]
-    assert "Reviewer Questions" in review["content"]
-
-    assert main(["training", "docs", "--topic", "rlhf-handbook-comparison", "--json"]) == 0
-    comparison = json.loads(capsys.readouterr().out)
-    assert comparison["ok"] is True
-    assert "RLHF Handbook Comparison And BashGym Gap Plan" in comparison["content"]
-    assert "Reward models are a real missing lane" in comparison["content"]
-    assert "Reviewer Questions Resolved" in comparison["content"]
+    assert set(DOCS) == expected_topics
+    for topic in sorted(expected_topics):
+        assert main(["training", "docs", "--topic", topic, "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["ok"] is True
+        assert payload["topic"] == topic
+        assert payload["content"].lstrip().startswith("# ")
+        assert Path(payload["path"]).is_file()
 
 
 def test_training_capabilities_matrix_maps_full_training_and_eval_spread(capsys):
@@ -2759,18 +3168,12 @@ def test_training_capabilities_matrix_maps_full_training_and_eval_spread(capsys)
     assert payload["next"][0]["command"].startswith("bashgym training plan")
 
 
-def test_training_docs_terminal_recipe_and_private_compute_checklist_are_readable(capsys):
+def test_training_docs_terminal_recipe_is_readable(capsys):
     assert main(["training", "docs", "--topic", "terminal-rl-recipe", "--json"]) == 0
     recipe = json.loads(capsys.readouterr().out)
     assert recipe["ok"] is True
     assert "TMax-Style Terminal RL Recipe" in recipe["content"]
     assert "smoke bundle" in recipe["content"]
-
-    assert main(["training", "docs", "--topic", "private-compute-checklist", "--json"]) == 0
-    checklist = json.loads(capsys.readouterr().out)
-    assert checklist["ok"] is True
-    assert "Private Compute Eval And Backend Smoke Checklist" in checklist["content"]
-    assert "backend_smoke_readiness.json" in checklist["content"]
 
 
 def test_training_plan_hardware_choices_are_machine_neutral():
@@ -3576,3 +3979,362 @@ def test_training_runcard_cli_accepts_session_distillation_evidence(tmp_path, ca
     assert "missing_session_distillation_records_path" not in codes
     assert "missing_session_distillation_reader_model" not in codes
     assert "missing_session_distillation_mask_policy" not in codes
+
+
+def _write_onboarding_contract(path: Path, data_directory: Path) -> None:
+    from bashgym.campaigns.remote import RemoteModelRegistrationRequest
+    from tests.campaigns.test_autoresearch_activation import _activation_fixture
+
+    input_directory = path.parent / "onboarding-inputs"
+    input_directory.mkdir(parents=True, exist_ok=True)
+    definition, activation = _activation_fixture(input_directory / "fixture")
+    registered = activation.executor_profile.registered_base_model
+    assert registered is not None and registered.artifact_receipt is not None
+    model_request = RemoteModelRegistrationRequest(
+        operation="register",
+        source_id=registered.source_id,
+        compute_profile_id=registered.compute_profile_id,
+        target_contract_key=registered.target_contract_key,
+        target_model_digest=registered.model_digest,
+        model_id=registered.artifact_receipt.model_id,
+        revision=registered.artifact_receipt.revision,
+        remote_model_path=registered.remote_model_path,
+    )
+    (input_directory / "definition.json").write_text(definition.model_dump_json(), encoding="utf-8")
+    (input_directory / "activation.json").write_text(activation.model_dump_json(), encoding="utf-8")
+    (input_directory / "model-request.json").write_text(
+        model_request.model_dump_json(), encoding="utf-8"
+    )
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "autoresearch_onboarding_contract.v1",
+                "onboarding_id": "onboarding-cli-v1",
+                "data_directory": str(data_directory),
+                "definition_file": str(input_directory / "definition.json"),
+                "activation_file": str(input_directory / "activation.json"),
+                "model_request_file": str(input_directory / "model-request.json"),
+                "workspace_id": activation.workspace_id,
+                "installation_id": "ins_0123456789abcdef0123456789abcdef",
+                "controller_owner_id": "autoresearch-controller",
+                "controller_lease_key_ref": "campaign_controller_lease",
+                "api_base": "http://127.0.0.1:8003/api",
+                "credential_ref": "campaign_local_operator",
+                "campaign_id": "campaign-cli-v1",
+                "campaign_title": "CLI experiment",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_research_onboard_plan_is_local_and_side_effect_free(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    contract = tmp_path / "onboarding.json"
+    _write_onboarding_contract(contract, tmp_path / "data")
+
+    def unexpected_services(_contract):
+        raise AssertionError("plan mode constructed physical onboarding services")
+
+    monkeypatch.setattr(
+        "bashgym.campaigns.onboarding.build_local_onboarding_services",
+        unexpected_services,
+        raising=False,
+    )
+
+    assert main(["research", "onboard", "--contract", str(contract), "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "plan"
+    assert payload["onboarding"]["applied"] is False
+    assert payload["onboarding"]["next_action"] == "apply_onboarding"
+    assert not (tmp_path / "data").exists()
+
+
+def test_research_onboard_apply_stops_at_ready(monkeypatch, tmp_path: Path, capsys) -> None:
+    from bashgym.campaigns.onboarding import AutoResearchOnboardingStepResult
+
+    contract = tmp_path / "onboarding.json"
+    data_directory = tmp_path / "data"
+    _write_onboarding_contract(contract, data_directory)
+
+    class Services:
+        def run_step(self, step, _contract):
+            return AutoResearchOnboardingStepResult(
+                step=step,
+                reference=f"receipt-{step}",
+                disposition="completed",
+            )
+
+        def campaign_status(self, _contract):
+            return "ready"
+
+    monkeypatch.setattr(
+        "bashgym.campaigns.onboarding.build_local_onboarding_services",
+        lambda _contract: Services(),
+        raising=False,
+    )
+
+    assert (
+        main(
+            [
+                "research",
+                "onboard",
+                "--contract",
+                str(contract),
+                "--apply",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "apply"
+    assert payload["onboarding"]["campaign_status"] == "ready"
+    assert payload["onboarding"]["next_action"] == ("explicit_start_confirmation_required")
+
+
+def test_research_onboard_failure_is_stable_json_without_traceback(tmp_path: Path, capsys) -> None:
+    missing = tmp_path / "private-onboarding-contract.json"
+
+    assert main(["research", "onboard", "--contract", str(missing), "--json"]) == 2
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload == {
+        "title": "BashGym AutoResearch Onboarding Error",
+        "ok": False,
+        "error": {
+            "code": "onboarding_contract_invalid",
+            "message": "AutoResearch onboarding could not be completed.",
+        },
+    }
+    assert str(tmp_path) not in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_service_status_failure_is_stable_json_without_traceback(monkeypatch, capsys) -> None:
+    from bashgym.campaigns.worker_service import WorkerServiceError
+
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.ApiServiceManager.status",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            WorkerServiceError("campaign_api_service_status_failed")
+        ),
+    )
+
+    assert main(["service", "status", "--json"]) == 2
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload == {
+        "title": "BashGym Resident Services Error",
+        "ok": False,
+        "error": {
+            "code": "campaign_api_service_status_failed",
+            "message": "Resident service status could not be read.",
+        },
+    }
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_service_status_reports_headless_api_and_worker_without_ui(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from types import SimpleNamespace
+
+    from bashgym.campaigns.worker_service import WorkerRunConfig, write_worker_config
+
+    root = tmp_path / "state"
+    config_path = root / "campaigns" / "worker-config.v1.json"
+    config = WorkerRunConfig.for_data_directory(root).model_copy(
+        update={"controller_owner_id": "expected-controller"}
+    )
+    write_worker_config(config_path, config)
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: root)
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.build_api_service_definition",
+        lambda **_kwargs: "api-definition",
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.build_service_definition",
+        lambda _path: "worker-definition",
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.ApiServiceManager.status",
+        lambda _self, _definition: {
+            "installed": True,
+            "supervisor_state": "available",
+        },
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.probe_api_health",
+        lambda **_kwargs: {
+            "schema_version": "bashgym_api_health.v1",
+            "healthy": True,
+            "state_root_match": True,
+            "code": "api_http_healthy",
+        },
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.project_controller_status_from_database",
+        lambda *_args: SimpleNamespace(online=True, owner_id="expected-controller"),
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.WorkerServiceManager.status",
+        lambda _self, _definition, _controller: {
+            "installed": True,
+            "supervisor_state": "available",
+            "controller": {"online": True, "state": "online"},
+        },
+    )
+
+    assert main(["service", "status", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ready"] is True
+    assert payload["api"]["supervisor_state"] == "available"
+    assert payload["api"]["health"]["code"] == "api_http_healthy"
+    assert payload["worker"]["controller"]["online"] is True
+
+
+def test_service_status_is_not_ready_for_a_different_controller_owner(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from types import SimpleNamespace
+
+    from bashgym.campaigns.worker_service import WorkerRunConfig, write_worker_config
+
+    root = tmp_path / "state"
+    config_path = root / "campaigns" / "worker-config.v1.json"
+    config = WorkerRunConfig.for_data_directory(root).model_copy(
+        update={"controller_owner_id": "expected-controller"}
+    )
+    write_worker_config(config_path, config)
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: root)
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.ApiServiceManager.status",
+        lambda *_args: {"installed": True, "supervisor_state": "available"},
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.probe_api_health",
+        lambda **_kwargs: {
+            "schema_version": "bashgym_api_health.v1",
+            "healthy": True,
+            "state_root_match": True,
+            "code": "api_http_healthy",
+        },
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.project_controller_status_from_database",
+        lambda *_args: SimpleNamespace(online=True, owner_id="old-controller"),
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.WorkerServiceManager.status",
+        lambda *_args: {
+            "installed": True,
+            "supervisor_state": "available",
+            "controller": {
+                "online": True,
+                "state": "online",
+                "owner_id": "old-controller",
+            },
+        },
+    )
+
+    assert main(["service", "status", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ready"] is False
+
+
+def test_service_status_is_not_ready_when_api_process_has_no_http_health(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from types import SimpleNamespace
+
+    from bashgym.campaigns.worker_service import WorkerRunConfig, write_worker_config
+
+    root = tmp_path / "state"
+    config_path = root / "campaigns" / "worker-config.v1.json"
+    write_worker_config(config_path, WorkerRunConfig.for_data_directory(root))
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: root)
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.ApiServiceManager.status",
+        lambda *_args: {"installed": True, "supervisor_state": "available"},
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.probe_api_health",
+        lambda **_kwargs: {
+            "schema_version": "bashgym_api_health.v1",
+            "healthy": False,
+            "state_root_match": False,
+            "code": "api_http_unavailable",
+        },
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.project_controller_status_from_database",
+        lambda *_args: SimpleNamespace(online=True),
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.WorkerServiceManager.status",
+        lambda *_args: {
+            "installed": True,
+            "supervisor_state": "available",
+            "controller": {"online": True, "state": "online"},
+        },
+    )
+
+    assert main(["service", "status", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ready"] is False
+    assert payload["api"]["health"] == {
+        "schema_version": "bashgym_api_health.v1",
+        "healthy": False,
+        "state_root_match": False,
+        "code": "api_http_unavailable",
+    }
+
+
+def test_service_status_does_not_create_a_missing_campaign_database(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from bashgym.campaigns.worker_service import WorkerRunConfig, write_worker_config
+
+    root = tmp_path / "state"
+    config_path = root / "campaigns" / "worker-config.v1.json"
+    config = WorkerRunConfig.for_data_directory(root)
+    write_worker_config(config_path, config)
+    assert not config.database_path.exists()
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: root)
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.ApiServiceManager.status",
+        lambda *_args: {"installed": False, "supervisor_state": "unavailable"},
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.probe_api_health",
+        lambda **_kwargs: {
+            "schema_version": "bashgym_api_health.v1",
+            "healthy": False,
+            "state_root_match": False,
+            "code": "api_http_unavailable",
+        },
+    )
+    monkeypatch.setattr(
+        "bashgym.campaigns.worker_service.WorkerServiceManager.status",
+        lambda _self, _definition, controller: {
+            "installed": False,
+            "supervisor_state": "unavailable",
+            "controller": controller.model_dump(mode="json"),
+        },
+    )
+
+    assert main(["service", "status", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ready"] is False
+    assert payload["worker"]["controller"]["state"] == "offline"
+    assert not config.database_path.exists()

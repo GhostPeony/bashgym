@@ -15,6 +15,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -774,10 +775,9 @@ class TestHFJobConfig:
         errors = config.validate()
         assert any("at least 1" in e for e in errors)
 
-        # Too long
+        # Long jobs are accepted because the provider owns the current maximum.
         config = HFJobConfig(timeout_minutes=1000)
-        errors = config.validate()
-        assert any("cannot exceed 720" in e for e in errors)
+        assert config.validate() == []
 
 
 # =============================================================================
@@ -928,6 +928,21 @@ class TestJobStatus:
 # =============================================================================
 
 
+def _hf_provider_job(job_id: str, stage: str, hardware: str = "a10g-small"):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    return SimpleNamespace(
+        id=job_id,
+        status=SimpleNamespace(stage=stage, message=None),
+        flavor=hardware,
+        created_at=now,
+        started_at=now if stage != "SCHEDULING" else None,
+        finished_at=now if stage in {"COMPLETED", "ERROR", "CANCELED"} else None,
+        url=f"https://huggingface.co/jobs/testuser/{job_id}",
+    )
+
+
 class TestHFJobRunner:
     """Tests for HFJobRunner class."""
 
@@ -943,10 +958,10 @@ class TestHFJobRunner:
 
         assert not runner.is_pro
 
-        # All operations should require Pro
-        with pytest.raises(HFProRequiredError):
-            runner.submit_training_job("train.py")
+        preflight = runner.preflight("train.py")
+        assert "jobs_access_not_confirmed" in preflight.reason_codes
 
+        # Provider observations require explicit eligible-plan confirmation.
         with pytest.raises(HFProRequiredError):
             runner.get_job_status("job_123")
 
@@ -985,7 +1000,7 @@ class TestHFJobRunner:
         with patch("bashgym.integrations.huggingface.client.HfApi", return_value=mock_api):
             with patch("bashgym.integrations.huggingface.client.HF_HUB_AVAILABLE", True):
                 client = HuggingFaceClient(token="hf_test")
-                runner = HFJobRunner(client=client)
+                runner = HFJobRunner(client=client, jobs_access_confirmed=True)
 
                 assert runner.is_pro
                 assert runner.client is client
@@ -1034,7 +1049,7 @@ class TestHFJobRunner:
             runner.submit_training_job("/nonexistent/script.py")
 
     def test_submit_job_success(self):
-        """Test successful job submission."""
+        """Test provider-backed job submission."""
         import os
         import tempfile
 
@@ -1043,7 +1058,9 @@ class TestHFJobRunner:
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
+        api = MagicMock()
+        api.run_uv_job.return_value = _hf_provider_job("provider-job-1", "SCHEDULING")
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         # Create temp script
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -1051,44 +1068,41 @@ class TestHFJobRunner:
             script_path = f.name
 
         try:
-            # Exercise the submit/tracking path without hitting the real `hf jobs` CLI.
-            with patch.object(HFJobRunner, "_submit_via_cli"):
-                job = runner.submit_training_job(
-                    script_path,
-                    repo_id="testuser/training-job",
-                    config=HFJobConfig(hardware="a10g-small", timeout_minutes=60),
-                )
+            job = runner.submit_training_job(
+                script_path,
+                repo_id="testuser/training-job",
+                config=HFJobConfig(
+                    hardware="a10g-small",
+                    timeout_minutes=60,
+                    secrets={"HF_TOKEN": "injected-at-launch"},
+                ),
+            )
 
-            assert job.job_id is not None
+            assert job.job_id == "provider-job-1"
             assert job.status == JobStatus.PENDING
             assert job.hardware == "a10g-small"
             assert job.logs_url is not None
-
-            # Job should be tracked
-            assert job.job_id in runner._jobs
+            api.run_uv_job.assert_called_once()
 
         finally:
             os.unlink(script_path)
 
     def test_get_job_status(self):
         """Test getting job status."""
-        from datetime import datetime, timezone
 
         from bashgym.integrations.huggingface import reset_hf_client
-        from bashgym.integrations.huggingface.jobs import HFJobInfo, HFJobRunner, JobStatus
+        from bashgym.integrations.huggingface.jobs import HFJobRunner, JobStatus
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate a job
-        job = HFJobInfo(
-            job_id="test_job_001",
-            status=JobStatus.RUNNING,
-            hardware="a10g-small",
-            created_at=datetime.now(timezone.utc),
-        )
-        runner._jobs["test_job_001"] = job
+        api = MagicMock()
+        not_found = RuntimeError("not found")
+        not_found.response = SimpleNamespace(status_code=404)
+        api.inspect_job.side_effect = [
+            _hf_provider_job("test_job_001", "RUNNING"),
+            not_found,
+        ]
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         # Get status
         result = runner.get_job_status("test_job_001")
@@ -1101,47 +1115,36 @@ class TestHFJobRunner:
 
     def test_get_job_logs(self):
         """Test getting job logs."""
-        from datetime import datetime, timezone
 
         from bashgym.integrations.huggingface import reset_hf_client
-        from bashgym.integrations.huggingface.jobs import HFJobInfo, HFJobRunner, JobStatus
+        from bashgym.integrations.huggingface.jobs import HFJobRunner
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate a job
-        job = HFJobInfo(
-            job_id="test_job_002",
-            status=JobStatus.RUNNING,
-            hardware="t4-small",
-            created_at=datetime.now(timezone.utc),
-        )
-        runner._jobs["test_job_002"] = job
+        api = MagicMock()
+        api.inspect_job.return_value = _hf_provider_job("test_job_002", "COMPLETED")
+        api.fetch_job_logs.return_value = ["test_job_002 training complete\n"]
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         logs = runner.get_job_logs("test_job_002")
         assert "test_job_002" in logs
-        assert "running" in logs.lower()
+        assert "complete" in logs.lower()
 
     def test_cancel_job(self):
         """Test cancelling a job."""
-        from datetime import datetime, timezone
 
         from bashgym.integrations.huggingface import HFJobFailedError, reset_hf_client
-        from bashgym.integrations.huggingface.jobs import HFJobInfo, HFJobRunner, JobStatus
+        from bashgym.integrations.huggingface.jobs import HFJobRunner, JobStatus
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate a running job
-        job = HFJobInfo(
-            job_id="test_job_003",
-            status=JobStatus.RUNNING,
-            hardware="a10g-small",
-            created_at=datetime.now(timezone.utc),
-        )
-        runner._jobs["test_job_003"] = job
+        api = MagicMock()
+        api.inspect_job.side_effect = [
+            _hf_provider_job("test_job_003", "RUNNING"),
+            _hf_provider_job("test_job_003", "CANCELED"),
+            _hf_provider_job("test_job_003", "CANCELED"),
+        ]
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         # Cancel job
         result = runner.cancel_job("test_job_003")
@@ -1154,23 +1157,15 @@ class TestHFJobRunner:
 
     def test_cancel_job_already_completed(self):
         """Test that cancelling a completed job fails."""
-        from datetime import datetime, timezone
 
         from bashgym.integrations.huggingface import HFJobFailedError, reset_hf_client
-        from bashgym.integrations.huggingface.jobs import HFJobInfo, HFJobRunner, JobStatus
+        from bashgym.integrations.huggingface.jobs import HFJobRunner
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate a completed job
-        job = HFJobInfo(
-            job_id="test_job_004",
-            status=JobStatus.COMPLETED,
-            hardware="a10g-small",
-            created_at=datetime.now(timezone.utc),
-        )
-        runner._jobs["test_job_004"] = job
+        api = MagicMock()
+        api.inspect_job.return_value = _hf_provider_job("test_job_004", "COMPLETED")
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         with pytest.raises(HFJobFailedError) as exc_info:
             runner.cancel_job("test_job_004")
@@ -1178,32 +1173,19 @@ class TestHFJobRunner:
 
     def test_list_jobs(self):
         """Test listing jobs."""
-        from datetime import datetime, timedelta, timezone
 
         from bashgym.integrations.huggingface import reset_hf_client
-        from bashgym.integrations.huggingface.jobs import HFJobInfo, HFJobRunner, JobStatus
+        from bashgym.integrations.huggingface.jobs import HFJobRunner, JobStatus
 
         reset_hf_client()
 
-        runner = HFJobRunner(token="hf_test", pro_enabled=True)
-
-        # Pre-populate multiple jobs
-        now = datetime.now(timezone.utc)
-        runner._jobs["job_1"] = HFJobInfo(
-            job_id="job_1",
-            status=JobStatus.COMPLETED,
-            hardware="t4-small",
-            created_at=now - timedelta(hours=2),
-        )
-        runner._jobs["job_2"] = HFJobInfo(
-            job_id="job_2",
-            status=JobStatus.RUNNING,
-            hardware="a10g-small",
-            created_at=now - timedelta(hours=1),
-        )
-        runner._jobs["job_3"] = HFJobInfo(
-            job_id="job_3", status=JobStatus.PENDING, hardware="a100-large", created_at=now
-        )
+        api = MagicMock()
+        api.list_jobs.return_value = [
+            _hf_provider_job("job_3", "SCHEDULING", "a100-large"),
+            _hf_provider_job("job_2", "RUNNING"),
+            _hf_provider_job("job_1", "COMPLETED", "t4-small"),
+        ]
+        runner = HFJobRunner(api=api, jobs_access_confirmed=True)
 
         # List all jobs (sorted by creation, newest first)
         jobs = runner.list_jobs()
@@ -1235,13 +1217,12 @@ class TestHFJobRunner:
         runner = HFJobRunner(token="hf_test", pro_enabled=False)
         repr_str = repr(runner)
         assert "HFJobRunner" in repr_str
-        assert "jobs=0" in repr_str
-        assert "[Pro]" not in repr_str
+        assert "jobs_access=unconfirmed" in repr_str
 
         # With Pro
         runner = HFJobRunner(token="hf_test", pro_enabled=True)
         repr_str = repr(runner)
-        assert "[Pro]" in repr_str
+        assert "jobs_access=confirmed" in repr_str
 
 
 # =============================================================================
@@ -1250,42 +1231,35 @@ class TestHFJobRunner:
 
 
 class TestHardwareSpecs:
-    """Tests for HARDWARE_SPECS constant."""
+    """Tests for the provider-derived hardware compatibility projection."""
 
     def test_hardware_specs_exists(self):
         """Test HARDWARE_SPECS has expected entries."""
-        from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
+        from bashgym.integrations.huggingface.jobs import (
+            HARDWARE_SPECS,
+            detect_hf_jobs_availability,
+        )
 
-        assert "cpu-basic" in HARDWARE_SPECS
-        assert "t4-small" in HARDWARE_SPECS
-        assert "a10g-small" in HARDWARE_SPECS
-        assert "a100-large" in HARDWARE_SPECS
-        assert "h100" in HARDWARE_SPECS
+        availability = detect_hf_jobs_availability()
+        assert set(HARDWARE_SPECS) == set(availability.hardware_flavors)
+        assert {"cpu-basic", "t4-small", "a10g-small", "a100-large"} <= set(HARDWARE_SPECS)
 
     def test_hardware_specs_structure(self):
         """Test HARDWARE_SPECS entry structure."""
         from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
 
-        for name, spec in HARDWARE_SPECS.items():
-            assert "gpu" in spec
-            assert "memory_gb" in spec
-            assert "pro_required" in spec
-            assert isinstance(spec["memory_gb"], (int, float))
-            assert isinstance(spec["pro_required"], bool)
+        for flavor, spec in HARDWARE_SPECS.items():
+            assert spec["provider_value"] == flavor
+            assert spec["source"] == "huggingface_hub.SpaceHardware"
+            assert spec["pro_required"] is True
+            assert spec["cost_per_hour"] is None
 
     def test_hardware_pro_requirements(self):
         """Test Pro requirements for hardware tiers."""
         from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
 
-        # CPU tiers should not require Pro
-        assert not HARDWARE_SPECS["cpu-basic"]["pro_required"]
-        assert not HARDWARE_SPECS["cpu-upgrade"]["pro_required"]
-
-        # GPU tiers should require Pro
-        assert HARDWARE_SPECS["t4-small"]["pro_required"]
-        assert HARDWARE_SPECS["a10g-small"]["pro_required"]
-        assert HARDWARE_SPECS["a100-large"]["pro_required"]
-        assert HARDWARE_SPECS["h100"]["pro_required"]
+        assert HARDWARE_SPECS
+        assert all(spec["pro_required"] is True for spec in HARDWARE_SPECS.values())
 
 
 # =============================================================================

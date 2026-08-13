@@ -29,7 +29,7 @@ export interface CanvasPreset {
 export const BUILTIN_PRESETS: CanvasPreset[] = [
   {
     id: 'training-mission',
-    name: 'Training Mission Control',
+    name: 'Training Experiment Loop',
     panels: [
       { type: 'terminal', title: 'Claude Code', launch: 'claude', position: { x: 60, y: 280 } },
       { type: 'training', title: 'Training Run', position: { x: 540, y: 40 } },

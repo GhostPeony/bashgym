@@ -92,7 +92,7 @@ Compact definitions for BashGym training, terminal RL, and world-model docs.
 
 ## Read next
 
-- [overview.md](overview.md)
+- [Platform overview](../PLATFORM_OVERVIEW.md)
 - [strategy-guide.md](strategy-guide.md)
 - [world-models.md](world-models.md)
 - [metrics-runbook.md](metrics-runbook.md)

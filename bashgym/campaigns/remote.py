@@ -11,10 +11,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 
+from bashgym.campaigns.autoresearch_evidence import AUTORESEARCH_EVALUATION_FILENAME
 from bashgym.campaigns.contracts import (
     CodeLineageRecord,
     CodeLineageState,
@@ -27,8 +28,22 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.lineage import canonical_model_manifest_digest
 from bashgym.campaigns.nemo_rl import ApprovedNemoRLProfile, NemoRLRuntimeReceipt
 from bashgym.gym.remote_trainer import HAS_ASYNCSSH, SSHConfig
+
+if TYPE_CHECKING:
+    from bashgym.ledger.contracts import DatasetVersionSpec, EvaluationSuiteSpec
+
+
+REMOTE_OUTPUT_SEAL_EXECUTOR_ID = "campaign-ssh-remote-executor"
+REMOTE_OUTPUT_SEAL_EXECUTOR_VERSION = "1"
+_REMOTE_CONTROLLER_READABLE_OUTPUTS = frozenset(
+    {
+        "autoresearch_dataset_receipt.json",
+        AUTORESEARCH_EVALUATION_FILENAME,
+    }
+)
 
 
 class RemoteRunState(str, Enum):
@@ -186,6 +201,382 @@ class CodeLineageLaunchSnapshot(FrozenContractModel):
         return self
 
 
+class SealedStageArtifactInput(FrozenContractModel):
+    """One verified campaign artifact uploaded at an explicit remote path."""
+
+    schema_version: Literal["campaign_sealed_stage_artifact_input.v1"] = (
+        "campaign_sealed_stage_artifact_input.v1"
+    )
+    campaign_artifact_id: Identifier
+    sha256: HexDigest
+    size_bytes: int = Field(ge=0)
+    schema_name: Identifier
+    local_sealed_path: Path
+    remote_relative_path: str = Field(min_length=1, max_length=4096)
+
+    @field_validator("local_sealed_path")
+    @classmethod
+    def verified_local_material(cls, value: Path) -> Path:
+        candidate = value.expanduser()
+        if candidate.is_symlink() or not candidate.is_file():
+            raise ValueError("sealed stage artifact must be a regular non-symlink file")
+        return candidate.resolve()
+
+    @field_validator("remote_relative_path")
+    @classmethod
+    def safe_remote_relative_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or path.as_posix() != value
+            or "\\" in value
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise ValueError("sealed stage artifact remote relative path is unsafe")
+        return value
+
+    def verify_material(self) -> None:
+        if self.local_sealed_path.is_symlink() or not self.local_sealed_path.is_file():
+            raise ValueError("sealed stage artifact material changed before launch")
+        if (
+            self.local_sealed_path.stat().st_size != self.size_bytes
+            or _sha256_file(self.local_sealed_path) != self.sha256
+        ):
+            raise ValueError("sealed stage artifact material changed before launch")
+
+
+class RemoteModelArtifactReceipt(FrozenContractModel):
+    """Bounded physical identity computed beside an immutable model artifact."""
+
+    schema_version: Literal["campaign_remote_model_artifact_receipt.v1"] = (
+        "campaign_remote_model_artifact_receipt.v1"
+    )
+    model_id: str = Field(min_length=3, max_length=512)
+    revision: GitObjectId
+    artifact_manifest_sha256: HexDigest
+    weight_file_count: int = Field(ge=1)
+    total_size_bytes: int = Field(ge=1)
+
+    @field_validator("model_id")
+    @classmethod
+    def exact_hugging_face_model_id(cls, value: str) -> str:
+        parts = value.split("/")
+        if (
+            len(parts) != 2
+            or any(not part or part in {".", ".."} for part in parts)
+            or any(
+                character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
+                for character in value.replace("/", "")
+            )
+        ):
+            raise ValueError("model ID must be one exact Hugging Face repository ID")
+        return value
+
+
+class RemoteModelRegistrationRequest(FrozenContractModel):
+    """Explicit target-side register or acquire request for one pinned model."""
+
+    schema_version: Literal["campaign_remote_model_registration_request.v1"] = (
+        "campaign_remote_model_registration_request.v1"
+    )
+    operation: Literal["register", "acquire"]
+    source_id: Identifier
+    compute_profile_id: Identifier
+    target_contract_key: Identifier
+    target_model_digest: HexDigest
+    model_id: str = Field(min_length=3, max_length=512)
+    revision: GitObjectId
+    remote_model_path: str = Field(min_length=2, max_length=4096)
+    target_auth_env: str | None = Field(default=None, min_length=1, max_length=128)
+    timeout_seconds: int = Field(default=21_600, ge=60, le=86_400)
+
+    @field_validator("model_id")
+    @classmethod
+    def exact_hugging_face_model_id(cls, value: str) -> str:
+        return RemoteModelArtifactReceipt.exact_hugging_face_model_id(value)
+
+    @field_validator("revision", mode="before")
+    @classmethod
+    def immutable_revision(cls, value: Any) -> Any:
+        if not (
+            isinstance(value, str)
+            and len(value) in {40, 64}
+            and all(character in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError("model revision must be an immutable commit digest")
+        return value
+
+    @field_validator("remote_model_path")
+    @classmethod
+    def absolute_remote_directory(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            not path.is_absolute()
+            or path.as_posix() != value
+            or value == "/"
+            or "\\" in value
+            or ".." in path.parts
+            or any(character in "\x00\n\r" for character in value)
+        ):
+            raise ValueError("registered base model path must be one absolute remote directory")
+        return value.rstrip("/")
+
+    @field_validator("target_auth_env")
+    @classmethod
+    def target_environment_reference(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not (
+            value[0] in "ABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+            and all(character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for character in value)
+        ):
+            raise ValueError("target auth must name a target environment variable")
+        return value
+
+    @model_validator(mode="after")
+    def auth_is_acquisition_only(self) -> RemoteModelRegistrationRequest:
+        if self.operation == "register" and self.target_auth_env is not None:
+            raise ValueError("target auth is only valid for acquire")
+        return self
+
+    @property
+    def request_digest(self) -> str:
+        return canonical_hash(self.model_dump(mode="json"))
+
+
+class RegisteredRemoteModelSource(FrozenContractModel):
+    """Server-registered base model already present on one compute profile."""
+
+    schema_version: Literal[
+        "campaign_registered_remote_model_source.v1",
+        "campaign_registered_remote_model_source.v2",
+    ] = "campaign_registered_remote_model_source.v1"
+    source_id: Identifier
+    compute_profile_id: Identifier
+    target_contract_key: Identifier
+    model_digest: HexDigest
+    remote_model_path: str = Field(min_length=2, max_length=4096)
+    artifact_receipt: RemoteModelArtifactReceipt | None = None
+
+    @field_validator("remote_model_path")
+    @classmethod
+    def absolute_remote_directory(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            not path.is_absolute()
+            or path.as_posix() != value
+            or value == "/"
+            or "\\" in value
+            or ".." in path.parts
+            or any(character in "\x00\n\r" for character in value)
+        ):
+            raise ValueError("registered base model path must be one absolute remote directory")
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def versioned_physical_identity(self) -> RegisteredRemoteModelSource:
+        if self.schema_version == "campaign_registered_remote_model_source.v2":
+            if self.artifact_receipt is None:
+                raise ValueError("registered model v2 requires a physical model receipt")
+        elif self.artifact_receipt is not None:
+            raise ValueError("legacy registered model cannot carry a physical model receipt")
+        return self
+
+    @property
+    def physical_model_digest(self) -> str:
+        """Digest of evaluated bytes when attested, with v1 compatibility."""
+
+        if self.artifact_receipt is not None:
+            return self.artifact_receipt.artifact_manifest_sha256
+        return self.model_digest
+
+
+class RegisteredRemoteEvaluationDatasetSource(FrozenContractModel):
+    """One immutable held-out dataset file registered on private compute."""
+
+    schema_version: Literal["campaign_registered_remote_evaluation_dataset_source.v1"] = (
+        "campaign_registered_remote_evaluation_dataset_source.v1"
+    )
+    source_id: Identifier
+    compute_profile_id: Identifier
+    dataset_version_id: Identifier
+    content_digest: HexDigest
+    remote_dataset_path: str = Field(min_length=1, max_length=4096)
+
+    @field_validator("remote_dataset_path")
+    @classmethod
+    def absolute_remote_file(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            not path.is_absolute()
+            or path.as_posix() != value
+            or value == "/"
+            or value.endswith("/")
+            or "\\" in value
+            or ".." in path.parts
+            or any(character in "\x00\n\r" for character in value)
+        ):
+            raise ValueError("registered evaluation dataset path must be one absolute remote file")
+        return value
+
+    @property
+    def source_uri(self) -> str:
+        """Return the opaque public ledger reference without exposing the remote path."""
+
+        return f"bashgym-remote-dataset://{self.source_id}"
+
+
+class RemoteResidentModelFile(FrozenContractModel):
+    """One immutable checkpoint file that remains on private compute."""
+
+    schema_version: Literal["campaign_remote_resident_model_file.v1"] = (
+        "campaign_remote_resident_model_file.v1"
+    )
+    remote_relative_path: str = Field(min_length=7, max_length=4096)
+    sha256: HexDigest
+    size_bytes: int = Field(ge=0)
+
+    @field_validator("remote_relative_path")
+    @classmethod
+    def safe_model_relative_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or path.as_posix() != value
+            or not value.startswith("model/")
+            or len(path.parts) < 2
+            or "\\" in value
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise ValueError("remote-resident model path is unsafe")
+        return value
+
+
+class RemoteResidentModelSource(FrozenContractModel):
+    """Exact training checkpoint consumed in place on the same compute profile."""
+
+    schema_version: Literal["campaign_remote_resident_model_source.v1"] = (
+        "campaign_remote_resident_model_source.v1"
+    )
+    campaign_id: Identifier
+    study_id: Identifier
+    action_id: Identifier
+    attempt_id: Identifier
+    stage_index: int = Field(ge=0)
+    compute_profile_id: Identifier
+    remote_model_path: str = Field(min_length=2, max_length=4096)
+    files: tuple[RemoteResidentModelFile, ...] = Field(min_length=1, max_length=1000)
+    model_digest: HexDigest = ""
+
+    @field_validator("remote_model_path")
+    @classmethod
+    def absolute_remote_directory(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            not path.is_absolute()
+            or path.as_posix() != value
+            or value == "/"
+            or "\\" in value
+            or ".." in path.parts
+            or any(character in "\x00\n\r" for character in value)
+        ):
+            raise ValueError("remote-resident model path must be one absolute remote directory")
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def canonical_file_manifest(self) -> RemoteResidentModelSource:
+        paths = tuple(item.remote_relative_path for item in self.files)
+        if not paths or tuple(sorted(set(paths))) != paths:
+            raise ValueError("remote-resident model files must be non-empty, sorted, and unique")
+        expected = canonical_model_manifest_digest(self.files)
+        if self.model_digest and self.model_digest != expected:
+            raise ValueError("remote-resident model digest mismatch")
+        if not self.model_digest:
+            object.__setattr__(self, "model_digest", expected)
+        return self
+
+
+class RemoteResidentDatasetFile(FrozenContractModel):
+    """One immutable dataset shard consumed in place on private compute."""
+
+    schema_version: Literal["campaign_remote_resident_dataset_file.v1"] = (
+        "campaign_remote_resident_dataset_file.v1"
+    )
+    remote_relative_path: str = Field(min_length=1, max_length=4096)
+    sha256: HexDigest
+    size_bytes: int = Field(ge=0)
+
+    @field_validator("remote_relative_path")
+    @classmethod
+    def safe_dataset_relative_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or path.as_posix() != value
+            or "\\" in value
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise ValueError("remote-resident dataset path is unsafe")
+        return value
+
+
+class RemoteResidentDatasetSource(FrozenContractModel):
+    """Exact generated dataset consumed without copying its rows to the controller."""
+
+    schema_version: Literal["campaign_remote_resident_dataset_source.v1"] = (
+        "campaign_remote_resident_dataset_source.v1"
+    )
+    campaign_id: Identifier
+    study_id: Identifier
+    action_id: Identifier
+    attempt_id: Identifier
+    stage_index: int = Field(ge=0)
+    compute_profile_id: Identifier
+    remote_dataset_path: str = Field(min_length=2, max_length=4096)
+    dataset_id: Identifier
+    dataset_version_id: Identifier
+    content_digest: HexDigest
+    files: tuple[RemoteResidentDatasetFile, ...] = Field(min_length=1, max_length=1000)
+
+    @field_validator("remote_dataset_path")
+    @classmethod
+    def absolute_remote_directory(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            not path.is_absolute()
+            or path.as_posix() != value
+            or value == "/"
+            or "\\" in value
+            or ".." in path.parts
+            or any(character in "\x00\n\r" for character in value)
+        ):
+            raise ValueError("remote-resident dataset path must be one absolute remote directory")
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def canonical_file_manifest(self) -> RemoteResidentDatasetSource:
+        paths = tuple(item.remote_relative_path for item in self.files)
+        if tuple(sorted(set(paths))) != paths:
+            raise ValueError("remote-resident dataset files must be sorted and unique")
+        return self
+
+
+class SealedStageArtifactSource(FrozenContractModel):
+    """Exact preceding training attempt that produced evaluator model inputs."""
+
+    schema_version: Literal["campaign_sealed_stage_artifact_source.v1"] = (
+        "campaign_sealed_stage_artifact_source.v1"
+    )
+    campaign_id: Identifier
+    study_id: Identifier
+    action_id: Identifier
+    attempt_id: Identifier
+    stage_index: int = Field(ge=0)
+
+
 class RemoteLaunchRequest(ContractModel):
     """Typed launch inputs; an approved recipe builds these arguments."""
 
@@ -203,6 +594,13 @@ class RemoteLaunchRequest(ContractModel):
         "training_metrics.jsonl",
     )
     source_snapshot: CodeLineageLaunchSnapshot | None = None
+    sealed_stage_artifact_inputs: tuple[SealedStageArtifactInput, ...] = ()
+    source_training: SealedStageArtifactSource | None = None
+    registered_base_model: RegisteredRemoteModelSource | None = None
+    registered_evaluation_dataset: RegisteredRemoteEvaluationDatasetSource | None = None
+    remote_resident_model: RemoteResidentModelSource | None = None
+    remote_resident_dataset: RemoteResidentDatasetSource | None = None
+    evaluation_context_sha256: HexDigest | None = None
 
     @field_validator("script_path")
     @classmethod
@@ -264,7 +662,114 @@ class RemoteLaunchRequest(ContractModel):
             and self.source_snapshot.archive_path.name in input_names
         ):
             raise ValueError("code snapshot and input files must have distinct basenames")
+        remote_names = [
+            *(path.name for path in self.input_files),
+            *(item.remote_relative_path for item in self.sealed_stage_artifact_inputs),
+        ]
+        if len(set(remote_names)) != len(remote_names):
+            raise ValueError("remote launch inputs must have unique destination paths")
+        for item in self.sealed_stage_artifact_inputs:
+            item.verify_material()
+        if bool(self.sealed_stage_artifact_inputs) != (self.source_training is not None):
+            raise ValueError("sealed stage artifacts require one explicit source identity")
+        model_sources = sum(
+            source is not None
+            for source in (
+                self.registered_base_model,
+                self.source_training,
+                self.remote_resident_model,
+            )
+        )
+        if model_sources > 1:
+            raise ValueError("evaluation requires exactly one evaluated model source")
+        if (
+            self.registered_base_model is not None
+            and self.registered_base_model.compute_profile_id != self.compute_profile_id
+        ):
+            raise ValueError("registered base model compute profile mismatch")
+        if (
+            self.registered_evaluation_dataset is not None
+            and self.registered_evaluation_dataset.compute_profile_id != self.compute_profile_id
+        ):
+            raise ValueError("registered evaluation dataset compute profile mismatch")
+        if (
+            self.remote_resident_model is not None
+            and self.remote_resident_model.compute_profile_id != self.compute_profile_id
+        ):
+            raise ValueError("remote-resident model compute profile mismatch")
+        if (
+            self.remote_resident_dataset is not None
+            and self.remote_resident_dataset.compute_profile_id != self.compute_profile_id
+        ):
+            raise ValueError("remote-resident dataset compute profile mismatch")
         return self
+
+    @property
+    def request_digest(self) -> str:
+        """Bind launch identity to all local material and remote destinations."""
+
+        entrypoint = (
+            {
+                "kind": "source_snapshot",
+                "sha256": self.source_snapshot.archive_sha256,
+                "size_bytes": self.source_snapshot.archive_size_bytes,
+            }
+            if self.source_snapshot is not None
+            else {
+                "kind": "pinned_script",
+                "sha256": _sha256_file(self.script_path),
+                "size_bytes": self.script_path.stat().st_size,
+            }
+        )
+        return canonical_hash(
+            {
+                "compute_profile_id": self.compute_profile_id,
+                "run_id": self.run_id,
+                "entrypoint": entrypoint,
+                "input_files": [
+                    {
+                        "name": path.name,
+                        "sha256": _sha256_file(path),
+                        "size_bytes": path.stat().st_size,
+                    }
+                    for path in self.input_files
+                ],
+                "sealed_stage_artifact_inputs": [
+                    item.model_dump(mode="json", exclude={"local_sealed_path"})
+                    for item in self.sealed_stage_artifact_inputs
+                ],
+                "source_training": (
+                    self.source_training.model_dump(mode="json")
+                    if self.source_training is not None
+                    else None
+                ),
+                "registered_base_model": (
+                    self.registered_base_model.model_dump(mode="json")
+                    if self.registered_base_model is not None
+                    else None
+                ),
+                "registered_evaluation_dataset": (
+                    self.registered_evaluation_dataset.model_dump(mode="json")
+                    if self.registered_evaluation_dataset is not None
+                    else None
+                ),
+                "remote_resident_model": (
+                    self.remote_resident_model.model_dump(mode="json")
+                    if self.remote_resident_model is not None
+                    else None
+                ),
+                "remote_resident_dataset": (
+                    self.remote_resident_dataset.model_dump(mode="json")
+                    if self.remote_resident_dataset is not None
+                    else None
+                ),
+                "script_args": list(self.script_args),
+                "python_executable": self.python_executable,
+                "recipe_digest": self.recipe_digest,
+                "output_paths": list(self.output_paths),
+                "evaluation_context_sha256": self.evaluation_context_sha256,
+            }
+        )
 
 
 class RemoteObservation(FrozenContractModel):
@@ -309,10 +814,62 @@ class RemoteStreamChunk(FrozenContractModel):
     next_cursor: RemoteStreamCursor
 
 
+class RemoteOutputFile(FrozenContractModel):
+    """Hash-and-size identity for one file inventoried on private compute."""
+
+    schema_version: Literal["campaign_remote_output_file.v1"] = "campaign_remote_output_file.v1"
+    path: str = Field(min_length=1, max_length=4096)
+    sha256: HexDigest
+    size_bytes: int = Field(ge=0)
+
+    @field_validator("path")
+    @classmethod
+    def safe_relative_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or path.as_posix() != value
+            or value in {"", "."}
+            or "\\" in value
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise ValueError("remote output path is unsafe")
+        return value
+
+
+class RemoteOutputInventory(FrozenContractModel):
+    """Ordered file inventory computed without moving remote output bytes."""
+
+    schema_version: Literal["campaign_remote_output_inventory.v1"] = (
+        "campaign_remote_output_inventory.v1"
+    )
+    compute_profile_id: Identifier
+    run_id: Identifier
+    files: tuple[RemoteOutputFile, ...] = Field(min_length=1, max_length=10_000)
+    aggregate_digest: HexDigest = ""
+
+    @model_validator(mode="after")
+    def canonical_inventory(self) -> RemoteOutputInventory:
+        paths = tuple(item.path for item in self.files)
+        if tuple(sorted(set(paths))) != paths:
+            raise ValueError("remote output inventory must be sorted and unique")
+        expected = canonical_hash(
+            [[item.path, item.sha256, item.size_bytes] for item in self.files]
+        )
+        if self.aggregate_digest and self.aggregate_digest != expected:
+            raise ValueError("remote output inventory digest mismatch")
+        if not self.aggregate_digest:
+            object.__setattr__(self, "aggregate_digest", expected)
+        return self
+
+
 class RemoteSession(Protocol):
     async def run(self, command: str, *, timeout: float | None = None) -> RemoteCommandResult: ...
 
     async def upload(self, local_path: Path, remote_path: str) -> None: ...
+
+    async def upload_bytes(self, payload: bytes, remote_path: str) -> None: ...
 
     async def download(self, remote_path: str, local_path: Path) -> bool: ...
 
@@ -361,6 +918,7 @@ class PinnedRemoteStageProfile(FrozenContractModel):
     @classmethod
     def approved_compute_stage_only(cls, value: StageKind) -> StageKind:
         if value not in {
+            StageKind.DATA_BUILD,
             StageKind.SMOKE_TRAINING,
             StageKind.FULL_TRAINING,
             StageKind.DEVELOPMENT_EVALUATION,
@@ -381,8 +939,6 @@ class PinnedRemoteStageProfile(FrozenContractModel):
     @field_validator("input_files")
     @classmethod
     def pinned_inputs(cls, value: tuple[Path, ...]) -> tuple[Path, ...]:
-        if not value:
-            raise ValueError("approved remote profile requires at least one input file")
         resolved: list[Path] = []
         for raw_path in value:
             candidate = raw_path.expanduser()
@@ -429,11 +985,27 @@ class PinnedRemoteStageProfile(FrozenContractModel):
 
     @model_validator(mode="after")
     def verify_contract_and_materials(self) -> PinnedRemoteStageProfile:
+        if self.stage != StageKind.DEVELOPMENT_EVALUATION and not self.input_files:
+            raise ValueError("training and data-build profiles require at least one input file")
         if self.script_path.name in {path.name for path in self.input_files}:
             raise ValueError("approved script and input files must have distinct basenames")
         expected_inputs = {path.name for path in self.input_files}
         if set(self.input_sha256) != expected_inputs:
             raise ValueError("approved input hashes must exactly match input basenames")
+        if self.stage == StageKind.DEVELOPMENT_EVALUATION:
+            reserved = ("--context", "--model-dir", "--dataset", "--output")
+            if any(
+                argument.casefold() == flag or argument.casefold().startswith(f"{flag}=")
+                for argument in self.script_args
+                for flag in reserved
+            ):
+                raise ValueError("reserved evaluator argument must be supplied by the ABI")
+        if self.stage == StageKind.FULL_TRAINING and any(
+            argument.casefold() in {"--dataset-dir", "--model-dir"}
+            or argument.casefold().startswith(("--dataset-dir=", "--model-dir="))
+            for argument in self.script_args
+        ):
+            raise ValueError("reserved training input argument must be supplied by the ABI")
         self.verify_materials()
         return self
 
@@ -470,6 +1042,8 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
     remote_work_dir: str = Field(default="~/bashgym-training", min_length=1, max_length=4096)
     stages: tuple[PinnedRemoteStageProfile, ...]
     nemo_rl: ApprovedNemoRLProfile | None = None
+    registered_base_model: RegisteredRemoteModelSource | None = None
+    registered_evaluation_dataset: RegisteredRemoteEvaluationDatasetSource | None = None
 
     @field_validator("host", "username")
     @classmethod
@@ -526,11 +1100,34 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
                 or not required_stages.issubset(configured_stages)
             ):
                 raise ValueError("NeMo RL profile does not match its remote executor")
+        if self.registered_base_model is not None:
+            registered = self.registered_base_model
+            if (
+                registered.compute_profile_id != self.compute_profile_id
+                or registered.target_contract_key != self.target_contract_key
+                or registered.model_digest != self.target_model_digest
+                or not {
+                    StageKind.DEVELOPMENT_EVALUATION,
+                    StageKind.FULL_TRAINING,
+                }.intersection(stage.stage for stage in self.stages)
+            ):
+                raise ValueError("registered base model does not match its remote executor")
+        if self.registered_evaluation_dataset is not None:
+            registered_dataset = self.registered_evaluation_dataset
+            if (
+                registered_dataset.compute_profile_id != self.compute_profile_id
+                or StageKind.DEVELOPMENT_EVALUATION not in {stage.stage for stage in self.stages}
+            ):
+                raise ValueError("registered evaluation dataset does not match its remote executor")
         excluded = {"profile_digest"}
         if self.nemo_rl is None:
             # Preserve the v2 digest of profiles written before the optional
             # NeMo RL extension existed.
             excluded.add("nemo_rl")
+        if self.registered_base_model is None:
+            excluded.add("registered_base_model")
+        if self.registered_evaluation_dataset is None:
+            excluded.add("registered_evaluation_dataset")
         payload = self.model_dump(mode="json", exclude=excluded)
         expected = canonical_hash(payload)
         if self.profile_digest and self.profile_digest != expected:
@@ -556,13 +1153,31 @@ def remote_executor_config(
     stage: StageKind,
     *,
     recipe_digest: HexDigest,
+    recipe_script_args: tuple[str, ...] = (),
     code_lineage: CodeLineageRecord | None = None,
+    sealed_stage_artifact_inputs: tuple[SealedStageArtifactInput, ...] = (),
+    evaluation_suite: EvaluationSuiteSpec | None = None,
+    dataset_version: DatasetVersionSpec | None = None,
+    source_training: SealedStageArtifactSource | dict[str, Any] | None = None,
+    remote_resident_model: RemoteResidentModelSource | dict[str, Any] | None = None,
+    remote_resident_dataset: RemoteResidentDatasetSource | dict[str, Any] | None = None,
+    bind_registered_training_base: bool = False,
+    evaluate_registered_base_model: bool = False,
 ) -> dict[str, Any]:
     """Project one protected profile stage into the persisted executor contract."""
 
     profile.verify_materials()
     configured = profile.stage_profile(stage)
+    recipe_script_args = PinnedRemoteStageProfile.exact_secret_free_args(recipe_script_args)
+    if recipe_script_args and stage not in {
+        StageKind.DATA_BUILD,
+        StageKind.SMOKE_TRAINING,
+        StageKind.FULL_TRAINING,
+    }:
+        raise ValueError("recipe arguments are supported only for data-build and training stages")
     result: dict[str, Any] = {
+        "seal_executor_id": REMOTE_OUTPUT_SEAL_EXECUTOR_ID,
+        "seal_executor_version": REMOTE_OUTPUT_SEAL_EXECUTOR_VERSION,
         "profile_id": profile.profile_id,
         "profile_revision": profile.profile_revision,
         "profile_digest": profile.profile_digest,
@@ -574,7 +1189,7 @@ def remote_executor_config(
         "expected_script_sha256": configured.script_sha256,
         "input_files": [str(path) for path in configured.input_files],
         "expected_input_sha256": dict(sorted(configured.input_sha256.items())),
-        "script_args": list(configured.script_args),
+        "script_args": [*configured.script_args, *recipe_script_args],
         "python_executable": configured.python_executable,
         "output_paths": list(configured.output_paths),
         "capacity_policy": configured.capacity_policy.model_dump(mode="json"),
@@ -582,6 +1197,104 @@ def remote_executor_config(
         "budget_reservation": configured.budget_reservation,
         "recipe_digest": recipe_digest,
     }
+    if recipe_script_args:
+        result["recipe_script_args"] = list(recipe_script_args)
+    if remote_resident_dataset is not None:
+        if stage != StageKind.FULL_TRAINING:
+            raise ValueError("remote-resident datasets are consumed only by full training")
+        resident_dataset = RemoteResidentDatasetSource.model_validate(remote_resident_dataset)
+        if resident_dataset.compute_profile_id != profile.compute_profile_id:
+            raise ValueError("remote-resident dataset compute profile mismatch")
+        result["remote_resident_dataset"] = resident_dataset.model_dump(mode="json")
+    resident_model = None
+    if remote_resident_model is not None:
+        resident_model = RemoteResidentModelSource.model_validate(remote_resident_model)
+        if resident_model.compute_profile_id != profile.compute_profile_id:
+            raise ValueError("remote-resident model compute profile mismatch")
+        if stage == StageKind.FULL_TRAINING:
+            result["remote_resident_model"] = resident_model.model_dump(mode="json")
+        elif stage != StageKind.DEVELOPMENT_EVALUATION:
+            raise ValueError("remote-resident models are consumed only by training or evaluation")
+    if bind_registered_training_base and stage != StageKind.FULL_TRAINING:
+        raise ValueError("registered training bases are consumed only by full training")
+    if bind_registered_training_base and resident_model is not None:
+        raise ValueError("full training requires exactly one model source")
+    if stage == StageKind.FULL_TRAINING and resident_model is None:
+        if profile.registered_base_model is None:
+            raise ValueError("full training requires one registered base model")
+        result["training_base_model"] = profile.registered_base_model.model_dump(mode="json")
+    if stage == StageKind.DEVELOPMENT_EVALUATION:
+        if evaluation_suite is None or dataset_version is None:
+            raise ValueError("development evaluation requires registered evaluator inputs")
+        if (
+            evaluation_suite.workspace_id != dataset_version.workspace_id
+            or evaluation_suite.project_id != dataset_version.project_id
+            or evaluation_suite.dataset_version_id != dataset_version.dataset_version_id
+            or configured.script_sha256 != evaluation_suite.code_digest
+            or AUTORESEARCH_EVALUATION_FILENAME not in configured.output_paths
+        ):
+            raise ValueError("development evaluation profile does not match registrations")
+        registered_dataset = profile.registered_evaluation_dataset
+        if registered_dataset is None:
+            raise ValueError("development evaluation requires one registered remote dataset")
+        if (
+            registered_dataset.compute_profile_id != profile.compute_profile_id
+            or registered_dataset.dataset_version_id != dataset_version.dataset_version_id
+            or registered_dataset.content_digest != dataset_version.content_digest
+        ):
+            raise ValueError("development evaluation dataset registration mismatch")
+        result["registered_evaluation_dataset"] = registered_dataset.model_dump(mode="json")
+        result["evaluation_binding"] = {
+            "ledger_project_id": evaluation_suite.project_id,
+            "evaluation_suite_id": evaluation_suite.evaluation_suite_id,
+            "evaluation_code_digest": evaluation_suite.code_digest,
+            "dataset_version_id": dataset_version.dataset_version_id,
+            "dataset_content_digest": dataset_version.content_digest,
+            "dataset_remote_path": registered_dataset.remote_dataset_path,
+            # Compatibility for workers written against the original local-input key.
+            "dataset_remote_name": registered_dataset.remote_dataset_path,
+        }
+        if evaluate_registered_base_model:
+            if (
+                source_training is not None
+                or sealed_stage_artifact_inputs
+                or remote_resident_model is not None
+            ):
+                raise ValueError("evaluation requires exactly one evaluated model source")
+            registered = profile.registered_base_model
+            if registered is None:
+                raise ValueError("development baseline requires one registered base model")
+            result["registered_base_model"] = registered.model_dump(mode="json")
+            result["evaluated_model_digest"] = registered.physical_model_digest
+        else:
+            if resident_model is not None:
+                if source_training is not None or sealed_stage_artifact_inputs:
+                    raise ValueError("evaluation requires exactly one evaluated model source")
+                source = resident_model
+                result["remote_resident_model"] = source.model_dump(mode="json")
+                result["evaluated_model_digest"] = source.model_digest
+            else:
+                if source_training is None or not sealed_stage_artifact_inputs:
+                    raise ValueError(
+                        "development candidate requires one full-training model source"
+                    )
+                source = SealedStageArtifactSource.model_validate(source_training)
+                for item in sealed_stage_artifact_inputs:
+                    item.verify_material()
+                    if (
+                        item.schema_name != "huggingface_model_file.v1"
+                        or not item.remote_relative_path.startswith("model/")
+                    ):
+                        raise ValueError("development evaluation model input is invalid")
+                result["sealed_stage_artifact_inputs"] = [
+                    item.model_dump(mode="json") for item in sealed_stage_artifact_inputs
+                ]
+                result["source_training"] = source.model_dump(
+                    mode="json", exclude={"schema_version"}
+                )
+                result["evaluated_model_digest"] = canonical_model_manifest_digest(
+                    sealed_stage_artifact_inputs
+                )
     if profile.nemo_rl is not None and stage in {
         StageKind.SMOKE_TRAINING,
         StageKind.FULL_TRAINING,
@@ -664,6 +1377,13 @@ class AsyncSSHSession:
     async def upload(self, local_path: Path, remote_path: str) -> None:
         await self.sftp.put(str(local_path), remote_path)
 
+    async def upload_bytes(self, payload: bytes, remote_path: str) -> None:
+        temporary_path = f"{remote_path}.tmp-{hashlib.sha256(payload).hexdigest()[:16]}"
+        async with self.sftp.open(temporary_path, "wb") as handle:
+            await handle.write(payload)
+        await self.sftp.chmod(temporary_path, 0o600)
+        await self.sftp.rename(temporary_path, remote_path)
+
     async def download(self, remote_path: str, local_path: Path) -> bool:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -702,6 +1422,80 @@ class RemoteTrainingAdapter:
         if not root.startswith("/"):
             raise RuntimeError("campaign_remote_root_must_be_absolute")
         return root.rstrip("/")
+
+    async def register_remote_model(
+        self,
+        request: RemoteModelRegistrationRequest,
+    ) -> RegisteredRemoteModelSource:
+        """Inspect or acquire one model entirely on its selected compute target."""
+
+        if request.compute_profile_id != self.compute_profile_id:
+            raise ValueError("remote model registration compute profile mismatch")
+        command = _remote_model_registration_command(request)
+        async with self._session() as session:
+            result = await session.run(command, timeout=request.timeout_seconds)
+        if result.exit_status != 0:
+            reason = (
+                "campaign_remote_model_acquisition_failed"
+                if request.operation == "acquire"
+                else "campaign_remote_model_registration_failed"
+            )
+            raise RuntimeError(reason)
+        receipt = _parse_remote_model_artifact_receipt(result.stdout, request)
+        return RegisteredRemoteModelSource(
+            schema_version="campaign_registered_remote_model_source.v2",
+            source_id=request.source_id,
+            compute_profile_id=request.compute_profile_id,
+            target_contract_key=request.target_contract_key,
+            model_digest=request.target_model_digest,
+            remote_model_path=request.remote_model_path,
+            artifact_receipt=receipt,
+        )
+
+    async def verify_registered_base_model(self, source: RegisteredRemoteModelSource) -> None:
+        """Confirm an operator-selected base already exists on this compute target."""
+
+        if source.compute_profile_id != self.compute_profile_id:
+            raise ValueError("registered base model compute profile mismatch")
+        async with self._session() as session:
+            await self._verify_registered_base_model(session, source)
+
+    async def _verify_registered_base_model(
+        self,
+        session: RemoteSession,
+        source: RegisteredRemoteModelSource,
+    ) -> None:
+        if source.compute_profile_id != self.compute_profile_id:
+            raise ValueError("registered base model compute profile mismatch")
+        if source.artifact_receipt is not None:
+            request = RemoteModelRegistrationRequest(
+                operation="register",
+                source_id=source.source_id,
+                compute_profile_id=source.compute_profile_id,
+                target_contract_key=source.target_contract_key,
+                target_model_digest=source.model_digest,
+                model_id=source.artifact_receipt.model_id,
+                revision=source.artifact_receipt.revision,
+                remote_model_path=source.remote_model_path,
+            )
+            result = await session.run(_remote_model_registration_command(request), timeout=3600)
+            if result.exit_status != 0:
+                raise RuntimeError("campaign_registered_base_model_not_ready")
+            observed = _parse_remote_model_artifact_receipt(result.stdout, request)
+            if observed != source.artifact_receipt:
+                raise RuntimeError("campaign_registered_base_model_changed")
+            return
+        quoted = shlex.quote(source.remote_model_path)
+        result = await session.run(
+            f"test -d {quoted} && test ! -L {quoted} && "
+            f"test -f {quoted}/config.json && test ! -L {quoted}/config.json && "
+            f"find {quoted} -maxdepth 1 -type f "
+            "\\( -name '*.safetensors' -o -name 'pytorch_model*.bin' \\) "
+            "-print -quit | grep -q .",
+            timeout=10,
+        )
+        if result.exit_status != 0:
+            raise RuntimeError("campaign_registered_base_model_not_ready")
 
     async def nemo_rl_preflight(
         self,
@@ -860,7 +1654,27 @@ class RemoteTrainingAdapter:
             if request.source_snapshot is not None
             else (request.script_path,)
         )
-        return (*entrypoint_material, *request.input_files)
+        return (
+            *entrypoint_material,
+            *request.input_files,
+            *(item.local_sealed_path for item in request.sealed_stage_artifact_inputs),
+        )
+
+    @staticmethod
+    def _launch_items(request: RemoteLaunchRequest) -> tuple[tuple[Path, str], ...]:
+        entrypoint_material = (
+            ((request.source_snapshot.archive_path, request.source_snapshot.archive_path.name),)
+            if request.source_snapshot is not None
+            else ((request.script_path, request.script_path.name),)
+        )
+        return (
+            *entrypoint_material,
+            *((path, path.name) for path in request.input_files),
+            *(
+                (item.local_sealed_path, item.remote_relative_path)
+                for item in request.sealed_stage_artifact_inputs
+            ),
+        )
 
     @staticmethod
     def _execution_context(
@@ -883,9 +1697,82 @@ class RemoteTrainingAdapter:
             "python_path": f"{remote_directory}/source",
         }
 
+    async def _verify_remote_model_source(
+        self, session: RemoteSession, source: RemoteResidentModelSource
+    ) -> None:
+        if source.compute_profile_id != self.compute_profile_id:
+            raise ValueError("remote-resident model compute profile mismatch")
+        predicates = []
+        for item in source.files:
+            relative = item.remote_relative_path.removeprefix("model/")
+            remote_path = f"{source.remote_model_path}/{relative}"
+            quoted = shlex.quote(remote_path)
+            predicates.append(
+                f"test -f {quoted} && test ! -L {quoted} && "
+                f'test "$(stat -c %s {quoted})" = {item.size_bytes} && '
+                f"test \"$(sha256sum {quoted} | awk '{{print $1}}')\" = {item.sha256}"
+            )
+        result = await session.run(" && ".join(predicates), timeout=3600)
+        if result.exit_status != 0:
+            raise RuntimeError("campaign_remote_resident_model_invalid")
+
+    async def verify_remote_model_source(self, source: RemoteResidentModelSource) -> None:
+        """Verify an in-place candidate checkpoint without moving any model bytes."""
+
+        async with self._session() as session:
+            await self._verify_remote_model_source(session, source)
+
+    async def _verify_remote_dataset_source(
+        self, session: RemoteSession, source: RemoteResidentDatasetSource
+    ) -> None:
+        if source.compute_profile_id != self.compute_profile_id:
+            raise ValueError("remote-resident dataset compute profile mismatch")
+        predicates = []
+        for item in source.files:
+            remote_path = f"{source.remote_dataset_path}/{item.remote_relative_path}"
+            quoted = shlex.quote(remote_path)
+            predicates.append(
+                f"test -f {quoted} && test ! -L {quoted} && "
+                f'test "$(stat -c %s {quoted})" = {item.size_bytes} && '
+                f"test \"$(sha256sum {quoted} | awk '{{print $1}}')\" = {item.sha256}"
+            )
+        result = await session.run(" && ".join(predicates), timeout=3600)
+        if result.exit_status != 0:
+            raise RuntimeError("campaign_remote_resident_dataset_invalid")
+
+    async def verify_remote_dataset_source(self, source: RemoteResidentDatasetSource) -> None:
+        """Verify generated rows on their source compute target without moving them."""
+
+        async with self._session() as session:
+            await self._verify_remote_dataset_source(session, source)
+
+    async def _verify_registered_evaluation_dataset(
+        self,
+        session: RemoteSession,
+        source: RegisteredRemoteEvaluationDatasetSource,
+    ) -> None:
+        if source.compute_profile_id != self.compute_profile_id:
+            raise ValueError("registered evaluation dataset compute profile mismatch")
+        quoted = shlex.quote(source.remote_dataset_path)
+        command = (
+            f"test -f {quoted} && test ! -L {quoted} && "
+            f"test \"$(sha256sum {quoted} | awk '{{print $1}}')\" = {source.content_digest}"
+        )
+        result = await session.run(command, timeout=3600)
+        if result.exit_status != 0:
+            raise RuntimeError("campaign_registered_evaluation_dataset_invalid")
+
+    async def verify_registered_evaluation_dataset(
+        self, source: RegisteredRemoteEvaluationDatasetSource
+    ) -> None:
+        """Verify a held-out file in place without uploading or downloading its rows."""
+
+        async with self._session() as session:
+            await self._verify_registered_evaluation_dataset(session, source)
+
     @staticmethod
     def _launch_manifest(request: RemoteLaunchRequest, remote_directory: str) -> dict[str, Any]:
-        files = RemoteTrainingAdapter._launch_files(request)
+        launch_items = RemoteTrainingAdapter._launch_items(request)
         if request.source_snapshot is not None and (
             request.source_snapshot.archive_path.stat().st_size
             != request.source_snapshot.archive_size_bytes
@@ -893,6 +1780,8 @@ class RemoteTrainingAdapter:
             != request.source_snapshot.archive_sha256
         ):
             raise ValueError("code lineage snapshot changed before launch")
+        for item in request.sealed_stage_artifact_inputs:
+            item.verify_material()
         argv = RemoteTrainingAdapter._argv(request, remote_directory)
         execution_context = RemoteTrainingAdapter._execution_context(request, remote_directory)
         command_contract = {"argv": list(argv), **execution_context}
@@ -900,19 +1789,43 @@ class RemoteTrainingAdapter:
             "schema_version": "campaign_remote_launch_manifest.v2",
             "compute_profile_id": request.compute_profile_id,
             "run_id": request.run_id,
+            "request_digest": request.request_digest,
+            "evaluation_context_sha256": request.evaluation_context_sha256,
             "recipe_digest": request.recipe_digest,
             "argv": list(argv),
             "execution_context": execution_context,
             "command_hash": canonical_hash(command_contract),
             "files": [
-                {"name": path.name, "sha256": _sha256_file(path), "size_bytes": path.stat().st_size}
-                for path in files
+                {
+                    "name": remote_path,
+                    "sha256": _sha256_file(path),
+                    "size_bytes": path.stat().st_size,
+                }
+                for path, remote_path in launch_items
             ],
             "output_paths": list(request.output_paths),
         }
         if request.source_snapshot is not None:
             manifest["code_lineage"] = request.source_snapshot.model_dump(
                 mode="json", exclude={"archive_path"}
+            )
+        if request.source_training is not None:
+            manifest["source_training"] = request.source_training.model_dump(mode="json")
+        if request.registered_base_model is not None:
+            manifest["registered_base_model"] = request.registered_base_model.model_dump(
+                mode="json"
+            )
+        if request.registered_evaluation_dataset is not None:
+            manifest["registered_evaluation_dataset"] = (
+                request.registered_evaluation_dataset.model_dump(mode="json")
+            )
+        if request.remote_resident_model is not None:
+            manifest["remote_resident_model"] = request.remote_resident_model.model_dump(
+                mode="json"
+            )
+        if request.remote_resident_dataset is not None:
+            manifest["remote_resident_dataset"] = request.remote_resident_dataset.model_dump(
+                mode="json"
             )
         return manifest
 
@@ -921,20 +1834,42 @@ class RemoteTrainingAdapter:
             raise ValueError("campaign compute profile does not match remote adapter")
         async with self._session() as session:
             root = await self._resolve_remote_root(session)
+            if request.registered_base_model is not None:
+                await self._verify_registered_base_model(session, request.registered_base_model)
+            if request.registered_evaluation_dataset is not None:
+                await self._verify_registered_evaluation_dataset(
+                    session, request.registered_evaluation_dataset
+                )
+            if request.remote_resident_model is not None:
+                await self._verify_remote_model_source(session, request.remote_resident_model)
+            if request.remote_resident_dataset is not None:
+                await self._verify_remote_dataset_source(session, request.remote_resident_dataset)
             remote_directory = f"{root}/{request.run_id}"
             quoted_root = shlex.quote(root)
             quoted_directory = shlex.quote(remote_directory)
+            input_directories = sorted(
+                {
+                    str(PurePosixPath(item.remote_relative_path).parent)
+                    for item in request.sealed_stage_artifact_inputs
+                    if str(PurePosixPath(item.remote_relative_path).parent) != "."
+                }
+            )
+            directory_setup = "".join(
+                f" && mkdir -p {shlex.quote(remote_directory + '/' + relative)}"
+                for relative in input_directories
+            )
             created = await session.run(
-                f"umask 077 && mkdir -p {quoted_root} && mkdir {quoted_directory}", timeout=10
+                f"umask 077 && mkdir -p {quoted_root} && mkdir {quoted_directory}{directory_setup}",
+                timeout=10,
             )
             if created.exit_status != 0:
                 raise RuntimeError("campaign_remote_run_already_exists")
-            files = self._launch_files(request)
+            launch_items = self._launch_items(request)
             manifest = self._launch_manifest(request, remote_directory)
             manifest_json = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
             manifest_sha256 = hashlib.sha256(manifest_json.encode()).hexdigest()
-            for path in files:
-                await session.upload(path, f"{remote_directory}/{path.name}")
+            for path, remote_path in launch_items:
+                await session.upload(path, f"{remote_directory}/{remote_path}")
             checks = " && ".join(
                 f"printf '%s  %s\\n' {item['sha256']} {shlex.quote(item['name'])} | sha256sum -c -"
                 for item in manifest["files"]
@@ -1227,6 +2162,195 @@ class RemoteTrainingAdapter:
             next_cursor=next_cursor,
         )
 
+    async def inventory_outputs(
+        self,
+        identity: RemoteRunIdentity,
+        request: RemoteLaunchRequest,
+        *,
+        observation: RemoteObservation | None = None,
+    ) -> RemoteOutputInventory:
+        """Hash the complete declared result set on compute without downloading it."""
+
+        proven = observation or await self.observe(identity)
+        if proven.identity != identity or proven.state != RemoteRunState.COMPLETED:
+            raise RuntimeError("campaign_remote_outputs_not_ready")
+        requested = (*request.output_paths, "training.log", "exit_code", "launch_manifest.json")
+        return await self._inventory_paths(identity, requested)
+
+    async def inventory_terminal_evidence(
+        self,
+        identity: RemoteRunIdentity,
+        *,
+        observation: RemoteObservation | None = None,
+    ) -> RemoteOutputInventory:
+        """Hash closed failure evidence on compute without downloading it."""
+
+        proven = observation or await self.observe(identity)
+        if proven.identity != identity or proven.state != RemoteRunState.FAILED:
+            raise RuntimeError("campaign_remote_terminal_evidence_not_ready")
+        return await self._inventory_paths(
+            identity, ("training.log", "exit_code", "launch_manifest.json")
+        )
+
+    async def _inventory_paths(
+        self, identity: RemoteRunIdentity, requested: tuple[str, ...]
+    ) -> RemoteOutputInventory:
+        script = """
+import hashlib, json, os, sys
+root = sys.argv[1]
+requested = json.loads(sys.argv[2])
+found = {}
+for relative in requested:
+    target = os.path.join(root, *relative.split('/'))
+    if not os.path.lexists(target) or os.path.islink(target):
+        raise SystemExit(41)
+    candidates = []
+    if os.path.isdir(target):
+        for base, directories, filenames in os.walk(target, followlinks=False):
+            if any(os.path.islink(os.path.join(base, name)) for name in directories + filenames):
+                raise SystemExit(42)
+            candidates.extend(os.path.join(base, name) for name in filenames)
+    elif os.path.isfile(target):
+        candidates.append(target)
+    else:
+        raise SystemExit(43)
+    for path in candidates:
+        relative_path = os.path.relpath(path, root).replace(os.sep, '/')
+        digest = hashlib.sha256()
+        size = 0
+        with open(path, 'rb') as handle:
+            while True:
+                block = handle.read(1024 * 1024)
+                if not block:
+                    break
+                digest.update(block)
+                size += len(block)
+        found[relative_path] = {
+            'path': relative_path,
+            'sha256': digest.hexdigest(),
+            'size_bytes': size,
+        }
+if not found or len(found) > 10000:
+    raise SystemExit(44)
+print(json.dumps([found[path] for path in sorted(found)], separators=(',', ':')))
+""".strip()
+        command = (
+            f"python3 -c {shlex.quote(script)} "
+            f"{shlex.quote(identity.remote_run_directory)} "
+            f"{shlex.quote(json.dumps(requested, separators=(',', ':')))}"
+        )
+        async with self._session() as session:
+            result = await session.run(command, timeout=3600)
+        if result.exit_status != 0:
+            raise RuntimeError("campaign_remote_outputs_invalid")
+        try:
+            files = tuple(
+                RemoteOutputFile.model_validate(item) for item in json.loads(result.stdout)
+            )
+            return RemoteOutputInventory(
+                compute_profile_id=identity.compute_profile_id,
+                run_id=identity.run_id,
+                files=files,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("campaign_remote_output_inventory_malformed") from exc
+
+    async def persist_action_seal(self, identity: RemoteRunIdentity, envelope: bytes) -> str:
+        """Persist an HMAC envelope beside its outputs without a controller file."""
+
+        self._validate_adapter_identity(identity)
+        if not envelope or len(envelope) > 16 * 1024 * 1024:
+            raise ValueError("campaign_remote_action_seal_size_invalid")
+        remote_path = f"{identity.remote_run_directory}/sealed_action_result.v1.json"
+        async with self._session() as session:
+            await session.upload_bytes(envelope, remote_path)
+        return remote_path
+
+    async def read_action_seal(self, identity: RemoteRunIdentity) -> bytes | None:
+        """Read the bounded remote seal into memory for crash-safe reconciliation."""
+
+        self._validate_adapter_identity(identity)
+        remote_path = f"{identity.remote_run_directory}/sealed_action_result.v1.json"
+        script = (
+            "import base64,json,os,sys;"
+            "p=sys.argv[1];m=int(sys.argv[2]);"
+            "sys.exit(3) if not os.path.exists(p) else None;"
+            "assert os.path.isfile(p) and not os.path.islink(p);"
+            "f=open(p,'rb');b=f.read(m+1);f.close();assert len(b)<=m;"
+            "print(json.dumps({'data':base64.b64encode(b).decode()},separators=(',',':')))"
+        )
+        command = f"python3 -c {shlex.quote(script)} {shlex.quote(remote_path)} {16 * 1024 * 1024}"
+        async with self._session() as session:
+            result = await session.run(command, timeout=30)
+        if result.exit_status == 3:
+            return None
+        if result.exit_status != 0:
+            raise RuntimeError("campaign_remote_action_seal_unavailable")
+        try:
+            payload = base64.b64decode(json.loads(result.stdout)["data"], validate=True)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("campaign_remote_action_seal_malformed") from exc
+        if not payload or len(payload) > 16 * 1024 * 1024:
+            raise RuntimeError("campaign_remote_action_seal_malformed")
+        return payload
+
+    async def read_output_bytes(
+        self,
+        identity: RemoteRunIdentity,
+        relative_path: str,
+        *,
+        expected_sha256: HexDigest,
+        expected_size_bytes: int,
+        max_bytes: int,
+    ) -> bytes:
+        """Read one bounded remote output into memory and verify its inventory identity."""
+
+        self._validate_adapter_identity(identity)
+        path = PurePosixPath(relative_path)
+        if (
+            path.is_absolute()
+            or path.as_posix() != relative_path
+            or relative_path in {"", "."}
+            or ".." in path.parts
+            or "\\" in relative_path
+            or relative_path not in _REMOTE_CONTROLLER_READABLE_OUTPUTS
+        ):
+            raise ValueError("campaign_remote_output_path_invalid")
+        if max_bytes < 1 or max_bytes > 16 * 1024 * 1024:
+            raise ValueError("campaign_remote_output_read_limit_invalid")
+        if expected_size_bytes < 0 or expected_size_bytes > max_bytes:
+            raise ValueError("campaign_remote_output_size_invalid")
+        remote_path = f"{identity.remote_run_directory}/{relative_path}"
+        script = (
+            "import base64,hashlib,json,os,sys;"
+            "p=sys.argv[1];m=int(sys.argv[2]);"
+            "assert os.path.isfile(p) and not os.path.islink(p);"
+            "f=open(p,'rb');b=f.read(m+1);f.close();"
+            "assert len(b)<=m;"
+            "print(json.dumps({'data':base64.b64encode(b).decode(),"
+            "'sha256':hashlib.sha256(b).hexdigest(),'size_bytes':len(b)},"
+            "separators=(',',':')))"
+        )
+        command = f"python3 -c {shlex.quote(script)} {shlex.quote(remote_path)} {max_bytes}"
+        async with self._session() as session:
+            result = await session.run(command, timeout=30)
+        if result.exit_status != 0:
+            raise RuntimeError("campaign_remote_output_unavailable")
+        try:
+            payload = json.loads(result.stdout)
+            decoded = base64.b64decode(payload["data"], validate=True)
+            digest = hashlib.sha256(decoded).hexdigest()
+            if (
+                payload["sha256"] != digest
+                or int(payload["size_bytes"]) != len(decoded)
+                or digest != expected_sha256
+                or len(decoded) != expected_size_bytes
+            ):
+                raise ValueError("identity mismatch")
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("campaign_remote_output_identity_mismatch") from exc
+        return decoded
+
     async def collect_outputs(
         self,
         identity: RemoteRunIdentity,
@@ -1235,35 +2359,8 @@ class RemoteTrainingAdapter:
         *,
         observation: RemoteObservation | None = None,
     ) -> tuple[Path, ...]:
-        proven = observation or await self.observe(identity)
-        if proven.identity != identity or proven.state != RemoteRunState.COMPLETED:
-            raise RuntimeError("campaign_remote_outputs_not_ready")
-        all_paths = (*request.output_paths, "training.log", "exit_code", "launch_manifest.json")
-        predicates = []
-        for relative in all_paths:
-            remote = f"{identity.remote_run_directory}/{relative}"
-            quoted = shlex.quote(remote)
-            predicates.append(
-                f"test -e {quoted} && test ! -L {quoted} && "
-                f'test -z "$(find {quoted} -type l -print -quit 2>/dev/null)"'
-            )
-        async with self._session() as session:
-            checked = await session.run(" && ".join(predicates), timeout=30)
-            if checked.exit_status != 0:
-                raise RuntimeError("campaign_remote_outputs_invalid")
-            downloaded: list[Path] = []
-            for relative in all_paths:
-                local_path = local_directory / PurePosixPath(relative)
-                remote_path = f"{identity.remote_run_directory}/{relative}"
-                if not await session.download(remote_path, local_path):
-                    raise RuntimeError("campaign_remote_outputs_incomplete")
-                downloaded.append(local_path)
-        for path in downloaded:
-            if not path.exists() or path.is_symlink():
-                raise RuntimeError("campaign_remote_outputs_invalid")
-            if path.is_dir() and any(child.is_symlink() for child in path.rglob("*")):
-                raise RuntimeError("campaign_remote_outputs_invalid")
-        return tuple(downloaded)
+        del identity, request, local_directory, observation
+        raise RuntimeError("campaign_controller_output_download_disabled")
 
     async def collect_terminal_evidence(
         self,
@@ -1272,46 +2369,10 @@ class RemoteTrainingAdapter:
         *,
         observation: RemoteObservation | None = None,
     ) -> tuple[Path, ...]:
-        """Download the closed supervisor evidence even when training failed."""
+        """Retain failed-run logs and evidence on private compute."""
 
-        proven = observation or await self.observe(identity)
-        if proven.identity != identity or proven.state != RemoteRunState.FAILED:
-            raise RuntimeError("campaign_remote_terminal_evidence_not_ready")
-        required = ("training.log", "exit_code", "launch_manifest.json")
-        optional = (
-            "effective_config.json",
-            "training_manifest.json",
-            "training_metrics.jsonl",
-        )
-        predicates = []
-        for relative in required:
-            remote = f"{identity.remote_run_directory}/{relative}"
-            quoted = shlex.quote(remote)
-            predicates.append(f"test -f {quoted} && test ! -L {quoted}")
-        optional_checks = " ".join(
-            "if test -f {path} -a ! -L {path}; then printf '%s\\n' {name}; fi;".format(
-                path=shlex.quote(f"{identity.remote_run_directory}/{relative}"),
-                name=shlex.quote(relative),
-            )
-            for relative in optional
-        )
-        check_command = " && ".join(predicates) + f" && {optional_checks}"
-        async with self._session() as session:
-            checked = await session.run(check_command, timeout=30)
-            present = tuple(line for line in checked.stdout.splitlines() if line)
-            if checked.exit_status != 0 or not set(present).issubset(optional):
-                raise RuntimeError("campaign_remote_terminal_evidence_invalid")
-            paths = (*required, *(relative for relative in optional if relative in present))
-            downloaded: list[Path] = []
-            for relative in paths:
-                local_path = local_directory / PurePosixPath(relative)
-                remote_path = f"{identity.remote_run_directory}/{relative}"
-                if not await session.download(remote_path, local_path):
-                    raise RuntimeError("campaign_remote_terminal_evidence_incomplete")
-                downloaded.append(local_path)
-        if any(not path.is_file() or path.is_symlink() for path in downloaded):
-            raise RuntimeError("campaign_remote_terminal_evidence_invalid")
-        return tuple(downloaded)
+        del identity, local_directory, observation
+        raise RuntimeError("campaign_controller_output_download_disabled")
 
     async def control(self, identity: RemoteRunIdentity, action: RemoteControl) -> bool:
         """Validate and signal the remote process group in one SSH command."""
@@ -1372,18 +2433,188 @@ def remote_command_fingerprint(request: RemoteLaunchRequest, remote_directory: s
     )
 
 
+_REMOTE_MODEL_INSPECTION_SCRIPT = """\
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+
+def inspect_model(path, model_id, revision):
+    root = Path(path)
+    resolved = root.resolve(strict=True)
+    if str(resolved) != path or root.is_symlink() or not root.is_dir():
+        raise RuntimeError("model directory is not exact")
+    config = root / "config.json"
+    if config.is_symlink() or not config.is_file():
+        raise RuntimeError("model config is missing")
+    files = []
+    weight_count = 0
+    total_size = 0
+    for candidate in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        relative_path = candidate.relative_to(root)
+        if (
+            relative_path.parts
+            and relative_path.parts[0] == ".cache"
+            or relative_path.as_posix() == ".bashgym-acquisition.json"
+        ):
+            continue
+        if candidate.is_symlink():
+            raise RuntimeError("model artifact contains a symlink")
+        if not candidate.is_file():
+            continue
+        relative = relative_path.as_posix()
+        digest = hashlib.sha256()
+        with candidate.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        size = candidate.stat().st_size
+        files.append([relative, digest.hexdigest(), size])
+        total_size += size
+        name = candidate.name
+        if name.endswith(".safetensors") or (
+            name.startswith("pytorch_model") and name.endswith(".bin")
+        ):
+            weight_count += 1
+    if weight_count < 1:
+        raise RuntimeError("model weights are missing")
+    manifest = json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "schema_version": "campaign_remote_model_artifact_receipt.v1",
+        "model_id": model_id,
+        "revision": revision,
+        "artifact_manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+        "weight_file_count": weight_count,
+        "total_size_bytes": total_size,
+    }
+"""
+
+
+_REMOTE_MODEL_REGISTER_SCRIPT = _REMOTE_MODEL_INSPECTION_SCRIPT + """\
+path, model_id, revision = sys.argv[1:]
+receipt = inspect_model(path, model_id, revision)
+print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+"""
+
+
+_REMOTE_MODEL_ACQUIRE_SCRIPT = _REMOTE_MODEL_INSPECTION_SCRIPT + """\
+import os
+
+path, model_id, revision, auth_env, request_digest = sys.argv[1:]
+destination = Path(path)
+parent = destination.parent.resolve(strict=True)
+if str(parent) != str(destination.parent) or destination.is_symlink():
+    raise RuntimeError("model destination is not exact")
+partial = parent / ("." + destination.name + ".partial-" + request_digest[:16])
+owner = {
+    "schema_version": "bashgym_remote_model_acquisition.v1",
+    "request_digest": request_digest,
+    "model_id": model_id,
+    "revision": revision,
+}
+owner_payload = json.dumps(owner, sort_keys=True, separators=(",", ":"))
+
+
+def owned(directory):
+    if directory.is_symlink() or not directory.is_dir():
+        return False
+    marker = directory / ".bashgym-acquisition.json"
+    if marker.is_symlink() or not marker.is_file() or marker.stat().st_size > 4096:
+        return False
+    return marker.read_text(encoding="utf-8") == owner_payload
+
+
+if destination.exists():
+    if not owned(destination):
+        raise RuntimeError("model destination is occupied by another acquisition")
+    receipt = inspect_model(str(destination), model_id, revision)
+else:
+    if partial.exists():
+        if not owned(partial):
+            raise RuntimeError("model partial destination belongs to another acquisition")
+    else:
+        partial.mkdir(mode=0o700)
+        marker = partial / ".bashgym-acquisition.json"
+        with marker.open("x", encoding="utf-8") as handle:
+            handle.write(owner_payload)
+    token = os.environ.get(auth_env) if auth_env else None
+    if auth_env and not token:
+        raise RuntimeError("target auth is unavailable")
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(
+        repo_id=model_id,
+        revision=revision,
+        local_dir=str(partial),
+        token=token,
+    )
+    receipt = inspect_model(str(partial), model_id, revision)
+    os.rename(partial, destination)
+print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+"""
+
+
+def _remote_model_registration_command(request: RemoteModelRegistrationRequest) -> str:
+    if request.operation == "acquire":
+        arguments = (
+            "python3",
+            "-c",
+            _REMOTE_MODEL_ACQUIRE_SCRIPT,
+            request.remote_model_path,
+            request.model_id,
+            request.revision,
+            request.target_auth_env or "",
+            request.request_digest,
+        )
+    else:
+        arguments = (
+            "python3",
+            "-c",
+            _REMOTE_MODEL_REGISTER_SCRIPT,
+            request.remote_model_path,
+            request.model_id,
+            request.revision,
+        )
+    return " ".join(shlex.quote(argument) for argument in arguments)
+
+
+def _parse_remote_model_artifact_receipt(
+    payload: str,
+    request: RemoteModelRegistrationRequest,
+) -> RemoteModelArtifactReceipt:
+    try:
+        receipt = RemoteModelArtifactReceipt.model_validate_json(payload.strip())
+    except (ValidationError, ValueError) as exc:
+        raise RuntimeError("campaign_remote_model_receipt_invalid") from exc
+    if receipt.model_id != request.model_id or receipt.revision != request.revision:
+        raise RuntimeError("campaign_remote_model_receipt_invalid")
+    return receipt
+
+
 __all__ = [
     "ApprovedCodeLineageExecutionBinding",
     "ApprovedRemoteExecutorProfile",
     "AsyncSSHSession",
     "CodeLineageLaunchSnapshot",
     "PinnedRemoteStageProfile",
+    "RegisteredRemoteEvaluationDatasetSource",
+    "RegisteredRemoteModelSource",
+    "RemoteModelArtifactReceipt",
+    "RemoteModelRegistrationRequest",
+    "RemoteResidentDatasetFile",
+    "RemoteResidentDatasetSource",
+    "RemoteResidentModelFile",
+    "RemoteResidentModelSource",
+    "SealedStageArtifactInput",
+    "SealedStageArtifactSource",
     "RemoteCommandResult",
     "RemoteCapacityPolicy",
     "RemoteCapacitySnapshot",
     "RemoteControl",
     "RemoteLaunchRequest",
     "RemoteObservation",
+    "RemoteOutputFile",
+    "RemoteOutputInventory",
     "RemoteRunIdentity",
     "RemoteRunState",
     "RemoteStreamChunk",

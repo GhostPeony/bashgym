@@ -35,7 +35,11 @@ def _default_api_base() -> str:
 
 DEFAULT_CAMPAIGN_API_BASE = _default_api_base()
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
-_MAX_NESTED_LIST_ITEMS = 100
+_MAX_NESTED_ENTRIES = 100
+_MAX_NESTED_DEPTH = 8
+_MAX_STRING_CHARS = 4096
+_MAX_SERIALIZED_PAYLOAD_BYTES = 65_536
+_TRUNCATION_MARKER = "[truncated]"
 
 CampaignId = Annotated[
     str,
@@ -50,6 +54,7 @@ MetricName = CampaignId
 MetricSource = Annotated[str, Field(min_length=1, max_length=240)]
 ExpectedVersion = Annotated[int, Field(ge=1)]
 EventCursor = Annotated[int, Field(ge=0)]
+ResearchWaitSeconds = Annotated[int, Field(ge=1, le=55)]
 ArtifactCursor = Annotated[
     str,
     Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"),
@@ -63,7 +68,9 @@ Reason = CancelReason
 ManifestRevisionNumber = Annotated[int, Field(ge=1)]
 Priority = Annotated[int, Field(ge=0, le=100)]
 ExportFormat = Literal["markdown", "json", "csv", "png", "docx", "pdf"]
+ResearchRole = Literal["baseline", "candidate"]
 HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+SetupSessionId = Annotated[str, Field(pattern=r"^setupsess_[0-9a-f]{32}$")]
 CampaignStatusFilter = Literal[
     "draft",
     "validating",
@@ -78,6 +85,28 @@ CampaignStatusFilter = Literal[
     "cancelled",
 ]
 CampaignKindFilter = Literal["embedding_retrieval", "general"]
+_SERVER_OWNED_PROPOSAL_FIELDS = frozenset(
+    {
+        "workspace_id",
+        "workspace",
+        "campaign_id",
+        "expected_version",
+        "role",
+        "autoresearch_role",
+        "parent_proposal_id",
+        "planner_actor_id",
+        "creation_sequence",
+        "status",
+        "credential_ref",
+        "credential",
+        "actor",
+        "agent",
+        "profile",
+        "autonomy_profile",
+        "capabilities",
+        "authorization",
+    }
+)
 
 
 class CampaignRequestClient(Protocol):
@@ -91,17 +120,89 @@ class CampaignRequestClient(Protocol):
         query: Mapping[str, Any] | None = None,
         payload: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
     ) -> Any: ...
 
 
-def _bounded_value(value: Any) -> Any:
-    """Keep nested API arrays bounded even when a future projection grows."""
+def _bounded_string(value: str) -> str:
+    if len(value) <= _MAX_STRING_CHARS:
+        return value
+    prefix_length = _MAX_STRING_CHARS - len(_TRUNCATION_MARKER) - 1
+    return f"{value[:prefix_length]} {_TRUNCATION_MARKER}"
 
+
+def _bounded_nested_value(value: Any, *, depth: int) -> Any:
+    if depth > _MAX_NESTED_DEPTH:
+        return _TRUNCATION_MARKER
+    if isinstance(value, str):
+        return _bounded_string(value)
     if isinstance(value, list):
-        return [_bounded_value(item) for item in value[:_MAX_NESTED_LIST_ITEMS]]
+        if len(value) >= _MAX_NESTED_ENTRIES:
+            return [
+                *(
+                    _bounded_nested_value(item, depth=depth + 1)
+                    for item in value[: _MAX_NESTED_ENTRIES - 1]
+                ),
+                _TRUNCATION_MARKER,
+            ]
+        return [_bounded_nested_value(item, depth=depth + 1) for item in value]
     if isinstance(value, dict):
-        return {str(key): _bounded_value(item) for key, item in value.items()}
+        items = list(value.items())
+        entry_limit = (
+            _MAX_NESTED_ENTRIES - 1 if len(items) >= _MAX_NESTED_ENTRIES else _MAX_NESTED_ENTRIES
+        )
+        bounded = {
+            _bounded_string(str(key)): _bounded_nested_value(item, depth=depth + 1)
+            for key, item in items[:entry_limit]
+        }
+        if len(items) >= _MAX_NESTED_ENTRIES:
+            bounded["_truncated"] = f"{len(items) - len(bounded)} entries omitted"
+        return bounded
     return value
+
+
+def _bounded_value(value: Any) -> Any:
+    """Return planner-safe JSON with per-field and total payload limits."""
+
+    bounded = _bounded_nested_value(value, depth=0)
+    if _serialized_size(bounded) > _MAX_SERIALIZED_PAYLOAD_BYTES:
+        return _payload_truncation()
+    return bounded
+
+
+def _serialized_size(value: Any) -> int:
+    return len(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    )
+
+
+def _payload_truncation() -> dict[str, str]:
+    return {"_truncated": (f"payload exceeded {_MAX_SERIALIZED_PAYLOAD_BYTES} serialized bytes")}
+
+
+def _bounded_named_result(name: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    result = {
+        "ok": True,
+        name: _bounded_nested_value(dict(value), depth=0),
+    }
+    if _serialized_size(result) > _MAX_SERIALIZED_PAYLOAD_BYTES:
+        result[name] = _payload_truncation()
+    return result
+
+
+def _bounded_mutation_result(value: Mapping[str, Any]) -> dict[str, Any]:
+    result = {
+        "ok": True,
+        **_bounded_nested_value(dict(value), depth=0),
+    }
+    if _serialized_size(result) > _MAX_SERIALIZED_PAYLOAD_BYTES:
+        return {"ok": True, **_payload_truncation()}
+    return result
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -122,6 +223,18 @@ def _invalid_response() -> dict[str, Any]:
     }
 
 
+def _invalid_request(message: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": {
+            "code": "campaign_request_invalid",
+            "message": message,
+            "retryable": False,
+            "status_code": 400,
+        },
+    }
+
+
 def _bounded_collection(
     response: Any,
     *,
@@ -132,8 +245,14 @@ def _bounded_collection(
     values = payload.get(key)
     if not isinstance(values, list):
         raise ValueError(f"campaign API response is missing {key}")
-    bounded = [_bounded_value(item) for item in values[:limit]]
-    return payload, bounded, len(values) > limit
+    bounded_value = _bounded_value(values[:limit])
+    if isinstance(bounded_value, list):
+        bounded = bounded_value
+        payload_truncated = False
+    else:
+        bounded = [bounded_value]
+        payload_truncated = True
+    return payload, bounded, len(values) > limit or payload_truncated
 
 
 def _mutation_headers(
@@ -201,15 +320,17 @@ def build_server(
         query: Mapping[str, Any] | None = None,
         payload: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         try:
+            kwargs = {"query": query, "payload": payload, "headers": headers}
+            if timeout is not None:
+                kwargs["timeout"] = timeout
             result = await asyncio.to_thread(
                 request_client.request_json,
                 method,
                 path,
-                query=query,
-                payload=payload,
-                headers=headers,
+                **kwargs,
             )
             return {"ok": True, "data": result}
         except CampaignClientError as exc:
@@ -249,10 +370,10 @@ def build_server(
         if not result["ok"]:
             return result
         try:
-            mutation = _bounded_value(_mapping(result["data"]))
+            mutation = _mapping(result["data"])
         except ValueError:
             return _invalid_response()
-        return {"ok": True, **mutation}
+        return _bounded_mutation_result(mutation)
 
     async def transition(
         operation: str,
@@ -289,6 +410,121 @@ def build_server(
         idempotentHint=True,
         openWorldHint=True,
     )
+
+    @server.tool(structured_output=True, annotations=read_only)
+    async def research_prepare(
+        session_id: SetupSessionId | None = None,
+    ) -> dict[str, Any]:
+        """Discover or resume guided campaign setup without starting compute."""
+
+        query = {"workspace_id": workspace_id}
+        if session_id is not None:
+            query["session_id"] = session_id
+        result = await request("GET", "/campaigns/setup/context", query=query)
+        if not result["ok"]:
+            return result
+        try:
+            context = _mapping(result["data"])
+        except ValueError:
+            return _invalid_response()
+        return _bounded_named_result("context", context)
+
+    @server.tool(structured_output=True, annotations=read_only)
+    async def research_state(campaign_id: CampaignId) -> dict[str, Any]:
+        """Read the compact durable experiment state for native agent goals and visuals."""
+
+        result = await request(
+            "GET",
+            f"/campaigns/{campaign_id}/research-state",
+            query={"workspace_id": workspace_id},
+        )
+        if not result["ok"]:
+            return result
+        try:
+            research = _mapping(result["data"])
+        except ValueError:
+            return _invalid_response()
+        return _bounded_named_result("research", research)
+
+    @server.tool(structured_output=True, annotations=read_only)
+    async def research_wait(
+        campaign_id: CampaignId,
+        after_cursor: EventCursor = 0,
+        timeout_seconds: ResearchWaitSeconds = 30,
+    ) -> dict[str, Any]:
+        """Wait briefly for progress, then return the latest durable agent state."""
+
+        result = await request(
+            "GET",
+            f"/campaigns/{campaign_id}/research-wait",
+            query={
+                "workspace_id": workspace_id,
+                "after_cursor": after_cursor,
+                "timeout_seconds": timeout_seconds,
+            },
+            timeout=timeout_seconds + 5,
+        )
+        if not result["ok"]:
+            return result
+        try:
+            wait = _mapping(result["data"])
+        except ValueError:
+            return _invalid_response()
+        return _bounded_named_result("wait", wait)
+
+    @server.tool(structured_output=True, annotations=state_change)
+    async def research_start(
+        campaign_id: CampaignId,
+        expected_version: ExpectedVersion,
+    ) -> dict[str, Any]:
+        """Start a ready research campaign after the operator explicitly authorizes it."""
+
+        return await transition("start", campaign_id, expected_version)
+
+    @server.tool(structured_output=True, annotations=state_change)
+    async def research_submit_iteration(
+        campaign_id: CampaignId,
+        expected_version: ExpectedVersion,
+        role: ResearchRole,
+        proposal: dict[str, Any],
+        parent_proposal_id: ProposalId | None = None,
+    ) -> dict[str, Any]:
+        """Submit an explicit baseline or one controlled candidate iteration."""
+
+        if _SERVER_OWNED_PROPOSAL_FIELDS.intersection(proposal):
+            return _invalid_request("Proposal contains server-owned fields.")
+        if role == "candidate" and parent_proposal_id is None:
+            return _invalid_request("Candidate iteration requires a parent proposal.")
+        if role == "baseline" and parent_proposal_id is not None:
+            return _invalid_request("Baseline iteration cannot have a parent proposal.")
+
+        body = {"expected_version": expected_version, **proposal}
+        if parent_proposal_id is not None:
+            body["parent_proposal_id"] = parent_proposal_id
+        suffix = "baseline" if role == "baseline" else "candidates"
+        return await mutate(
+            f"autoresearch-{role}",
+            campaign_id,
+            f"/campaigns/{campaign_id}/autoresearch/{suffix}",
+            body,
+        )
+
+    @server.tool(structured_output=True, annotations=state_change)
+    async def research_report(
+        campaign_id: CampaignId,
+        expected_version: ExpectedVersion,
+        formats: list[ExportFormat],
+    ) -> dict[str, Any]:
+        """Request bounded campaign evidence exports for review and presentation."""
+
+        if not formats or len(formats) != len(set(formats)):
+            return _invalid_request("Report formats must be non-empty and unique.")
+        return await mutate(
+            "export",
+            campaign_id,
+            f"/campaigns/{campaign_id}/export",
+            {"expected_version": expected_version, "formats": formats},
+        )
 
     @server.tool(structured_output=True, annotations=read_only)
     async def campaign_list(

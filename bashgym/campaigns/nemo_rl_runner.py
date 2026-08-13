@@ -23,6 +23,7 @@ from bashgym.campaigns.nemo_gym_ingestion import (
     NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME,
 )
 from bashgym.campaigns.nemo_rl import NemoRLContainerContract, sha256_file
+from bashgym.campaigns.tmax_recipe import TMaxCompositeTrainingRecipe
 from bashgym.environments.nemo_gym import (
     extract_nemo_gym_bundle_archive,
     inspect_nemo_gym_bundle_archive,
@@ -42,6 +43,16 @@ _VLLM_TRAINING_CONFIG = (
 class ModelMount:
     host_directory: Path
     container_path: str
+
+
+@dataclass(frozen=True)
+class DatasetMount:
+    """One compute-resident training dataset mounted read-only in the container."""
+
+    host_directory: Path
+    container_train_path: str
+    container_validation_path: str | None
+    sha256: str
 
 
 def _utc_now() -> str:
@@ -67,16 +78,61 @@ def _run_checked(argv: Sequence[str], *, timeout: float = 30) -> str:
     return completed.stdout.strip()
 
 
-def validate_runtime_identity(contract: NemoRLContainerContract, run_directory: Path) -> ModelMount:
-    dataset = run_directory / contract.dataset_file
-    if (
-        dataset.is_symlink()
-        or not dataset.is_file()
-        or sha256_file(dataset) != contract.dataset_sha256
-    ):
-        raise RuntimeError("nemo_rl_dataset_identity_mismatch")
+def resolve_dataset_mount(
+    contract: NemoRLContainerContract,
+    *,
+    run_directory: Path,
+    dataset_directory: Path | None = None,
+) -> DatasetMount:
+    """Resolve static or worker-bound training rows without copying them off compute."""
 
-    model = Path(contract.remote_model_path).expanduser().resolve()
+    if dataset_directory is None:
+        root = run_directory.resolve()
+        dataset = root / contract.dataset_file
+        container_root = "/bashgym/run"
+        if (
+            dataset.is_symlink()
+            or not dataset.is_file()
+            or sha256_file(dataset) != contract.dataset_sha256
+        ):
+            raise RuntimeError("nemo_rl_dataset_identity_mismatch")
+    else:
+        if contract.nemo_gym is not None:
+            raise RuntimeError("nemo_gym_resident_dataset_override_unsupported")
+        if not dataset_directory.is_absolute() or dataset_directory.is_symlink():
+            raise RuntimeError("nemo_rl_resident_dataset_not_ready")
+        root = dataset_directory.resolve()
+        if not root.is_dir():
+            raise RuntimeError("nemo_rl_resident_dataset_not_ready")
+        dataset = root / contract.dataset_file
+        if not dataset.is_file():
+            dataset = root / "train.jsonl"
+        if dataset.is_symlink() or not dataset.is_file():
+            raise RuntimeError("nemo_rl_resident_dataset_not_ready")
+        container_root = "/bashgym/dataset"
+
+    validation = root / "validation.jsonl"
+    if validation.is_symlink():
+        raise RuntimeError("nemo_rl_resident_dataset_not_ready")
+    validation_path = f"{container_root}/validation.jsonl" if validation.is_file() else None
+    return DatasetMount(
+        host_directory=root,
+        container_train_path=f"{container_root}/{dataset.name}",
+        container_validation_path=validation_path,
+        sha256=sha256_file(dataset),
+    )
+
+
+def validate_runtime_identity(
+    contract: NemoRLContainerContract,
+    run_directory: Path,
+    *,
+    model_directory: Path | None = None,
+) -> ModelMount:
+    model_source = model_directory or Path(contract.remote_model_path)
+    if model_directory is not None and not model_directory.is_absolute():
+        raise RuntimeError("nemo_rl_model_not_ready")
+    model = model_source.expanduser().resolve()
     if model.is_symlink() or not model.is_dir() or not (model / "config.json").is_file():
         raise RuntimeError("nemo_rl_model_not_ready")
 
@@ -170,24 +226,53 @@ def docker_argv(
     *,
     run_directory: Path,
     model_mount: ModelMount,
+    dataset_mount: DatasetMount | None = None,
     container_name: str,
+    experiment_recipe: TMaxCompositeTrainingRecipe | None = None,
 ) -> tuple[str, ...]:
     """Return a typed argv; callers never invoke a shell."""
 
+    if experiment_recipe is not None and experiment_recipe.sft_enabled:
+        raise RuntimeError("nemo_rl_sft_composition_unsupported")
+    effective_max_steps = experiment_recipe.max_steps if experiment_recipe else contract.max_steps
+    effective_learning_rate = (
+        experiment_recipe.learning_rate if experiment_recipe else contract.learning_rate
+    )
     controller_overrides: tuple[str, ...] = (
         "checkpointing.checkpoint_dir=/bashgym/run/final",
-        f"grpo.max_num_steps={contract.max_steps}",
+        f"grpo.max_num_steps={effective_max_steps}",
         "logger.log_dir=/bashgym/run/logs",
         f"policy.model_name={model_mount.container_path}",
-        f"policy.optimizer.kwargs.lr={contract.learning_rate}",
+        f"policy.optimizer.kwargs.lr={effective_learning_rate}",
         f"policy.tokenizer.name={model_mount.container_path}",
     )
+    if experiment_recipe is not None:
+        controller_overrides += (
+            f"grpo.num_generations_per_prompt={experiment_recipe.group_size}",
+            f"policy.generation.temperature={experiment_recipe.temperature}",
+            f"grpo.seed={experiment_recipe.seed}",
+        )
     mounts = [
         "--mount",
         f"type=bind,src={run_directory},dst=/bashgym/run",
         "--mount",
         f"type=bind,src={model_mount.host_directory},dst=/bashgym/model-repo,readonly",
     ]
+    if contract.nemo_gym is None and dataset_mount is not None:
+        controller_overrides += (f"data.train.data_path={dataset_mount.container_train_path}",)
+        if dataset_mount.container_validation_path is not None:
+            controller_overrides += (
+                f"data.validation.data_path={dataset_mount.container_validation_path}",
+            )
+        if dataset_mount.host_directory != run_directory.resolve():
+            mounts.extend(
+                (
+                    "--mount",
+                    "type=bind,"
+                    f"src={dataset_mount.host_directory},"
+                    "dst=/bashgym/dataset,readonly",
+                )
+            )
     if contract.nemo_gym is not None:
         gym = contract.nemo_gym
         resource_source = (
@@ -241,25 +326,45 @@ def docker_argv(
     )
 
 
-def _append_metric(handle: IO[str], *, name: str, value: float, step: int | None) -> None:
+def _append_metric(handle: IO[str], *, name: str, value: float, step: int) -> None:
     record = {
         "schema_version": "nemo_rl_training_metric.v1",
         "observed_at": _utc_now(),
-        "name": name.casefold(),
-        "value": value,
+        "step": step,
+        name.casefold(): value,
     }
-    if step is not None:
-        record["step"] = step
     handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
     handle.flush()
 
 
-def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
+def run_contract(
+    contract: NemoRLContainerContract,
+    run_directory: Path,
+    *,
+    model_directory: Path | None = None,
+    dataset_directory: Path | None = None,
+    experiment_recipe: TMaxCompositeTrainingRecipe | None = None,
+) -> int:
+    if experiment_recipe is not None and experiment_recipe.sft_enabled:
+        raise RuntimeError("nemo_rl_sft_composition_unsupported")
+    effective_max_steps = experiment_recipe.max_steps if experiment_recipe else contract.max_steps
+    effective_learning_rate = (
+        experiment_recipe.learning_rate if experiment_recipe else contract.learning_rate
+    )
     run_directory = run_directory.resolve()
     final_directory = run_directory / "final"
     final_directory.mkdir(exist_ok=True)
     (run_directory / "logs").mkdir(exist_ok=True)
-    model_mount = validate_runtime_identity(contract, run_directory)
+    dataset_mount = resolve_dataset_mount(
+        contract,
+        run_directory=run_directory,
+        dataset_directory=dataset_directory,
+    )
+    model_mount = validate_runtime_identity(
+        contract,
+        run_directory,
+        model_directory=model_directory,
+    )
     if contract.nemo_gym is not None:
         bundle_root = run_directory / "nemo_gym_bundle"
         extract_nemo_gym_bundle_archive(
@@ -275,19 +380,31 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
             if destination.exists() or destination.is_symlink():
                 raise RuntimeError("nemo_gym_evidence_companion_already_exists")
             destination.write_bytes(source.read_bytes())
-    identity = canonical_hash(contract.model_dump(mode="json"))[:20]
+    experiment_payload = (
+        experiment_recipe.model_dump(mode="json") if experiment_recipe is not None else None
+    )
+    identity = canonical_hash(
+        {"contract": contract.model_dump(mode="json"), "experiment_recipe": experiment_payload}
+    )[:20]
     container_name = f"bashgym-nemo-{identity}-{os.getpid()}"
     argv = docker_argv(
         contract,
         run_directory=run_directory,
         model_mount=model_mount,
+        dataset_mount=dataset_mount,
         container_name=container_name,
+        experiment_recipe=experiment_recipe,
     )
     effective_config = {
         "schema_version": "nemo_rl_effective_config.v1",
         "contract": contract.model_dump(mode="json"),
         "contract_digest": canonical_hash(contract.model_dump(mode="json")),
         "container_name": container_name,
+        "dataset_sha256": dataset_mount.sha256,
+        "experiment_recipe": experiment_payload,
+        "experiment_recipe_digest": (
+            canonical_hash(experiment_payload) if experiment_payload is not None else None
+        ),
         "argv_sha256": hashlib.sha256("\0".join(argv).encode()).hexdigest(),
         "started_at": _utc_now(),
     }
@@ -332,14 +449,14 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
                         metrics,
                         name=match.group("name"),
                         value=float(match.group("value")),
-                        step=observed_step,
+                        step=observed_step if observed_step is not None else 0,
                     )
             exit_code = process.wait()
             _append_metric(
                 metrics,
                 name="run_completed" if exit_code == 0 else "run_failed",
                 value=1.0,
-                step=contract.max_steps,
+                step=effective_max_steps,
             )
     finally:
         for sig, handler in previous.items():
@@ -362,7 +479,7 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
             "model_revision": contract.model_revision,
             "model_support_level": contract.model_support_level,
             "recipe_sha256": contract.recipe_sha256,
-            "dataset_sha256": contract.dataset_sha256,
+            "dataset_sha256": dataset_mount.sha256,
             "verifier_id": contract.verifier_id,
             "verifier_digest": contract.verifier_digest,
             "nemo_gym": (
@@ -377,8 +494,10 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
                 else None
             ),
             "mode": contract.mode,
-            "max_steps": contract.max_steps,
-            "learning_rate": contract.learning_rate,
+            "algorithm": experiment_recipe.algorithm if experiment_recipe else "grpo",
+            "max_steps": effective_max_steps,
+            "learning_rate": effective_learning_rate,
+            "experiment_recipe": experiment_payload,
             "checkpoints": checkpoints,
             "exit_code": exit_code,
             "completed_at": _utc_now(),
@@ -390,9 +509,49 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--contract-json", required=True)
+    parser.add_argument("--model-dir", type=Path)
+    parser.add_argument("--dataset-dir", type=Path)
+    parser.add_argument("--algorithm", choices=("grpo",))
+    parser.add_argument("--sft-enabled", choices=("true", "false"))
+    parser.add_argument("--learning-rate", type=float)
+    parser.add_argument("--max-steps", type=int)
+    parser.add_argument("--group-size", type=int)
+    parser.add_argument("--temperature", type=float)
+    parser.add_argument("--seed", type=int)
     args = parser.parse_args(argv)
     contract = NemoRLContainerContract.model_validate_json(args.contract_json)
-    return run_contract(contract, Path.cwd())
+    experiment_values = (
+        args.algorithm,
+        args.sft_enabled,
+        args.learning_rate,
+        args.max_steps,
+        args.group_size,
+        args.temperature,
+        args.seed,
+    )
+    experiment_recipe = None
+    if any(value is not None for value in experiment_values):
+        if any(value is None for value in experiment_values):
+            parser.error("the complete typed experiment recipe is required")
+        try:
+            experiment_recipe = TMaxCompositeTrainingRecipe(
+                algorithm=args.algorithm,
+                sft_enabled=args.sft_enabled == "true",
+                learning_rate=args.learning_rate,
+                max_steps=args.max_steps,
+                group_size=args.group_size,
+                temperature=args.temperature,
+                seed=args.seed,
+            )
+        except ValueError as exc:
+            parser.error(f"invalid typed experiment recipe: {exc}")
+    return run_contract(
+        contract,
+        Path.cwd(),
+        model_directory=args.model_dir,
+        dataset_directory=args.dataset_dir,
+        experiment_recipe=experiment_recipe,
+    )
 
 
 if __name__ == "__main__":

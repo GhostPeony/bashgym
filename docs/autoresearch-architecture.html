@@ -1,0 +1,1598 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Interactive architecture of the BashGym AutoResearch experiment loop.">
+  <title>BashGym AutoResearch — Interactive Architecture</title>
+  <style>
+    :root {
+      --page: #ffffff;
+      --surface: #f5f5f7;
+      --surface-raised: #ffffff;
+      --ink: #1d1d1f;
+      --muted: #6e6e73;
+      --quiet: #86868b;
+      --line: #d2d2d7;
+      --line-soft: #e8e8ed;
+      --blue: #0071e3;
+      --blue-hover: #0077ed;
+      --blue-soft: #eaf3ff;
+      --green: #16803d;
+      --green-soft: #eaf7ef;
+      --red: #b42318;
+      --red-soft: #fff0ee;
+      --amber: #9a6700;
+      --amber-soft: #fff7df;
+      --radius-sm: 10px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.08);
+      --content: 1180px;
+      --ease: 220ms cubic-bezier(.2, .8, .2, 1);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      background: var(--page);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--page);
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    button, select { font: inherit; }
+    button { color: inherit; }
+    a { color: var(--blue); }
+
+    :focus-visible {
+      outline: 3px solid rgba(0, 113, 227, 0.35);
+      outline-offset: 3px;
+    }
+
+    .shell {
+      width: min(calc(100% - 64px), var(--content));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(210, 210, 215, 0.78);
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: saturate(180%) blur(18px);
+    }
+
+    .topbar-inner {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 0 0 auto;
+      font-size: 15px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: white;
+      background: var(--ink);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .nav-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .nav-tabs::-webkit-scrollbar { display: none; }
+
+    .nav-tab {
+      min-height: 38px;
+      padding: 0 13px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      white-space: nowrap;
+      cursor: pointer;
+      transition: color var(--ease), background var(--ease);
+    }
+
+    .nav-tab:hover { color: var(--ink); background: var(--surface); }
+    .nav-tab[aria-selected="true"] { color: var(--ink); background: var(--surface); font-weight: 600; }
+
+    main { min-height: calc(100vh - 64px); }
+
+    .view {
+      display: none;
+      padding: 78px 0 100px;
+      animation: reveal var(--ease) both;
+    }
+
+    .view.is-active { display: block; }
+
+    @keyframes reveal {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--blue);
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: 0.01em;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      max-width: 900px;
+      margin-bottom: 22px;
+      font-size: clamp(42px, 6.2vw, 72px);
+      line-height: 1.03;
+      letter-spacing: -0.055em;
+      font-weight: 680;
+    }
+
+    h2 {
+      margin-bottom: 16px;
+      font-size: clamp(30px, 4vw, 44px);
+      line-height: 1.1;
+      letter-spacing: -0.035em;
+      font-weight: 650;
+    }
+
+    h3 {
+      margin-bottom: 10px;
+      font-size: 20px;
+      line-height: 1.3;
+      letter-spacing: -0.015em;
+      font-weight: 650;
+    }
+
+    .lede {
+      max-width: 790px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: clamp(19px, 2.2vw, 24px);
+      line-height: 1.48;
+      letter-spacing: -0.018em;
+    }
+
+    .section-intro {
+      max-width: 760px;
+      margin-bottom: 42px;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.6;
+    }
+
+    .hero { margin-bottom: 76px; }
+
+    .ownership {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      margin-top: 38px;
+      overflow: hidden;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-md);
+      background: var(--line-soft);
+    }
+
+    .ownership-item {
+      padding: 22px 24px;
+      background: var(--surface-raised);
+    }
+
+    .ownership-item strong { display: block; margin-bottom: 4px; font-size: 15px; }
+    .ownership-item span { color: var(--muted); font-size: 15px; }
+
+    .loop-card {
+      padding: 34px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+    }
+
+    .loop-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 30px;
+    }
+
+    .loop-heading p { max-width: 540px; margin: 0; color: var(--muted); }
+
+    .fixed-chip {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 0 12px;
+      border-radius: 999px;
+      color: #0c5ca8;
+      background: var(--blue-soft);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .fixed-chip::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blue);
+    }
+
+    .phase-rail {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .phase-rail::before {
+      content: "";
+      position: absolute;
+      z-index: 0;
+      top: 23px;
+      left: 9%;
+      right: 9%;
+      height: 1px;
+      background: var(--line);
+    }
+
+    .phase {
+      position: relative;
+      z-index: 1;
+      min-width: 0;
+      min-height: 112px;
+      padding: 12px 10px 14px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color var(--ease), background var(--ease), transform var(--ease);
+    }
+
+    .phase:hover { background: rgba(255,255,255,.72); }
+    .phase[aria-selected="true"] { border-color: var(--line); background: white; box-shadow: 0 8px 24px rgba(0,0,0,.055); }
+    .phase[aria-selected="true"] .phase-number { color: white; border-color: var(--blue); background: var(--blue); }
+
+    .phase-number {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 13px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      transition: all var(--ease);
+    }
+
+    .phase-label { display: block; font-size: 15px; line-height: 1.25; font-weight: 620; }
+    .phase-meta { display: block; margin-top: 5px; color: var(--quiet); font-size: 12px; line-height: 1.35; }
+
+    .phase-detail {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr);
+      gap: 34px;
+      padding: 30px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-md);
+      background: white;
+      box-shadow: var(--shadow);
+    }
+
+    .detail-kicker { margin: 0 0 8px; color: var(--blue); font-size: 13px; font-weight: 650; }
+    .detail-copy { margin: 0 0 22px; color: var(--muted); font-size: 17px; line-height: 1.58; }
+
+    .micro-steps {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .micro-steps li {
+      padding: 7px 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--surface);
+      font-size: 13px;
+    }
+
+    .responsibility-list {
+      display: grid;
+      gap: 16px;
+      margin: 0;
+    }
+
+    .responsibility-list div { padding-bottom: 14px; border-bottom: 1px solid var(--line-soft); }
+    .responsibility-list div:last-child { padding: 0; border: 0; }
+    .responsibility-list dt { margin-bottom: 4px; font-size: 13px; font-weight: 650; }
+    .responsibility-list dd { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+
+    .loopback {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin: 22px auto 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .loopback svg { color: var(--blue); }
+
+    .overview-lower {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-top: 64px;
+    }
+
+    .quiet-card {
+      padding: 28px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-md);
+      background: white;
+    }
+
+    .quiet-card p { margin-bottom: 0; color: var(--muted); }
+
+    .plain-list {
+      display: grid;
+      gap: 12px;
+      margin: 18px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .plain-list li { display: flex; gap: 10px; color: var(--muted); }
+    .plain-list li::before { content: ""; flex: 0 0 7px; width: 7px; height: 7px; margin-top: 9px; border-radius: 50%; background: var(--blue); }
+
+    .architecture-map {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      align-items: stretch;
+      gap: 10px;
+      margin: 46px 0 24px;
+    }
+
+    .arch-node {
+      position: relative;
+      min-height: 122px;
+      padding: 18px 15px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-md);
+      background: white;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+    }
+
+    .arch-node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -10px;
+      top: 50%;
+      z-index: 2;
+      width: 10px;
+      color: var(--quiet);
+      transform: translate(50%, -50%);
+    }
+
+    .arch-node:hover { border-color: var(--line); transform: translateY(-2px); }
+    .arch-node[aria-selected="true"] { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+
+    .node-index { display: block; margin-bottom: 22px; color: var(--quiet); font-size: 12px; font-weight: 650; }
+    .node-title { display: block; font-size: 15px; line-height: 1.3; font-weight: 650; }
+
+    .arch-detail {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
+      gap: 36px;
+      padding: 32px;
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+    }
+
+    .boundary {
+      padding: 18px;
+      border-left: 3px solid var(--blue);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      background: white;
+    }
+
+    .boundary strong { display: block; margin-bottom: 5px; font-size: 13px; }
+    .boundary span { color: var(--muted); font-size: 14px; }
+
+    .architecture-rule {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-top: 62px;
+    }
+
+    .rule-card { padding: 24px; border-top: 1px solid var(--line); }
+    .rule-card span { display: block; margin-bottom: 12px; color: var(--blue); font-size: 13px; font-weight: 650; }
+    .rule-card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+    .segmented {
+      display: inline-flex;
+      gap: 3px;
+      margin: 30px 0;
+      padding: 4px;
+      border-radius: 12px;
+      background: var(--surface);
+    }
+
+    .segment {
+      min-height: 40px;
+      padding: 0 16px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .segment:hover { color: var(--ink); }
+    .segment[aria-selected="true"] { color: var(--ink); background: white; box-shadow: 0 1px 4px rgba(0,0,0,.08); font-weight: 600; }
+
+    .method-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr);
+      gap: 44px;
+      padding: 38px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-lg);
+      background: white;
+    }
+
+    .method-summary { color: var(--muted); font-size: 18px; line-height: 1.6; }
+
+    .formula {
+      margin-top: 24px;
+      padding: 20px;
+      overflow-x: auto;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--ink);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .method-facts {
+      display: grid;
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-md);
+      background: var(--line-soft);
+    }
+
+    .method-fact { padding: 18px; background: var(--surface); }
+    .method-fact strong { display: block; margin-bottom: 4px; font-size: 13px; }
+    .method-fact span { color: var(--muted); font-size: 14px; }
+
+    .data-boundary {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: stretch;
+      gap: 16px;
+      margin-top: 64px;
+    }
+
+    .dataset-card { padding: 26px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); }
+    .dataset-card p { color: var(--muted); }
+    .dataset-arrow { display: grid; place-items: center; color: var(--quiet); }
+
+    details.reference {
+      margin-top: 24px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-md);
+      background: white;
+    }
+
+    details.reference > summary {
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 22px;
+      cursor: pointer;
+      font-weight: 620;
+      list-style: none;
+    }
+
+    details.reference > summary::-webkit-details-marker { display: none; }
+    details.reference > summary::after { content: "+"; color: var(--muted); font-size: 22px; font-weight: 350; }
+    details.reference[open] > summary::after { content: "−"; }
+    .reference-body { padding: 0 22px 24px; color: var(--muted); }
+
+    .reference-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 28px; margin-top: 12px; }
+    .reference-grid div { padding: 12px 0; border-top: 1px solid var(--line-soft); }
+    .reference-grid strong { display: block; margin-bottom: 4px; color: var(--ink); font-size: 14px; }
+    .reference-grid span { font-size: 14px; }
+
+    .paper-list {
+      display: grid;
+      gap: 0;
+      margin-top: 8px;
+    }
+
+    .paper-row {
+      display: grid;
+      grid-template-columns: minmax(220px, .72fr) minmax(0, 1.28fr);
+      gap: 32px;
+      padding: 24px 0;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .paper-title {
+      margin: 0 0 8px;
+      font-size: 16px;
+      line-height: 1.4;
+      font-weight: 650;
+    }
+
+    .paper-meta { margin: 0; color: var(--quiet); font-size: 13px; }
+    .paper-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+    .paper-links a { font-size: 13px; text-underline-offset: 3px; }
+    .paper-links a:visited { color: #5e3a9e; }
+
+    .paper-comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .paper-comparison strong { display: block; margin-bottom: 5px; font-size: 13px; }
+    .paper-comparison p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+
+    .agent-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, .7fr);
+      gap: 56px;
+      align-items: start;
+      margin-top: 30px;
+    }
+
+    .agent-panel {
+      padding: 34px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-lg);
+      background: white;
+    }
+
+    .agent-description { color: var(--muted); font-size: 18px; line-height: 1.6; }
+
+    .native-capabilities {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 22px;
+    }
+
+    .native-capabilities span { padding: 7px 10px; border-radius: 999px; background: var(--blue-soft); color: #0c5ca8; font-size: 13px; font-weight: 550; }
+
+    .tool-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .tool-item {
+      display: grid;
+      grid-template-columns: 190px 1fr;
+      gap: 14px;
+      padding: 15px 0;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .tool-item code { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; overflow-wrap: anywhere; }
+    .tool-item span { color: var(--muted); font-size: 14px; }
+
+    .conversation {
+      padding: 20px;
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+    }
+
+    .message {
+      max-width: 90%;
+      margin-bottom: 12px;
+      padding: 13px 15px;
+      border-radius: 16px;
+      color: var(--muted);
+      background: white;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .message.user { margin-left: auto; color: white; background: var(--blue); }
+    .message:last-child { margin-bottom: 0; }
+    .message strong { display: block; margin-bottom: 4px; color: inherit; font-size: 12px; }
+
+    .results-controls {
+      display: flex;
+      align-items: flex-end;
+      gap: 16px;
+      margin: 34px 0 28px;
+    }
+
+    .select-field { display: grid; gap: 7px; }
+    .select-field label { color: var(--muted); font-size: 13px; font-weight: 600; }
+    .select-field select {
+      min-width: 190px;
+      min-height: 44px;
+      padding: 0 38px 0 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      color: var(--ink);
+      background: white;
+    }
+
+    .example-label { margin-left: auto; color: var(--quiet); font-size: 13px; }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 170px minmax(0, 1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .run-card {
+      padding: 28px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-lg);
+      background: white;
+    }
+
+    .run-card.candidate { border-color: #b9d9fb; background: #fbfdff; }
+    .run-type { display: block; margin-bottom: 8px; color: var(--quiet); font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
+    .run-card p { color: var(--muted); }
+
+    .run-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 24px; }
+    .run-meta div { padding-top: 12px; border-top: 1px solid var(--line-soft); }
+    .run-meta strong { display: block; font-size: 13px; }
+    .run-meta span { color: var(--muted); font-size: 13px; }
+
+    .decision-card {
+      display: grid;
+      place-items: center;
+      align-content: center;
+      padding: 18px;
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      text-align: center;
+    }
+
+    .decision-badge { display: inline-flex; min-height: 32px; align-items: center; padding: 0 11px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+    .decision-badge.keep { color: var(--green); background: var(--green-soft); }
+    .decision-badge.discard { color: var(--red); background: var(--red-soft); }
+    .decision-delta { margin: 12px 0 2px; font-size: 27px; font-weight: 680; letter-spacing: -.04em; }
+    .decision-note { margin: 0; color: var(--muted); font-size: 13px; }
+
+    .metrics { display: grid; gap: 18px; margin-top: 28px; }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr) 90px;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .metric-name strong { display: block; font-size: 14px; }
+    .metric-name span { color: var(--quiet); font-size: 12px; }
+
+    .metric-bars { display: grid; gap: 6px; }
+    .bar-track { height: 8px; overflow: hidden; border-radius: 999px; background: var(--surface); }
+    .bar { height: 100%; border-radius: inherit; background: var(--quiet); transition: width var(--ease); }
+    .bar.candidate { background: var(--blue); }
+
+    .metric-values { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+    .metric-values .delta { display: block; color: var(--green); font-weight: 650; }
+    .metric-values .delta.negative { color: var(--red); }
+
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 64px;
+    }
+
+    .report-item { padding: 24px; border-top: 1px solid var(--line); }
+    .report-item span { display: block; margin-bottom: 8px; color: var(--blue); font-size: 13px; font-weight: 650; }
+    .report-item p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    .records { margin-top: 28px; }
+
+    footer {
+      padding: 26px 0 36px;
+      border-top: 1px solid var(--line-soft);
+      color: var(--quiet);
+      font-size: 13px;
+    }
+
+    .footer-inner { display: flex; justify-content: space-between; gap: 20px; }
+
+    @media (max-width: 980px) {
+      .shell { width: min(calc(100% - 40px), var(--content)); }
+      .topbar-inner { align-items: flex-start; flex-direction: column; gap: 8px; padding: 12px 0 10px; }
+      .nav-tabs { width: 100%; padding-left: 0; }
+      .view { padding-top: 56px; }
+      .phase-rail { grid-template-columns: 1fr; gap: 8px; }
+      .phase-rail::before { top: 24px; bottom: 24px; left: 23px; right: auto; width: 1px; height: auto; }
+      .phase { min-height: 64px; display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: center; padding: 10px; }
+      .phase-number { margin: 0; }
+      .phase-meta { margin-top: 2px; }
+      .phase-detail, .arch-detail, .method-panel, .agent-layout { grid-template-columns: 1fr; }
+      .architecture-map { grid-template-columns: repeat(3, 1fr); }
+      .arch-node:nth-child(3)::after { display: none; }
+      .architecture-rule { grid-template-columns: 1fr; }
+      .comparison { grid-template-columns: 1fr; }
+      .decision-card { min-height: 150px; }
+      .report-grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 680px) {
+      .shell { width: calc(100% - 40px); }
+      .brand { font-size: 14px; }
+      .nav-tab { min-height: 44px; padding: 0 11px; }
+      .view { padding: 44px 0 72px; }
+      .hero { margin-bottom: 52px; }
+      h1 { font-size: 40px; line-height: 1.06; }
+      h2 { font-size: 29px; }
+      .lede { font-size: 19px; }
+      .ownership, .overview-lower { grid-template-columns: 1fr; }
+      .loop-card { padding: 20px; border-radius: var(--radius-md); }
+      .loop-heading { display: block; margin-bottom: 22px; }
+      .fixed-chip { margin-top: 16px; }
+      .phase-detail { gap: 28px; padding: 22px; }
+      .architecture-map { grid-template-columns: 1fr; }
+      .arch-node { min-height: 78px; }
+      .arch-node:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -10px; transform: translate(50%, 50%); }
+      .node-index { margin-bottom: 8px; }
+      .arch-detail, .method-panel, .agent-panel { padding: 24px; }
+      .segmented { width: 100%; overflow-x: auto; }
+      .segment { flex: 1 0 auto; min-height: 44px; }
+      .data-boundary { grid-template-columns: 1fr; }
+      .dataset-arrow { transform: rotate(90deg); }
+      .reference-grid, .paper-row, .paper-comparison { grid-template-columns: 1fr; }
+      .tool-item { grid-template-columns: 1fr; gap: 5px; }
+      .results-controls { align-items: stretch; flex-direction: column; }
+      .select-field select { width: 100%; }
+      .example-label { margin-left: 0; }
+      .metric-row { grid-template-columns: 1fr 64px; }
+      .metric-bars { grid-column: 1 / -1; grid-row: 2; }
+      .report-grid { grid-template-columns: 1fr; }
+      .footer-inner { flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <div class="brand" aria-label="BashGym AutoResearch">
+        <span class="brand-mark" aria-hidden="true">BG</span>
+        <span>BashGym AutoResearch</span>
+      </div>
+      <nav class="nav-tabs" role="tablist" aria-label="Architecture sections">
+        <button class="nav-tab" role="tab" aria-selected="true" aria-controls="view-overview" id="tab-overview" data-view="overview">Overview</button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="view-architecture" id="tab-architecture" data-view="architecture">Architecture</button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="view-methods" id="tab-methods" data-view="methods">Methods</button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="view-agents" id="tab-agents" data-view="agents">Agent workflow</button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="view-results" id="tab-results" data-view="results">Results</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="view is-active" id="view-overview" role="tabpanel" aria-labelledby="tab-overview">
+      <div class="shell">
+        <div class="hero">
+          <p class="eyebrow">Interactive architecture</p>
+          <h1>Autonomous model experimentation, from baseline to the next iteration.</h1>
+          <p class="lede">An agent inspects results and chooses what to change. BashGym runs the training and evaluation work, preserves the experiment record, and returns a comparison the agent can act on.</p>
+          <div class="ownership" aria-label="Responsibility boundary">
+            <div class="ownership-item">
+              <strong>The agent directs the research</strong>
+              <span>Forms hypotheses, changes data or training, interprets failures, and selects the next experiment.</span>
+            </div>
+            <div class="ownership-item">
+              <strong>BashGym executes the experiment</strong>
+              <span>Runs stages, tracks lineage, evaluates against fixed tasks, compares outcomes, and produces the report.</span>
+            </div>
+          </div>
+        </div>
+
+        <section class="loop-card" aria-labelledby="loop-title">
+          <div class="loop-heading">
+            <div>
+              <p class="eyebrow">The experiment loop</p>
+              <h2 id="loop-title">One result becomes the next experiment.</h2>
+              <p>Select a phase to see what the agent does, what BashGym does, and what moves forward.</p>
+            </div>
+            <span class="fixed-chip">Held-out evaluation stays fixed</span>
+          </div>
+
+          <div class="phase-rail" role="tablist" aria-label="Experiment phases" id="phase-rail"></div>
+          <div class="phase-detail" id="phase-detail" role="tabpanel" aria-live="polite"></div>
+          <div class="loopback" aria-label="The loop repeats until a stopping condition is met">
+            <svg width="24" height="18" viewBox="0 0 24 18" fill="none" aria-hidden="true"><path d="M21 4.5H7.5A4.5 4.5 0 0 0 3 9a4.5 4.5 0 0 0 4.5 4.5H18M18 13.5l-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Compare, learn, and begin the next controlled iteration—or stop and write the report.
+          </div>
+        </section>
+
+        <div class="overview-lower">
+          <article class="quiet-card">
+            <h3>What an iteration may change</h3>
+            <p>Each candidate should have a specific reason to exist.</p>
+            <ul class="plain-list">
+              <li>Training examples, filtering, or data mixture</li>
+              <li>SFT, preference optimization, or verifier-based RL</li>
+              <li>Learning rate, schedule, sampling, or batch settings</li>
+              <li>Reward, verifier, environment, or training code</li>
+            </ul>
+          </article>
+          <article class="quiet-card">
+            <h3>What remains comparable</h3>
+            <p>The experiment contract prevents the target from moving between runs.</p>
+            <ul class="plain-list">
+              <li>Held-out task set and contamination boundary</li>
+              <li>Primary metric definitions and regression checks</li>
+              <li>Reference baseline and keep/discard rule</li>
+              <li>Recorded lineage for data, recipe, model, and evaluator</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-architecture" role="tabpanel" aria-labelledby="tab-architecture" hidden>
+      <div class="shell">
+        <p class="eyebrow">Executable path</p>
+        <h2>How one experiment moves through BashGym.</h2>
+        <p class="section-intro">The host agent uses a small research interface. Existing campaign, execution, evidence, and comparison components carry the experiment through to a result. Select a component to see its responsibility and boundary.</p>
+
+        <div class="architecture-map" role="tablist" aria-label="Executable architecture" id="architecture-map"></div>
+        <div class="arch-detail" id="architecture-detail" role="tabpanel" aria-live="polite"></div>
+
+        <div class="architecture-rule" aria-label="Architecture invariants">
+          <article class="rule-card">
+            <span>01 · Same experiment</span>
+            <p>Baseline and candidates use the same evaluation suite and comparison rule.</p>
+          </article>
+          <article class="rule-card">
+            <span>02 · One source of state</span>
+            <p>The agent, API, worker, and observation UI read the same campaign records.</p>
+          </article>
+          <article class="rule-card">
+            <span>03 · Resume without invention</span>
+            <p>Durable attempts and sealed outputs let interrupted work continue from recorded state.</p>
+          </article>
+        </div>
+
+        <details class="reference">
+          <summary>Component responsibilities</summary>
+          <div class="reference-body">
+            <div class="reference-grid" id="module-reference"></div>
+          </div>
+        </details>
+
+        <details class="reference">
+          <summary>Comparison with related research</summary>
+          <div class="reference-body">
+            <p>Selected work published from March through July 2026. The comparison identifies tested ideas and material differences; it does not claim that the papers implement BashGym's architecture.</p>
+            <div class="paper-list" id="paper-list"></div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="view" id="view-methods" role="tabpanel" aria-labelledby="tab-methods" hidden>
+      <div class="shell">
+        <p class="eyebrow">Training and evaluation</p>
+        <h2>Choose the method that matches the available signal.</h2>
+        <p class="section-intro">BashGym does not assume one training strategy. The intervention depends on the data and the feedback available for the experiment.</p>
+
+        <div class="segmented" role="tablist" aria-label="Training methods" id="method-tabs"></div>
+        <article class="method-panel" id="method-panel" role="tabpanel" aria-live="polite"></article>
+
+        <div class="data-boundary" aria-label="Training and evaluation data boundary">
+          <article class="dataset-card">
+            <p class="eyebrow">Training side</p>
+            <h3>Construct the intervention</h3>
+            <p>Bring a dataset or derive one from verified traces, synthetic examples, preferences, or environment rollouts. Curate, validate, and decontaminate it before training.</p>
+          </article>
+          <div class="dataset-arrow" aria-hidden="true">→</div>
+          <article class="dataset-card">
+            <p class="eyebrow">Evaluation side</p>
+            <h3>Measure without leakage</h3>
+            <p>Keep held-out tasks outside training. Run the base model and every candidate through the same evaluator, then inspect both the primary metric and protected regressions.</p>
+          </article>
+        </div>
+
+        <details class="reference">
+          <summary>Data preparation checklist</summary>
+          <div class="reference-body">
+            <div class="reference-grid">
+              <div><strong>Schema</strong><span>Every row satisfies the selected trainer’s input contract.</span></div>
+              <div><strong>Verification</strong><span>Demonstrations and rewards are checked before they become training signal.</span></div>
+              <div><strong>Decontamination</strong><span>Training rows are compared against held-out tasks and known evaluation material.</span></div>
+              <div><strong>Versioning</strong><span>The exact data revision and transformation recipe are recorded for each run.</span></div>
+              <div><strong>Coverage</strong><span>Failure categories are represented intentionally instead of by raw volume alone.</span></div>
+              <div><strong>Ablations</strong><span>Change one defensible intervention at a time when attributing an effect matters.</span></div>
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="view" id="view-agents" role="tabpanel" aria-labelledby="tab-agents" hidden>
+      <div class="shell">
+        <p class="eyebrow">Agent workflow</p>
+        <h2>Use the agent environment you already work in.</h2>
+        <p class="section-intro">BashGym adds experiment tools and shared state. The host agent keeps its own goals, plans, conversation context, tools, and subagents; there is no second planning system to manage.</p>
+
+        <div class="segmented" role="tablist" aria-label="Agent environments" id="agent-tabs"></div>
+        <div class="agent-layout">
+          <article class="agent-panel" id="agent-panel" role="tabpanel" aria-live="polite"></article>
+          <aside class="conversation" aria-label="Example agent interaction">
+            <div class="message user"><strong>Research request</strong>Establish the baseline, analyze terminal recovery failures, and test a data-focused intervention.</div>
+            <div class="message"><strong>Agent</strong>I’ll read the experiment state, inspect the fixed evaluation contract, and run the baseline first.</div>
+            <div class="message"><strong>BashGym result</strong>Baseline complete. The dominant failure cluster is recovery after an invalid tool call.</div>
+            <div class="message"><strong>Agent</strong>I’ll build a verified recovery subset, submit one candidate, and compare it against the same held-out tasks.</div>
+          </aside>
+        </div>
+
+        <details class="reference records">
+          <summary>Experiment records available to the agent</summary>
+          <div class="reference-body">
+            <div class="reference-grid">
+              <div><strong>Evaluation</strong><span>Normalized metrics, task-level outcomes, suite identity, and evaluated model.</span></div>
+              <div><strong>Failures</strong><span>Error clusters, regressions, verifier failures, and representative examples.</span></div>
+              <div><strong>Data</strong><span>Dataset version, source, transformation recipe, validation, and contamination checks.</span></div>
+              <div><strong>Training</strong><span>Recipe, stage output, resource use, logs, metrics, and candidate identity.</span></div>
+              <div><strong>Decision</strong><span>Reference run, candidate delta, regression checks, and keep/discard outcome.</span></div>
+              <div><strong>Report</strong><span>Experiment history, findings, limitations, cost, and recommended next work.</span></div>
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="view" id="view-results" role="tabpanel" aria-labelledby="tab-results" hidden>
+      <div class="shell">
+        <p class="eyebrow">Experiment comparison</p>
+        <h2>See what changed, what improved, and what regressed.</h2>
+        <p class="section-intro">The comparison combines one primary outcome with protected metrics and the exact intervention. Values below are illustrative; the layout mirrors the result an agent reviews before its next decision.</p>
+
+        <div class="results-controls">
+          <div class="select-field">
+            <label for="reference-run">Reference run</label>
+            <select id="reference-run"></select>
+          </div>
+          <div class="select-field">
+            <label for="candidate-run">Candidate run</label>
+            <select id="candidate-run"></select>
+          </div>
+          <span class="example-label">Illustrative experiment values</span>
+        </div>
+
+        <div class="comparison" id="comparison"></div>
+        <div class="metrics" id="metrics"></div>
+
+        <div class="report-grid" aria-label="Current export contents">
+          <article class="report-item"><span>Campaign</span><p>The experiment objective, current status, and retained reference.</p></article>
+          <article class="report-item"><span>Attempts</span><p>Each scheduled stage, its completion state, and candidate digest.</p></article>
+          <article class="report-item"><span>Evaluation</span><p>Persisted development comparisons and the latest available verdict.</p></article>
+          <article class="report-item"><span>Training</span><p>Recorded loss series grouped by attempt when the runner emits them.</p></article>
+          <article class="report-item"><span>Evidence</span><p>Sealed artifact schemas, hashes, sizes, validity, and implementation flags.</p></article>
+          <article class="report-item"><span>Reconciliation</span><p>A source digest and export manifest bind the generated files to one snapshot.</p></article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <span>BashGym AutoResearch architecture</span>
+      <span>Standalone interactive reference · no network dependencies</span>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const phases = [
+        {
+          id: "baseline",
+          label: "Define & baseline",
+          meta: "Set the comparison",
+          title: "Define the question and measure the starting point.",
+          summary: "The agent turns the research request into a bounded experiment, confirms the fixed evaluation contract, and evaluates the unmodified model before proposing a candidate.",
+          steps: ["Define experiment", "Run baseline"],
+          agent: "Clarifies the hypothesis, success metric, constraints, and stopping rules.",
+          bashgym: "Creates the study and campaign records, schedules the baseline evaluation, and records the result.",
+          output: "A baseline result tied to a model, dataset, evaluator, and metric definition.",
+          next: "Inspect task-level failures and decide what evidence should drive the first intervention."
+        },
+        {
+          id: "analyze",
+          label: "Analyze",
+          meta: "Explain the failures",
+          title: "Move from a score to a diagnosis.",
+          summary: "Aggregate metrics are not enough. The agent inspects task-level outcomes, error clusters, verifier traces, regressions, and representative examples to form a testable explanation.",
+          steps: ["Analyze failures"],
+          agent: "Groups failure modes, examines examples, and states a causal hypothesis that can be tested.",
+          bashgym: "Returns evaluation records, failure evidence, history, and the currently accepted reference.",
+          output: "A concrete hypothesis linked to observed failures rather than a generic desire to improve.",
+          next: "Choose the smallest data, objective, reward, environment, or code change that tests the hypothesis."
+        },
+        {
+          id: "change",
+          label: "Change",
+          meta: "Prepare the intervention",
+          title: "Build one defensible candidate experiment.",
+          summary: "The intervention may curate existing data, generate and verify new examples, revise a reward, select a training method, or change bounded hyperparameters. Held-out evaluation material remains outside this work.",
+          steps: ["Prepare or revise data", "Submit candidate"],
+          agent: "Creates or selects the intervention and records why it should address the diagnosed failure.",
+          bashgym: "Validates proposal lineage, dataset and recipe identities, required stages, and experiment limits.",
+          output: "A candidate proposal with one parent, explicit inputs, a training recipe, and expected evidence.",
+          next: "Execute the data and training stages using the registered stage adapter."
+        },
+        {
+          id: "train-evaluate",
+          label: "Train & evaluate",
+          meta: "Produce comparable evidence",
+          title: "Train the candidate, then evaluate it independently.",
+          summary: "The worker executes the required stages, preserves outputs and lineage, and sends the resulting candidate through the same held-out evaluator used for the baseline.",
+          steps: ["Fine-tune candidate", "Evaluate candidate"],
+          agent: "Observes progress and handles scientific exceptions; it does not need to manually move every artifact.",
+          bashgym: "Schedules stages, executes via the selected adapter, retries bounded mechanical failures, and ingests the completed evaluation.",
+          output: "A candidate model and normalized evaluation result with sealed provenance.",
+          next: "Compare the candidate with its exact reference and check protected regressions."
+        },
+        {
+          id: "compare",
+          label: "Compare & decide",
+          meta: "Keep, discard, or stop",
+          title: "Turn the result into the next research decision.",
+          summary: "The primary metric, protected regressions, runtime, and intervention are reviewed together. A useful candidate becomes the new reference; an unsuccessful one remains part of the experiment history.",
+          steps: ["Compare runs", "Repeat or stop", "Write report"],
+          agent: "Interprets the result, revises its hypothesis, and chooses the next candidate or ends the study.",
+          bashgym: "Applies deterministic comparison rules, records keep or discard, enforces stopping conditions, and assembles the report.",
+          output: "A decision with exact compared runs, metric deltas, regressions, and experiment history.",
+          next: "If uncertainty remains, return to analysis with the new evidence. Otherwise publish the report."
+        }
+      ];
+
+      const architecture = [
+        {
+          id: "agent",
+          title: "Host agent",
+          heading: "The agent chooses the scientific intervention.",
+          body: "Codex, Cursor, Claude, or another compatible agent reads the current experiment state, inspects evidence, forms a hypothesis, and proposes the next bounded iteration using its native goals, plans, tools, and subagents.",
+          boundary: "The agent owns interpretation and hypothesis selection. BashGym does not silently invent the next scientific change."
+        },
+        {
+          id: "core",
+          title: "Campaign core",
+          heading: "The campaign core keeps experiments comparable.",
+          body: "The core establishes the baseline-first lineage, accepts controlled candidate proposals, exposes current state, applies stopping rules, and records whether a candidate is kept or discarded.",
+          boundary: "A candidate has one explicit parent and is judged against the study’s fixed evaluation contract."
+        },
+        {
+          id: "worker",
+          title: "Campaign worker",
+          heading: "The worker advances one durable action at a time.",
+          body: "The worker reconciles interrupted work, schedules the next required stage, claims an action, invokes the configured adapter, observes progress, and settles the recorded attempt. Mechanical retries are bounded.",
+          boundary: "Restarting the worker does not create a new experiment or erase an in-flight attempt."
+        },
+        {
+          id: "adapter",
+          title: "Stage adapter",
+          heading: "Adapters run the actual data, training, and evaluation programs.",
+          body: "A registered stage profile binds an entry point, inputs, arguments, outputs, and compute target. The same campaign workflow can invoke different installed adapters without changing the scientific record.",
+          boundary: "The adapter executes a declared stage. It does not decide which experiment should run next."
+        },
+        {
+          id: "evidence",
+          title: "Evidence projection",
+          heading: "Completed evaluation outputs become normalized results.",
+          body: "The projector validates the completed training and evaluation evidence, binds the evaluated model and suite, creates stable ledger records, and produces the campaign result used for comparison.",
+          boundary: "Training metrics do not substitute for held-out evaluation, and caller-authored scores do not become real results."
+        },
+        {
+          id: "loop",
+          title: "Loop & report",
+          heading: "The completed result returns to the agent as actionable state.",
+          body: "The loop coordinator ingests sealed evaluations, retries mechanical failures when allowed, applies terminal stop conditions, and otherwise reports that a scientific agent action is required. Observation views render the same state.",
+          boundary: "Automatic mechanics continue automatically; scientific iteration returns to the host agent with evidence."
+        }
+      ];
+
+      const modules = [
+        ["Research interface", "High-level tools prepare, read, wait for progress, start, submit, and report an experiment."],
+        ["Proposal validation", "Checks roles, parent relationships, required stage sequence, and registered runtimes."],
+        ["Runtime", "Derives deterministic action specifications and binds stage inputs to the proposal."],
+        ["Worker", "Reconciles, claims, launches, observes, and settles durable actions."],
+        ["Adapters", "Execute installed data, training, and evaluation programs on registered compute."],
+        ["Evidence projector", "Validates sealed outputs and writes normalized ledger and campaign results."],
+        ["Campaign core", "Maintains baseline and candidate lineage, decisions, state, and stopping rules."],
+        ["Agent brief", "Projects compact state and Markdown for agents and observation surfaces."],
+        ["API and MCP", "Expose the same campaign state and mutations to user interfaces and agent hosts."],
+        ["Report export", "Writes the current campaign, attempts, comparisons, loss series, sealed-artifact inventory, and reconciliation manifest."]
+      ];
+
+      const papers = [
+        {
+          title: "Frontis-MA1: Training an AI4AI Model towards Recursive Self-Improvement in Machine Learning Engineering",
+          date: "Jul 30, 2026",
+          kind: "Recursive improvement",
+          overlap: "OpenMLE combines verifiable task environments, execution-grounded post-training, and long-horizon evolutionary search. Its trained 35B agent and search stack both improved held-out machine-learning engineering performance.",
+          difference: "It evolves machine-learning programs with a dedicated learned operator and search system. BashGym keeps scientific choice in the host agent and organizes repeated data, training, reward, and evaluation experiments around a target model.",
+          arxiv: "https://arxiv.org/abs/2607.28568",
+          hf: "https://huggingface.co/papers/2607.28568"
+        },
+        {
+          title: "AutoTrainess: Teaching Language Models to Improve Language Models Autonomously",
+          date: "Jun 30, 2026",
+          kind: "Closest agent interface",
+          overlap: "It gives coding agents structured operations for planning, data preparation, training, evaluation, and logging. Codex scored 26.94 on PostTrainBench versus 23.21 with a raw command line.",
+          difference: "Its experiments use a fixed training stack, small base models, and a ten-hour benchmark budget. BashGym aims to retain the same agent-facing simplicity while keeping a longer-lived candidate lineage across configured training methods and execution targets.",
+          arxiv: "https://arxiv.org/abs/2606.31551",
+          hf: "https://huggingface.co/papers/2606.31551"
+        },
+        {
+          title: "Auto Research with Specialist Agents Develops Effective and Non-Trivial Training Recipes",
+          date: "May 7, 2026",
+          kind: "Closest measured loop",
+          overlap: "Each trial retains a hypothesis, executable edit, evaluator-owned outcome, failure label, and lineage for the next proposal. The study ran 1,197 headline trials without human repair during search.",
+          difference: "Its editable surface is code-level recipes inside fixed tasks. BashGym applies the same measured-iteration pattern to model, data, training, reward, evaluator, and approved code interventions chosen through the host agent.",
+          arxiv: "https://arxiv.org/abs/2605.05724",
+          hf: "https://huggingface.co/papers/2605.05724"
+        },
+        {
+          title: "Agent^2 RL-Bench: Can LLM Agents Engineer Agentic RL Post-Training?",
+          date: "May 13, 2026",
+          kind: "SFT and RL benchmark",
+          overlap: "Agents design, implement, debug, train, and evaluate post-training pipelines under a fixed budget. One ALFWorld run improved from 4.85 to 93.28 through an SFT warm-up followed by GRPO and online rollouts.",
+          difference: "The benchmark also found unstable RL behavior and severe regressions, so it is a standard BashGym still needs to meet with real campaigns rather than evidence that every configured method already works.",
+          arxiv: "https://arxiv.org/abs/2604.10547",
+          hf: "https://huggingface.co/papers/2604.10547"
+        },
+        {
+          title: "FT-Dojo: Towards Autonomous LLM Fine-Tuning with Language Agents",
+          date: "Mar 2, 2026",
+          kind: "Fine-tuning environment",
+          overlap: "Its agent curates data, builds a training pipeline, evaluates results, diagnoses failures, and retains experience for later attempts. A purpose-built fine-tuning agent led on 10 of 13 tasks.",
+          difference: "Its cases also show weak causal diagnosis and destructive data filtering. BashGym can retain the full comparison history, but the host agent still has to make scientifically sound interventions.",
+          arxiv: "https://arxiv.org/abs/2603.01712",
+          hf: "https://huggingface.co/papers/2603.01712"
+        },
+        {
+          title: "PostTrainBench: Can LLM Agents Automate LLM Post-Training?",
+          date: "Mar 9, 2026",
+          kind: "External readiness benchmark",
+          overlap: "A coding agent receives a base model and target benchmark, finds data and methods, trains within ten hours, and submits a checkpoint for held-out evaluation. The best agent improved substantially over the base models.",
+          difference: "The best average still trailed official instruction-tuned models, and several runs contaminated evaluation or substituted checkpoints. BashGym's fixed evaluation and experiment record address these failure modes, but need equivalent real-compute results.",
+          arxiv: "https://arxiv.org/abs/2603.08640",
+          hf: "https://huggingface.co/papers/2603.08640"
+        },
+        {
+          title: "Understanding the Challenges in Iterative Generative Optimization with LLMs",
+          date: "Mar 25, 2026",
+          kind: "Loop design evidence",
+          overlap: "It studies agents that repeatedly improve artifacts from execution feedback and shows that the starting artifact, feedback horizon, and batching of failed and successful trials can determine whether improvement occurs.",
+          difference: "It is an analysis across several optimization domains, not a post-training product. Its result is a warning that BashGym must keep those experiment choices explicit and inspectable instead of hiding them behind one universal loop setting.",
+          arxiv: "https://arxiv.org/abs/2603.23994",
+          hf: "https://huggingface.co/papers/2603.23994"
+        }
+      ];
+
+      const methods = [
+        {
+          id: "sft",
+          label: "SFT",
+          title: "Supervised fine-tuning",
+          summary: "Use verified demonstrations when the desired response or trajectory is known. SFT increases the likelihood of the demonstrated response tokens while masking prompt tokens from the loss.",
+          formula: "L_SFT(θ) = − Σₜ mₜ log πθ(yₜ | x, y<ₜ)",
+          facts: [
+            ["Requires", "Prompt–response pairs or verified multi-turn trajectories"],
+            ["Good for", "Format, tool-use patterns, domain behavior, and recovery demonstrations"],
+            ["Watch", "Memorization, contamination, weak examples, and capability regressions"],
+            ["Compare", "Held-out success, valid actions, recovery, and protected benchmarks"]
+          ]
+        },
+        {
+          id: "dpo",
+          label: "DPO",
+          title: "Preference optimization",
+          summary: "Use ranked response pairs when one completion is preferred to another. DPO optimizes the policy relative to a fixed reference without fitting a separate reward model for the update.",
+          formula: "L_DPO(θ) = − E log σ(β[(log πθ(y⁺|x) − log πref(y⁺|x)) − (log πθ(y⁻|x) − log πref(y⁻|x))])",
+          facts: [
+            ["Requires", "Prompts with chosen and rejected responses"],
+            ["Good for", "Behavioral preferences that are easier to rank than score absolutely"],
+            ["Watch", "Noisy preferences, reference mismatch, length bias, and over-optimization"],
+            ["Compare", "Task success plus style, refusal, calibration, and regression metrics"]
+          ]
+        },
+        {
+          id: "grpo",
+          label: "GRPO / RLVR",
+          title: "Verifier-based reinforcement learning",
+          summary: "Use multiple sampled responses and a deterministic verifier or reward. Group-relative advantages compare each reward with the group mean and standard deviation before the policy update.",
+          formula: "Aᵢ = (rᵢ − mean(r₁…rG)) / (std(r₁…rG) + ε)",
+          facts: [
+            ["Requires", "A task environment, rollout sampling, and a reliable verifier or reward"],
+            ["Good for", "Problems with checkable outcomes, including terminal and code tasks"],
+            ["Watch", "Reward hacking, zero-variance groups, verifier errors, KL drift, and cost"],
+            ["Compare", "Verified success, pass@k, recovery, efficiency, and protected regressions"]
+          ]
+        },
+        {
+          id: "eval",
+          label: "Evaluation",
+          title: "Fixed held-out evaluation",
+          summary: "Every candidate is measured against the same held-out task suite and metric definitions as the baseline. Aggregate results are paired with task-level evidence and protected regression checks.",
+          formula: "pass@k = 1 − C(n − c, k) / C(n, k)    ·    Δ = metric(candidate) − metric(reference)",
+          facts: [
+            ["Requires", "A versioned suite, evaluator, metric definition, and reference run"],
+            ["Primary signal", "The metric declared by the experiment contract"],
+            ["Protection", "Separate thresholds for capabilities that must not regress"],
+            ["Decision", "Keep or discard using the recorded comparison rule, then interpret why"]
+          ]
+        }
+      ];
+
+      const agents = [
+        {
+          id: "codex",
+          label: "Codex",
+          title: "Codex uses the research tools inside its existing task.",
+          description: "The experiment can be the Codex task goal. Codex inspects the repository and research state, delegates analysis or implementation to subagents, submits the next iteration, and continues when BashGym returns a result.",
+          capabilities: ["Task goal", "Plans", "Tools", "Subagents", "Workspace context"]
+        },
+        {
+          id: "cursor",
+          label: "Cursor",
+          title: "Cursor combines repository work with the same experiment state.",
+          description: "Cursor’s agent can inspect code and data, call the research interface, change a bounded training component, and review the resulting comparison without learning a separate experiment workflow.",
+          capabilities: ["Agent instructions", "Plans", "Tools", "Codebase context", "Background work"]
+        },
+        {
+          id: "claude",
+          label: "Claude",
+          title: "Claude Code drives the loop with its native project workflow.",
+          description: "Claude Code can use its project instructions, plans, tools, and delegated tasks to diagnose results and author the next intervention while BashGym preserves the shared experiment history.",
+          capabilities: ["Project instructions", "Plans", "Tools", "Subagents", "Session context"]
+        }
+      ];
+
+      const researchTools = [
+        ["research_prepare", "Build or resume the experiment context without beginning training."],
+        ["research_state", "Read the compact goal, current runs, latest result, budget, and next required action."],
+        ["research_wait", "Wait for changed, action-required, or terminal state and resume from the returned event cursor."],
+        ["research_start", "Start the prepared campaign through the canonical campaign mutation."],
+        ["research_submit_iteration", "Submit a baseline or candidate proposal with role and parent validation."],
+        ["research_report", "Retrieve the current experiment report and export information."]
+      ];
+
+      const runs = [
+        { id: "base", name: "Base model", type: "Baseline", intervention: "No training intervention", method: "Evaluation only", data: "Held-out suite v3", metrics: { success: .428, valid: .811, recovery: .294, regression: .782, runtime: 1.00 } },
+        { id: "candidate-a", name: "Recovery data v1", type: "Candidate 01", intervention: "Verified recovery trajectories", method: "SFT", data: "Recovery subset v1", metrics: { success: .487, valid: .856, recovery: .412, regression: .786, runtime: 1.18 } },
+        { id: "candidate-b", name: "Recovery data + GRPO", type: "Candidate 02", intervention: "SFT warm start + verifier reward", method: "SFT → GRPO", data: "Recovery subset v2", metrics: { success: .516, valid: .873, recovery: .451, regression: .779, runtime: 1.62 } },
+        { id: "candidate-c", name: "Broad synthetic mix", type: "Candidate 03", intervention: "Expanded synthetic task mixture", method: "SFT", data: "Synthetic mixture v4", metrics: { success: .439, valid: .824, recovery: .318, regression: .731, runtime: 1.25 } }
+      ];
+
+      const metricDefinitions = [
+        ["success", "Task success", "Primary", true],
+        ["valid", "Valid tool calls", "Protected", true],
+        ["recovery", "Failure recovery", "Diagnostic", true],
+        ["regression", "General capability", "Protected", true],
+        ["runtime", "Relative runtime", "Resource", false]
+      ];
+
+      const escapeHtml = value => String(value).replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
+
+      function setupPrimaryNavigation() {
+        const tabs = [...document.querySelectorAll(".nav-tab")];
+        const views = [...document.querySelectorAll(".view")];
+        const activate = tab => {
+          tabs.forEach(item => item.setAttribute("aria-selected", String(item === tab)));
+          views.forEach(view => {
+            const active = view.id === `view-${tab.dataset.view}`;
+            view.classList.toggle("is-active", active);
+            view.hidden = !active;
+          });
+          window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        };
+        tabs.forEach((tab, index) => {
+          tab.addEventListener("click", () => activate(tab));
+          tab.addEventListener("keydown", event => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            let next = index;
+            if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+            if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+            if (event.key === "Home") next = 0;
+            if (event.key === "End") next = tabs.length - 1;
+            tabs[next].focus();
+            activate(tabs[next]);
+          });
+        });
+      }
+
+      function setupPhases() {
+        const rail = document.getElementById("phase-rail");
+        const detail = document.getElementById("phase-detail");
+        let selected = 0;
+        rail.innerHTML = phases.map((phase, index) => `
+          <button class="phase" role="tab" id="phase-${phase.id}" aria-controls="phase-detail" aria-selected="${index === 0}" data-index="${index}">
+            <span class="phase-number">${index + 1}</span>
+            <span><span class="phase-label">${escapeHtml(phase.label)}</span><span class="phase-meta">${escapeHtml(phase.meta)}</span></span>
+          </button>`).join("");
+
+        const render = index => {
+          selected = index;
+          const phase = phases[index];
+          [...rail.querySelectorAll(".phase")].forEach((button, buttonIndex) => button.setAttribute("aria-selected", String(buttonIndex === index)));
+          detail.setAttribute("aria-labelledby", `phase-${phase.id}`);
+          detail.innerHTML = `
+            <div>
+              <p class="detail-kicker">Phase ${index + 1} of ${phases.length}</p>
+              <h3>${escapeHtml(phase.title)}</h3>
+              <p class="detail-copy">${escapeHtml(phase.summary)}</p>
+              <ul class="micro-steps">${phase.steps.map(step => `<li>${escapeHtml(step)}</li>`).join("")}</ul>
+            </div>
+            <dl class="responsibility-list">
+              <div><dt>Agent action</dt><dd>${escapeHtml(phase.agent)}</dd></div>
+              <div><dt>BashGym action</dt><dd>${escapeHtml(phase.bashgym)}</dd></div>
+              <div><dt>Result</dt><dd>${escapeHtml(phase.output)}</dd></div>
+              <div><dt>Next decision</dt><dd>${escapeHtml(phase.next)}</dd></div>
+            </dl>`;
+        };
+
+        const buttons = [...rail.querySelectorAll(".phase")];
+        buttons.forEach((button, index) => {
+          button.addEventListener("click", () => render(index));
+          button.addEventListener("keydown", event => {
+            if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            let next = selected;
+            if (["ArrowLeft", "ArrowUp"].includes(event.key)) next = (selected - 1 + buttons.length) % buttons.length;
+            if (["ArrowRight", "ArrowDown"].includes(event.key)) next = (selected + 1) % buttons.length;
+            if (event.key === "Home") next = 0;
+            if (event.key === "End") next = buttons.length - 1;
+            buttons[next].focus();
+            render(next);
+          });
+        });
+        render(0);
+      }
+
+      function setupArchitecture() {
+        const map = document.getElementById("architecture-map");
+        const detail = document.getElementById("architecture-detail");
+        map.innerHTML = architecture.map((node, index) => `
+          <button class="arch-node" role="tab" id="arch-${node.id}" aria-controls="architecture-detail" aria-selected="${index === 0}" data-index="${index}">
+            <span class="node-index">0${index + 1}</span>
+            <span class="node-title">${escapeHtml(node.title)}</span>
+          </button>`).join("");
+        const render = index => {
+          const node = architecture[index];
+          [...map.querySelectorAll(".arch-node")].forEach((button, buttonIndex) => button.setAttribute("aria-selected", String(index === buttonIndex)));
+          detail.setAttribute("aria-labelledby", `arch-${node.id}`);
+          detail.innerHTML = `
+            <div><p class="detail-kicker">Component ${index + 1}</p><h3>${escapeHtml(node.heading)}</h3><p class="detail-copy">${escapeHtml(node.body)}</p></div>
+            <div class="boundary"><strong>Responsibility boundary</strong><span>${escapeHtml(node.boundary)}</span></div>`;
+        };
+        const buttons = [...map.querySelectorAll(".arch-node")];
+        buttons.forEach((button, index) => {
+          button.addEventListener("click", () => render(index));
+          button.addEventListener("keydown", event => {
+            if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            const current = Number(button.dataset.index);
+            let next = current;
+            if (["ArrowLeft", "ArrowUp"].includes(event.key)) next = (current - 1 + buttons.length) % buttons.length;
+            if (["ArrowRight", "ArrowDown"].includes(event.key)) next = (current + 1) % buttons.length;
+            if (event.key === "Home") next = 0;
+            if (event.key === "End") next = buttons.length - 1;
+            buttons[next].focus();
+            render(next);
+          });
+        });
+        document.getElementById("module-reference").innerHTML = modules.map(([title, body]) => `<div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(body)}</span></div>`).join("");
+        document.getElementById("paper-list").innerHTML = papers.map(paper => `
+          <article class="paper-row">
+            <div>
+              <p class="paper-title">${escapeHtml(paper.title)}</p>
+              <p class="paper-meta">${escapeHtml(paper.kind)} · ${escapeHtml(paper.date)}</p>
+              <div class="paper-links"><a href="${paper.arxiv}" target="_blank" rel="noreferrer">arXiv</a><a href="${paper.hf}" target="_blank" rel="noreferrer">Hugging Face paper</a></div>
+            </div>
+            <div class="paper-comparison">
+              <div><strong>Shared idea</strong><p>${escapeHtml(paper.overlap)}</p></div>
+              <div><strong>Material difference</strong><p>${escapeHtml(paper.difference)}</p></div>
+            </div>
+          </article>`).join("");
+        render(0);
+      }
+
+      function setupMethods() {
+        const tabs = document.getElementById("method-tabs");
+        const panel = document.getElementById("method-panel");
+        tabs.innerHTML = methods.map((method, index) => `<button class="segment" role="tab" id="method-${method.id}" aria-controls="method-panel" aria-selected="${index === 0}" data-index="${index}">${escapeHtml(method.label)}</button>`).join("");
+        const render = index => {
+          const method = methods[index];
+          [...tabs.querySelectorAll(".segment")].forEach((button, buttonIndex) => button.setAttribute("aria-selected", String(index === buttonIndex)));
+          panel.setAttribute("aria-labelledby", `method-${method.id}`);
+          panel.innerHTML = `
+            <div><p class="detail-kicker">Method</p><h3>${escapeHtml(method.title)}</h3><p class="method-summary">${escapeHtml(method.summary)}</p><div class="formula">${escapeHtml(method.formula)}</div></div>
+            <div class="method-facts">${method.facts.map(([label, value]) => `<div class="method-fact"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`).join("")}</div>`;
+        };
+        const buttons = [...tabs.querySelectorAll(".segment")];
+        buttons.forEach((button, index) => {
+          button.addEventListener("click", () => render(index));
+          button.addEventListener("keydown", event => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            let next = index;
+            if (event.key === "ArrowLeft") next = (index - 1 + buttons.length) % buttons.length;
+            if (event.key === "ArrowRight") next = (index + 1) % buttons.length;
+            if (event.key === "Home") next = 0;
+            if (event.key === "End") next = buttons.length - 1;
+            buttons[next].focus();
+            render(next);
+          });
+        });
+        render(0);
+      }
+
+      function setupAgents() {
+        const tabs = document.getElementById("agent-tabs");
+        const panel = document.getElementById("agent-panel");
+        tabs.innerHTML = agents.map((agent, index) => `<button class="segment" role="tab" id="agent-${agent.id}" aria-controls="agent-panel" aria-selected="${index === 0}" data-index="${index}">${escapeHtml(agent.label)}</button>`).join("");
+        const render = index => {
+          const agent = agents[index];
+          [...tabs.querySelectorAll(".segment")].forEach((button, buttonIndex) => button.setAttribute("aria-selected", String(index === buttonIndex)));
+          panel.setAttribute("aria-labelledby", `agent-${agent.id}`);
+          panel.innerHTML = `
+            <p class="detail-kicker">${escapeHtml(agent.label)} integration</p>
+            <h3>${escapeHtml(agent.title)}</h3>
+            <p class="agent-description">${escapeHtml(agent.description)}</p>
+            <div class="native-capabilities">${agent.capabilities.map(capability => `<span>${escapeHtml(capability)}</span>`).join("")}</div>
+            <div class="tool-list">${researchTools.map(([tool, body]) => `<div class="tool-item"><code>${escapeHtml(tool)}</code><span>${escapeHtml(body)}</span></div>`).join("")}</div>`;
+        };
+        [...tabs.querySelectorAll(".segment")].forEach((button, index) => {
+          button.addEventListener("click", () => render(index));
+          button.addEventListener("keydown", event => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            let next = index;
+            if (event.key === "ArrowLeft") next = (index - 1 + agents.length) % agents.length;
+            if (event.key === "ArrowRight") next = (index + 1) % agents.length;
+            if (event.key === "Home") next = 0;
+            if (event.key === "End") next = agents.length - 1;
+            tabs.children[next].focus();
+            render(next);
+          });
+        });
+        render(0);
+      }
+
+      function formatMetric(key, value) {
+        if (key === "runtime") return `${value.toFixed(2)}×`;
+        return `${(value * 100).toFixed(1)}%`;
+      }
+
+      function setupResults() {
+        const referenceSelect = document.getElementById("reference-run");
+        const candidateSelect = document.getElementById("candidate-run");
+        referenceSelect.innerHTML = runs.map(run => `<option value="${run.id}"${run.id === "base" ? " selected" : ""}>${escapeHtml(run.name)}</option>`).join("");
+        candidateSelect.innerHTML = runs.map(run => `<option value="${run.id}"${run.id === "candidate-a" ? " selected" : ""}>${escapeHtml(run.name)}</option>`).join("");
+
+        const render = () => {
+          const reference = runs.find(run => run.id === referenceSelect.value);
+          const candidate = runs.find(run => run.id === candidateSelect.value);
+          const successDelta = candidate.metrics.success - reference.metrics.success;
+          const regressionDelta = candidate.metrics.regression - reference.metrics.regression;
+          const keep = successDelta > 0 && regressionDelta > -0.03;
+
+          const runCard = (run, candidateCard = false) => `
+            <article class="run-card${candidateCard ? " candidate" : ""}">
+              <span class="run-type">${escapeHtml(run.type)}</span>
+              <h3>${escapeHtml(run.name)}</h3>
+              <p>${escapeHtml(run.intervention)}</p>
+              <div class="run-meta"><div><strong>Method</strong><span>${escapeHtml(run.method)}</span></div><div><strong>Data</strong><span>${escapeHtml(run.data)}</span></div></div>
+            </article>`;
+
+          document.getElementById("comparison").innerHTML = `
+            ${runCard(reference)}
+            <div class="decision-card"><span class="decision-badge ${keep ? "keep" : "discard"}">${keep ? "Keep candidate" : "Discard candidate"}</span><div class="decision-delta">${successDelta >= 0 ? "+" : ""}${(successDelta * 100).toFixed(1)} pts</div><p class="decision-note">primary metric delta</p></div>
+            ${runCard(candidate, true)}`;
+
+          document.getElementById("metrics").innerHTML = metricDefinitions.map(([key, name, type, higherBetter]) => {
+            const refValue = reference.metrics[key];
+            const candValue = candidate.metrics[key];
+            const delta = candValue - refValue;
+            const good = higherBetter ? delta >= 0 : delta <= 0;
+            const scale = key === "runtime" ? 2 : 1;
+            const refWidth = Math.min(100, (refValue / scale) * 100);
+            const candWidth = Math.min(100, (candValue / scale) * 100);
+            const deltaText = key === "runtime" ? `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}×` : `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)} pts`;
+            return `<div class="metric-row"><div class="metric-name"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(type)}</span></div><div class="metric-bars" aria-label="Reference ${formatMetric(key, refValue)}, candidate ${formatMetric(key, candValue)}"><div class="bar-track"><div class="bar" style="width:${refWidth}%"></div></div><div class="bar-track"><div class="bar candidate" style="width:${candWidth}%"></div></div></div><div class="metric-values">${formatMetric(key, refValue)} → ${formatMetric(key, candValue)}<span class="delta${good ? "" : " negative"}">${deltaText}</span></div></div>`;
+          }).join("");
+        };
+
+        referenceSelect.addEventListener("change", render);
+        candidateSelect.addEventListener("change", render);
+        render();
+      }
+
+      setupPrimaryNavigation();
+      setupPhases();
+      setupArchitecture();
+      setupMethods();
+      setupAgents();
+      setupResults();
+    })();
+  </script>
+</body>
+</html>

@@ -62,7 +62,7 @@ test('keeps a useful compact six-step setup visible while authority is offline',
   assert.match(html, /Live authority is offline/)
   assert.match(html, /Registered choices will appear here after reconnection/)
   assert.match(html, /grid-cols-\[minmax\(0,1fr\)_18rem\]/)
-  assert.doesNotMatch(html, /Qwen|cloud fallback|Ponyo|GX10/i)
+  assert.doesNotMatch(html, /Qwen|cloud fallback|private hostname|device model/i)
   assert.match(html, /<button[^>]*disabled=""[^>]*>Save choice<\/button>/)
 })
 

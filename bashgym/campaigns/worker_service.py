@@ -1473,7 +1473,25 @@ def _matching_process(pid: int, create_time: float) -> psutil.Process | None:
 def _background_service_lock(launch: BackgroundServiceLaunch):
     """Serialize current-user start/stop helpers without administrator rights."""
 
-    import msvcrt
+    if os.name == "nt":
+        import msvcrt
+
+        def lock(handle) -> None:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+
+        def unlock(handle) -> None:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+    else:
+        import fcntl
+
+        def lock(handle) -> None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        def unlock(handle) -> None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     lock_path = launch.receipt_path.with_suffix(launch.receipt_path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1484,8 +1502,7 @@ def _background_service_lock(launch: BackgroundServiceLaunch):
         deadline = monotonic() + 10
         while True:
             try:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                lock(handle)
                 break
             except OSError as exc:
                 if monotonic() >= deadline:
@@ -1494,8 +1511,7 @@ def _background_service_lock(launch: BackgroundServiceLaunch):
         try:
             yield
         finally:
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            unlock(handle)
 
 
 def _terminate_process(process: psutil.Process | None) -> None:

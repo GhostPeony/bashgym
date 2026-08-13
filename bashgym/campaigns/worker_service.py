@@ -1956,7 +1956,13 @@ def run_headless_api(
     _reject_controls(host)
     os.environ["BASHGYM_MODE"] = "headless"
     if data_directory is not None:
-        os.environ["BASHGYM_DIR"] = str(data_directory.expanduser().resolve())
+        state_root = data_directory.expanduser().resolve()
+        state_root.mkdir(parents=True, exist_ok=True)
+        os.environ["BASHGYM_DIR"] = str(state_root)
+        from bashgym.api.database import set_db_path
+
+        set_db_path(state_root / "api" / "bashgym.db")
+        os.chdir(state_root)
     if server_runner is None:
         import uvicorn
 

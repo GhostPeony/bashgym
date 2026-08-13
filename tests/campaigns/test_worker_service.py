@@ -593,8 +593,14 @@ def test_background_service_restarts_a_crashed_child_and_prevents_duplicates(
 def test_run_headless_api_sets_mode_and_uses_one_server_worker(monkeypatch) -> None:
     """Removing headless mode would accidentally attach desktop-owned runtime work."""
 
+    from bashgym.api import database
+
     monkeypatch.delenv("BASHGYM_MODE", raising=False)
     received: dict[str, object] = {}
+    database_paths: list[Path] = []
+    working_directories: list[Path] = []
+    monkeypatch.setattr(database, "set_db_path", database_paths.append)
+    monkeypatch.setattr(os, "chdir", lambda path: working_directories.append(Path(path)))
 
     def run_server(app: str, **kwargs) -> None:
         received["app"] = app
@@ -609,6 +615,8 @@ def test_run_headless_api_sets_mode_and_uses_one_server_worker(monkeypatch) -> N
 
     assert os.environ["BASHGYM_MODE"] == "headless"
     assert os.environ["BASHGYM_DIR"] == str(Path("test-data").resolve())
+    assert database_paths == [Path("test-data").resolve() / "api" / "bashgym.db"]
+    assert working_directories == [Path("test-data").resolve()]
     assert received == {
         "app": "bashgym.api.routes:app",
         "host": "127.0.0.1",

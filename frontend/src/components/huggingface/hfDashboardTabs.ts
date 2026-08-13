@@ -1,13 +1,7 @@
 import { Database, FileText, HardDrive, Layers, Package, Search, Server } from 'lucide-react'
 
 export type HFDashboardTab =
-  | 'training'
-  | 'spaces'
-  | 'datasets'
-  | 'models'
-  | 'buckets'
-  | 'research'
-  | 'traces'
+  'training' | 'spaces' | 'datasets' | 'models' | 'buckets' | 'research' | 'traces'
 
 export function hfDashboardTabs() {
   return [

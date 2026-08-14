@@ -429,7 +429,158 @@ def main(argv: list[str] | None = None) -> int:
     evaluate.add_argument("--dataset-archive")
     evaluate.add_argument("--output", required=True)
     evaluate.add_argument("--adapter")
+    autoresearch_train = subparsers.add_parser("autoresearch-train")
+    autoresearch_train.add_argument("--model-dir", required=True)
+    autoresearch_train.add_argument("--recipe-file")
+    autoresearch_train.add_argument("--model-revision")
+    autoresearch_train.add_argument("--train-jsonl")
+    autoresearch_train.add_argument("--validation-jsonl")
+    autoresearch_train.add_argument("--dataset-archive")
+    autoresearch_train.add_argument("--max-steps", type=int, default=160)
+    autoresearch_evaluate = subparsers.add_parser("autoresearch-evaluate")
+    autoresearch_evaluate.add_argument("--model-revision", required=True)
+    autoresearch_evaluate.add_argument("--context", required=True)
+    autoresearch_evaluate.add_argument("--model-dir", required=True)
+    autoresearch_evaluate.add_argument("--dataset", required=True)
+    autoresearch_evaluate.add_argument("--output", required=True)
     args = parser.parse_args(argv)
+
+    if args.command == "autoresearch-train":
+        if args.recipe_file:
+            recipe_path = Path(args.recipe_file).expanduser().resolve()
+            if (
+                recipe_path.is_symlink()
+                or not recipe_path.is_file()
+                or recipe_path.stat().st_size > 64 * 1024
+            ):
+                raise ValueError("autoresearch training recipe is invalid")
+            recipe_payload = json.loads(recipe_path.read_text(encoding="utf-8"))
+            if (
+                not isinstance(recipe_payload, dict)
+                or recipe_payload.get("schema_version")
+                != "star_count_autoresearch_training_recipe.v1"
+                or set(recipe_payload)
+                - {
+                    "schema_version",
+                    "model_revision",
+                    "train_jsonl",
+                    "validation_jsonl",
+                    "dataset_archive",
+                    "max_steps",
+                }
+            ):
+                raise ValueError("autoresearch training recipe is invalid")
+            args.model_revision = recipe_payload.get("model_revision")
+            args.train_jsonl = recipe_payload.get("train_jsonl")
+            args.validation_jsonl = recipe_payload.get("validation_jsonl")
+            args.dataset_archive = recipe_payload.get("dataset_archive")
+            args.max_steps = recipe_payload.get("max_steps", 160)
+        if not args.model_revision:
+            parser.error("autoresearch-train requires --recipe-file or --model-revision")
+        recipe = StarCountVLMRecipe(
+            model_id=str(Path(args.model_dir).expanduser().resolve()),
+            model_revision=args.model_revision,
+            max_steps=args.max_steps,
+        )
+        if args.dataset_archive:
+            dataset_root = extract_star_count_archive(
+                args.dataset_archive, Path("training_dataset").resolve()
+            )
+            train_jsonl = dataset_root / "train.jsonl"
+            validation_jsonl = dataset_root / "validation.jsonl"
+        else:
+            if not args.train_jsonl or not args.validation_jsonl:
+                parser.error(
+                    "autoresearch-train requires --dataset-archive or both split JSONL paths"
+                )
+            train_jsonl = args.train_jsonl
+            validation_jsonl = args.validation_jsonl
+        result = train_star_count_lora(
+            recipe,
+            train_jsonl=train_jsonl,
+            validation_jsonl=validation_jsonl,
+            output_dir=Path("training").resolve(),
+        )
+        adapter = Path("training/final_adapter").resolve()
+        final = Path("final").resolve()
+        if not adapter.is_dir() or final.exists():
+            raise ValueError("autoresearch training did not produce one fresh final adapter")
+        adapter.replace(final)
+        print(json.dumps(result, sort_keys=True))
+        return 0
+
+    if args.command == "autoresearch-evaluate":
+        from bashgym.campaigns.autoresearch_evidence import (
+            AutoResearchEvaluationContext,
+            AutoResearchEvaluationEvidence,
+        )
+        from bashgym.campaigns.contracts import utc_now
+
+        context = AutoResearchEvaluationContext.model_validate_json(
+            Path(args.context).read_text(encoding="utf-8")
+        )
+        dataset = Path(args.dataset).expanduser().resolve()
+        heldout_jsonl = dataset
+        if dataset.suffix.casefold() == ".zip":
+            heldout_jsonl = (
+                extract_star_count_archive(dataset, Path("evaluation_dataset").resolve())
+                / "heldout.jsonl"
+            )
+        model_dir = Path(args.model_dir).expanduser().resolve()
+        adapter_path = None
+        model_id = str(model_dir)
+        adapter_config = model_dir / "adapter_config.json"
+        if adapter_config.is_file():
+            adapter_payload = json.loads(adapter_config.read_text(encoding="utf-8"))
+            base_model = adapter_payload.get("base_model_name_or_path")
+            if not isinstance(base_model, str) or not Path(base_model).expanduser().is_dir():
+                raise ValueError("autoresearch adapter base model is unavailable")
+            model_id = str(Path(base_model).expanduser().resolve())
+            adapter_path = model_dir
+        recipe = StarCountVLMRecipe(
+            model_id=model_id,
+            model_revision=args.model_revision,
+        )
+        started_at = utc_now()
+        result = evaluate_star_count_model(
+            recipe,
+            heldout_jsonl=heldout_jsonl,
+            output_path=Path("star_count_evaluation_detail.json").resolve(),
+            adapter_path=adapter_path,
+        )
+        raw_metrics = result.get("metrics")
+        if not isinstance(raw_metrics, dict):
+            raise ValueError("star-count evaluator did not return metrics")
+        metrics = {
+            key: float(value)
+            for key, value in raw_metrics.items()
+            if key != "example_count" and isinstance(value, (int, float))
+        }
+        evidence = AutoResearchEvaluationEvidence(
+            campaign_id=context.campaign_id,
+            study_id=context.study_id,
+            action_id=context.action_id,
+            attempt_id=context.attempt_id,
+            candidate_digest=context.candidate_digest,
+            evaluation_suite_id=context.evaluation_suite_id,
+            evaluation_code_digest=context.evaluation_code_digest,
+            dataset_version_id=context.dataset_version_id,
+            evaluated_model_manifest_digest=context.evaluated_model_manifest_digest,
+            metrics=metrics,
+            slice_metrics={
+                "adapter_evaluated": bool(result.get("adapter_evaluated", adapter_path)),
+                "example_count": int(raw_metrics.get("example_count", 0)),
+            },
+            started_at=started_at,
+            completed_at=utc_now(),
+        )
+        Path(args.output).write_text(
+            json.dumps(evidence.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(json.dumps(evidence.model_dump(mode="json"), sort_keys=True))
+        return 0
+
     recipe = StarCountVLMRecipe(
         model_id=args.model_id,
         model_revision=args.model_revision,

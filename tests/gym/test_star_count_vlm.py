@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -187,3 +188,134 @@ def test_train_command_can_evaluate_the_sealed_candidate(monkeypatch, tmp_path):
     assert calls["evaluation"]["heldout_jsonl"] == dataset / "heldout.jsonl"
     assert calls["evaluation"]["adapter_path"] == output / "final_adapter"
     assert calls["evaluation"]["output_path"] == str(output / "evaluation_result.json")
+
+
+def test_autoresearch_train_publishes_only_the_final_adapter(monkeypatch, tmp_path):
+    model_dir = tmp_path / "base-model"
+    model_dir.mkdir()
+    train_jsonl = tmp_path / "train.jsonl"
+    validation_jsonl = tmp_path / "validation.jsonl"
+    train_jsonl.write_text("{}\n", encoding="utf-8")
+    validation_jsonl.write_text("{}\n", encoding="utf-8")
+    recipe_file = tmp_path / "star-count-autoresearch-recipe.json"
+    recipe_file.write_text(
+        json.dumps(
+            {
+                "schema_version": "star_count_autoresearch_training_recipe.v1",
+                "model_revision": "a" * 40,
+                "train_jsonl": str(train_jsonl),
+                "validation_jsonl": str(validation_jsonl),
+                "max_steps": 80,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    def fake_train(_recipe, **kwargs):
+        output = Path(kwargs["output_dir"])
+        adapter = output / "final_adapter"
+        adapter.mkdir(parents=True)
+        (adapter / "adapter_config.json").write_text(
+            json.dumps({"base_model_name_or_path": str(model_dir)}), encoding="utf-8"
+        )
+        (adapter / "adapter_model.safetensors").write_bytes(b"adapter")
+        return {"train_loss": 0.25}
+
+    monkeypatch.setattr("bashgym.gym.star_count_vlm.train_star_count_lora", fake_train)
+
+    assert (
+        main(
+            [
+                "autoresearch-train",
+                "--model-dir",
+                str(model_dir),
+                "--recipe-file",
+                str(recipe_file),
+            ]
+        )
+        == 0
+    )
+    assert (tmp_path / "final" / "adapter_config.json").is_file()
+    assert (tmp_path / "final" / "adapter_model.safetensors").read_bytes() == b"adapter"
+    assert not (tmp_path / "final" / "final_adapter").exists()
+
+
+def test_autoresearch_evaluate_emits_context_bound_standard_evidence(monkeypatch, tmp_path):
+    context = {
+        "schema_version": "autoresearch_evaluation_context.v1",
+        "workspace_id": "workspace-demo",
+        "campaign_id": "campaign-demo",
+        "study_id": "study-demo",
+        "action_id": "action-demo",
+        "attempt_id": "attempt-demo",
+        "candidate_digest": "1" * 64,
+        "evaluation_suite_id": "suite-demo",
+        "evaluation_code_digest": "2" * 64,
+        "dataset_version_id": "dataset-version-demo",
+        "dataset_content_digest": "3" * 64,
+        "evaluated_model_manifest_digest": "4" * 64,
+    }
+    context_path = tmp_path / "autoresearch_evaluation_context.json"
+    context_path.write_text(json.dumps(context), encoding="utf-8")
+    dataset_path = tmp_path / "heldout.jsonl"
+    dataset_path.write_text("{}\n", encoding="utf-8")
+    base_model = tmp_path / "base-model"
+    base_model.mkdir()
+    adapter = tmp_path / "candidate-adapter"
+    adapter.mkdir()
+    (adapter / "adapter_config.json").write_text(
+        json.dumps({"base_model_name_or_path": str(base_model)}), encoding="utf-8"
+    )
+    output_path = tmp_path / "autoresearch_evaluation.json"
+
+    def fake_evaluate(recipe, **kwargs):
+        assert recipe.model_id == str(base_model)
+        assert kwargs["adapter_path"] == adapter
+        return {
+            "adapter_evaluated": True,
+            "metrics": {
+                "primary_metric": "exact_count_accuracy",
+                "exact_count_accuracy": 0.625,
+                "count_accuracy": 0.875,
+                "format_accuracy": 1.0,
+                "mean_reward": 0.88125,
+                "example_count": 64,
+            },
+        }
+
+    monkeypatch.setattr("bashgym.gym.star_count_vlm.evaluate_star_count_model", fake_evaluate)
+
+    assert (
+        main(
+            [
+                "autoresearch-evaluate",
+                "--model-revision",
+                "a" * 40,
+                "--context",
+                str(context_path),
+                "--model-dir",
+                str(adapter),
+                "--dataset",
+                str(dataset_path),
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+    evidence = json.loads(output_path.read_text(encoding="utf-8"))
+    assert evidence["schema_version"] == "autoresearch_evaluation_evidence.v1"
+    assert evidence["campaign_id"] == "campaign-demo"
+    assert evidence["attempt_id"] == "attempt-demo"
+    assert evidence["evaluated_model_manifest_digest"] == "4" * 64
+    assert evidence["metrics"] == {
+        "count_accuracy": 0.875,
+        "exact_count_accuracy": 0.625,
+        "format_accuracy": 1.0,
+        "mean_reward": 0.88125,
+    }
+    assert evidence["slice_metrics"] == {
+        "adapter_evaluated": True,
+        "example_count": 64,
+    }

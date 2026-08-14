@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -138,6 +139,15 @@ class AdviseRequest(BaseModel):
     domain: str = Field("", description="Optional weak capability/domain to target")
 
 
+class ResearchContextRequest(BaseModel):
+    workspace_id: str = Field(min_length=1, max_length=160)
+    campaign_id: str = Field(min_length=1, max_length=160)
+    proposal_id: str = Field(min_length=1, max_length=160)
+    query: str = Field(min_length=1, max_length=1_000)
+    categories: tuple[Literal["research", "github", "pdf"], ...] = ("research",)
+    limit: int = Field(default=5, ge=1, le=10)
+
+
 def _build_advisor():
     """A ResearchAdvisor over a fresh Firecrawl client (key from FIRECRAWL_API_KEY)."""
     from bashgym.research.advisor import ResearchAdvisor
@@ -192,3 +202,24 @@ async def research_advise(req: AdviseRequest):
     finally:
         await client.close()
     return {"configured": client.configured, **report.to_dict()}
+
+
+@router.post("/context")
+async def research_context(req: ResearchContextRequest):
+    """Collect bounded citations that an agent may attach to one proposal."""
+
+    from bashgym.research.advisor import build_research_context
+    from bashgym.research.firecrawl_client import FirecrawlResearchClient
+
+    client = FirecrawlResearchClient()
+    try:
+        result = await client.search(req.query, categories=req.categories, k=req.limit)
+    finally:
+        await client.close()
+    context = build_research_context(
+        result,
+        workspace_id=req.workspace_id,
+        campaign_id=req.campaign_id,
+        proposal_id=req.proposal_id,
+    )
+    return {"ok": True, "context": context.model_dump(mode="json")}

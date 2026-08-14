@@ -140,6 +140,31 @@ def validate_proposal_submission(
         reasons.add("proposal_prerequisites_not_unique")
     if not set(submission.prerequisite_study_ids).issubset(existing_prerequisite_ids):
         reasons.add("proposal_prerequisite_not_found")
+    expected_identity = (
+        submission.workspace_id,
+        submission.campaign_id,
+        submission.proposal_id,
+    )
+    if (
+        submission.research_context is not None
+        and (
+            submission.research_context.workspace_id,
+            submission.research_context.campaign_id,
+            submission.research_context.proposal_id,
+        )
+        != expected_identity
+    ):
+        reasons.add("proposal_research_context_binding_mismatch")
+    if (
+        submission.acquisition is not None
+        and (
+            submission.acquisition.workspace_id,
+            submission.acquisition.campaign_id,
+            submission.acquisition.proposal_id,
+        )
+        != expected_identity
+    ):
+        reasons.add("proposal_acquisition_binding_mismatch")
 
     recipes = (
         submission.dataset_recipe,

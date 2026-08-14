@@ -69,6 +69,8 @@ ManifestRevisionNumber = Annotated[int, Field(ge=1)]
 Priority = Annotated[int, Field(ge=0, le=100)]
 ExportFormat = Literal["markdown", "json", "csv", "png", "docx", "pdf"]
 ResearchRole = Literal["baseline", "candidate"]
+ResearchCategory = Literal["research", "github", "pdf"]
+ResearchLimit = Annotated[int, Field(ge=1, le=10)]
 HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 SetupSessionId = Annotated[str, Field(pattern=r"^setupsess_[0-9a-f]{32}$")]
 CampaignStatusFilter = Literal[
@@ -410,6 +412,38 @@ def build_server(
         idempotentHint=True,
         openWorldHint=True,
     )
+
+    @server.tool(structured_output=True, annotations=read_only)
+    async def research_context(
+        campaign_id: CampaignId,
+        proposal_id: ProposalId,
+        query: Annotated[str, Field(min_length=1, max_length=1000)],
+        categories: list[ResearchCategory],
+        limit: ResearchLimit = 5,
+    ) -> dict[str, Any]:
+        """Collect bounded paper/repository citations for one proposed experiment."""
+
+        if not categories or len(categories) != len(set(categories)):
+            return _invalid_request("Research categories must be non-empty and unique.")
+        result = await request(
+            "POST",
+            "/research/context",
+            payload={
+                "workspace_id": workspace_id,
+                "campaign_id": campaign_id,
+                "proposal_id": proposal_id,
+                "query": query,
+                "categories": categories,
+                "limit": limit,
+            },
+        )
+        if not result["ok"]:
+            return result
+        try:
+            payload = _mapping(result["data"])
+        except ValueError:
+            return _invalid_response()
+        return _bounded_named_result("context", payload.get("context", payload))
 
     @server.tool(structured_output=True, annotations=read_only)
     async def research_prepare(

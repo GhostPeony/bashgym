@@ -298,6 +298,7 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
         tools = {tool["name"]: tool for tool in connected["inventory"]["tools"]}
         assert set(tools) == {
             "research_prepare",
+            "research_context",
             "research_state",
             "research_wait",
             "research_start",
@@ -344,6 +345,7 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
 
         assert tools["campaign_list"]["annotations"]["readOnlyHint"] is True
         assert tools["research_prepare"]["annotations"]["readOnlyHint"] is True
+        assert tools["research_context"]["annotations"]["readOnlyHint"] is True
         assert tools["research_state"]["annotations"]["readOnlyHint"] is True
         assert tools["research_wait"]["annotations"]["readOnlyHint"] is True
         assert tools["research_wait"]["inputSchema"]["properties"]["after_cursor"]["minimum"] == 0
@@ -694,6 +696,37 @@ async def test_research_submit_iteration_routes_explicit_baseline_without_parent
         "workspace_id": "workspace-a",
         "expected_version": 2,
         "proposal_id": "baseline-1",
+    }
+
+
+async def test_research_context_delegates_bounded_search():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    await call_tool(
+        server,
+        "research_context",
+        {
+            "campaign_id": "campaign-1",
+            "proposal_id": "proposal-1",
+            "query": "information gain",
+            "categories": ["research", "github"],
+            "limit": 4,
+        },
+    )
+    assert client.calls[0]["path"] == "/research/context"
+    assert client.calls[0]["payload"] == {
+        "workspace_id": "workspace-a",
+        "campaign_id": "campaign-1",
+        "proposal_id": "proposal-1",
+        "query": "information gain",
+        "categories": ["research", "github"],
+        "limit": 4,
     }
 
 

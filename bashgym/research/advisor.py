@@ -19,7 +19,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .firecrawl_client import TRACKED_REPOS, FirecrawlResearchClient
+from .acquisition import ResearchContextBundle, ResearchContextSource
+from .firecrawl_client import (
+    TRACKED_REPOS,
+    FirecrawlResearchClient,
+    ResearchSearchResult,
+)
 
 # Topics that define "relevant to how BashGym trains" — the news feed's lens.
 DEFAULT_TOPICS: tuple[str, ...] = (
@@ -29,6 +34,42 @@ DEFAULT_TOPICS: tuple[str, ...] = (
     "preference optimization DPO",
     "QLoRA quantization",
 )
+
+
+def build_research_context(
+    result: ResearchSearchResult,
+    *,
+    workspace_id: str,
+    campaign_id: str,
+    proposal_id: str,
+) -> ResearchContextBundle:
+    """Project a provider result into the proposal-safe durable contract."""
+
+    default_type = result.categories[0]
+    sources = tuple(
+        ResearchContextSource(
+            title=source.title or source.url,
+            url=source.url,
+            summary=source.summary,
+            source_type=(
+                source.category
+                if source.category in {"research", "github", "pdf"}
+                else default_type
+            ),
+            published_at=source.published_at,
+        )
+        for source in result.sources
+    )
+    return ResearchContextBundle(
+        workspace_id=workspace_id,
+        campaign_id=campaign_id,
+        proposal_id=proposal_id,
+        query=result.query,
+        categories=result.categories,
+        status=result.status,
+        code=result.code,
+        sources=sources,
+    )
 
 
 @dataclass

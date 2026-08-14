@@ -2173,6 +2173,7 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "research onboard": (
                 "Prepare model, services, bindings, and one READY campaign from a reviewed contract."
             ),
+            "research context": "Collect bounded citations for one proposed experiment.",
             "research state": (
                 "Read one campaign as a native-agent goal brief and Markdown progress view."
             ),
@@ -4298,6 +4299,25 @@ def cmd_research_state(args: argparse.Namespace) -> int:
     return _campaign_read_collection(args, "research-state", "research")
 
 
+def cmd_research_context(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/research/context",
+        payload={
+            "workspace_id": args.workspace_id,
+            "campaign_id": args.campaign_id,
+            "proposal_id": args.proposal_id,
+            "query": args.query,
+            "categories": args.categories.split(","),
+            "limit": args.limit,
+        },
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="context")
+    )
+
+
 def cmd_research_wait(args: argparse.Namespace) -> int:
     response, error = _campaign_request(
         args,
@@ -6029,6 +6049,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     research_prepare.add_argument("--session-id")
     research_prepare.set_defaults(func=cmd_campaign_setup_context)
+
+    research_context = research_sub.add_parser(
+        "context",
+        help="Collect bounded paper and repository citations for one proposal",
+        parents=[json_parent, campaign_connection],
+    )
+    research_context.add_argument("--campaign", dest="campaign_id", required=True)
+    research_context.add_argument("--proposal", dest="proposal_id", required=True)
+    research_context.add_argument("--query", required=True)
+    research_context.add_argument(
+        "--categories",
+        choices=(
+            "research",
+            "github",
+            "pdf",
+            "research,github",
+            "research,pdf",
+            "github,pdf",
+            "research,github,pdf",
+        ),
+        default="research",
+    )
+    research_context.add_argument("--limit", type=int, choices=range(1, 11), default=5)
+    research_context.set_defaults(func=cmd_research_context)
 
     research_state = research_sub.add_parser(
         "state",

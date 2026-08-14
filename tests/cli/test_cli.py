@@ -29,6 +29,7 @@ def test_manifest_json_is_agent_readable(capsys):
         "Resume guided AutoResearch preparation without starting compute."
     )
     assert "research onboard" in payload["commands"]
+    assert "research context" in payload["commands"]
     assert "research state" in payload["commands"]
     assert "research wait" in payload["commands"]
     assert "research start" in payload["commands"]
@@ -542,6 +543,58 @@ def test_training_start_activates_ssh_target(monkeypatch, capsys):
     json.loads(capsys.readouterr().out)
     assert captured[-1]["use_remote_ssh"] is True
     assert captured[-1]["device_id"] == "lab-box"
+
+
+def test_research_context_routes_bounded_search(monkeypatch, capsys):
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append((method, path, query, payload, headers))
+            return {"ok": True, "context": {"status": "available"}}
+
+    client = Client()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+    result = main(
+        [
+            "research",
+            "context",
+            "--workspace-id",
+            "workspace-a",
+            "--credential-ref",
+            "BASHGYM_CAMPAIGN_CODEX_REFRESH",
+            "--campaign",
+            "campaign-1",
+            "--proposal",
+            "proposal-1",
+            "--query",
+            "information gain",
+            "--categories",
+            "research,github",
+            "--limit",
+            "4",
+            "--json",
+        ]
+    )
+    assert result == 0
+    json.loads(capsys.readouterr().out)
+    assert client.calls == [
+        (
+            "POST",
+            "/research/context",
+            None,
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "proposal_id": "proposal-1",
+                "query": "information gain",
+                "categories": ["research", "github"],
+                "limit": 4,
+            },
+            None,
+        )
+    ]
 
 
 def test_campaign_read_commands_preserve_workspace_and_pagination(monkeypatch, capsys):

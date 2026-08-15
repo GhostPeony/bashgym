@@ -1908,6 +1908,7 @@ class RemoteTrainingAdapter:
                 "printf '%s\\n' \"$code\" > exit_code.tmp && mv exit_code.tmp exit_code; "
                 'exit "$code"'
             )
+            gated_inner = f"kill -STOP $$; {inner}"
             state_writer = (
                 "import json,sys;"
                 "print(json.dumps({"
@@ -1944,14 +1945,22 @@ class RemoteTrainingAdapter:
             launch_command = (
                 f"cd {quoted_directory} || exit 1; "
                 "boot=$(cat /proc/sys/kernel/random/boot_id) || exit 2; "
-                f"nohup setsid bash -lc {shlex.quote(inner)} > training.log 2>&1 < /dev/null & "
-                "pid=$!; sleep 0.05; "
+                f"nohup setsid bash -lc {shlex.quote(gated_inner)} "
+                "> training.log 2>&1 < /dev/null & "
+                "pid=$!; state=; start=; pgid=; i=0; "
+                'while [ "$i" -lt 100 ]; do '
+                "state=$(ps -o stat= -p $pid 2>/dev/null | tr -d ' '); "
                 "start=$(awk '{print $22}' /proc/$pid/stat 2>/dev/null); "
                 "pgid=$(ps -o pgid= -p $pid 2>/dev/null | tr -d ' '); "
+                'case "$state" in T*) break ;; esac; '
+                "i=$((i + 1)); sleep 0.01; done; "
                 "launched=$(date -u +%Y-%m-%dT%H:%M:%SZ); "
-                'test -n "$start" -a -n "$pgid" || exit 3; '
+                'test -n "$start" -a -n "$pgid" || '
+                '{ kill -KILL "$pid" 2>/dev/null; exit 3; }; '
                 f"{state_command} > remote_run_state.v1.json.tmp && "
-                "mv remote_run_state.v1.json.tmp remote_run_state.v1.json && "
+                "mv remote_run_state.v1.json.tmp remote_run_state.v1.json || "
+                '{ kill -KILL "$pid" 2>/dev/null; exit 4; }; '
+                'kill -CONT "$pid" && '
                 "cat remote_run_state.v1.json"
             )
             launched = await session.run(launch_command, timeout=15)

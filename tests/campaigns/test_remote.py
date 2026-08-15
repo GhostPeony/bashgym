@@ -1430,6 +1430,10 @@ def test_supervisor_state_writer_uses_typed_json_instead_of_printf_placeholders(
     assert "python3 -c" in launch_command
     assert "int(sys.argv[4])" in launch_command
     assert "remote_run_state.v1.json.tmp" in launch_command
+    assert "kill -STOP $$" in launch_command
+    assert launch_command.index("remote_run_state.v1.json.tmp") < launch_command.index(
+        'kill -CONT "$pid"'
+    )
 
 
 @pytest.mark.asyncio

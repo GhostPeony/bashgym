@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import math
+import statistics
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -75,6 +76,31 @@ class AutoResearchEvaluationContext(FrozenContractModel):
     evaluated_model_manifest_digest: HexDigest
 
 
+class AutoResearchEvaluatorReadiness(FrozenContractModel):
+    """Evaluator-authored baseline canaries and repeated-score observations."""
+
+    schema_version: Literal["autoresearch_evaluator_readiness.v1"] = (
+        "autoresearch_evaluator_readiness.v1"
+    )
+    known_good_case_id: Identifier
+    known_good_passed: bool
+    known_bad_case_id: Identifier
+    known_bad_rejected: bool
+    baseline_scores: tuple[float, ...] = Field(min_length=3, max_length=10)
+
+    @field_validator("baseline_scores")
+    @classmethod
+    def finite_baseline_scores(cls, value: tuple[float, ...]) -> tuple[float, ...]:
+        _require_finite(value)
+        return value
+
+    @model_validator(mode="after")
+    def distinct_canary_cases(self) -> AutoResearchEvaluatorReadiness:
+        if self.known_good_case_id == self.known_bad_case_id:
+            raise ValueError("evaluator readiness canary cases must be distinct")
+        return self
+
+
 def evaluation_context_bytes(context: AutoResearchEvaluationContext) -> bytes:
     """Return the one canonical byte representation used for launch and adoption."""
 
@@ -101,6 +127,7 @@ class AutoResearchEvaluationEvidence(FrozenContractModel):
     evaluated_model_manifest_digest: HexDigest
     metrics: dict[Identifier, float] = Field(min_length=1)
     slice_metrics: dict[str, Any] = Field(default_factory=dict)
+    evaluator_readiness: AutoResearchEvaluatorReadiness | None = None
     started_at: datetime
     completed_at: datetime
 
@@ -115,6 +142,85 @@ class AutoResearchEvaluationEvidence(FrozenContractModel):
         if self.completed_at < self.started_at:
             raise ValueError("completed_at cannot precede started_at")
         return self
+
+
+def validate_evaluator_readiness_contract(readiness_contract: Any) -> dict[str, Any]:
+    """Validate the small baseline-readiness policy registered with an evaluator."""
+
+    if not isinstance(readiness_contract, dict):
+        raise ValueError("autoresearch_evaluator_readiness_contract_invalid")
+    good_id = readiness_contract.get("known_good_case_id")
+    bad_id = readiness_contract.get("known_bad_case_id")
+    repeat_count = readiness_contract.get("baseline_repeat_count")
+    maximum_spread = readiness_contract.get("maximum_baseline_spread")
+    if (
+        not isinstance(good_id, str)
+        or not good_id
+        or not isinstance(bad_id, str)
+        or not bad_id
+        or good_id == bad_id
+        or isinstance(repeat_count, bool)
+        or not isinstance(repeat_count, int)
+        or repeat_count < 3
+        or repeat_count > 10
+        or isinstance(maximum_spread, bool)
+        or not isinstance(maximum_spread, (int, float))
+        or not math.isfinite(float(maximum_spread))
+        or float(maximum_spread) < 0
+    ):
+        raise ValueError("autoresearch_evaluator_readiness_contract_invalid")
+    return {
+        "known_good_case_id": good_id,
+        "known_bad_case_id": bad_id,
+        "baseline_repeat_count": repeat_count,
+        "maximum_baseline_spread": float(maximum_spread),
+    }
+
+
+def validate_baseline_evaluator_readiness(
+    evidence: AutoResearchEvaluationEvidence,
+    *,
+    primary_metric: str,
+    readiness_contract: Any,
+) -> None:
+    """Enforce sealed baseline canaries when the evaluation suite declares them."""
+
+    if readiness_contract is None:
+        return
+
+    contract = validate_evaluator_readiness_contract(readiness_contract)
+    good_id = contract["known_good_case_id"]
+    bad_id = contract["known_bad_case_id"]
+    repeat_count = contract["baseline_repeat_count"]
+    maximum_spread = contract["maximum_baseline_spread"]
+    readiness = evidence.evaluator_readiness
+    if readiness is None:
+        raise ValueError("autoresearch_evaluator_readiness_missing")
+    if (
+        readiness.known_good_case_id != good_id
+        or not readiness.known_good_passed
+        or readiness.known_bad_case_id != bad_id
+        or not readiness.known_bad_rejected
+    ):
+        raise ValueError("autoresearch_evaluator_canary_failed")
+    if len(readiness.baseline_scores) != repeat_count:
+        raise ValueError("autoresearch_baseline_repeat_count_mismatch")
+    observed_spread = max(readiness.baseline_scores) - min(readiness.baseline_scores)
+    if observed_spread > float(maximum_spread) and not math.isclose(
+        observed_spread,
+        float(maximum_spread),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("autoresearch_baseline_unstable")
+    primary_value = evidence.metrics.get(primary_metric)
+    if primary_value is None or not math.isclose(
+        float(primary_value),
+        statistics.fmean(readiness.baseline_scores),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("autoresearch_baseline_repeat_mean_mismatch")
 
 
 def _read_bounded_file(path: Path, *, max_bytes: int) -> tuple[bytes, str, int]:
@@ -895,6 +1001,17 @@ class CampaignEvaluationProjector:
             )
         except (OSError, TypeError, ValueError):
             self._invariant("autoresearch_evaluation_evidence_invalid")
+        from bashgym.campaigns.autoresearch import ExperimentRole
+
+        if control.role == ExperimentRole.BASELINE:
+            try:
+                validate_baseline_evaluator_readiness(
+                    evidence,
+                    primary_metric=spec.primary_metric,
+                    readiness_contract=evaluation_suite.metric_contract.get("evaluator_readiness"),
+                )
+            except ValueError as exc:
+                self._invariant(str(exc))
 
         usage = self.repository.study_budget_usage(
             workspace_id, campaign_id, study.study_id, spec.stop_rules.budget_unit
@@ -1215,9 +1332,12 @@ __all__ = [
     "AUTORESEARCH_NORMALIZED_EVALUATION_DOMAIN",
     "AutoResearchEvaluationContext",
     "AutoResearchEvaluationEvidence",
+    "AutoResearchEvaluatorReadiness",
     "CampaignEvaluationProjector",
     "MAX_AUTORESEARCH_EVALUATION_BYTES",
     "SealedEvaluationReader",
     "evaluation_context_bytes",
+    "validate_baseline_evaluator_readiness",
+    "validate_evaluator_readiness_contract",
     "ingest_completed_evaluation",
 ]

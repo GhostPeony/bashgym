@@ -147,6 +147,29 @@ class ExperimentAcquisition(_FrozenModel):
     def validate_identity(cls, value: str) -> str:
         return _validate_identifier(value)
 
+    @field_validator("expected_cost", mode="before")
+    @classmethod
+    def validate_expected_cost(cls, value: Any) -> Any:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 1e-9
+        ):
+            raise ValueError("acquisition_expected_cost_invalid")
+        return value
+
+    @field_validator("expected_information_gain", "cost_normalized_information_gain", mode="before")
+    @classmethod
+    def validate_supplied_score(cls, value: Any) -> Any:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            raise ValueError("acquisition_score_invalid")
+        return value
+
     @model_validator(mode="after")
     def compute_scores(self) -> ExperimentAcquisition:
         hypothesis_ids = tuple(item.hypothesis_id for item in self.hypotheses)

@@ -189,8 +189,9 @@ class ResearchAdvisor:
     ) -> list[NewsItem]:
         query = " OR ".join(topics[:4])
         items: list[NewsItem] = []
+        provider_limit = min(k, 10)
 
-        findings = await self.client.search_github(query, k=k)
+        findings = await self.client.search_github(query, k=provider_limit)
         repo_set = set(repos)
         for f in findings:
             # Scope to tracked repos when the index labels the repository; keep
@@ -207,7 +208,9 @@ class ResearchAdvisor:
                 )
             )
 
-        papers = await self.client.search_papers(query, k=k, categories="cs.LG", since=since)
+        papers = await self.client.search_papers(
+            query, k=provider_limit, categories="cs.LG", since=since
+        )
         for p in papers:
             items.append(
                 NewsItem(

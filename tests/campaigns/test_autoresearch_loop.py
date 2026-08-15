@@ -32,6 +32,8 @@ from bashgym.campaigns.service import CampaignControllerService
 from bashgym.campaigns.worker import CampaignWorker
 from bashgym.campaigns.worker_service import build_worker
 from tests.campaigns.test_autoresearch_campaign import NOW, activate, fresh_core
+from tests.campaigns.test_persistence import campaign as campaign_fixture
+from tests.campaigns.test_persistence import create as create_campaign_fixture
 from tests.campaigns.test_proposals import principal, proposal
 from tests.campaigns.test_worker import (
     START,
@@ -612,7 +614,9 @@ def test_worker_returns_after_coordinator_effect_before_claiming_retry(tmp_path)
     assert retry.claim_generation == 0
 
 
-def test_worker_never_schedules_generic_work_when_autoresearch_is_blocked(tmp_path, monkeypatch):
+def test_worker_excludes_blocked_autoresearch_campaign_but_continues_other_work(
+    tmp_path, monkeypatch
+):
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     worker = CampaignWorker(
         repository,
@@ -623,12 +627,58 @@ def test_worker_never_schedules_generic_work_when_autoresearch_is_blocked(tmp_pa
         autoresearch_loop=_BlockedCoordinator(),
     )
 
-    def unexpected_controller(*_args, **_kwargs):
-        raise AssertionError("blocked AutoResearch must not enter generic scheduling")
+    def schedule_other_campaign(_leader, *, now, excluded_campaign_keys):
+        assert now == NOW + timedelta(seconds=2)
+        assert excluded_campaign_keys == frozenset({("workspace-a", "campaign-1")})
+        return "other_campaign_scheduled"
 
-    monkeypatch.setattr(worker, "controller_once", unexpected_controller)
+    monkeypatch.setattr(worker, "controller_once", schedule_other_campaign)
 
-    assert worker.run_once(now=NOW + timedelta(seconds=2)) == "autoresearch_agent_action_required"
+    assert worker.run_once(now=NOW + timedelta(seconds=2)) == "other_campaign_scheduled"
+
+
+def test_controller_query_excludes_one_campaign_and_selects_another(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    create_campaign_fixture(repository, campaign_fixture(campaign_id="campaign-2"))
+    for version, trigger, key in (
+        (1, CampaignTrigger.VALIDATE, "validate-second"),
+        (2, CampaignTrigger.VALIDATION_PASSED, "ready-second"),
+        (3, CampaignTrigger.START, "start-second"),
+    ):
+        repository.transition_campaign(
+            "workspace-a",
+            "campaign-2",
+            trigger,
+            expected_version=version,
+            actor_id="codex-agent",
+            credential_kind=CredentialKind.ACCESS,
+            correlation_id=key,
+            idempotency_key=key,
+        )
+    with repository._connection(immediate=True) as connection:
+        for sequence, campaign_id in enumerate(("campaign-1", "campaign-2"), start=1):
+            connection.execute(
+                """
+                INSERT INTO campaign_proposals(
+                    workspace_id, campaign_id, proposal_id, status, priority,
+                    estimated_cost, creation_sequence, proposal_json, created_at
+                ) VALUES (?, ?, ?, 'submitted', 50, 0.1, ?, '{}', ?)
+                """,
+                (
+                    "workspace-a",
+                    campaign_id,
+                    f"proposal-{campaign_id}",
+                    sequence,
+                    (NOW + timedelta(seconds=sequence)).isoformat(),
+                ),
+            )
+
+    assert repository.next_controller_campaign().campaign_id == "campaign-1"
+    selected = repository.next_controller_campaign(
+        excluded_campaign_keys=frozenset({("workspace-a", "campaign-1")})
+    )
+    assert selected is not None
+    assert selected.campaign_id == "campaign-2"
 
 
 def test_worker_service_builds_one_shared_autoresearch_authority(tmp_path):

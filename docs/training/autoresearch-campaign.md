@@ -65,6 +65,13 @@ A simulated or fake result cannot establish the baseline. A real baseline is
 accepted only through the authoritative evaluation projection with matching
 campaign, study, run, suite, metric, and sealed evidence lineage.
 
+A registered suite may also declare two evaluator canary IDs, a baseline repeat
+count, and a maximum score spread. When it does, the sealed baseline output must
+show that the known-good case passed, the known-bad case was rejected, and the
+repeated scores stayed within that bound. The reported primary metric must equal
+the repeat mean. Candidate evaluations remain single-pass unless their own method
+requires repeated measurement.
+
 ### 3. Propose one controlled candidate
 
 After the baseline, the agent inspects task-level failures and changes exactly

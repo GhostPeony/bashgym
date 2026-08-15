@@ -9,11 +9,19 @@ from bashgym._compat import UTC
 from bashgym.campaigns.autoresearch_evidence import (
     AutoResearchEvaluationContext,
     AutoResearchEvaluationEvidence,
+    AutoResearchEvaluatorReadiness,
     evaluation_context_bytes,
+    validate_baseline_evaluator_readiness,
 )
 
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 MODEL_DIGEST = "a" * 64
+READINESS_CONTRACT = {
+    "known_good_case_id": "known-good",
+    "known_bad_case_id": "known-bad",
+    "baseline_repeat_count": 3,
+    "maximum_baseline_spread": 0.02,
+}
 
 
 def _context(**updates):
@@ -52,6 +60,18 @@ def _evidence(**updates):
     return AutoResearchEvaluationEvidence(**values)
 
 
+def _readiness(**updates):
+    values = {
+        "known_good_case_id": "known-good",
+        "known_good_passed": True,
+        "known_bad_case_id": "known-bad",
+        "known_bad_rejected": True,
+        "baseline_scores": (0.74, 0.75, 0.76),
+    }
+    values.update(updates)
+    return AutoResearchEvaluatorReadiness(**values)
+
+
 def test_evaluation_only_baseline_context_binds_the_registered_model_digest():
     context = _context()
 
@@ -80,3 +100,75 @@ def test_evidence_rejects_nonfinite_primary_metrics(metric):
 def test_evidence_rejects_reversed_evaluation_timestamps():
     with pytest.raises(ValidationError, match="completed_at"):
         _evidence(started_at=NOW + timedelta(seconds=1), completed_at=NOW)
+
+
+def test_baseline_readiness_accepts_matching_canaries_and_stable_repeats():
+    evidence = _evidence(
+        metrics={"score": 0.75},
+        evaluator_readiness=_readiness(),
+    )
+
+    validate_baseline_evaluator_readiness(
+        evidence,
+        primary_metric="score",
+        readiness_contract=READINESS_CONTRACT,
+    )
+
+
+def test_baseline_readiness_is_optional_when_suite_does_not_declare_it():
+    validate_baseline_evaluator_readiness(
+        _evidence(metrics={"score": 0.75}),
+        primary_metric="score",
+        readiness_contract=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("evidence", "contract", "code"),
+    (
+        (
+            _evidence(metrics={"score": 0.75}),
+            READINESS_CONTRACT,
+            "autoresearch_evaluator_readiness_missing",
+        ),
+        (
+            _evidence(
+                metrics={"score": 0.75},
+                evaluator_readiness=_readiness(known_bad_rejected=False),
+            ),
+            READINESS_CONTRACT,
+            "autoresearch_evaluator_canary_failed",
+        ),
+        (
+            _evidence(
+                metrics={"score": 0.75},
+                evaluator_readiness=_readiness(baseline_scores=(0.70, 0.75, 0.80)),
+            ),
+            READINESS_CONTRACT,
+            "autoresearch_baseline_unstable",
+        ),
+        (
+            _evidence(
+                metrics={"score": 0.80},
+                evaluator_readiness=_readiness(),
+            ),
+            READINESS_CONTRACT,
+            "autoresearch_baseline_repeat_mean_mismatch",
+        ),
+        (
+            _evidence(
+                metrics={"score": 0.75},
+                evaluator_readiness=_readiness(known_good_case_id="different-case"),
+            ),
+            READINESS_CONTRACT,
+            "autoresearch_evaluator_canary_failed",
+        ),
+    ),
+)
+def test_baseline_readiness_rejects_untrustworthy_evaluator_observations(evidence, contract, code):
+    with pytest.raises(ValueError, match=code):
+        validate_baseline_evaluator_readiness(
+            evidence,
+            primary_metric="score",
+            readiness_contract=contract,
+        )

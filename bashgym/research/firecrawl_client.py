@@ -16,6 +16,7 @@ import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -96,6 +97,20 @@ class GithubFinding:
 CommandRunner = Callable[[Sequence[str], float], subprocess.CompletedProcess[str]]
 
 
+def _cli_argv_prefix(executable: str) -> tuple[str, ...]:
+    """Resolve npm's Windows batch shim to its fixed Node entrypoint."""
+
+    path = Path(executable)
+    if path.suffix.casefold() not in {".cmd", ".bat"}:
+        return (executable,)
+    entrypoint = path.parent / "node_modules" / "firecrawl-cli" / "dist" / "index.js"
+    local_node = path.parent / "node.exe"
+    node = str(local_node) if local_node.is_file() else shutil.which("node")
+    if not entrypoint.is_file() or node is None:
+        return ()
+    return (node, str(entrypoint))
+
+
 def _default_command_runner(
     argv: Sequence[str], timeout: float
 ) -> subprocess.CompletedProcess[str]:
@@ -130,6 +145,14 @@ def _result_items(payload: Any) -> list[dict[str, Any]]:
             if isinstance(items, list):
                 return [item for item in items if isinstance(item, dict)]
     return []
+
+
+def _valid_response_envelope(payload: Any) -> bool:
+    if isinstance(payload, list):
+        return True
+    if not isinstance(payload, dict) or payload.get("success") is False:
+        return False
+    return isinstance(payload.get("data"), (list, dict))
 
 
 def _paper_url(item: dict[str, Any]) -> str:
@@ -298,9 +321,13 @@ class FirecrawlResearchClient:
     ) -> ResearchSearchResult:
         query, normalized_categories = self._validate_search(query, categories, k)
 
-        if self.cli_executable:
+        cli_failure_code: str | None = None
+        cli_prefix = _cli_argv_prefix(self.cli_executable) if self.cli_executable else ()
+        if self.cli_executable and not cli_prefix:
+            self.cli_executable = ""
+        if cli_prefix:
             argv = [
-                self.cli_executable,
+                *cli_prefix,
                 "search",
                 query,
                 "--categories",
@@ -314,27 +341,26 @@ class FirecrawlResearchClient:
             except (FileNotFoundError, OSError):
                 self.cli_executable = ""
             except subprocess.TimeoutExpired:
-                return self._unavailable(
-                    query, normalized_categories, "firecrawl_cli", "firecrawl_timeout"
-                )
+                cli_failure_code = "firecrawl_timeout"
             else:
                 if completed.returncode != 0:
-                    return self._unavailable(
-                        query,
-                        normalized_categories,
-                        "firecrawl_cli",
-                        _failure_code(completed.stderr),
-                    )
-                try:
-                    payload = json.loads(completed.stdout)
-                except (TypeError, json.JSONDecodeError):
-                    return self._unavailable(
-                        query,
-                        normalized_categories,
-                        "firecrawl_cli",
-                        "firecrawl_invalid_response",
-                    )
-                return self._available(query, normalized_categories, "firecrawl_cli", payload, k)
+                    cli_failure_code = _failure_code(completed.stderr)
+                else:
+                    try:
+                        payload = json.loads(completed.stdout)
+                    except (TypeError, json.JSONDecodeError):
+                        cli_failure_code = "firecrawl_invalid_response"
+                    else:
+                        if _valid_response_envelope(payload):
+                            return self._available(
+                                query, normalized_categories, "firecrawl_cli", payload, k
+                            )
+                        cli_failure_code = "firecrawl_invalid_response"
+
+        if cli_failure_code and not self.api_key:
+            return self._unavailable(
+                query, normalized_categories, "firecrawl_cli", cli_failure_code
+            )
 
         if not self.api_key:
             return self._unavailable(
@@ -368,6 +394,13 @@ class FirecrawlResearchClient:
         try:
             payload = response.json()
         except json.JSONDecodeError:
+            return self._unavailable(
+                query,
+                normalized_categories,
+                "firecrawl_api",
+                "firecrawl_invalid_response",
+            )
+        if not _valid_response_envelope(payload):
             return self._unavailable(
                 query,
                 normalized_categories,

@@ -137,6 +137,10 @@ def test_activate_autoresearch_parser_binds_an_existing_model_and_evaluator():
     assert args.dataset_source_id == "terminal-heldout-v1"
     assert args.model_source_id == "registered-base-v1"
     assert args.evaluation_budget_reservation == 0.1
+    assert args.evaluator_known_good_case_id is None
+    assert args.evaluator_known_bad_case_id is None
+    assert args.baseline_repeat_count is None
+    assert args.maximum_baseline_spread is None
     assert args.training_input == ["tmax-runner-config.json"]
     assert args.data_build_script == "build_data.py"
     assert args.data_build_budget_reservation == 0.05
@@ -304,6 +308,7 @@ def test_activate_autoresearch_plan_binds_remote_heldout_without_ssh_or_local_ro
     assert resident.dataset_version_id == "terminal-heldout-v1"
     evaluation_stage = request.executor_profile.stage_profile(StageKind.DEVELOPMENT_EVALUATION)
     assert evaluation_stage.input_files == ()
+    assert "evaluator_readiness" not in request.evaluation_suite.metric_contract
 
 
 def test_canvas_action_commands_send_origin_and_runtime_metadata(monkeypatch, capsys):

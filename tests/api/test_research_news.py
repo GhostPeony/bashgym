@@ -47,6 +47,10 @@ def test_news_configured_when_key_present(monkeypatch):
     assert r.json()["configured"] is True
 
 
+def test_news_rejects_unbounded_feed_size():
+    assert client.get("/api/research/news?k=51").status_code == 422
+
+
 def test_advise_returns_report_and_resolves_family(monkeypatch):
     captured = {}
 

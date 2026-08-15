@@ -33,6 +33,7 @@ from bashgym.campaigns.autoresearch_evidence import (
     AUTORESEARCH_EVALUATION_FILENAME,
     AutoResearchEvaluationContext,
     AutoResearchEvaluationEvidence,
+    AutoResearchEvaluatorReadiness,
     CampaignEvaluationProjector,
     SealedEvaluationReader,
 )
@@ -212,6 +213,18 @@ class _CredentialFreeRemoteAdapter:
         self.remote_files: dict[str, dict[str, bytes]] = {}
         self.remote_seals: dict[str, bytes] = {}
 
+    @staticmethod
+    def _baseline_readiness(request, metric: float):
+        if request.registered_base_model is None or request.remote_resident_model is not None:
+            return None
+        return AutoResearchEvaluatorReadiness(
+            known_good_case_id="known-good",
+            known_good_passed=True,
+            known_bad_case_id="known-bad",
+            known_bad_rejected=True,
+            baseline_scores=(metric - 0.005, metric, metric + 0.005),
+        )
+
     async def discover(self, request):
         return self.identities.get(request.run_id)
 
@@ -298,6 +311,7 @@ class _CredentialFreeRemoteAdapter:
                 dataset_version_id=context.dataset_version_id,
                 evaluated_model_manifest_digest=context.evaluated_model_manifest_digest,
                 metrics={"mrr_at_10": metric},
+                evaluator_readiness=self._baseline_readiness(request, metric),
                 started_at=identity.launched_at,
                 completed_at=identity.launched_at + timedelta(seconds=1),
             )
@@ -352,6 +366,7 @@ class _CredentialFreeRemoteAdapter:
                 dataset_version_id=context.dataset_version_id,
                 evaluated_model_manifest_digest=context.evaluated_model_manifest_digest,
                 metrics={"mrr_at_10": metric},
+                evaluator_readiness=self._baseline_readiness(request, metric),
                 started_at=identity.launched_at,
                 completed_at=identity.launched_at + timedelta(seconds=1),
             )
@@ -505,7 +520,15 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
         name="Fixed held-out evaluator",
         task_type="text-retrieval",
         dataset_version_id=dataset_version.dataset_version_id,
-        metric_contract={"primary_metric": "mrr_at_10"},
+        metric_contract={
+            "primary_metric": "mrr_at_10",
+            "evaluator_readiness": {
+                "known_good_case_id": "known-good",
+                "known_bad_case_id": "known-bad",
+                "baseline_repeat_count": 3,
+                "maximum_baseline_spread": 0.02,
+            },
+        },
         code_digest=_sha256(evaluator),
         created_at=NOW,
     )
@@ -765,16 +788,16 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
     )
     assert adapter.launch_requests[-1].registered_base_model == base_model
     assert adapter.launch_requests[-1].script_args[:4] == (
-        "--dataset-dir",
-        adapter.launch_requests[-1].remote_resident_dataset.remote_dataset_path,
-        "--model-dir",
-        base_model.remote_model_path,
-    )
-    assert adapter.launch_requests[-1].script_args[-14:-10] == (
         "--algorithm",
         "grpo",
         "--sft-enabled",
         "false",
+    )
+    assert adapter.launch_requests[-1].script_args[-4:] == (
+        "--model-dir",
+        base_model.remote_model_path,
+        "--dataset-dir",
+        adapter.launch_requests[-1].remote_resident_dataset.remote_dataset_path,
     )
     assert worker.run_once(now=NOW + timedelta(seconds=6)) == "completed"
     first_evaluation = repository.list_attempts("workspace-a", "campaign-1")[-1]
@@ -821,11 +844,11 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
     assert second_training_request.remote_resident_model.remote_model_path.endswith(
         f"/{first_training.attempt_id}/final"
     )
-    assert second_training_request.script_args[:4] == (
-        "--dataset-dir",
-        second_training_request.remote_resident_dataset.remote_dataset_path,
+    assert second_training_request.script_args[-4:] == (
         "--model-dir",
         second_training_request.remote_resident_model.remote_model_path,
+        "--dataset-dir",
+        second_training_request.remote_resident_dataset.remote_dataset_path,
     )
     assert worker.run_once(now=NOW + timedelta(seconds=11)) == "completed"
     second_evaluation = repository.list_attempts("workspace-a", "campaign-1")[-1]

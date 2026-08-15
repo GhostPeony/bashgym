@@ -3499,7 +3499,10 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
     )
     from bashgym.campaigns.autoresearch import load_autoresearch_template_definitions
     from bashgym.campaigns.autoresearch_dataset import AUTORESEARCH_DATASET_RECEIPT_FILENAME
-    from bashgym.campaigns.autoresearch_evidence import AUTORESEARCH_EVALUATION_FILENAME
+    from bashgym.campaigns.autoresearch_evidence import (
+        AUTORESEARCH_EVALUATION_FILENAME,
+        validate_evaluator_readiness_contract,
+    )
     from bashgym.campaigns.contracts import CodeMutationKind, StageKind
     from bashgym.campaigns.installation import autoresearch_binding_plan
     from bashgym.campaigns.lineage import ApprovedSourceRepositoryProfile
@@ -3543,6 +3546,28 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
     if definition is None:
         raise ValueError("installed AutoResearch template was not found")
     binding = autoresearch_binding_plan(definition)
+    readiness_values = (
+        args.evaluator_known_good_case_id,
+        args.evaluator_known_bad_case_id,
+        args.baseline_repeat_count,
+        args.maximum_baseline_spread,
+    )
+    if any(value is not None for value in readiness_values) and not all(
+        value is not None for value in readiness_values
+    ):
+        raise ValueError("all evaluator readiness options must be supplied together")
+    evaluator_readiness_contract = (
+        validate_evaluator_readiness_contract(
+            {
+                "known_good_case_id": args.evaluator_known_good_case_id,
+                "known_bad_case_id": args.evaluator_known_bad_case_id,
+                "baseline_repeat_count": args.baseline_repeat_count,
+                "maximum_baseline_spread": args.maximum_baseline_spread,
+            }
+        )
+        if all(value is not None for value in readiness_values)
+        else None
+    )
     registered_base_model = RegisteredRemoteModelSource(
         source_id=(args.model_source_id or f"{args.executor_profile_id}-registered-base"),
         compute_profile_id=binding.compute_profile_id,
@@ -3773,6 +3798,11 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
             metric_contract={
                 "primary_metric": binding.primary_metric,
                 "metric_direction": binding.metric_direction.value,
+                **(
+                    {"evaluator_readiness": evaluator_readiness_contract}
+                    if evaluator_readiness_contract is not None
+                    else {}
+                ),
             },
             code_digest=sha256_file(evaluator_file),
         ),
@@ -5368,6 +5398,25 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_activate.add_argument("--evaluation-arg", action="append", default=[])
     campaign_activate.add_argument("--evaluation-budget-reservation", type=float, required=True)
     campaign_activate.add_argument("--evaluation-name", required=True)
+    campaign_activate.add_argument(
+        "--evaluator-known-good-case-id",
+        help="Optional evaluator canary case that must pass before the baseline is accepted",
+    )
+    campaign_activate.add_argument(
+        "--evaluator-known-bad-case-id",
+        help="Optional evaluator canary case that must be rejected before the baseline is accepted",
+    )
+    campaign_activate.add_argument(
+        "--baseline-repeat-count",
+        type=int,
+        choices=range(3, 11),
+        help="Optional number of repeated baseline scores emitted by the evaluator",
+    )
+    campaign_activate.add_argument(
+        "--maximum-baseline-spread",
+        type=float,
+        help="Optional largest accepted max-minus-min spread across repeated baseline scores",
+    )
     campaign_activate.add_argument(
         "--remote-model-path",
         required=True,

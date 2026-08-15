@@ -45,6 +45,7 @@ WORKSPACE = "workspace-a"
 PROJECT = "autoresearch-test"
 DATASET_VERSION = "terminal-agent-approved-v1"
 SUITE = "terminal-heldout-v1"
+EVALUATOR_CODE_DIGEST = hashlib.sha256(b"print('training')\n").hexdigest()
 
 
 def definition() -> AutoResearchTemplateDefinition:
@@ -121,7 +122,12 @@ def initialized_ledger(tmp_path: Path) -> ExperimentLedgerRepository:
     return ledger
 
 
-def register_scientific_bindings(ledger: ExperimentLedgerRepository) -> None:
+def register_scientific_bindings(
+    ledger: ExperimentLedgerRepository,
+    *,
+    evaluator_readiness: bool = True,
+    evaluator_code_digest: str = EVALUATOR_CODE_DIGEST,
+) -> None:
     ledger.register_project(
         ProjectSpec(
             workspace_id=WORKSPACE,
@@ -160,8 +166,20 @@ def register_scientific_bindings(ledger: ExperimentLedgerRepository) -> None:
             metric_contract={
                 "primary_metric": "exact_task_accuracy",
                 "metric_direction": "maximize",
+                **(
+                    {
+                        "evaluator_readiness": {
+                            "known_good_case_id": "known-good",
+                            "known_bad_case_id": "known-bad",
+                            "baseline_repeat_count": 3,
+                            "maximum_baseline_spread": 0.02,
+                        }
+                    }
+                    if evaluator_readiness
+                    else {}
+                ),
             },
-            code_digest="c" * 64,
+            code_digest=evaluator_code_digest,
         )
     )
 
@@ -183,7 +201,7 @@ def registered_profile(
         StageKind.SMOKE_TRAINING,
     ):
         script = tmp_path / f"{stage_kind.value}.py"
-        script.write_text("print('training')\n", encoding="utf-8")
+        script.write_bytes(b"print('training')\n")
         stages.append(
             PinnedRemoteStageProfile(
                 stage=stage_kind,
@@ -305,6 +323,7 @@ def test_real_template_fails_closed_when_installation_bindings_are_missing(tmp_p
     assert report.blocking_codes == (
         "data_binding_unresolved",
         "evaluator_binding_unresolved",
+        "evaluator_readiness_contract_unresolved",
         "compute_binding_unresolved",
         "source_repository_binding_unresolved",
         "code_lineage_execution_binding_unresolved",
@@ -367,6 +386,57 @@ def test_real_template_requires_exact_ledger_profile_and_material_hashes(tmp_pat
     )
     assert stale.materializable is False
     assert stale.blocking_codes == ("compute_binding_unresolved",)
+
+
+def test_real_template_accepts_a_fixed_evaluator_without_optional_canaries(tmp_path: Path):
+    template = definition()
+    ledger = initialized_ledger(tmp_path)
+    register_scientific_bindings(ledger, evaluator_readiness=False)
+    profile, _script = registered_profile(tmp_path, template)
+    source_root = tmp_path / "source-fixture"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    source = source_profile(source_repository)
+
+    report = doctor_autoresearch_template(
+        template,
+        workspace_id=WORKSPACE,
+        ledger=ledger,
+        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
+        controller=online_controller(),
+        source_profiles={source.profile_id: source},
+    )
+
+    assert report.materializable is True
+    readiness = next(
+        check for check in report.checks if check.check_id == "evaluator_readiness_contract"
+    )
+    assert readiness.ready is True
+
+
+def test_doctor_rejects_an_evaluator_stage_that_does_not_match_the_registered_suite(
+    tmp_path: Path,
+):
+    template = definition()
+    ledger = initialized_ledger(tmp_path)
+    register_scientific_bindings(ledger, evaluator_code_digest="d" * 64)
+    profile, _script = registered_profile(tmp_path, template)
+    source_root = tmp_path / "source-fixture"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    source = source_profile(source_repository)
+
+    report = doctor_autoresearch_template(
+        template,
+        workspace_id=WORKSPACE,
+        ledger=ledger,
+        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
+        controller=online_controller(),
+        source_profiles={source.profile_id: source},
+    )
+
+    assert report.materializable is False
+    assert "compute_binding_unresolved" in report.blocking_codes
 
 
 def test_doctor_requires_registered_base_model(tmp_path: Path):

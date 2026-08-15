@@ -115,6 +115,34 @@ async def test_cli_search_uses_typed_argv_and_parses_research_results():
     assert result.sources[0].category == "research"
 
 
+async def test_windows_npm_shim_is_resolved_to_node_without_a_shell(tmp_path):
+    shim = tmp_path / "firecrawl.cmd"
+    shim.write_text("@echo off\n", encoding="utf-8")
+    node = tmp_path / "node.exe"
+    node.write_bytes(b"")
+    entrypoint = tmp_path / "node_modules" / "firecrawl-cli" / "dist" / "index.js"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text("", encoding="utf-8")
+    observed = []
+
+    def runner(argv, _timeout):
+        observed.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout='{"data": []}', stderr="")
+
+    client = FirecrawlResearchClient(
+        api_key="",
+        cli_executable=str(shim),
+        command_runner=runner,
+    )
+    try:
+        await client.search("a & literal query", categories=("research",), k=1)
+    finally:
+        await client.close()
+
+    assert observed[0][:2] == (str(node), str(entrypoint))
+    assert observed[0][3] == "a & literal query"
+
+
 async def test_cli_quota_failure_is_explicit_and_sanitized():
     def runner(argv, timeout):
         return subprocess.CompletedProcess(
@@ -154,6 +182,38 @@ async def test_cli_timeout_and_invalid_json_are_typed():
     )
     invalid = await invalid_client.search("x", categories=("research",), k=1)
     assert invalid.code == "firecrawl_invalid_response"
+
+
+async def test_cli_malformed_success_envelope_is_unavailable():
+    def runner(argv, timeout):
+        return subprocess.CompletedProcess(
+            argv, 0, stdout='{"success":false,"error":"provider failed"}', stderr=""
+        )
+
+    client = FirecrawlResearchClient(api_key="", cli_executable="firecrawl", command_runner=runner)
+    result = await client.search("x", categories=("research",), k=1)
+
+    assert result.status == "unavailable"
+    assert result.code == "firecrawl_invalid_response"
+
+
+async def test_cli_failure_falls_back_to_api_when_configured():
+    def runner(argv, timeout):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="provider failed")
+
+    def handler(req):
+        return httpx.Response(200, json={"data": {"web": []}})
+
+    client = FirecrawlResearchClient(
+        api_key="fc-test",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        cli_executable="firecrawl",
+        command_runner=runner,
+    )
+    result = await client.search("x", categories=("research",), k=1)
+
+    assert result.status == "available"
+    assert result.provider == "firecrawl_api"
 
 
 async def test_api_auth_failure_is_typed_without_response_details():

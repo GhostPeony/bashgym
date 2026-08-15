@@ -483,10 +483,18 @@ class CampaignWorker:
         self.recovery.settle(claim, status="completed", outcome_code="campaign_resumed", now=now)
         return "recovery_resumed"
 
-    def controller_once(self, leader: LeaseRecord, *, now: datetime) -> str | None:
+    def controller_once(
+        self,
+        leader: LeaseRecord,
+        *,
+        now: datetime,
+        excluded_campaign_keys: frozenset[tuple[str, str]] = frozenset(),
+    ) -> str | None:
         """Select one proposal and schedule its next safe stage under the leader fence."""
 
-        campaign = self.repository.next_controller_campaign()
+        campaign = self.repository.next_controller_campaign(
+            excluded_campaign_keys=excluded_campaign_keys
+        )
         if campaign is None:
             return None
         if campaign.active_study_id is None:
@@ -942,9 +950,9 @@ class CampaignWorker:
             ):
                 raise RuntimeError("campaign_remote_training_base_argument_conflict")
             script_args = (
+                *script_args,
                 "--model-dir",
                 training_model_path,
-                *script_args,
             )
         if remote_resident_dataset is not None:
             if any(
@@ -953,9 +961,9 @@ class CampaignWorker:
             ):
                 raise RuntimeError("campaign_remote_training_dataset_argument_conflict")
             script_args = (
+                *script_args,
                 "--dataset-dir",
                 remote_resident_dataset.remote_dataset_path,
-                *script_args,
             )
         input_files = tuple(Path(value) for value in executor["input_files"])
         if evaluation_suite is not None and dataset_version is not None:
@@ -982,6 +990,7 @@ class CampaignWorker:
             binding = executor["evaluation_binding"]
             input_files = (evaluation_context_path, *input_files)
             script_args = (
+                *script_args,
                 "--context",
                 AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
                 "--model-dir",
@@ -998,7 +1007,6 @@ class CampaignWorker:
                 binding["dataset_remote_path"],
                 "--output",
                 AUTORESEARCH_EVALUATION_FILENAME,
-                *script_args,
             )
         source_snapshot = None
         if code_lineage is not None:
@@ -1535,20 +1543,30 @@ class CampaignWorker:
             return reconciled
         if self._stop_requested:
             return "stopped"
+        deferred_autoresearch_status = None
+        excluded_campaign_keys: frozenset[tuple[str, str]] = frozenset()
         if self.autoresearch_loop is not None:
             loop_result = self.autoresearch_loop.tick(now=tick_at)
             if loop_result.effect_performed:
                 return f"autoresearch_{loop_result.status}"
             if loop_result.agent_action_required:
-                return f"autoresearch_{loop_result.status}"
-        controller_result = self.controller_once(leader, now=tick_at)
+                deferred_autoresearch_status = f"autoresearch_{loop_result.status}"
+                if loop_result.workspace_id is not None and loop_result.campaign_id is not None:
+                    excluded_campaign_keys = frozenset(
+                        {(loop_result.workspace_id, loop_result.campaign_id)}
+                    )
+        controller_result = self.controller_once(
+            leader,
+            now=tick_at,
+            excluded_campaign_keys=excluded_campaign_keys,
+        )
         attempt = self.repository.claim_next_action(
             leader,
             ttl=self.action_ttl,
             now=tick_at,
         )
         if attempt is None:
-            return controller_result or "idle"
+            return controller_result or deferred_autoresearch_status or "idle"
         if attempt.executor.get("kind") == "ssh_remote":
             return asyncio.run(self._remote_tick(attempt, now=tick_at))
         if attempt.executor.get("kind") == "development_evaluation":

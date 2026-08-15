@@ -34,6 +34,7 @@ from bashgym.campaigns.contracts import (
     ContractModel,
     CredentialKind,
     FrozenContractModel,
+    ProposalStatus,
     SealedActionResult,
     StageKind,
     StagePlan,
@@ -345,13 +346,29 @@ class CampaignRuntimeRepository(CampaignRepository):
             ).fetchall()
         return tuple(self._attempt_from_row(row) for row in rows)
 
-    def next_controller_campaign(self) -> Campaign | None:
+    def next_controller_campaign(
+        self,
+        *,
+        excluded_campaign_keys: frozenset[tuple[str, str]] = frozenset(),
+    ) -> Campaign | None:
         """Return one deterministic active aggregate that can make controller progress."""
 
         self._require_initialized()
+        exclusions = tuple(sorted(excluded_campaign_keys))
+        if len(exclusions) > 64:
+            raise CampaignPersistenceError("campaign_controller_exclusion_limit_exceeded")
+        exclusion_sql = "".join(
+            " AND NOT (c.workspace_id = ? AND c.campaign_id = ?)" for _item in exclusions
+        )
+        parameters: list[str] = [
+            CampaignStatus.ACTIVE.value,
+            ProposalStatus.SUBMITTED.value,
+        ]
+        for workspace_id, campaign_id in exclusions:
+            parameters.extend((workspace_id, campaign_id))
         with self._connection() as connection:
             row = connection.execute(
-                """
+                f"""
                 SELECT c.* FROM campaigns c
                 WHERE c.status = ? AND c.active_action_id IS NULL
                   AND (
@@ -363,10 +380,11 @@ class CampaignRuntimeRepository(CampaignRepository):
                           AND p.status = ?
                     )
                   )
+                  {exclusion_sql}
                 ORDER BY c.updated_at, c.workspace_id, c.campaign_id
                 LIMIT 1
                 """,
-                (CampaignStatus.ACTIVE.value, "submitted"),
+                parameters,
             ).fetchone()
         return self._campaign_from_row(row) if row is not None else None
 

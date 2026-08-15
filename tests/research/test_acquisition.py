@@ -100,6 +100,24 @@ def test_zero_information_experiment_scores_zero():
     assert result.cost_normalized_information_gain == pytest.approx(0.0, abs=1e-12)
 
 
+@pytest.mark.parametrize("expected_cost", [float("inf"), float("nan"), 1e-12])
+def test_expected_cost_must_be_finite_and_material(expected_cost):
+    with pytest.raises(ValidationError, match="acquisition_expected_cost_invalid"):
+        acquisition(expected_cost=expected_cost)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("expected_information_gain", float("inf")),
+        ("cost_normalized_information_gain", float("nan")),
+    ],
+)
+def test_supplied_scores_must_be_finite(field, value):
+    with pytest.raises(ValidationError, match="acquisition_score_invalid"):
+        acquisition(**{field: value})
+
+
 @pytest.mark.parametrize(
     "updates",
     [

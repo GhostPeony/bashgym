@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ def _build_advisor():
 
 
 @router.get("/news")
-async def research_news(k: int = 20, since: str | None = None):
+async def research_news(k: int = Query(default=20, ge=1, le=50), since: str | None = None):
     """Platform news feed: latest training-method changes (tracked GitHub repos +
     recent papers). Advisory — returns ``configured: false`` (no items) when
     ``FIRECRAWL_API_KEY`` is unset rather than erroring."""

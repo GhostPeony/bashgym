@@ -81,3 +81,23 @@ async def test_news_feed_caps_to_k():
     advisor = ResearchAdvisor(_FakeClient(papers=[], github=github))
     feed = await advisor.news_feed(k=5)
     assert len(feed) == 5
+
+
+async def test_news_feed_caps_each_provider_request_to_its_contract():
+    class RecordingClient(_FakeClient):
+        def __init__(self):
+            super().__init__(papers=[], github=[])
+            self.requested: list[int] = []
+
+        async def search_papers(self, query, *, k, **kwargs):
+            self.requested.append(k)
+            return []
+
+        async def search_github(self, query, *, k):
+            self.requested.append(k)
+            return []
+
+    client = RecordingClient()
+    await ResearchAdvisor(client).news_feed(k=20)
+
+    assert client.requested == [10, 10]

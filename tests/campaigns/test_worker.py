@@ -659,6 +659,8 @@ def test_evaluation_remote_request_regenerates_context_and_revalidates_sealed_mo
     assert request.evaluation_context_sha256 == executor_config["evaluation_context_sha256"]
     assert evaluation_attempt.executor["source_training"] == source_training
     assert request.script_args == (
+        "--batch-size",
+        "8",
         "--context",
         AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
         "--model-dir",
@@ -667,8 +669,6 @@ def test_evaluation_remote_request_regenerates_context_and_revalidates_sealed_mo
         heldout.remote_dataset_path,
         "--output",
         AUTORESEARCH_EVALUATION_FILENAME,
-        "--batch-size",
-        "8",
     )
 
     tampered = evaluation_attempt.model_copy(deep=True)
@@ -1675,7 +1675,11 @@ def test_first_generation_full_training_binds_registered_base_for_plain_recipe(t
     assert request is not None
     assert request.registered_base_model == base_model
     assert request.remote_resident_model is None
-    assert request.script_args[:2] == ("--model-dir", base_model.remote_model_path)
+    assert request.script_args == (
+        *profile.stages[0].script_args,
+        "--model-dir",
+        base_model.remote_model_path,
+    )
     attempt = repository.list_attempts("workspace-a", "campaign-1")[0]
     assert attempt.executor["training_base_model"] == base_model.model_dump(mode="json")
 
@@ -1754,10 +1758,10 @@ def test_worker_passes_typed_training_recipe_arguments_to_compute(tmp_path):
     assert worker.run_once(now=START) == "remote_running"
     assert adapter.last_request is not None
     assert adapter.last_request.script_args == (
-        "--model-dir",
-        "/models/registered-base-v1",
         *profile.stages[0].script_args,
         *recipe_args,
+        "--model-dir",
+        "/models/registered-base-v1",
     )
     attempt = repository.list_attempts("workspace-a", "campaign-1")[0]
     assert attempt.executor["recipe_script_args"] == list(recipe_args)
@@ -2013,6 +2017,8 @@ def test_controller_launches_evaluation_only_baseline_from_registered_remote_mod
     assert request.source_training is None
     assert request.sealed_stage_artifact_inputs == ()
     assert request.script_args == (
+        "--batch-size",
+        "8",
         "--context",
         AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
         "--model-dir",
@@ -2021,8 +2027,6 @@ def test_controller_launches_evaluation_only_baseline_from_registered_remote_mod
         heldout.remote_dataset_path,
         "--output",
         AUTORESEARCH_EVALUATION_FILENAME,
-        "--batch-size",
-        "8",
     )
     attempt = repository.list_attempts("workspace-a", "campaign-1")[0]
     assert attempt.executor["evaluation_binding"] == {

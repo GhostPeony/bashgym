@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import math
+import statistics
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,6 +25,19 @@ from bashgym.campaigns.contracts import (
     SealedActionResult,
     StageKind,
 )
+from bashgym.campaigns.diagnostic_actions import (
+    AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+    AUTORESEARCH_DIAGNOSTIC_EVIDENCE_SCHEMA,
+    AUTORESEARCH_NORMALIZED_DIAGNOSTIC_DOMAIN,
+    MAX_AUTORESEARCH_DIAGNOSTIC_BYTES,
+    AutoResearchDiagnosticEvidence,
+    AutoResearchDiagnosticRecipe,
+    public_diagnostic_projection,
+)
+from bashgym.campaigns.failure_observations import (
+    AUTORESEARCH_FAILURE_OBSERVATIONS_KEY,
+    AutoResearchFailureObservation,
+)
 from bashgym.campaigns.lineage import canonical_model_manifest_digest
 
 if TYPE_CHECKING:
@@ -41,6 +55,7 @@ AUTORESEARCH_EVALUATION_CONTEXT_FILENAME = "autoresearch_evaluation_context.json
 AUTORESEARCH_EVALUATION_CONTEXT_SCHEMA = "autoresearch_evaluation_context.v1"
 MAX_AUTORESEARCH_EVALUATION_BYTES = 1024 * 1024
 AUTORESEARCH_NORMALIZED_EVALUATION_DOMAIN = "bashgym.autoresearch.normalized-evaluation.v1"
+AUTORESEARCH_CHECKPOINT_TRAJECTORY_KEY = "autoresearch_checkpoint_trajectory"
 
 
 def _require_finite(value: Any) -> None:
@@ -75,6 +90,64 @@ class AutoResearchEvaluationContext(FrozenContractModel):
     evaluated_model_manifest_digest: HexDigest
 
 
+class AutoResearchEvaluatorReadiness(FrozenContractModel):
+    """Evaluator-authored baseline canaries and repeated-score observations."""
+
+    schema_version: Literal["autoresearch_evaluator_readiness.v1"] = (
+        "autoresearch_evaluator_readiness.v1"
+    )
+    known_good_case_id: Identifier
+    known_good_passed: bool
+    known_bad_case_id: Identifier
+    known_bad_rejected: bool
+    baseline_scores: tuple[float, ...] = Field(min_length=3, max_length=10)
+
+    @field_validator("baseline_scores")
+    @classmethod
+    def finite_baseline_scores(cls, value: tuple[float, ...]) -> tuple[float, ...]:
+        _require_finite(value)
+        return value
+
+    @model_validator(mode="after")
+    def distinct_canary_cases(self) -> AutoResearchEvaluatorReadiness:
+        if self.known_good_case_id == self.known_bad_case_id:
+            raise ValueError("evaluator readiness canary cases must be distinct")
+        return self
+
+
+class AutoResearchCheckpointObservation(FrozenContractModel):
+    """One diagnostic fixed-suite observation of a sealed training checkpoint."""
+
+    schema_version: Literal["autoresearch_checkpoint_observation.v1"] = (
+        "autoresearch_checkpoint_observation.v1"
+    )
+    observation_id: Identifier | None = None
+    checkpoint_step: int = Field(ge=1, le=10_000_000)
+    evaluated_model_manifest_digest: HexDigest
+    metrics: dict[Identifier, float] = Field(min_length=1)
+    slice_metrics: dict[str, Any] = Field(default_factory=dict)
+    started_at: datetime
+    completed_at: datetime
+
+    @field_validator("metrics", "slice_metrics")
+    @classmethod
+    def finite_metrics(cls, value):
+        _require_finite(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_identity_and_time(self) -> AutoResearchCheckpointObservation:
+        if self.completed_at < self.started_at:
+            raise ValueError("completed_at cannot precede started_at")
+        if self.observation_id is None:
+            object.__setattr__(
+                self,
+                "observation_id",
+                f"checkpoint-step-{self.checkpoint_step}-{self.evaluated_model_manifest_digest[:12]}",
+            )
+        return self
+
+
 def evaluation_context_bytes(context: AutoResearchEvaluationContext) -> bytes:
     """Return the one canonical byte representation used for launch and adoption."""
 
@@ -101,6 +174,13 @@ class AutoResearchEvaluationEvidence(FrozenContractModel):
     evaluated_model_manifest_digest: HexDigest
     metrics: dict[Identifier, float] = Field(min_length=1)
     slice_metrics: dict[str, Any] = Field(default_factory=dict)
+    checkpoint_observations: tuple[AutoResearchCheckpointObservation, ...] = Field(
+        default=(), max_length=8
+    )
+    failure_observations: tuple[AutoResearchFailureObservation, ...] = Field(
+        default=(), max_length=12
+    )
+    evaluator_readiness: AutoResearchEvaluatorReadiness | None = None
     started_at: datetime
     completed_at: datetime
 
@@ -114,7 +194,131 @@ class AutoResearchEvaluationEvidence(FrozenContractModel):
     def ordered_timestamps(self) -> AutoResearchEvaluationEvidence:
         if self.completed_at < self.started_at:
             raise ValueError("completed_at cannot precede started_at")
+        steps = tuple(item.checkpoint_step for item in self.checkpoint_observations)
+        if steps != tuple(sorted(set(steps))):
+            raise ValueError("checkpoint observation steps must be sorted and unique")
+        if AUTORESEARCH_CHECKPOINT_TRAJECTORY_KEY in self.slice_metrics:
+            raise ValueError("checkpoint trajectory is reserved for verified projection")
+        if AUTORESEARCH_FAILURE_OBSERVATIONS_KEY in self.slice_metrics:
+            raise ValueError("failure observations are reserved for verified projection")
+        observation_ids = tuple(item.observation_id for item in self.failure_observations)
+        if len(observation_ids) != len(set(observation_ids)):
+            raise ValueError("failure observation IDs must be unique")
         return self
+
+
+def validate_checkpoint_observations(
+    evidence: AutoResearchEvaluationEvidence,
+    *,
+    checkpoint_artifacts: Iterable[CampaignArtifactRecord],
+) -> None:
+    """Bind evaluator observations to exact checkpoint files from the training seal."""
+
+    grouped: dict[int, list[CampaignArtifactRecord]] = {}
+    for artifact in checkpoint_artifacts:
+        metadata = getattr(artifact, "metadata", {})
+        step = metadata.get("checkpoint_step") if isinstance(metadata, dict) else None
+        relative_path = metadata.get("relative_path") if isinstance(metadata, dict) else None
+        if (
+            getattr(artifact, "schema_name", None) != "huggingface_checkpoint_file.v1"
+            or isinstance(step, bool)
+            or not isinstance(step, int)
+            or step < 1
+            or not isinstance(relative_path, str)
+            or not relative_path
+        ):
+            raise ValueError("checkpoint artifact inventory is invalid")
+        grouped.setdefault(step, []).append(artifact)
+
+    for observation in evidence.checkpoint_observations:
+        files = grouped.get(observation.checkpoint_step)
+        if not files:
+            raise ValueError("checkpoint manifest mismatch")
+        try:
+            digest = canonical_model_manifest_digest(files)
+        except ValueError as exc:
+            raise ValueError("checkpoint artifact inventory is invalid") from exc
+        if digest != observation.evaluated_model_manifest_digest:
+            raise ValueError("checkpoint manifest mismatch")
+
+
+def validate_evaluator_readiness_contract(readiness_contract: Any) -> dict[str, Any]:
+    """Validate the small baseline-readiness policy registered with an evaluator."""
+
+    if not isinstance(readiness_contract, dict):
+        raise ValueError("autoresearch_evaluator_readiness_contract_invalid")
+    good_id = readiness_contract.get("known_good_case_id")
+    bad_id = readiness_contract.get("known_bad_case_id")
+    repeat_count = readiness_contract.get("baseline_repeat_count")
+    maximum_spread = readiness_contract.get("maximum_baseline_spread")
+    if (
+        not isinstance(good_id, str)
+        or not good_id
+        or not isinstance(bad_id, str)
+        or not bad_id
+        or good_id == bad_id
+        or isinstance(repeat_count, bool)
+        or not isinstance(repeat_count, int)
+        or repeat_count < 3
+        or repeat_count > 10
+        or isinstance(maximum_spread, bool)
+        or not isinstance(maximum_spread, (int, float))
+        or not math.isfinite(float(maximum_spread))
+        or float(maximum_spread) < 0
+    ):
+        raise ValueError("autoresearch_evaluator_readiness_contract_invalid")
+    return {
+        "known_good_case_id": good_id,
+        "known_bad_case_id": bad_id,
+        "baseline_repeat_count": repeat_count,
+        "maximum_baseline_spread": float(maximum_spread),
+    }
+
+
+def validate_baseline_evaluator_readiness(
+    evidence: AutoResearchEvaluationEvidence,
+    *,
+    primary_metric: str,
+    readiness_contract: Any,
+) -> None:
+    """Enforce sealed baseline canaries when the evaluation suite declares them."""
+
+    if readiness_contract is None:
+        return
+
+    contract = validate_evaluator_readiness_contract(readiness_contract)
+    good_id = contract["known_good_case_id"]
+    bad_id = contract["known_bad_case_id"]
+    repeat_count = contract["baseline_repeat_count"]
+    maximum_spread = contract["maximum_baseline_spread"]
+    readiness = evidence.evaluator_readiness
+    if readiness is None:
+        raise ValueError("autoresearch_evaluator_readiness_missing")
+    if (
+        readiness.known_good_case_id != good_id
+        or not readiness.known_good_passed
+        or readiness.known_bad_case_id != bad_id
+        or not readiness.known_bad_rejected
+    ):
+        raise ValueError("autoresearch_evaluator_canary_failed")
+    if len(readiness.baseline_scores) != repeat_count:
+        raise ValueError("autoresearch_baseline_repeat_count_mismatch")
+    observed_spread = max(readiness.baseline_scores) - min(readiness.baseline_scores)
+    if observed_spread > float(maximum_spread) and not math.isclose(
+        observed_spread,
+        float(maximum_spread),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("autoresearch_baseline_unstable")
+    primary_value = evidence.metrics.get(primary_metric)
+    if primary_value is None or not math.isclose(
+        float(primary_value),
+        statistics.fmean(readiness.baseline_scores),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("autoresearch_baseline_repeat_mean_mismatch")
 
 
 def _read_bounded_file(path: Path, *, max_bytes: int) -> tuple[bytes, str, int]:
@@ -177,6 +381,7 @@ class SealedEvaluationReader:
         dataset_version: DatasetVersionSpec,
         evaluated_model_digest: HexDigest | None = None,
         training_artifacts: Iterable[CampaignArtifactRecord],
+        checkpoint_artifacts: Iterable[CampaignArtifactRecord] = (),
         remote_manifest: SealedActionResult | None = None,
     ) -> tuple[AutoResearchEvaluationEvidence, CampaignArtifactRecord]:
         """Return verified typed evidence and its exact public artifact record."""
@@ -373,6 +578,10 @@ class SealedEvaluationReader:
             raise ValueError("evaluation evidence registered-input identity mismatch")
         if evidence.evaluated_model_manifest_digest != model_manifest_digest:
             raise ValueError("evaluation evidence model manifest mismatch")
+        validate_checkpoint_observations(
+            evidence,
+            checkpoint_artifacts=checkpoint_artifacts,
+        )
         return evidence, artifact
 
 
@@ -446,6 +655,131 @@ class CampaignEvaluationProjector:
             isinstance(value, str)
             and len(value) == 64
             and all(character in "0123456789abcdef" for character in value)
+        )
+
+    def project_diagnostic_and_ingest(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        proposal_id: str,
+    ) -> Any:
+        """Verify one sealed diagnostic artifact and persist its aggregate projection."""
+
+        from bashgym.campaigns.autoresearch import (
+            AutoResearchDiagnosticResult,
+            ExperimentRole,
+        )
+
+        control = self.repository.get_autoresearch_proposal(workspace_id, campaign_id, proposal_id)
+        proposal = self.repository.get_proposal(workspace_id, campaign_id, proposal_id)
+        if control.role != ExperimentRole.DIAGNOSTIC or proposal.study_id is None:
+            self._invariant("autoresearch_diagnostic_lineage_mismatch")
+        attempts = self.repository.list_study_attempts(workspace_id, campaign_id, proposal.study_id)
+        matching = tuple(
+            attempt
+            for attempt in attempts
+            if attempt.stage == StageKind.CONTRACT_EVALUATION
+            and attempt.status.value == "completed"
+        )
+        if len(matching) != 1:
+            self._invariant("autoresearch_exact_completed_diagnostic_required")
+        attempt = matching[0]
+        executor = attempt.executor
+        recipe = AutoResearchDiagnosticRecipe.model_validate(executor.get("diagnostic_recipe"))
+        contract = executor.get("diagnostic_contract")
+        if (
+            executor.get("kind") != "ssh_remote"
+            or executor.get("stage") != StageKind.CONTRACT_EVALUATION.value
+            or executor.get("diagnostic_proposal_id") != proposal_id
+            or not isinstance(contract, dict)
+            or not attempt.sealed_result_uri
+            or not attempt.sealed_result_uri.startswith("bashgym-remote-seal://")
+        ):
+            self._invariant("autoresearch_diagnostic_executor_mismatch")
+        manifest = self.repository.get_attempt_result_manifest(workspace_id, attempt.attempt_id)
+        try:
+            _validate_remote_seal_execution(attempt, manifest)
+        except ValueError:
+            self._invariant("autoresearch_diagnostic_seal_invalid")
+        outputs = tuple(
+            output
+            for output in manifest.outputs
+            if output.schema_name == AUTORESEARCH_DIAGNOSTIC_EVIDENCE_SCHEMA
+            and output.path == AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME
+        )
+        artifacts = tuple(
+            artifact
+            for artifact in self.repository.list_action_artifacts(
+                workspace_id, campaign_id, attempt.action_id
+            )
+            if artifact.schema_name == AUTORESEARCH_DIAGNOSTIC_EVIDENCE_SCHEMA
+            and artifact.producer_action_id == attempt.action_id
+            and artifact.metadata.get("attempt_id") == attempt.attempt_id
+        )
+        if len(outputs) != 1 or len(artifacts) != 1:
+            self._invariant("autoresearch_diagnostic_artifact_invalid")
+        output, artifact = outputs[0], artifacts[0]
+        normalized = artifact.metadata.get("normalized_diagnostic")
+        signature = artifact.metadata.get("projection_signature")
+        if (
+            output.size_bytes > MAX_AUTORESEARCH_DIAGNOSTIC_BYTES
+            or artifact.sha256 != output.sha256
+            or artifact.size_bytes != output.size_bytes
+            or not artifact.sealed
+            or not artifact.valid
+            or artifact.metadata.get("projection_key_version") != self.reader.sealer.key_version
+            or not isinstance(normalized, dict)
+            or not isinstance(signature, str)
+            or not hmac.compare_digest(
+                signature,
+                self.reader.sealer.sign_canonical_payload(
+                    normalized,
+                    domain=AUTORESEARCH_NORMALIZED_DIAGNOSTIC_DOMAIN,
+                ),
+            )
+        ):
+            self._invariant("autoresearch_diagnostic_artifact_invalid")
+        evidence = AutoResearchDiagnosticEvidence.model_validate(normalized.get("evidence"))
+        projection = normalized.get("projection")
+        if (
+            not isinstance(projection, dict)
+            or projection != public_diagnostic_projection(recipe, evidence)
+            or (
+                evidence.workspace_id,
+                evidence.campaign_id,
+                evidence.proposal_id,
+                evidence.study_id,
+                evidence.action_id,
+                evidence.attempt_id,
+            )
+            != (
+                workspace_id,
+                campaign_id,
+                proposal_id,
+                proposal.study_id,
+                attempt.action_id,
+                attempt.attempt_id,
+            )
+        ):
+            self._invariant("autoresearch_diagnostic_evidence_mismatch")
+        budget_unit = self.repository.get_autoresearch_spec(
+            workspace_id, campaign_id
+        ).stop_rules.budget_unit
+        actual_cost = sum(
+            usage.amount for usage in evidence.resource_usage if usage.unit == budget_unit
+        )
+        return self.repository.record_autoresearch_diagnostic_result(
+            AutoResearchDiagnosticResult(
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                proposal_id=proposal_id,
+                study_id=proposal.study_id,
+                attempt_id=attempt.attempt_id,
+                status=evidence.status,
+                projection=projection,
+                actual_cost=actual_cost,
+                recorded_at=attempt.updated_at,
+            )
         )
 
     def _build_result(self, resolved: _ResolvedProjection) -> Any:
@@ -628,6 +962,7 @@ class CampaignEvaluationProjector:
         ):
             self._invariant("autoresearch_evaluation_environment_binding_mismatch")
 
+        checkpoint_artifacts: tuple[Any, ...] = ()
         try:
             registered_base = executor.get("registered_base_model")
             if registered_base is not None:
@@ -696,6 +1031,14 @@ class CampaignEvaluationProjector:
                     )
                     if artifact.schema_name == "huggingface_model_file.v1"
                 )
+                checkpoint_artifacts = tuple(
+                    artifact
+                    for artifact in self.repository.list_action_artifacts(
+                        workspace_id, campaign_id, training_attempt.action_id
+                    )
+                    if artifact.schema_name == "huggingface_checkpoint_file.v1"
+                    and artifact.metadata.get("attempt_id") == training_attempt.attempt_id
+                )
                 if (
                     not training_artifacts
                     or canonical_model_manifest_digest(training_artifacts) != source.model_digest
@@ -763,6 +1106,14 @@ class CampaignEvaluationProjector:
                         workspace_id, campaign_id, item.campaign_artifact_id
                     )
                     for item in sealed_inputs
+                )
+                checkpoint_artifacts = tuple(
+                    artifact
+                    for artifact in self.repository.list_action_artifacts(
+                        workspace_id, campaign_id, training_attempt.action_id
+                    )
+                    if artifact.schema_name == "huggingface_checkpoint_file.v1"
+                    and artifact.metadata.get("attempt_id") == training_attempt.attempt_id
                 )
                 if any(
                     artifact.producer_action_id != training_attempt.action_id
@@ -891,10 +1242,22 @@ class CampaignEvaluationProjector:
                 dataset_version=dataset_version,
                 evaluated_model_digest=evaluated_model_digest,
                 training_artifacts=training_artifacts,
+                checkpoint_artifacts=checkpoint_artifacts,
                 remote_manifest=(evaluation_manifest if remote_evaluation else None),
             )
         except (OSError, TypeError, ValueError):
             self._invariant("autoresearch_evaluation_evidence_invalid")
+        from bashgym.campaigns.autoresearch import ExperimentRole
+
+        if control.role == ExperimentRole.BASELINE:
+            try:
+                validate_baseline_evaluator_readiness(
+                    evidence,
+                    primary_metric=spec.primary_metric,
+                    readiness_contract=evaluation_suite.metric_contract.get("evaluator_readiness"),
+                )
+            except ValueError as exc:
+                self._invariant(str(exc))
 
         usage = self.repository.study_budget_usage(
             workspace_id, campaign_id, study.study_id, spec.stop_rules.budget_unit
@@ -1076,6 +1439,15 @@ class CampaignEvaluationProjector:
                 },
                 created_at=evaluation_artifact.created_at,
             )
+            projected_slice_metrics = dict(evidence.slice_metrics)
+            if evidence.checkpoint_observations:
+                projected_slice_metrics[AUTORESEARCH_CHECKPOINT_TRAJECTORY_KEY] = [
+                    item.model_dump(mode="json") for item in evidence.checkpoint_observations
+                ]
+            if evidence.failure_observations:
+                projected_slice_metrics[AUTORESEARCH_FAILURE_OBSERVATIONS_KEY] = [
+                    item.model_dump(mode="json") for item in evidence.failure_observations
+                ]
             evaluation_spec = EvaluationResultSpec(
                 workspace_id=workspace_id,
                 project_id=project_id,
@@ -1086,7 +1458,7 @@ class CampaignEvaluationProjector:
                 model_version_id=model_version_id,
                 status=RunStatus.COMPLETED,
                 metrics=evidence.metrics,
-                slice_metrics=evidence.slice_metrics,
+                slice_metrics=projected_slice_metrics,
                 artifact_id=artifact_id,
                 compared_to_result_id=None,
                 started_at=evidence.started_at,
@@ -1212,12 +1584,18 @@ __all__ = [
     "AUTORESEARCH_EVALUATION_CONTEXT_SCHEMA",
     "AUTORESEARCH_EVALUATION_FILENAME",
     "AUTORESEARCH_EVALUATION_SCHEMA",
+    "AUTORESEARCH_CHECKPOINT_TRAJECTORY_KEY",
     "AUTORESEARCH_NORMALIZED_EVALUATION_DOMAIN",
     "AutoResearchEvaluationContext",
     "AutoResearchEvaluationEvidence",
+    "AutoResearchCheckpointObservation",
+    "AutoResearchEvaluatorReadiness",
     "CampaignEvaluationProjector",
     "MAX_AUTORESEARCH_EVALUATION_BYTES",
     "SealedEvaluationReader",
     "evaluation_context_bytes",
+    "validate_baseline_evaluator_readiness",
+    "validate_checkpoint_observations",
+    "validate_evaluator_readiness_contract",
     "ingest_completed_evaluation",
 ]

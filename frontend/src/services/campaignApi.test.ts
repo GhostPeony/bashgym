@@ -295,7 +295,14 @@ test('guided setup API uses exact authenticated routes, stable idempotency, and 
         template_id: 'template-modern',
         definition_digest: 'a'.repeat(64),
         quality_claim_eligible: true,
-        required_bindings: required
+        required_bindings: required,
+        experiment_contract: {
+          primary_metric: 'exact_task_accuracy',
+          metric_direction: 'maximize',
+          max_attempts_limit: 6,
+          budget_limits: { gpu_hours: 10 },
+          protected_metrics: []
+        }
       }
     ],
     installations: [],
@@ -399,6 +406,19 @@ test('guided setup creation returns only the safe campaign handoff', async () =>
                 data: 'data.registered',
                 compute: 'compute.private',
                 evaluation: 'evaluation.registered'
+              },
+              stop_rules: {
+                schema_version: 'autoresearch_stop_rules.v1',
+                max_attempts: 5,
+                budget_unit: 'gpu_hours',
+                max_total_cost: 10,
+                target_metric: null,
+                minimum_improvement: 0.01,
+                protected_metrics: [],
+                deadline: null
+              },
+              method_thresholds: {
+                schema_version: 'autoresearch_method_thresholds.v1'
               }
             }
           }

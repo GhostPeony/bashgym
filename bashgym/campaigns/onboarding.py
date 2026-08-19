@@ -21,12 +21,14 @@ from typing import Any, Literal, Protocol
 
 from pydantic import Field, HttpUrl
 
+from bashgym.campaigns.autoresearch import AutoResearchStopRules, MetricDirection
 from bashgym.campaigns.contracts import (
     CampaignStatus,
     FrozenContractModel,
     Identifier,
     canonical_hash,
 )
+from bashgym.campaigns.method_policy import AutoResearchMethodThresholds
 
 _ONBOARDING_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 _MAX_RECEIPT_BYTES = 1024 * 1024
@@ -71,6 +73,7 @@ class AutoResearchOnboardingContract(FrozenContractModel):
     credential_ref: Identifier
     campaign_id: Identifier
     campaign_title: str = Field(min_length=1, max_length=240)
+    stop_rules: AutoResearchStopRules
 
     @classmethod
     def from_file(cls, path: Path) -> AutoResearchOnboardingContract:
@@ -116,12 +119,27 @@ class AutoResearchOnboardingStepResult(FrozenContractModel):
     disposition: Literal["completed", "replayed"]
 
 
+class AutoResearchOnboardingExperimentContract(FrozenContractModel):
+    """The exact scientific and resource contract shown before Start."""
+
+    schema_version: Literal["autoresearch_onboarding_experiment_contract.v1"] = (
+        "autoresearch_onboarding_experiment_contract.v1"
+    )
+    primary_metric: Identifier
+    metric_direction: MetricDirection
+    stop_rules: AutoResearchStopRules
+    method_thresholds: AutoResearchMethodThresholds = Field(
+        default_factory=AutoResearchMethodThresholds
+    )
+
+
 class AutoResearchOnboardingPlan(FrozenContractModel):
     schema_version: Literal["autoresearch_onboarding_plan.v1"] = "autoresearch_onboarding_plan.v1"
     onboarding_id: Identifier
     contract_digest: str
     applied: Literal[False] = False
     steps: tuple[str, ...]
+    experiment_contract: AutoResearchOnboardingExperimentContract
     next_action: Literal["apply_onboarding"] = "apply_onboarding"
 
 
@@ -135,6 +153,7 @@ class AutoResearchOnboardingReceipt(FrozenContractModel):
     replayed: bool = False
     completed_steps: tuple[AutoResearchOnboardingStepResult, ...] = ()
     campaign_id: Identifier
+    experiment_contract: AutoResearchOnboardingExperimentContract
     campaign_status: str = "preparing"
     next_action: Literal[
         "resume_onboarding",
@@ -216,6 +235,7 @@ def validate_local_onboarding_contract(
         raise AutoResearchOnboardingError("onboarding_workspace_mismatch")
     try:
         _validate_definition_bindings(definition, activation)
+        definition.validate_campaign_stop_rules(contract.stop_rules)
     except ValueError as exc:
         raise AutoResearchOnboardingError("onboarding_definition_binding_invalid") from exc
 
@@ -601,14 +621,29 @@ class AutoResearchOnboardingCoordinator:
 
     @staticmethod
     def plan(contract: AutoResearchOnboardingContract) -> AutoResearchOnboardingPlan:
-        validate_local_onboarding_contract(contract)
+        definition, _activation, _model_request = validate_local_onboarding_contract(contract)
+        assert definition.policy is not None
         return AutoResearchOnboardingPlan(
             onboarding_id=contract.onboarding_id,
             contract_digest=contract.contract_digest,
             steps=ONBOARDING_STEPS,
+            experiment_contract=AutoResearchOnboardingExperimentContract(
+                primary_metric=definition.policy.primary_metric,
+                metric_direction=definition.policy.metric_direction,
+                stop_rules=contract.stop_rules,
+                method_thresholds=definition.policy.method_thresholds,
+            ),
         )
 
     def apply(self, contract: AutoResearchOnboardingContract) -> AutoResearchOnboardingReceipt:
+        definition, _activation, _model_request = validate_local_onboarding_contract(contract)
+        assert definition.policy is not None
+        experiment_contract = AutoResearchOnboardingExperimentContract(
+            primary_metric=definition.policy.primary_metric,
+            metric_direction=definition.policy.metric_direction,
+            stop_rules=contract.stop_rules,
+            method_thresholds=definition.policy.method_thresholds,
+        )
         path = _receipt_path(contract)
         contract_digest = contract.contract_digest
         existing = _read_receipt(path)
@@ -655,6 +690,7 @@ class AutoResearchOnboardingCoordinator:
                     contract_digest=contract_digest,
                     completed_steps=tuple(completed),
                     campaign_id=contract.campaign_id,
+                    experiment_contract=experiment_contract,
                 ),
             )
 
@@ -666,6 +702,7 @@ class AutoResearchOnboardingCoordinator:
             applied=ready,
             completed_steps=tuple(completed),
             campaign_id=contract.campaign_id,
+            experiment_contract=experiment_contract,
             campaign_status=status,
             next_action=("explicit_start_confirmation_required" if ready else "resume_onboarding"),
         )
@@ -799,6 +836,7 @@ class LocalAutoResearchOnboardingServices:
                 "compute": binding.compute_profile_id,
                 "evaluation": binding.evaluation_suite_id,
             },
+            "stop_rules": contract.stop_rules.model_dump(mode="json"),
         }
         doctor = self.client.request_json("POST", "/campaigns/setup/doctor", payload=draft)
         if not isinstance(doctor, dict) or not doctor.get("ready"):
@@ -889,6 +927,7 @@ __all__ = [
     "AutoResearchOnboardingContract",
     "AutoResearchOnboardingCoordinator",
     "AutoResearchOnboardingError",
+    "AutoResearchOnboardingExperimentContract",
     "AutoResearchOnboardingPlan",
     "AutoResearchOnboardingReceipt",
     "AutoResearchOnboardingServices",

@@ -246,8 +246,14 @@ def _activation_fixture(tmp_path: Path):
             metric_contract={
                 "primary_metric": binding.primary_metric,
                 "metric_direction": binding.metric_direction.value,
+                "evaluator_readiness": {
+                    "known_good_case_id": "known-good",
+                    "known_bad_case_id": "known-bad",
+                    "baseline_repeat_count": 3,
+                    "maximum_baseline_spread": 0.02,
+                },
             },
-            code_digest="c" * 64,
+            code_digest=executor.stage_profile(StageKind.DEVELOPMENT_EVALUATION).script_sha256,
         ),
         source_profile=source,
         executor_profile=executor,

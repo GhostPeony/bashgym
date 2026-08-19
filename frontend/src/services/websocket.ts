@@ -100,14 +100,6 @@ export const MessageTypes = {
   ORCHESTRATION_CANCELLED: 'orchestration:cancelled',
   ORCHESTRATION_TASK_RETRYING: 'orchestration:task:retrying',
   ORCHESTRATION_MERGE_RESULT: 'orchestration:merge:result',
-  // AutoResearch events
-  AUTORESEARCH_EXPERIMENT: 'autoresearch:experiment',
-  AUTORESEARCH_STATUS: 'autoresearch:status',
-  AUTORESEARCH_TRACE_EXPERIMENT: 'autoresearch:trace-experiment',
-  AUTORESEARCH_TRACE_COMPLETE: 'autoresearch:trace-research-complete',
-  // Schema research events
-  AUTORESEARCH_SCHEMA_EXPERIMENT: 'schema-research:experiment',
-  AUTORESEARCH_SCHEMA_STATUS: 'schema-research:status',
   // Cascade RL events
   CASCADE_STAGE_STARTED: 'cascade:stage-started',
   CASCADE_STAGE_COMPLETED: 'cascade:stage-completed',

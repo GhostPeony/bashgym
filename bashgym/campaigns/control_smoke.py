@@ -148,6 +148,7 @@ def run_autoresearch_control_smoke(directory: Path) -> dict[str, object]:
                 max_attempts=2,
                 budget_unit="gpu_hours",
                 max_total_cost=0.1,
+                minimum_improvement=0.0,
             ),
             created_at=now,
         )

@@ -115,5 +115,364 @@ def test_export_rejects_local_path_bearing_projections(tmp_path):
         campaign={"campaign_id": "campaign-1"},
         attempts=({"attempt_id": "attempt-1", "sealed_result_uri": "C:/private/run"},),
     )
+    export_campaign_evidence(unsafe, tmp_path / "export")
+    evidence = json.loads((tmp_path / "export" / "campaign_evidence.json").read_text())
+    assert evidence["attempts"] == [{"attempt_id": "attempt-1"}]
+    assert "private" not in json.dumps(evidence)
+
+    unsafe_history = CampaignExportSnapshot(
+        campaign={"campaign_id": "campaign-1"},
+        autoresearch_history={
+            "schema_version": "bashgym.autoresearch_history.v1",
+            "experiments": [{"evidence": {"path": "C:/private/run"}}],
+        },
+    )
     with pytest.raises(CampaignExportError, match="campaign_export_contains_local_path"):
-        export_campaign_evidence(unsafe, tmp_path / "export")
+        export_campaign_evidence(unsafe_history, tmp_path / "history-export")
+
+
+def test_export_allowlists_attempts_and_rejects_nested_private_locations(tmp_path):
+    value = CampaignExportSnapshot(
+        campaign={"campaign_id": "campaign-1", "objective": "Public experiment"},
+        attempts=(
+            {
+                "attempt_id": "attempt-1",
+                "study_id": "study-1",
+                "stage": "full_training",
+                "status": "completed",
+                "candidate_digest": "a" * 64,
+                "recipe_digest": "b" * 64,
+                "compute_profile_id": "registered-compute",
+                "created_at": "2026-08-15T00:00:00Z",
+                "updated_at": "2026-08-15T00:01:00Z",
+                "executor": {
+                    "input_files": [
+                        {
+                            "local_path": "C:\\Users\\operator\\private-runner.py",
+                            "remote_name": "runner.py",
+                        }
+                    ]
+                },
+            },
+        ),
+    )
+
+    export_campaign_evidence(value, tmp_path / "export")
+
+    evidence = json.loads((tmp_path / "export" / "campaign_evidence.json").read_text())
+    assert evidence["attempts"] == [
+        {
+            "attempt_id": "attempt-1",
+            "candidate_digest": "a" * 64,
+            "compute_profile_id": "registered-compute",
+            "created_at": "2026-08-15T00:00:00Z",
+            "recipe_digest": "b" * 64,
+            "stage": "full_training",
+            "status": "completed",
+            "study_id": "study-1",
+            "updated_at": "2026-08-15T00:01:00Z",
+        }
+    ]
+    assert "private-runner" not in json.dumps(evidence)
+    assert "executor" not in evidence["attempts"][0]
+    for path in (tmp_path / "export").iterdir():
+        assert b"private-runner" not in path.read_bytes()
+        assert b"Users\\operator" not in path.read_bytes()
+
+    private_metadata = CampaignExportSnapshot(
+        campaign={"campaign_id": "campaign-1"},
+        artifacts=(
+            {
+                "artifact_id": "artifact-1",
+                "metadata": {"details": {"relative_path": "/home/operator/private.bin"}},
+            },
+        ),
+    )
+    export_campaign_evidence(private_metadata, tmp_path / "private-metadata")
+    evidence = json.loads((tmp_path / "private-metadata" / "campaign_evidence.json").read_text())
+    assert evidence["artifacts"] == [{"artifact_id": "artifact-1"}]
+    assert "private.bin" not in json.dumps(evidence)
+
+
+def test_autoresearch_export_reports_cumulative_fixed_suite_performance(tmp_path):
+    history = {
+        "schema_version": "bashgym.autoresearch_history.v1",
+        "workspace_id": "workspace-a",
+        "campaign_id": "campaign-1",
+        "ledger_project_id": "project-a",
+        "objective": "Improve held-out retrieval",
+        "evaluation_suite_id": "suite-heldout",
+        "primary_metric": "task_success",
+        "metric_direction": "maximize",
+        "method_thresholds": {
+            "schema_version": "autoresearch_method_thresholds.v1",
+            "min_demonstration_examples": 64,
+        },
+        "total_experiments": 2,
+        "returned_experiments": 2,
+        "omitted_experiments": 0,
+        "experiments": [
+            {
+                "proposal_id": "baseline",
+                "study_id": "study-baseline",
+                "result_id": "result-baseline",
+                "role": "baseline",
+                "parent_proposal_id": None,
+                "proposal": {
+                    "hypothesis": "Record starting performance.",
+                    "changed_variable": "baseline",
+                    "expected_outcome": "Establish the fixed-suite reference.",
+                    "falsification_criterion": "The evaluator readiness checks fail.",
+                },
+                "performance": {
+                    "evaluation_suite_id": "suite-heldout",
+                    "primary": {
+                        "metric_name": "task_success",
+                        "direction": "maximize",
+                        "reference_proposal_id": None,
+                        "reference_value": None,
+                        "candidate_value": 0.5,
+                        "improvement": None,
+                        "minimum_improvement": 0.02,
+                        "passed": None,
+                    },
+                    "protected_metrics": [],
+                    "metrics": {"task_success": 0.5},
+                    "metrics_omitted": 0,
+                },
+                "result": {
+                    "outcome": "completed",
+                    "provenance": "real",
+                    "actual_cost": 0.1,
+                    "recorded_at": "2026-08-15T12:00:00+00:00",
+                },
+                "decision": {
+                    "decision": "baseline",
+                    "reason_code": "real_baseline_verified",
+                    "eligible_for_best": True,
+                },
+                "learning": {
+                    "status": "baseline_recorded",
+                    "summary": "Starting performance was recorded on the fixed evaluation suite.",
+                },
+                "data": None,
+                "attempt_ids": ["attempt-baseline"],
+                "attempt_ids_omitted": 0,
+                "evidence_references": ["evaluation-baseline"],
+                "evidence_references_omitted": 0,
+            },
+            {
+                "proposal_id": "candidate-kept",
+                "study_id": "study-candidate",
+                "result_id": "result-candidate",
+                "role": "candidate",
+                "parent_proposal_id": "baseline",
+                "proposal": {
+                    "hypothesis": "Verified data improves completion.",
+                    "changed_variable": "dataset_recipe.verifier_filter",
+                    "expected_outcome": "Task success improves.",
+                    "falsification_criterion": "The primary or protected gate fails.",
+                },
+                "performance": {
+                    "evaluation_suite_id": "suite-heldout",
+                    "primary": {
+                        "metric_name": "task_success",
+                        "direction": "maximize",
+                        "reference_proposal_id": "baseline",
+                        "reference_value": 0.5,
+                        "candidate_value": 0.62,
+                        "improvement": 0.12,
+                        "minimum_improvement": 0.02,
+                        "passed": True,
+                    },
+                    "protected_metrics": [
+                        {
+                            "metric_name": "invalid_tool_calls",
+                            "direction": "minimize",
+                            "reference_value": 0.04,
+                            "candidate_value": 0.03,
+                            "signed_change": 0.01,
+                            "observed_regression": 0.0,
+                            "maximum_regression": 0.01,
+                            "passed": True,
+                        }
+                    ],
+                    "metrics": {"invalid_tool_calls": 0.03, "task_success": 0.62},
+                    "metrics_omitted": 0,
+                },
+                "result": {
+                    "outcome": "completed",
+                    "provenance": "real",
+                    "actual_cost": 1.0,
+                    "recorded_at": "2026-08-15T13:00:00+00:00",
+                },
+                "decision": {
+                    "decision": "keep",
+                    "reason_code": "candidate_improved_primary_metric",
+                    "eligible_for_best": True,
+                },
+                "learning": {
+                    "status": "retained",
+                    "summary": (
+                        "The candidate cleared the configured primary and protected metric gates "
+                        "and became the reference."
+                    ),
+                },
+                "failure_analysis": {
+                    "schema_version": "bashgym.research_failures.v1",
+                    "campaign_id": "campaign-1",
+                    "reference": None,
+                    "candidate": None,
+                    "comparison": [
+                        {
+                            "category": "format_failure",
+                            "reference_count": 1,
+                            "candidate_count": 2,
+                            "delta": 1,
+                            "status": "regressed",
+                        },
+                        {
+                            "category": "task_failure",
+                            "reference_count": 20,
+                            "candidate_count": 7,
+                            "delta": -13,
+                            "status": "improved",
+                        },
+                    ],
+                    "truncated": False,
+                },
+                "outcome_assessment": {
+                    "schema_version": "bashgym.autoresearch_outcome_assessment.v1",
+                    "classification": "acceptable_tradeoff",
+                    "is_failure": False,
+                    "failure_kind": None,
+                    "decision": "keep",
+                    "reason_code": "primary_gain_with_nonblocking_tradeoff",
+                    "observed_tradeoffs": ["format_failure"],
+                    "observed_improvements": ["task_failure"],
+                    "evidence_strength": "single_observation",
+                },
+                "data": {
+                    "dataset_version_id": "dataset-v2",
+                    "content_digest": "e" * 64,
+                    "quality": {
+                        "generated_rows": 90,
+                        "accepted_rows": 60,
+                        "acceptance_rate": 2 / 3,
+                        "verification_pass_rate": 0.8,
+                    },
+                },
+                "attempt_ids": ["attempt-data", "attempt-train", "attempt-eval"],
+                "attempt_ids_omitted": 0,
+                "evidence_references": ["evaluation-candidate"],
+                "evidence_references_omitted": 0,
+            },
+        ],
+        "diagnostic_results": [
+            {
+                "schema_version": "bashgym.research_diagnostic_result.v1",
+                "probe_family": "loss_landscape",
+                "question": "Does held-out loss rise after the retained checkpoint?",
+                "hypothesis": "Longer continuation moves beyond the useful region.",
+                "status": "completed",
+                "measurements": [
+                    {
+                        "name": "heldout_loss_slope",
+                        "value": 0.031,
+                        "sample_count": 64,
+                        "unit": "loss_per_step",
+                    }
+                ],
+                "observations": [],
+                "unsupported_reason": None,
+            },
+            {
+                "probe_family": "reward_integrity_probe",
+                "question": "Can the exact decomposed reward safely support verifier RL?",
+                "hypothesis": "Hard constraints and exploit canaries pass.",
+                "status": "completed",
+                "comparison_contract": {
+                    "reward_spec_digest": "a" * 64,
+                    "canary_suite_id": "reward-hacking-v1",
+                },
+                "measurements": [
+                    {
+                        "name": "reward_canary_failure_rate",
+                        "value": 0.0,
+                        "sample_count": 4,
+                        "unit": "fraction",
+                    }
+                ],
+                "observations": [],
+                "unsupported_reason": None,
+            },
+            {
+                "probe_family": "preference_integrity_probe",
+                "question": "Are the exact preference labels stable enough for DPO?",
+                "hypothesis": "Position swaps preserve the preferred response.",
+                "status": "completed",
+                "comparison_contract": {
+                    "preference_dataset_digest": "b" * 64,
+                    "labeling_contract_digest": "c" * 64,
+                },
+                "measurements": [
+                    {
+                        "name": "preference_position_bias_rate",
+                        "value": 0.02,
+                        "sample_count": 96,
+                        "unit": "fraction",
+                    }
+                ],
+                "observations": [],
+                "unsupported_reason": None,
+            },
+        ],
+    }
+    value = CampaignExportSnapshot(
+        campaign={
+            "campaign_id": "campaign-1",
+            "objective": "Improve held-out retrieval",
+            "status": "exhausted",
+        },
+        autoresearch_history=history,
+    )
+
+    manifest = export_campaign_evidence(value, tmp_path / "export")
+
+    evidence = json.loads((tmp_path / "export" / "campaign_evidence.json").read_text())
+    report = (tmp_path / "export" / "campaign_report.md").read_text(encoding="utf-8")
+    assert evidence["schema_version"] == "campaign_export_snapshot.v2"
+    assert evidence["autoresearch_history"] == history
+    assert manifest["quality_findings_available"] is True
+    assert "## AutoResearch experiment history" in report
+    assert "## Research diagnostics" in report
+    assert "### loss_landscape" in report
+    assert "`heldout_loss_slope` = 0.031 loss_per_step (n=64)" in report
+    assert f"Reward spec: `{'a' * 64}`" in report
+    assert "Canary suite: `reward-hacking-v1`" in report
+    assert f"Preference dataset: `{'b' * 64}`" in report
+    assert f"Labeling contract: `{'c' * 64}`" in report
+    assert "Current AutoResearch reference: `candidate-kept`" in report
+    assert "Promoted campaign champion: `not promoted`" in report
+    assert "Recorded baseline cost: `0.1`" in report
+    assert "Recorded candidate cost: `1`" in report
+    assert "Recorded campaign total cost: `1.1`" in report
+    assert "| 1 | baseline | baseline | 0.5 | — | baseline |" in report
+    assert "| 2 | candidate | dataset_recipe.verifier_filter | 0.62 | +0.12 | keep |" in report
+    assert "### 2. candidate-kept" in report
+    assert "Fixed evaluation suite: `suite-heldout`" in report
+    assert "`invalid_tool_calls`: 0.03 vs 0.04; regression 0; limit 0.01; pass" in report
+    assert "Data quality: 60/90 accepted; verification pass rate 0.8." in report
+    assert "Method-readiness thresholds: `min_demonstration_examples=64`." in report
+    assert "`task_failure`: 20 to 7 (-13; improved)" in report
+    assert "Outcome assessment: `acceptable_tradeoff`; not a failed experiment" in report
+    assert "Observed tradeoffs: `format_failure`." in report
+    assert "Observed improvements: `task_failure`." in report
+    assert "Evidence strength: `single_observation`." in report
+    assert "Behavioral error categories:" in report
+    assert "Failure categories:" not in report
+    assert (
+        "Finding: The candidate cleared the configured primary and protected metric gates and "
+        "became the reference."
+    ) in report
+    assert "Evidence: `evaluation-candidate`" in report

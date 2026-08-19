@@ -79,6 +79,16 @@ test('campaign bridge allowlists exact REST routes and rejects renderer escape h
       data: 'data.registered',
       compute: 'compute.private',
       evaluation: 'evaluation.registered'
+    },
+    stop_rules: {
+      schema_version: 'autoresearch_stop_rules.v1',
+      max_attempts: 5,
+      budget_unit: 'gpu_hours',
+      max_total_cost: 10,
+      target_metric: null,
+      minimum_improvement: 0.01,
+      protected_metrics: [],
+      deadline: null
     }
   })
   validateCampaignRequest(
@@ -410,6 +420,11 @@ test('main-only credential adapters use only fixed routes and keep bgag out of b
           status: 200
         })
       }
+      if (url.includes('/actions/wait?')) {
+        return new Response(JSON.stringify({ schemaVersion: 'campaign_agent_wait.v1' }), {
+          status: 200
+        })
+      }
       return new Response(
         JSON.stringify({ schemaVersion: 'campaign_agent_artifact_page.v1', items: [] }),
         { status: 200 }
@@ -428,6 +443,10 @@ test('main-only credential adapters use only fixed routes and keep bgag out of b
     expectedResumeCursor: 'public-cursor-0'
   })
   const observation = await client.observeCampaignAsAgent(credential)
+  const wait = await client.waitForCampaignAsAgent(credential, {
+    afterCursor: 11,
+    timeoutSeconds: 30
+  })
   const artifacts = await client.listCampaignArtifactsAsAgent(credential, {
     afterCursor: 'a1.ABCdef_1234',
     limit: 25
@@ -438,6 +457,7 @@ test('main-only credential adapters use only fixed routes and keep bgag out of b
     [
       'http://127.0.0.1:8003/api/campaign-agent/heartbeat',
       'http://127.0.0.1:8003/api/campaign-agent/actions/observe',
+      'http://127.0.0.1:8003/api/campaign-agent/actions/wait?after_cursor=11&timeout_seconds=30',
       'http://127.0.0.1:8003/api/campaign-agent/actions/artifacts?after_cursor=a1.ABCdef_1234&limit=25'
     ]
   )
@@ -452,7 +472,9 @@ test('main-only credential adapters use only fixed routes and keep bgag out of b
   assert.equal(calls[1].init?.body, undefined)
   assert.equal(calls[2].init?.method, 'GET')
   assert.equal(calls[2].init?.body, undefined)
-  assert.equal(JSON.stringify([heartbeat, observation, artifacts]).includes('bgag.'), false)
+  assert.equal(calls[3].init?.method, 'GET')
+  assert.equal(calls[3].init?.body, undefined)
+  assert.equal(JSON.stringify([heartbeat, observation, wait, artifacts]).includes('bgag.'), false)
 
   assert.throws(
     () => validateCampaignRequest('POST', '/api/campaign-agent/heartbeat', {}),
@@ -488,6 +510,14 @@ test('main-only credential adapters reject unbounded inputs and sanitize every f
   )
   await assert.rejects(
     () => client.listCampaignArtifactsAsAgent(credential, { limit: 51 }),
+    (error: Error) => error.message === 'Campaign agent credential request failed'
+  )
+  await assert.rejects(
+    () => client.waitForCampaignAsAgent(credential, { afterCursor: -1, timeoutSeconds: 30 }),
+    (error: Error) => error.message === 'Campaign agent credential request failed'
+  )
+  await assert.rejects(
+    () => client.waitForCampaignAsAgent(credential, { afterCursor: 0, timeoutSeconds: 56 }),
     (error: Error) => error.message === 'Campaign agent credential request failed'
   )
   assert.equal(fetchCount, 0)

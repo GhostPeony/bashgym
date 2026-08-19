@@ -22,6 +22,38 @@ const privateLabelCanary =
   /(?:https?:\/\/|ssh:\/\/|file:\/\/|[A-Za-z]:\\|\/(?:home|Users)\/|(?:ghp|sk-proj|sk_live|xox[baprs]|AKIA|AIza)[_-]?[A-Za-z0-9])/i
 const canonicalUtc = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{6}))?Z$/
 const guidedSetupLimit = 32
+const methodThresholdIntegerKeys = [
+  'min_demonstration_examples',
+  'min_preference_pairs',
+  'min_rollout_groups',
+  'min_reward_canary_cases',
+  'min_recovery_traces'
+] as const
+const methodThresholdRateKeys = [
+  'min_target_slice_coverage',
+  'max_contamination_rate',
+  'min_preference_agreement_lower_bound',
+  'max_ambiguous_pair_rate',
+  'max_preference_position_bias_rate',
+  'max_preference_label_conflict_rate',
+  'max_preference_contamination_rate',
+  'min_rollout_success_rate',
+  'max_rollout_success_rate',
+  'max_zero_std_group_fraction',
+  'max_verifier_error_rate',
+  'min_teacher_output_acceptance_rate',
+  'max_reward_canary_failure_rate',
+  'max_hard_constraint_violation_rate'
+] as const
+const methodThresholdFiniteKeys = [
+  'min_teacher_metric_gap',
+  'min_recovery_lift_lower_bound'
+] as const
+const methodThresholdKeys = [
+  ...methodThresholdIntegerKeys,
+  ...methodThresholdRateKeys,
+  ...methodThresholdFiniteKeys
+] as const
 
 type PublicRecord = Record<string, unknown>
 
@@ -60,6 +92,13 @@ export interface GuidedSetupTemplate {
   definition_digest: string
   quality_claim_eligible: boolean
   required_bindings: GuidedSetupBindings
+  experiment_contract: {
+    primary_metric: string
+    metric_direction: 'maximize' | 'minimize'
+    max_attempts_limit: number
+    budget_limits: Record<string, number>
+    protected_metrics: AutoResearchStopRules['protected_metrics']
+  }
 }
 
 export interface GuidedSetupStepReceipt {
@@ -116,7 +155,30 @@ export interface GuidedSetupDoctor {
   ready: boolean
   blocking_codes: string[]
   binding_references: Array<{ kind: GuidedBindingKind; logical_id: string; availability: string }>
+  stop_rules: AutoResearchStopRules
+  method_thresholds: AutoResearchMethodThresholds
 }
+
+export interface AutoResearchStopRules {
+  schema_version: 'autoresearch_stop_rules.v1'
+  max_attempts: number
+  budget_unit: string
+  max_total_cost: number
+  target_metric: number | null
+  minimum_improvement: number
+  protected_metrics: Array<{
+    metric_name: string
+    direction: 'maximize' | 'minimize'
+    max_regression: number
+  }>
+  deadline: string | null
+}
+
+type AutoResearchMethodThresholdKey = (typeof methodThresholdKeys)[number]
+
+export type AutoResearchMethodThresholds = {
+  schema_version: 'autoresearch_method_thresholds.v1'
+} & Partial<Record<AutoResearchMethodThresholdKey, number>>
 
 export interface GuidedSetupValidation extends GuidedSetupDoctor {
   receipt_id: string
@@ -136,6 +198,8 @@ export interface GuidedSetupCreation {
   replayed: boolean
   validation_receipt_id: string
   binding_references: GuidedSetupBindings
+  stop_rules: AutoResearchStopRules
+  method_thresholds: AutoResearchMethodThresholds
 }
 
 export interface GuidedSetupOption {
@@ -179,6 +243,94 @@ function safeString(value: unknown, pattern = publicId, max = 160): value is str
 
 function safeReasonCodes(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= 64 && value.every((item) => safeString(item))
+}
+
+export function parseAutoResearchStopRules(value: unknown): AutoResearchStopRules | null {
+  const item = exact(value, [
+    'schema_version',
+    'max_attempts',
+    'budget_unit',
+    'max_total_cost',
+    'target_metric',
+    'minimum_improvement',
+    'protected_metrics',
+    'deadline'
+  ])
+  if (
+    !item ||
+    item.schema_version !== 'autoresearch_stop_rules.v1' ||
+    !Number.isSafeInteger(item.max_attempts) ||
+    Number(item.max_attempts) < 1 ||
+    Number(item.max_attempts) > 100 ||
+    !safeString(item.budget_unit) ||
+    typeof item.max_total_cost !== 'number' ||
+    !Number.isFinite(item.max_total_cost) ||
+    item.max_total_cost <= 0 ||
+    (item.target_metric !== null &&
+      (typeof item.target_metric !== 'number' || !Number.isFinite(item.target_metric))) ||
+    typeof item.minimum_improvement !== 'number' ||
+    !Number.isFinite(item.minimum_improvement) ||
+    item.minimum_improvement < 0 ||
+    !Array.isArray(item.protected_metrics) ||
+    item.protected_metrics.length > 64 ||
+    (item.deadline !== null &&
+      (typeof item.deadline !== 'string' || Number.isNaN(Date.parse(item.deadline))))
+  )
+    return null
+  const protectedMetrics = item.protected_metrics.map((value) =>
+    exact(value, ['metric_name', 'direction', 'max_regression'])
+  )
+  if (
+    protectedMetrics.some(
+      (metric) =>
+        !metric ||
+        !safeString(metric.metric_name) ||
+        !['maximize', 'minimize'].includes(String(metric.direction)) ||
+        typeof metric.max_regression !== 'number' ||
+        !Number.isFinite(metric.max_regression) ||
+        metric.max_regression < 0
+    )
+  )
+    return null
+  return {
+    schema_version: item.schema_version,
+    max_attempts: Number(item.max_attempts),
+    budget_unit: item.budget_unit as string,
+    max_total_cost: item.max_total_cost,
+    target_metric: item.target_metric as number | null,
+    minimum_improvement: item.minimum_improvement,
+    protected_metrics: protectedMetrics as AutoResearchStopRules['protected_metrics'],
+    deadline: item.deadline as string | null
+  }
+}
+
+function parseAutoResearchMethodThresholds(value: unknown): AutoResearchMethodThresholds | null {
+  const item = exact(value, ['schema_version'], methodThresholdKeys)
+  if (
+    !item ||
+    item.schema_version !== 'autoresearch_method_thresholds.v1' ||
+    !methodThresholdIntegerKeys.every(
+      (key) =>
+        item[key] === undefined || (Number.isSafeInteger(item[key]) && Number(item[key]) >= 1)
+    ) ||
+    !methodThresholdRateKeys.every(
+      (key) =>
+        item[key] === undefined ||
+        (typeof item[key] === 'number' &&
+          Number.isFinite(item[key]) &&
+          Number(item[key]) >= 0 &&
+          Number(item[key]) <= 1)
+    ) ||
+    !methodThresholdFiniteKeys.every(
+      (key) =>
+        item[key] === undefined || (typeof item[key] === 'number' && Number.isFinite(item[key]))
+    ) ||
+    (typeof item.min_rollout_success_rate === 'number' &&
+      typeof item.max_rollout_success_rate === 'number' &&
+      item.min_rollout_success_rate > item.max_rollout_success_rate)
+  )
+    return null
+  return item as AutoResearchMethodThresholds
 }
 
 function boundedInteger(value: unknown, max = 10_000): value is number {
@@ -371,16 +523,62 @@ export function parseGuidedSetupContext(value: unknown): GuidedSetupContext | nu
       'template_id',
       'definition_digest',
       'quality_claim_eligible',
-      'required_bindings'
+      'required_bindings',
+      'experiment_contract'
     ])
     const required = row ? parseBindings(row.required_bindings) : null
+    const experiment = row
+      ? exact(row.experiment_contract, [
+          'primary_metric',
+          'metric_direction',
+          'max_attempts_limit',
+          'budget_limits',
+          'protected_metrics'
+        ])
+      : null
+    const budgetLimits = experiment ? record(experiment.budget_limits) : null
+    const validBudgetLimits =
+      budgetLimits !== null &&
+      Object.keys(budgetLimits).length > 0 &&
+      Object.keys(budgetLimits).length <= 64 &&
+      Object.entries(budgetLimits).every(
+        ([unit, limit]) =>
+          safeString(unit) && typeof limit === 'number' && Number.isFinite(limit) && limit >= 0
+      )
+    const protectedMetrics = experiment
+      ? parseAutoResearchStopRules({
+          schema_version: 'autoresearch_stop_rules.v1',
+          max_attempts: 1,
+          budget_unit: 'validation',
+          max_total_cost: 1,
+          target_metric: null,
+          minimum_improvement: 0,
+          protected_metrics: experiment.protected_metrics,
+          deadline: null
+        })?.protected_metrics
+      : null
     return row &&
       row.schema_version === 'guided_setup_template.v1' &&
       safeString(row.template_id) &&
       safeString(row.definition_digest, hexDigest, 64) &&
       typeof row.quality_claim_eligible === 'boolean' &&
-      required
-      ? ({ ...row, required_bindings: required } as unknown as GuidedSetupTemplate)
+      required &&
+      experiment &&
+      safeString(experiment.primary_metric) &&
+      ['maximize', 'minimize'].includes(String(experiment.metric_direction)) &&
+      Number.isSafeInteger(experiment.max_attempts_limit) &&
+      Number(experiment.max_attempts_limit) >= 1 &&
+      validBudgetLimits &&
+      protectedMetrics
+      ? ({
+          ...row,
+          required_bindings: required,
+          experiment_contract: {
+            ...experiment,
+            budget_limits: budgetLimits,
+            protected_metrics: protectedMetrics
+          }
+        } as unknown as GuidedSetupTemplate)
       : null
   })
   if (templates.some((row) => row === null)) return null
@@ -460,10 +658,14 @@ function parseDoctorBase(
     'draft_digest',
     'ready',
     'blocking_codes',
-    'binding_references'
+    'binding_references',
+    'stop_rules',
+    'method_thresholds'
   ]
   if (withReceipt) required.push('receipt_id')
   const item = exact(value, required)
+  const stopRules = item ? parseAutoResearchStopRules(item.stop_rules) : null
+  const methodThresholds = item ? parseAutoResearchMethodThresholds(item.method_thresholds) : null
   if (
     !item ||
     item.schema_version !== 'guided_setup_doctor.v1' ||
@@ -474,7 +676,9 @@ function parseDoctorBase(
     typeof item.ready !== 'boolean' ||
     !safeReasonCodes(item.blocking_codes) ||
     !Array.isArray(item.binding_references) ||
-    item.binding_references.length !== 4
+    item.binding_references.length !== 4 ||
+    !stopRules ||
+    !methodThresholds
   )
     return null
   const references = item.binding_references.map((value) =>
@@ -498,7 +702,11 @@ function parseDoctorBase(
   )
     return null
   if (withReceipt && !safeString(item.receipt_id, validationReceiptId)) return null
-  return item as unknown as GuidedSetupDoctor | GuidedSetupValidation
+  return {
+    ...item,
+    stop_rules: stopRules,
+    method_thresholds: methodThresholds
+  } as unknown as GuidedSetupDoctor | GuidedSetupValidation
 }
 
 export function parseGuidedSetupDoctor(value: unknown): GuidedSetupDoctor | null {
@@ -526,9 +734,17 @@ export function parseGuidedSetupCreation(value: unknown): GuidedSetupCreation | 
   const campaign = item ? record(item.campaign) : null
   const event = item ? record(item.event) : null
   const setup = item
-    ? exact(item.setup, ['schema_version', 'validation_receipt_id', 'binding_references'])
+    ? exact(item.setup, [
+        'schema_version',
+        'validation_receipt_id',
+        'binding_references',
+        'stop_rules',
+        'method_thresholds'
+      ])
     : null
   const bindings = setup ? parseBindings(setup.binding_references) : null
+  const stopRules = setup ? parseAutoResearchStopRules(setup.stop_rules) : null
+  const methodThresholds = setup ? parseAutoResearchMethodThresholds(setup.method_thresholds) : null
   if (
     !item ||
     !campaign ||
@@ -538,6 +754,8 @@ export function parseGuidedSetupCreation(value: unknown): GuidedSetupCreation | 
     setup.schema_version !== 'guided_setup_creation.v1' ||
     !safeString(setup.validation_receipt_id, validationReceiptId) ||
     !bindings ||
+    !stopRules ||
+    !methodThresholds ||
     !safeString(campaign.workspace_id) ||
     !safeString(campaign.campaign_id) ||
     typeof campaign.title !== 'string' ||
@@ -554,7 +772,9 @@ export function parseGuidedSetupCreation(value: unknown): GuidedSetupCreation | 
     status: campaign.status,
     replayed: item.replayed,
     validation_receipt_id: setup.validation_receipt_id,
-    binding_references: bindings
+    binding_references: bindings,
+    stop_rules: stopRules,
+    method_thresholds: methodThresholds
   }
 }
 
@@ -573,7 +793,7 @@ export function buildGuidedSetupView(context: GuidedSetupContext): GuidedSetupVi
     options = context.templates.map((item) => ({
       id: item.template_id,
       label: item.template_id,
-      detail: item.quality_claim_eligible ? 'Quality-claim eligible' : null,
+      detail: `${item.experiment_contract.primary_metric} · ${item.experiment_contract.metric_direction} · up to ${item.experiment_contract.max_attempts_limit} attempts`,
       selectable: true,
       reasonCodes: []
     }))

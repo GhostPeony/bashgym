@@ -21,22 +21,110 @@ or the user asks for them. Use plain technical language; do not invent slogans.
    plan.
 2. If no baseline exists, evaluate the registered starting model on the fixed
    held-out suite.
-3. Inspect failed tasks, traces, metric slices, dataset checks, and prior
-   interventions. Form one falsifiable hypothesis.
-4. Change one supported input: data, training recipe, reward, evaluator, or
-   approved training code. Submit one candidate against the current reference.
-5. Let BashGym schedule and run the registered stages. Use `research wait` with
+3. Read `bashgym research failures` to compare bounded evaluator-authored
+   behavioral categories for the reference and latest candidate. Combine those
+   summaries with traces, numeric slices, dataset checks, and prior
+   interventions, then form one falsifiable hypothesis. Failure summaries are
+   development evidence; they never authorize access to protected rows.
+4. Choose the intervention mode deliberately. Use a `controlled` candidate for
+   one declared scientific path when a narrow causal test is possible. Use an
+   `exploratory` candidate for a bounded, fully declared bundle when coupled
+   changes are the hypothesis; give that branch a hypothesis-family ID and do
+   not attribute its result to one component.
+   Read `decision_packet.method_selection` before choosing SFT, DPO, verifier
+   RL, or distillation. Its persisted thresholds and readiness statuses are
+   advisory; the host agent still makes the scientific choice, and only a
+   validated installed runner can execute it. Read
+   `recommended_intervention_families` before spending training compute. When
+   prompt/context, retrieval/tooling, or serving parity could distinguish the
+   failure more cheaply, run that bounded control first. A weight update remains
+   available when its method evidence is eligible; the projection advises the
+   host and never chooses or launches an intervention.
+5. When the next method choice depends on a measurable unknown, submit an
+   agent-designed diagnostic with `research submit-iteration --role diagnostic
+--parent-proposal <reference>`. The agent chooses the probe family, question,
+   hypothesis, measurements, and bounded parameters; no pre-registered design
+   ID is required. The installed runner and campaign still bound the accessible
+   data, sample count, measurement count, runtime, outputs, and cost. Treat
+   `unsupported` as evidence that this runner cannot answer the question—never
+   substitute a different probe or method silently. Diagnostics spend campaign
+   budget and proposal rounds, but do not consume a model-candidate attempt,
+   change the retained reference, or produce KEEP/DISCARD.
+   Read `research state.diagnostic_capabilities` first. Treat it as the
+   installed runner's measurement matrix, not an experiment menu. Passive
+   failure, trajectory, dataset-quality, and training-metric diagnostics should
+   be used directly without scheduling another action. If the active request is
+   outside the matrix, it may still be scientifically valid, but the runner
+   must return `unsupported`; never rewrite it into a supported probe silently.
+   For repeated fine-tuning lineages, do not call an endpoint regression
+   plasticity loss. A `plasticity_probe` is interpretable only when the runner
+   exposes all required measurements and executes the same recipe digest, seed,
+   sample scope, optimizer contract, and fixed step budget against at least two
+   exact parent checkpoints. Read `decision_packet.plasticity`: retention decline
+   and reduced adaptation efficiency are separate observations, and the
+   campaign-supplied retention tolerance and minimum efficiency ratio determine
+   whether either concern is material.
+   Before GRPO or RLVR, require a completed `reward_integrity_probe` when the
+   installed runner exposes it. Bind the probe to the exact decomposed reward
+   spec, inspect each named component distribution, and predeclare any
+   non-negotiable component bound. The existing adversarial reward-hacking
+   canaries must run through the same environment guardrails. Reward variance
+   alone is not readiness: a failed hard constraint, an unguarded canary, a
+   verifier error, or missing campaign thresholds keeps verifier RL
+   `blocked`/`diagnostic_needed`. The host agent may propose a different named
+   component weight or reward definition as an experiment, but the installed
+   verifier executable and evaluation boundary remain fixed unless the proposal
+   carries approved code lineage.
+   Before DPO, use a completed `preference_integrity_probe` when the installed
+   runner exposes it. Bind the exact preference dataset and labeling contract;
+   inspect agreement, ambiguous-pair rate, position-order bias, contradictory
+   labels, and held-out overlap. Row-format validation or a large pair count is
+   not enough. Missing campaign thresholds keeps DPO `diagnostic_needed`; a
+   measured breach suggests a labeling or data-revision experiment, not an
+   automatic switch to another training method.
+6. Let BashGym schedule and run the registered stages. Use `research wait` with
    its durable cursor, then refresh `research state` when progress or an agent
    action is reported.
-6. Compare the candidate with the baseline and current reference. Inspect
+7. Compare the candidate with the baseline and current reference. Inspect
    aggregate gains, protected regressions, and the tasks behind both.
-7. Repeat only when the evidence supports a specific next intervention.
+8. Repeat only when the evidence supports a specific next intervention.
    Otherwise stop and request the report.
 
 Keep user-facing updates in this order: objective, current experiment, latest
 comparison, latest finding, next action. Add budget only when it constrains the
 decision. Link the BashGym experiment view only when the user asks for the
 visual record or needs to inspect detailed logs or artifacts.
+
+### Preserve idea diversity
+
+Before selecting the next expensive run, keep a small hypothesis portfolio in
+the host agent's native goal or plan:
+
+- one **exploit** idea that improves the current reference using the strongest
+  measured signal;
+- one **near-miss** idea that revisits a promising failure with a materially
+  different, evidence-backed intervention;
+- one **structural** idea from error analysis, profiling, an advisor, a
+  subagent, or cited external research.
+
+Use a cheap diagnostic or evaluation probe when it can distinguish these ideas
+before training. Execute one declared candidate at a time, evaluate it on the
+fixed suite, then update or retire the portfolio from the recorded result. A
+completed real ancestor may be used as a verified branch parent, but
+KEEP/DISCARD still compares the candidate with the current retained reference.
+The portfolio is research scratch state, not a second scheduler: it does not
+permit parallel training, undeclared changes, promotion without evaluation, or
+training from an unverified checkpoint.
+
+After each completed result and before compaction or handoff, update one
+**bounded scientific handoff** in the host's native goal, plan, or curated
+research context.
+Record the current question, three or four portfolio entries, each entry's
+status (`active`, `tested`, `retired`, or `deferred`), one evidence reference,
+the next discriminating probe, and why no experiment was selected when the
+agent stops. On resume, load this handoff after live campaign state and before
+new brainstorming. It preserves scientific intent without becoming another
+campaign scheduler.
 
 ## Establish context
 
@@ -99,6 +187,20 @@ Use the existing campaign ledger as the durable training-session record. Use `ge
 2. State the verified plan and unresolved gates. Do not relaunch work that already exists.
 3. Preview and persist the exact strategy/config, including `checkpoint_limit`, `artifact_retention`, and Hugging Face destination fields. Select a doctor-verified activation lane and perform the next allowed action through its executable surface. A generated SkyPilot/dstack plan is not a launch; an HF Jobs id is not a native BashGym run id. If the doctor reports `launch_general_training: false`, do not pretend the documented CLI is executable there: continue planning/inspection and request a reachable desktop API or an updated isolated checkout. Never imply that local project tooling advanced the desktop campaign ledger.
    - For direct runs, pass `--tracking-context <json>` or the agent tool's `tracking_context`. If lineage is incomplete, record an unassigned smoke/ad-hoc run and resolve it before using the result for a project decision.
+   - For a claim-bearing full-training profile, declare and seal a compact
+     `training_metrics.jsonl` when the trainer supports it. If the recipe cannot
+     emit metrics, record `loss unavailable for this recipe`; do not present an
+     empty loss chart as observed training behavior.
+   - When the installed runner and fixed evaluator implement checkpoint
+     trajectory evidence, set `--intermediate-checkpoint-limit N` during
+     activation (maximum 8). Treat retained checkpoint scores as diagnostic
+     evidence only; do not promote an intermediate checkpoint implicitly.
+   - To test whether an apparent improvement repeats, submit separate candidate
+     studies with distinct declared training seeds and one shared
+     `hypothesis_family_id`. Hold the intervention and evaluation contract fixed.
+     Read the family mean, sample standard deviation, standard error, and range
+     as descriptive evidence; do not claim replication from one run or from
+     multiple checkpoints of the same run.
 4. Monitor at a cadence appropriate to the run. Record milestones and anomalies, not every metric point.
 5. Evaluate with the declared suite, compare against the pinned baseline and gates, and distinguish smoke/runtime evidence from model-quality evidence.
 6. Export Markdown, charts, DOCX, and PDF only after the required full run and evaluation complete. Preserve report/export IDs and hashes.
@@ -109,9 +211,7 @@ Use the existing campaign ledger as the durable training-session record. Use `ge
 ## Run a durable AutoResearch campaign
 
 Use the durable campaign API for any new multi-iteration research loop. The
-legacy `/api/autoresearch/*` surface is prototype compatibility only, is hidden
-unless `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`, and must not be used as the
-authoritative campaign record.
+campaign record is the single authoritative AutoResearch state.
 
 An initial request to begin AutoResearch authorizes preparation, not training.
 Do not make the user repeat choices that already exist in registered context.
@@ -123,7 +223,12 @@ Do not make the user repeat choices that already exist in registered context.
    required choice is missing or ambiguous.
 2. Once the choices are exact, create a private
    `autoresearch_onboarding_contract.v1` that references the reviewed
-   definition, activation request, and immutable target-model request. Preview
+   definition, activation request, and immutable target-model request. Require
+   the user to choose `max_attempts`, `budget_unit`, `max_total_cost`, and
+   `minimum_improvement`; attempts include the baseline and candidates. Never
+   infer these values from a prior campaign or silently use the template
+   policy. Preserve the template's fixed primary metric, direction, and
+   protected gates. Preview
    it with `bashgym research onboard --contract <file> --json`. This returns the
    ordered plan without applying it.
 3. Apply the same contract by adding `--apply` to `bashgym research onboard`.
@@ -147,9 +252,11 @@ Do not make the user repeat choices that already exist in registered context.
    plus `next_cursor`. On `changed`, `agent_action_required`, or `terminal`,
    synchronize the host's native goal and plan. On `timeout`, call it again with
    the returned cursor when continued monitoring is useful.
-7. After a real baseline is accepted, submit one candidate at a time with
+7. After a real baseline is accepted, either submit one candidate at a time with
    `research submit-iteration --role candidate` and the incumbent proposal as
-   `--parent-proposal`. Do not use the generic proposal route. For changes to
+   `--parent-proposal`, or run a bounded diagnostic first when a measured result
+   can distinguish competing interventions. Do not use the generic proposal
+   route. For changes to
    trainer, algorithm, gym, environment, reward, evaluator, or verifier code,
    use `campaign proposal lineage-prepare`, edit only the returned worktree,
    and finish with `campaign proposal lineage-capture`. Scalar recipe changes
@@ -158,7 +265,7 @@ Do not make the user repeat choices that already exist in registered context.
    attempt, artifact, and evaluation lineage. The primary metric comes from the
    evaluator, not training loss. Smoke or simulated results prove wiring only;
    they cannot establish a baseline or incumbent.
-9. Re-read `research state` after each result. Continue only with a specific
+9. Re-read `research state` and `research failures` after each result. Continue only with a specific
    evidence-backed hypothesis. Stop on the durable stop rule or an authorized
    pause/cancel, then request the final artifacts with `research report`.
 

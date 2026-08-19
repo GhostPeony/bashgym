@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import plistlib
+import subprocess
 import sys
 import threading
 import urllib.error
@@ -254,6 +255,30 @@ def test_linux_status_does_not_treat_an_inactive_unit_as_available(tmp_path: Pat
 
     assert worker_status["supervisor_state"] == "unavailable"
     assert api_status["supervisor_state"] == "unavailable"
+
+
+def test_windows_service_commands_never_create_console_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Onboarding lifecycle commands must not flash or steal desktop focus."""
+
+    observed: dict[str, object] = {}
+
+    def fake_run(argv, **kwargs):
+        observed["argv"] = tuple(argv)
+        observed.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(worker_service.subprocess, "run", fake_run)
+
+    result = worker_service.run_command(
+        ("reg.exe", "QUERY", "HKCU\\Software\\BashGym"),
+        platform=WorkerPlatform.WINDOWS,
+    )
+
+    assert result.returncode == 0
+    assert observed["shell"] is False
+    assert int(observed["creationflags"]) & 0x08000000
 
 
 def test_windows_worker_install_registers_then_starts_without_elevation(tmp_path: Path) -> None:

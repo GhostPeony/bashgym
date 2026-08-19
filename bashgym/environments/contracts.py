@@ -95,6 +95,35 @@ class FixtureSpec:
 
 
 @dataclass
+class RewardConstraintSpec:
+    """A non-negotiable bound for one named reward component."""
+
+    minimum: float | None = None
+    maximum: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.minimum is not None:
+            self.minimum = float(self.minimum)
+        if self.maximum is not None:
+            self.maximum = float(self.maximum)
+        if self.minimum is None and self.maximum is None:
+            raise ValueError("reward constraint requires at least one bound")
+        if any(
+            value is not None and not math.isfinite(value) for value in (self.minimum, self.maximum)
+        ):
+            raise ValueError("reward constraint bounds must be finite")
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("reward constraint minimum cannot exceed maximum")
+
+    def to_dict(self) -> dict[str, float]:
+        return _clean_dict({"minimum": self.minimum, "maximum": self.maximum})
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RewardConstraintSpec:
+        return cls(minimum=data.get("minimum"), maximum=data.get("maximum"))
+
+
+@dataclass
 class RewardComponentSpec:
     """One named verifier reward used for multi-objective RL.
 
@@ -107,18 +136,24 @@ class RewardComponentSpec:
     weight: float = 1.0
     description: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    hard_constraint: RewardConstraintSpec | None = None
 
     def __post_init__(self) -> None:
         self.name = str(self.name).strip()
         self.weight = float(self.weight)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "weight": self.weight,
-            "description": self.description,
-            "metadata": self.metadata,
-        }
+        return _clean_dict(
+            {
+                "name": self.name,
+                "weight": self.weight,
+                "description": self.description,
+                "metadata": self.metadata,
+                "hard_constraint": (
+                    self.hard_constraint.to_dict() if self.hard_constraint is not None else None
+                ),
+            }
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | str) -> RewardComponentSpec:
@@ -129,6 +164,11 @@ class RewardComponentSpec:
             weight=float(data.get("weight", 1.0)),
             description=str(data.get("description", "")),
             metadata=dict(data.get("metadata") or {}),
+            hard_constraint=(
+                RewardConstraintSpec.from_dict(dict(data["hard_constraint"]))
+                if data.get("hard_constraint") is not None
+                else None
+            ),
         )
 
 

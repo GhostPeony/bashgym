@@ -47,6 +47,9 @@ class TerminalEnvironmentDraft(BaseModel):
 def build_terminal_env_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
     """Build a terminal-environment generation pipeline."""
     builder = build_base_config(config)
+    experiment_brief = config.experiment_brief.strip() or (
+        "Generate a broad, balanced set of realistic terminal-agent tasks."
+    )
 
     builder.add_column(
         dd.SamplerColumnConfig(
@@ -163,6 +166,7 @@ def build_terminal_env_pipeline(config: PipelineConfig) -> dd.DataDesignerConfig
             model_alias="text-model",
             prompt=(
                 "Generate a realistic terminal-agent task.\n\n"
+                f"Experiment focus: {experiment_brief}\n\n"
                 "Domain: {{ domain }}\n"
                 "Skill focus: {{ skill_type }}\n"
                 "Persona: {{ persona }}\n"

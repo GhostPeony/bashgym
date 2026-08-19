@@ -134,6 +134,10 @@ def test_campaign_evidence_is_deterministic_and_preserves_exact_identities(tmp_p
     assert first.token_evidence_digest
     assert first.refit_receipt_digest
     assert first.evidence_digest
+    reward_reference = first.bounded_reference(artifact_id="artifact-a", artifact_sha256="c" * 64)
+    assert reward_reference["reward_spec_digest"]
+    assert "command" not in str(reward_reference)
+    assert "path" not in str(reward_reference)
 
 
 def test_loader_rejects_tampering_and_cross_attempt_replay(tmp_path: Path):

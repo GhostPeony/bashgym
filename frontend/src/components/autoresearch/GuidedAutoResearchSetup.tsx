@@ -23,9 +23,17 @@ export interface GuidedAutoResearchSetupProps {
   selectedOptionId: string
   campaignId: string
   title: string
+  budgetUnit: string
+  budgetLimit: string
+  maxAttempts: string
+  minimumImprovement: string
   onSelectedOptionChange: (value: string) => void
   onCampaignIdChange: (value: string) => void
   onTitleChange: (value: string) => void
+  onBudgetUnitChange: (value: string) => void
+  onBudgetLimitChange: (value: string) => void
+  onMaxAttemptsChange: (value: string) => void
+  onMinimumImprovementChange: (value: string) => void
   onAdvance: () => void
   onDoctor: () => void
   onValidate: () => void
@@ -64,9 +72,17 @@ export function GuidedAutoResearchSetup({
   selectedOptionId,
   campaignId,
   title,
+  budgetUnit,
+  budgetLimit,
+  maxAttempts,
+  minimumImprovement,
   onSelectedOptionChange,
   onCampaignIdChange,
   onTitleChange,
+  onBudgetUnitChange,
+  onBudgetLimitChange,
+  onMaxAttemptsChange,
+  onMinimumImprovementChange,
   onAdvance,
   onDoctor,
   onValidate,
@@ -77,9 +93,29 @@ export function GuidedAutoResearchSetup({
   const view = context ? buildGuidedSetupView(context) : null
   const activeStep = view?.currentStep
   const selectedOption = view?.options.find((option) => option.id === selectedOptionId)
+  const selectedTemplate = context?.templates.find(
+    (item) => item.template_id === context.session?.selections.template_id
+  )
+  const approvedBudget = selectedTemplate?.experiment_contract.budget_limits[budgetUnit]
   const canSave = live && !pending && Boolean(selectedOption?.selectable)
+  const limitsValid =
+    selectedTemplate !== undefined &&
+    /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(budgetUnit) &&
+    Number.isFinite(Number(budgetLimit)) &&
+    Number(budgetLimit) > 0 &&
+    approvedBudget !== undefined &&
+    Number(budgetLimit) <= approvedBudget &&
+    /^[1-9][0-9]*$/.test(maxAttempts) &&
+    Number(maxAttempts) <= selectedTemplate.experiment_contract.max_attempts_limit &&
+    Number.isFinite(Number(minimumImprovement)) &&
+    Number(minimumImprovement) >= 0
   const canCreate =
-    live && !pending && Boolean(validation?.ready) && campaignId.length > 0 && title.length > 0
+    live &&
+    !pending &&
+    limitsValid &&
+    Boolean(validation?.ready) &&
+    campaignId.length > 0 &&
+    title.length > 0
 
   return (
     <section className="mx-auto w-full max-w-[1200px]" aria-labelledby="guided-setup-title">
@@ -226,9 +262,78 @@ export function GuidedAutoResearchSetup({
                 Verify materialization
               </h3>
               <p className="mt-1 text-xs leading-5 text-text-secondary">
-                Doctor reads the current registered bindings. Validation then seals that exact
-                readiness result before campaign creation.
+                Choose the experiment limits, then verify the registered bindings. Validation seals
+                both before campaign creation.
               </p>
+              {selectedTemplate ? (
+                <p className="mt-2 border-l-2 border-accent px-3 py-2 font-mono text-[10px] leading-5 text-text-secondary">
+                  Primary metric · {selectedTemplate.experiment_contract.primary_metric} (
+                  {selectedTemplate.experiment_contract.metric_direction})
+                  <br />
+                  Approved ceilings · {selectedTemplate.experiment_contract.max_attempts_limit}{' '}
+                  attempts ·{' '}
+                  {Object.entries(selectedTemplate.experiment_contract.budget_limits)
+                    .map(([unit, limit]) => `${limit} ${unit}`)
+                    .join(' · ')}
+                  <br />
+                  Protected metrics ·{' '}
+                  {selectedTemplate.experiment_contract.protected_metrics.length
+                    ? selectedTemplate.experiment_contract.protected_metrics
+                        .map(
+                          (gate) =>
+                            `${gate.metric_name} (${gate.direction}, max regression ${gate.max_regression})`
+                        )
+                        .join(' · ')
+                    : 'none'}
+                </p>
+              ) : null}
+              <fieldset className="mt-3 grid gap-3 sm:grid-cols-2" aria-label="Experiment limits">
+                <label className="text-[11px] font-medium text-text-secondary">
+                  Maximum attempts (baseline + candidates)
+                  <input
+                    className="input mt-1 w-full font-mono text-xs"
+                    inputMode="numeric"
+                    value={maxAttempts}
+                    placeholder="5"
+                    onChange={(event) => onMaxAttemptsChange(event.currentTarget.value)}
+                  />
+                </label>
+                <label className="text-[11px] font-medium text-text-secondary">
+                  Budget unit
+                  <input
+                    className="input mt-1 w-full font-mono text-xs"
+                    value={budgetUnit}
+                    placeholder="gpu_hours"
+                    onChange={(event) => onBudgetUnitChange(event.currentTarget.value)}
+                  />
+                </label>
+                <label className="text-[11px] font-medium text-text-secondary">
+                  Campaign budget limit
+                  <input
+                    className="input mt-1 w-full font-mono text-xs"
+                    inputMode="decimal"
+                    value={budgetLimit}
+                    placeholder="10"
+                    onChange={(event) => onBudgetLimitChange(event.currentTarget.value)}
+                  />
+                </label>
+                <label className="text-[11px] font-medium text-text-secondary">
+                  Minimum improvement
+                  <input
+                    className="input mt-1 w-full font-mono text-xs"
+                    inputMode="decimal"
+                    value={minimumImprovement}
+                    placeholder="0.01"
+                    onChange={(event) => onMinimumImprovementChange(event.currentTarget.value)}
+                  />
+                </label>
+              </fieldset>
+              {!limitsValid ? (
+                <p className="mt-2 text-xs text-status-warning">
+                  Enter an attempt count and budget within the approved ceilings, plus a
+                  non-negative improvement threshold.
+                </p>
+              ) : null}
               {doctor ? (
                 <div
                   className={clsx(
@@ -253,7 +358,7 @@ export function GuidedAutoResearchSetup({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  disabled={!live || pending}
+                  disabled={!live || pending || !limitsValid}
                   onClick={onDoctor}
                 >
                   Run doctor
@@ -262,7 +367,7 @@ export function GuidedAutoResearchSetup({
                   type="button"
                   variant="primary"
                   size="sm"
-                  disabled={!live || pending || !doctor?.ready}
+                  disabled={!live || pending || !limitsValid || !doctor?.ready}
                   onClick={onValidate}
                 >
                   Seal validation

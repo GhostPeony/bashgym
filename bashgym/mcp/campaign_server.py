@@ -68,7 +68,9 @@ Reason = CancelReason
 ManifestRevisionNumber = Annotated[int, Field(ge=1)]
 Priority = Annotated[int, Field(ge=0, le=100)]
 ExportFormat = Literal["markdown", "json", "csv", "png", "docx", "pdf"]
-ResearchRole = Literal["baseline", "candidate"]
+ResearchRole = Literal["baseline", "candidate", "diagnostic"]
+ResearchCategory = Literal["research", "github", "pdf"]
+ResearchLimit = Annotated[int, Field(ge=1, le=10)]
 HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 SetupSessionId = Annotated[str, Field(pattern=r"^setupsess_[0-9a-f]{32}$")]
 CampaignStatusFilter = Literal[
@@ -412,6 +414,38 @@ def build_server(
     )
 
     @server.tool(structured_output=True, annotations=read_only)
+    async def research_context(
+        campaign_id: CampaignId,
+        proposal_id: ProposalId,
+        query: Annotated[str, Field(min_length=1, max_length=1000)],
+        categories: list[ResearchCategory],
+        limit: ResearchLimit = 5,
+    ) -> dict[str, Any]:
+        """Collect bounded paper/repository citations for one proposed experiment."""
+
+        if not categories or len(categories) != len(set(categories)):
+            return _invalid_request("Research categories must be non-empty and unique.")
+        result = await request(
+            "POST",
+            "/research/context",
+            payload={
+                "workspace_id": workspace_id,
+                "campaign_id": campaign_id,
+                "proposal_id": proposal_id,
+                "query": query,
+                "categories": categories,
+                "limit": limit,
+            },
+        )
+        if not result["ok"]:
+            return result
+        try:
+            payload = _mapping(result["data"])
+        except ValueError:
+            return _invalid_response()
+        return _bounded_named_result("context", payload.get("context", payload))
+
+    @server.tool(structured_output=True, annotations=read_only)
     async def research_prepare(
         session_id: SetupSessionId | None = None,
     ) -> dict[str, Any]:
@@ -445,6 +479,23 @@ def build_server(
         except ValueError:
             return _invalid_response()
         return _bounded_named_result("research", research)
+
+    @server.tool(structured_output=True, annotations=read_only)
+    async def research_failures(campaign_id: CampaignId) -> dict[str, Any]:
+        """Compare bounded evaluator-authored failure categories for the latest result."""
+
+        result = await request(
+            "GET",
+            f"/campaigns/{campaign_id}/research-failures",
+            query={"workspace_id": workspace_id},
+        )
+        if not result["ok"]:
+            return result
+        try:
+            failures = _mapping(result["data"])
+        except ValueError:
+            return _invalid_response()
+        return _bounded_named_result("failures", failures)
 
     @server.tool(structured_output=True, annotations=read_only)
     async def research_wait(
@@ -489,19 +540,23 @@ def build_server(
         proposal: dict[str, Any],
         parent_proposal_id: ProposalId | None = None,
     ) -> dict[str, Any]:
-        """Submit an explicit baseline or one controlled candidate iteration."""
+        """Submit a baseline, model candidate, or agent-designed diagnostic."""
 
         if _SERVER_OWNED_PROPOSAL_FIELDS.intersection(proposal):
             return _invalid_request("Proposal contains server-owned fields.")
-        if role == "candidate" and parent_proposal_id is None:
-            return _invalid_request("Candidate iteration requires a parent proposal.")
+        if role in {"candidate", "diagnostic"} and parent_proposal_id is None:
+            return _invalid_request(f"{role.title()} iteration requires a parent proposal.")
         if role == "baseline" and parent_proposal_id is not None:
             return _invalid_request("Baseline iteration cannot have a parent proposal.")
 
         body = {"expected_version": expected_version, **proposal}
         if parent_proposal_id is not None:
             body["parent_proposal_id"] = parent_proposal_id
-        suffix = "baseline" if role == "baseline" else "candidates"
+        suffix = {
+            "baseline": "baseline",
+            "candidate": "candidates",
+            "diagnostic": "diagnostics",
+        }[role]
         return await mutate(
             f"autoresearch-{role}",
             campaign_id,
@@ -824,14 +879,22 @@ def build_server(
         campaign_id: CampaignId,
         title: Annotated[str, Field(min_length=1, max_length=240)],
         template_id: CampaignId,
+        stop_rules: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Create a draft only from a server-approved manifest template."""
+        """Create from an approved template; AutoResearch requires explicit stop rules."""
 
+        payload: dict[str, Any] = {
+            "campaign_id": campaign_id,
+            "title": title,
+            "template_id": template_id,
+        }
+        if stop_rules is not None:
+            payload["stop_rules"] = stop_rules
         return await mutate(
             "create-template",
             campaign_id,
             "/campaigns/from-template",
-            {"campaign_id": campaign_id, "title": title, "template_id": template_id},
+            payload,
         )
 
     @server.tool(structured_output=True, annotations=state_change)

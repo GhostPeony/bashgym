@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import Field
 
 from bashgym.campaigns.autoresearch import AutoResearchTemplateDefinition
+from bashgym.campaigns.autoresearch_evidence import validate_evaluator_readiness_contract
 from bashgym.campaigns.contracts import FrozenContractModel, Identifier, StageKind, canonical_hash
 from bashgym.campaigns.lineage import (
     ApprovedSourceRepositoryProfile,
@@ -173,6 +174,7 @@ def doctor_autoresearch_template(
         )
 
         evaluator_ready = policy is not None
+        suite = None
         if evaluator_ready:
             try:
                 ledger.get_project(workspace_id, policy.ledger_project_id)
@@ -199,6 +201,23 @@ def doctor_autoresearch_template(
                 "Register a hash-pinned evaluation suite whose dataset and primary metric exactly match the campaign policy.",
             )
         )
+        evaluator_readiness_ready = evaluator_ready and suite is not None
+        if evaluator_readiness_ready:
+            try:
+                readiness_contract = suite.get("metric_contract", {}).get("evaluator_readiness")
+                if readiness_contract is not None:
+                    validate_evaluator_readiness_contract(readiness_contract)
+            except (AttributeError, TypeError, ValueError):
+                evaluator_readiness_ready = False
+        checks.append(
+            _check(
+                "evaluator_readiness_contract",
+                evaluator_readiness_ready,
+                "evaluator_readiness_contract_ready",
+                "evaluator_readiness_contract_unresolved",
+                "Declare the evaluator's known-good case, known-bad case, repeat count, and maximum baseline spread.",
+            )
+        )
 
         profile_key = (
             definition.manifest.compute_profile_id,
@@ -222,6 +241,9 @@ def doctor_autoresearch_template(
                 and profile.registered_evaluation_dataset.content_digest
                 == dataset_version_record.get("content_digest")
                 and required_compute_stages.issubset({stage.stage for stage in profile.stages})
+                and suite is not None
+                and profile.stage_profile(StageKind.DEVELOPMENT_EVALUATION).script_sha256
+                == suite.get("code_digest")
             )
             if compute_ready:
                 try:
@@ -438,6 +460,13 @@ def doctor_autoresearch_template(
                     True,
                     "control_template_evaluator_not_required",
                     "evaluator_binding_unresolved",
+                    "",
+                ),
+                _check(
+                    "evaluator_readiness_contract",
+                    True,
+                    "control_template_evaluator_readiness_not_required",
+                    "evaluator_readiness_contract_unresolved",
                     "",
                 ),
                 _check(

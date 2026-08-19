@@ -82,8 +82,6 @@ _MODULE_EXPORTS = {
         "Observation",
         "BatchGymEnv",
     ),
-    "bashgym.gym.data_recipe_search_space": ("DataRecipeSearchSpace",),
-    "bashgym.gym.environment_recipe_search_space": ("EnvironmentRecipeSearchSpace",),
     "bashgym.gym.gdpo_adapter": (
         "GDPOBindingReceipt",
         "GDPOComponent",

@@ -1,0 +1,109 @@
+{
+  "schema_version": "open_frontiers.research_post.v1",
+  "publication": {
+    "slug": "REPLACE_PUBLIC_SLUG",
+    "title": "REPLACE_PUBLIC_TITLE",
+    "summary": "REPLACE_ONE_SENTENCE_SUMMARY",
+    "approval": {
+      "status": "draft",
+      "approved_by": null,
+      "approved_at": null,
+      "feedback": []
+    }
+  },
+  "experiment": {
+    "question": "REPLACE_TESTABLE_QUESTION",
+    "hypothesis": "REPLACE_FALSIFIABLE_HYPOTHESIS",
+    "model": "REPLACE_PUBLIC_MODEL_NAME",
+    "method": "REPLACE_TRAINING_METHOD",
+    "intervention": "REPLACE_ONE_CONTROLLED_CHANGE",
+    "evaluation": "REPLACE_FIXED_EVALUATION_DESCRIPTION",
+    "method_selection": {
+      "selected_method": "REPLACE_SELECTED_METHOD",
+      "selection_authority": "host_agent",
+      "rationale": "REPLACE_EVIDENCE_BOUNDED_METHOD_RATIONALE",
+      "alternatives": []
+    }
+  },
+  "results": {
+    "primary": {
+      "name": "REPLACE_METRIC_NAME",
+      "unit": "fraction",
+      "baseline": 0.0,
+      "candidate": 0.0,
+      "delta": 0.0,
+      "direction": "higher_is_better"
+    },
+    "secondary": [],
+    "failure_analysis": [],
+    "decision": "baseline"
+  },
+  "narrative": {
+    "simple": "REPLACE_PLAIN_LANGUAGE_EXPLANATION",
+    "technical": "REPLACE_TECHNICAL_INTERPRETATION",
+    "judgement": "REPLACE_EVIDENCE_BOUNDED_JUDGEMENT",
+    "limitations": [
+      "REPLACE_CONCRETE_LIMITATION"
+    ],
+    "next_experiment": "REPLACE_NEXT_UNCERTAINTY_REDUCING_EXPERIMENT"
+  },
+  "training_rungs": [
+    {
+      "order": 1,
+      "label": "Baseline",
+      "method": "Fixed evaluation",
+      "status": "completed",
+      "summary": "REPLACE_BASELINE_SUMMARY"
+    },
+    {
+      "order": 2,
+      "label": "Candidate",
+      "method": "REPLACE_METHOD",
+      "status": "kept",
+      "summary": "REPLACE_CANDIDATE_SUMMARY"
+    }
+  ],
+  "visuals": [
+    {
+      "id": "primary-comparison",
+      "type": "metric_comparison",
+      "title": "REPLACE_METRIC_TITLE",
+      "data": {
+        "baseline": 0.0,
+        "candidate": 0.0
+      }
+    },
+    {
+      "id": "training-rungs",
+      "type": "training_rungs",
+      "title": "Experiment sequence",
+      "data": {
+        "orders": [
+          1,
+          2
+        ]
+      }
+    }
+  ],
+  "claims": [
+    {
+      "id": "primary-result",
+      "text": "REPLACE_EVIDENCE_BACKED_CLAIM",
+      "evidence_refs": [
+        "campaign-export"
+      ],
+      "source_refs": []
+    }
+  ],
+  "sources": [],
+  "provenance": {
+    "evidence": [
+      {
+        "id": "campaign-export",
+        "kind": "bashgym_campaign_export",
+        "digest": "REPLACE_64_CHARACTER_SHA256"
+      }
+    ],
+    "generated_at": "REPLACE_ISO_8601_TIMESTAMP"
+  }
+}

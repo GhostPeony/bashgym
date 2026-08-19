@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import bashgym.api.campaign_agent_routes as campaign_agent_routes
 from bashgym._compat import UTC
 from bashgym.api.campaign_agent_routes import (
     campaign_agent_credential_router,
@@ -238,6 +239,7 @@ def test_create_app_registers_campaign_agent_routes():
         "/api/campaigns/{campaign_id}/agent-attachment/receipts",
         "/api/campaign-agent/heartbeat",
         "/api/campaign-agent/actions/observe",
+        "/api/campaign-agent/actions/wait",
         "/api/campaign-agent/actions/artifacts",
     } <= paths
 
@@ -353,6 +355,103 @@ def test_observe_action_derives_scope_and_principal_from_bearer(tmp_path):
         },
     }
     assert secret not in observed.text
+
+
+def test_wait_action_returns_immediate_cursor_change_for_bearer_scope(tmp_path):
+    http, access, delivered = _client(tmp_path)
+    grant = http.post(
+        "/api/campaigns/campaign-1/agent-grant",
+        headers=_bearer(access),
+        json=_grant_payload(),
+    ).json()
+    attached = http.post(
+        "/api/campaigns/campaign-1/agent-attachment",
+        headers=_bearer(access),
+        json=_attach_payload(grant),
+    )
+    secret = delivered[0].raw_token
+    assert _agent_heartbeat(http, secret).status_code == 200
+
+    waited = http.get(
+        "/api/campaign-agent/actions/wait",
+        headers=_bearer(secret),
+        params={"after_cursor": 0, "timeout_seconds": 30},
+    )
+
+    assert waited.status_code == 200
+    payload = waited.json()
+    assert payload == {
+        "schemaVersion": "campaign_agent_wait.v1",
+        "scope": {"workspaceId": "workspace-a", "campaignId": "campaign-1"},
+        "status": "changed",
+        "afterCursor": 0,
+        "nextCursor": 1,
+        "observation": {
+            "schemaVersion": "campaign_agent_observation.v1",
+            "scope": {"workspaceId": "workspace-a", "campaignId": "campaign-1"},
+            "campaign": {
+                "status": "draft",
+                "version": 1,
+                "manifestRevision": 1,
+                "activeStudyId": None,
+                "activeActionId": None,
+                "latestEventCursor": 1,
+            },
+            "agent": {
+                "attachmentId": attached.json()["attachment"]["attachment_id"],
+                "attachmentVersion": 1,
+                "agentFamily": "codex",
+                "agentPrincipalId": "codex-agent",
+                "authorizedCapability": "campaign_observe",
+            },
+        },
+    }
+    assert secret not in waited.text
+
+
+def test_wait_action_uses_bounded_backoff_when_the_cursor_does_not_change(tmp_path, monkeypatch):
+    """Catch a regression to fixed-rate control-room snapshot polling."""
+
+    http, access, delivered = _client(tmp_path)
+    grant = http.post(
+        "/api/campaigns/campaign-1/agent-grant",
+        headers=_bearer(access),
+        json=_grant_payload(),
+    ).json()
+    http.post(
+        "/api/campaigns/campaign-1/agent-attachment",
+        headers=_bearer(access),
+        json=_attach_payload(grant),
+    )
+    secret = delivered[0].raw_token
+    assert _agent_heartbeat(http, secret).status_code == 200
+
+    now = 0.0
+    sleep_calls: list[float] = []
+
+    def fake_monotonic() -> float:
+        return now
+
+    async def fake_sleep(seconds: float) -> None:
+        nonlocal now
+        sleep_calls.append(seconds)
+        now += seconds
+
+    monkeypatch.setattr(campaign_agent_routes, "monotonic", fake_monotonic)
+    monkeypatch.setattr(campaign_agent_routes.asyncio, "sleep", fake_sleep)
+
+    waited = http.get(
+        "/api/campaign-agent/actions/wait",
+        headers=_bearer(secret),
+        params={"after_cursor": 1, "timeout_seconds": 55},
+    )
+
+    assert waited.status_code == 200
+    assert waited.json()["status"] == "timeout"
+    assert sum(sleep_calls) == 55
+    assert sleep_calls[:4] == [0.25, 0.5, 1.0, 2.0]
+    assert max(sleep_calls) == 4.0
+    assert len(sleep_calls) <= 18
 
 
 def test_observe_action_ignores_spoofed_scope_and_capability_inputs(tmp_path):

@@ -14,6 +14,14 @@ from bashgym.campaigns.contracts import (
     StageKind,
     StudyProposalSubmission,
 )
+from bashgym.campaigns.data_designer_recipe import (
+    AUTORESEARCH_DATA_DESIGN_RECIPE_SCHEMA,
+    AutoResearchDataDesignRecipe,
+)
+from bashgym.campaigns.diagnostic_actions import (
+    AUTORESEARCH_DIAGNOSTIC_RECIPE_SCHEMA,
+    AutoResearchDiagnosticRecipe,
+)
 from bashgym.campaigns.tmax_recipe import (
     TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA,
     TMaxCompositeTrainingRecipe,
@@ -140,6 +148,31 @@ def validate_proposal_submission(
         reasons.add("proposal_prerequisites_not_unique")
     if not set(submission.prerequisite_study_ids).issubset(existing_prerequisite_ids):
         reasons.add("proposal_prerequisite_not_found")
+    expected_identity = (
+        submission.workspace_id,
+        submission.campaign_id,
+        submission.proposal_id,
+    )
+    if (
+        submission.research_context is not None
+        and (
+            submission.research_context.workspace_id,
+            submission.research_context.campaign_id,
+            submission.research_context.proposal_id,
+        )
+        != expected_identity
+    ):
+        reasons.add("proposal_research_context_binding_mismatch")
+    if (
+        submission.acquisition is not None
+        and (
+            submission.acquisition.workspace_id,
+            submission.acquisition.campaign_id,
+            submission.acquisition.proposal_id,
+        )
+        != expected_identity
+    ):
+        reasons.add("proposal_acquisition_binding_mismatch")
 
     recipes = (
         submission.dataset_recipe,
@@ -153,6 +186,25 @@ def validate_proposal_submission(
             TMaxCompositeTrainingRecipe.model_validate(submission.training_recipe)
         except ValueError:
             reasons.add("proposal_tmax_training_recipe_invalid")
+    if submission.dataset_recipe.get("schema_version") == AUTORESEARCH_DATA_DESIGN_RECIPE_SCHEMA:
+        try:
+            AutoResearchDataDesignRecipe.model_validate(submission.dataset_recipe)
+        except ValueError:
+            reasons.add("proposal_data_design_recipe_invalid")
+    diagnostic_recipe = (
+        submission.evaluation_recipe.get("schema_version") == AUTORESEARCH_DIAGNOSTIC_RECIPE_SCHEMA
+    )
+    if diagnostic_recipe:
+        try:
+            AutoResearchDiagnosticRecipe.model_validate(
+                {
+                    key: value
+                    for key, value in submission.evaluation_recipe.items()
+                    if key != "runtime"
+                }
+            )
+        except ValueError:
+            reasons.add("proposal_diagnostic_recipe_invalid")
     if any(_contains_forbidden_execution_material(recipe) for recipe in recipes):
         reasons.add("proposal_executable_material_forbidden")
     for recipe in recipes:
@@ -207,12 +259,15 @@ def validate_proposal_submission(
                 StageKind.DEVELOPMENT_EVALUATION,
             ),
         }
+        if diagnostic_recipe:
+            allowed_sequences.add((StageKind.CONTRACT_EVALUATION,))
         if required_sequence not in allowed_sequences:
             reasons.add("proposal_autoresearch_stage_plan_invalid")
         live_runtime_by_stage = {
             StageKind.DATA_BUILD: live_data_build,
             StageKind.FULL_TRAINING: live_training,
             StageKind.DEVELOPMENT_EVALUATION: live_evaluation,
+            StageKind.CONTRACT_EVALUATION: live_evaluation,
         }
         if any(
             not live_runtime_by_stage[stage]
@@ -234,6 +289,12 @@ def validate_proposal_submission(
         and Capability.DATA_BUILD not in required
     ):
         reasons.add("proposal_data_build_capability_missing")
+    if (
+        live_evaluation
+        and StageKind.CONTRACT_EVALUATION in required_stages
+        and Capability.EVAL_DEVELOPMENT not in required
+    ):
+        reasons.add("proposal_diagnostic_capability_missing")
     if (
         live_evaluation
         and StageKind.DEVELOPMENT_EVALUATION in required_stages

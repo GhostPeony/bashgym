@@ -29,7 +29,9 @@ from bashgym.campaigns.autoresearch import (
     AutoResearchInvariantError,
     AutoResearchRepository,
     AutoResearchResult,
+    AutoResearchStopRules,
     AutoResearchTemplateDefinition,
+    InterventionMode,
     autoresearch_spec_for_template,
     build_autoresearch_template_registry,
     builtin_autoresearch_template_definitions,
@@ -48,6 +50,7 @@ from bashgym.campaigns.contracts import (
     ControllerObservationV1,
     ProtectedEvaluationResult,
     ReadinessSummaryV1,
+    StageKind,
     StagePlan,
     StudyProposalSubmission,
     TargetModelContract,
@@ -59,6 +62,11 @@ from bashgym.campaigns.control_room import (
     build_control_room_snapshot,
     if_none_match_matches,
     principal_control_room_etag,
+)
+from bashgym.campaigns.decision_packet import (
+    build_decision_packet,
+    latest_data_quality_for_outcome,
+    method_evidence_from_diagnostic_results,
 )
 from bashgym.campaigns.human_oversight import (
     HUMAN_WORK_MAX_ITEMS,
@@ -83,11 +91,13 @@ from bashgym.campaigns.persistence import (
     RecordNotFoundError,
     RevisionConflictError,
 )
+from bashgym.campaigns.plasticity import build_plasticity_comparison
 from bashgym.campaigns.readiness import (
     AutoResearchDoctorReport,
     doctor_autoresearch_template,
 )
 from bashgym.campaigns.remote import ApprovedRemoteExecutorProfile, RemoteRunIdentity
+from bashgym.campaigns.research_history import build_autoresearch_history
 from bashgym.campaigns.runtime import (
     ActionClaimConflictError,
     ActionIdentityMismatchError,
@@ -107,6 +117,7 @@ from bashgym.campaigns.worker_service import (
 )
 from bashgym.config import get_bashgym_dir, get_settings
 from bashgym.ledger.persistence import ExperimentLedgerRepository, LedgerPersistenceError
+from bashgym.research.acquisition import ExperimentAcquisition, ResearchContextBundle
 from bashgym.secrets import get_secret
 
 campaign_router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
@@ -147,6 +158,7 @@ class CampaignTemplateCreateInput(ApiModel):
     campaign_id: str = Field(min_length=1, max_length=160)
     title: str = Field(min_length=1, max_length=240)
     template_id: str = Field(min_length=1, max_length=160)
+    stop_rules: AutoResearchStopRules | None = None
 
 
 class CampaignTransitionInput(ApiModel):
@@ -178,9 +190,23 @@ class CampaignProposalCreateInput(CampaignExpectedVersionInput):
     required_capabilities: frozenset[Capability] = frozenset()
     stage_plan: StagePlan
     rationale: str = Field(min_length=1, max_length=4000)
+    research_context: ResearchContextBundle | None = None
+    acquisition: ExperimentAcquisition | None = None
 
 
 class AutoResearchCandidateCreateInput(CampaignProposalCreateInput):
+    parent_proposal_id: str = Field(min_length=1, max_length=160)
+    intervention_mode: InterventionMode = InterventionMode.CONTROLLED
+    changed_variables: tuple[str, ...] = Field(default=(), max_length=16)
+    hypothesis_family_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$",
+    )
+
+
+class AutoResearchDiagnosticCreateInput(CampaignProposalCreateInput):
     parent_proposal_id: str = Field(min_length=1, max_length=160)
 
 
@@ -559,7 +585,17 @@ def _control_room_definition_matches(
         return False
     if durable.autoresearch_spec is None:
         return True
-    materialized = definition.materialize_spec(campaign.workspace_id, campaign.campaign_id)
+    try:
+        selected_stop_rules = AutoResearchStopRules.model_validate(
+            durable.autoresearch_spec.get("stop_rules")
+        )
+        materialized = definition.materialize_spec(
+            campaign.workspace_id,
+            campaign.campaign_id,
+            stop_rules=selected_stop_rules,
+        )
+    except (TypeError, ValueError):
+        return False
     if materialized is None:
         return False
     persisted_spec = {
@@ -816,6 +852,8 @@ def _proposal_submission(campaign_id: str, body: CampaignProposalCreateInput):
         required_capabilities=body.required_capabilities,
         stage_plan=body.stage_plan,
         rationale=body.rationale,
+        research_context=body.research_context,
+        acquisition=body.acquisition,
     )
 
 
@@ -1261,6 +1299,9 @@ def create_campaign_from_template(
             raise ValueError("campaign_template_not_approved") from exc
         definition = _autoresearch_definitions(request).get(body.template_id)
         if definition is not None:
+            if body.stop_rules is None:
+                raise AutoResearchInvariantError("autoresearch_stop_rules_required")
+            definition.validate_campaign_stop_rules(body.stop_rules)
             readiness = _autoresearch_doctor_report(
                 request, _repository, definition, body.workspace_id
             )
@@ -1269,6 +1310,8 @@ def create_campaign_from_template(
                     "autoresearch_installation_bindings_unresolved:"
                     + ",".join(readiness.blocking_codes)
                 )
+        elif body.stop_rules is not None:
+            raise ValueError("campaign_stop_rules_not_supported")
         campaign = Campaign(
             campaign_id=body.campaign_id,
             workspace_id=body.workspace_id,
@@ -1291,6 +1334,7 @@ def create_campaign_from_template(
             body.template_id,
             workspace_id=body.workspace_id,
             campaign_id=body.campaign_id,
+            stop_rules=body.stop_rules,
             definitions=_autoresearch_definitions(request).values(),
         )
         if spec is not None:
@@ -1593,8 +1637,8 @@ def _build_control_room_snapshot(
 def _autoresearch_stop_conditions(spec) -> tuple[str, ...]:
     rules = spec.stop_rules
     conditions = [
-        f"At most {rules.max_attempts} experiment attempts",
-        f"At most {rules.max_total_cost:g} {rules.budget_unit}",
+        f"At most {rules.max_attempts} experiment attempts (baseline included)",
+        f"At most {rules.max_total_cost:g} {rules.budget_unit} for the full campaign",
     ]
     if rules.deadline is not None:
         conditions.append(f"Stop at {rules.deadline.isoformat()}")
@@ -1602,6 +1646,56 @@ def _autoresearch_stop_conditions(spec) -> tuple[str, ...]:
         direction = "at least" if spec.metric_direction.value == "maximize" else "at most"
         conditions.append(f"Stop when {spec.primary_metric} is {direction} {rules.target_metric:g}")
     return tuple(conditions)
+
+
+def _research_diagnostic_capabilities(
+    *,
+    request: Request,
+    repository: CampaignRuntimeRepository,
+    workspace_id: str,
+    campaign_id: str,
+) -> dict[str, Any]:
+    unavailable = {
+        "schema_version": "bashgym.research_diagnostic_capabilities.v1",
+        "available": False,
+        "runner": None,
+        "limits": None,
+        "capabilities": [],
+    }
+    campaign = repository.get_campaign(workspace_id, campaign_id)
+    manifest = repository.get_manifest_revision(
+        workspace_id,
+        campaign_id,
+        campaign.manifest_revision,
+    ).manifest
+    profile = _approved_executor_profiles(request).get(
+        (
+            manifest.compute_profile_id,
+            campaign.target_model.target_contract_key,
+        )
+    )
+    if profile is None:
+        return unavailable
+    try:
+        stage = profile.stage_profile(StageKind.CONTRACT_EVALUATION)
+    except KeyError:
+        return unavailable
+    contract = stage.diagnostic_contract
+    if contract is None:
+        return unavailable
+    return {
+        "schema_version": "bashgym.research_diagnostic_capabilities.v1",
+        "available": True,
+        "runner": {
+            "runner_id": contract.runner_id,
+            "runner_version": contract.runner_version,
+        },
+        "limits": {
+            "max_sample_limit": contract.max_sample_limit,
+            "max_measurements": contract.max_measurements,
+        },
+        "capabilities": [item.model_dump(mode="json") for item in contract.capabilities],
+    }
 
 
 def _research_state_payload(
@@ -1638,6 +1732,76 @@ def _research_state_payload(
     )
     goal = brief["goal"]
     current_work = goal.get("current_work") if isinstance(goal, dict) else None
+    controls = core.repository.list_autoresearch_proposals(workspace_id, campaign_id)
+    outcomes = core.repository.list_autoresearch_outcomes(workspace_id, campaign_id)
+    diagnostic_results = core.repository.list_autoresearch_diagnostic_results(
+        workspace_id, campaign_id
+    )
+    control_by_proposal = {item.proposal_id: item for item in controls}
+    latest_outcome = outcomes[-1] if outcomes else None
+    latest_control = (
+        control_by_proposal.get(latest_outcome.result.proposal_id)
+        if latest_outcome is not None
+        else None
+    )
+    latest_proposal = (
+        core.repository.get_proposal(
+            workspace_id,
+            campaign_id,
+            latest_control.proposal_id,
+        ).proposal
+        if latest_control is not None
+        else None
+    )
+    proposal_by_id = {
+        item.proposal.proposal_id: item.proposal
+        for item in repository.list_proposals(workspace_id, campaign_id)
+    }
+    dataset_versions = (
+        core.ledger.list_dataset_versions(workspace_id, spec.ledger_project_id)
+        if spec.ledger_project_id is not None
+        else []
+    )
+    latest_data_quality = (
+        latest_data_quality_for_outcome(
+            dataset_versions,
+            latest_outcome,
+        )
+        if latest_outcome is not None
+        else None
+    )
+    campaign_knowledge = build_autoresearch_history(
+        objective=snapshot.campaign.objective,
+        spec=spec,
+        proposals=tuple(
+            proposal_by_id[item.proposal_id]
+            for item in controls
+            if item.proposal_id in proposal_by_id
+        ),
+        controls=controls,
+        outcomes=outcomes,
+        dataset_versions=dataset_versions,
+    )
+    decision_packet = build_decision_packet(
+        objective=snapshot.campaign.objective,
+        spec=spec,
+        state=state,
+        diagnostics=core.diagnostics(workspace_id, campaign_id),
+        latest_proposal=latest_proposal,
+        latest_control=latest_control,
+        latest_outcome=latest_outcome,
+        latest_data_quality=latest_data_quality,
+        current_work=current_work if isinstance(current_work, Mapping) else None,
+        campaign_knowledge=campaign_knowledge,
+        failure_analysis=core.failures(workspace_id, campaign_id),
+        method_evidence=method_evidence_from_diagnostic_results(diagnostic_results),
+        method_thresholds=spec.method_thresholds.model_dump(mode="json", exclude_none=True),
+    )
+    decision_packet["diagnostic_results"] = [item.projection for item in diagnostic_results[-10:]]
+    decision_packet["plasticity"] = build_plasticity_comparison(
+        diagnostic_results=diagnostic_results,
+        controls=controls,
+    )
     phase = current_work.get("phase") if isinstance(current_work, dict) else None
     exports = repository.list_exports(workspace_id, campaign_id, limit=1)
     return {
@@ -1666,6 +1830,14 @@ def _research_state_payload(
         },
         "next_action": state.next_action.value,
         "reason_code": state.reason_code,
+        "decision_packet": decision_packet,
+        "diagnostic_results": [item.projection for item in diagnostic_results[-10:]],
+        "diagnostic_capabilities": _research_diagnostic_capabilities(
+            request=request,
+            repository=repository,
+            workspace_id=workspace_id,
+            campaign_id=campaign_id,
+        ),
         "report": exports[0] if exports else None,
         "control_room": control_room,
         "goal": goal,
@@ -1701,6 +1873,25 @@ def get_research_state(
                 workspace_id=workspace_id,
                 campaign_id=campaign_id,
             )
+        )
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.get("/{campaign_id}/research-failures")
+def get_research_failures(
+    campaign_id: str,
+    request: Request,
+    workspace_id: str = Query(..., min_length=1, max_length=160),
+):
+    """Return bounded evaluator-authored failure categories for agent decisions."""
+
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        principal.require(workspace_id, Capability.CAMPAIGN_READ)
+        return _private_json_response(
+            _autoresearch_core(repository).failures(workspace_id, campaign_id)
         )
     except Exception as exc:
         _raise_api(exc)
@@ -1928,10 +2119,39 @@ def submit_autoresearch_candidate(
 ):
     try:
         repository, _auth, _service = _services(request)
-        mutation = _autoresearch_core(repository).submit_controlled_candidate(
+        mutation = _autoresearch_core(repository).submit_candidate(
             _proposal_submission(campaign_id, body),
             parent_proposal_id=body.parent_proposal_id,
-            changed_variable=body.primary_variable,
+            changed_variables=body.changed_variables or (body.primary_variable,),
+            intervention_mode=body.intervention_mode,
+            hypothesis_family_id=body.hypothesis_family_id,
+            expected_version=body.expected_version,
+            principal=_principal(request),
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+        )
+        return _proposal_mutation_payload(mutation)
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.post("/{campaign_id}/autoresearch/diagnostics")
+def submit_autoresearch_diagnostic(
+    campaign_id: str,
+    body: AutoResearchDiagnosticCreateInput,
+    request: Request,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", max_length=160),
+    correlation_id: str = Header(
+        default="campaign-rest-autoresearch-diagnostic",
+        alias="X-Correlation-ID",
+        max_length=160,
+    ),
+):
+    try:
+        repository, _auth, _service = _services(request)
+        mutation = _autoresearch_core(repository).submit_diagnostic(
+            _proposal_submission(campaign_id, body),
+            parent_proposal_id=body.parent_proposal_id,
             expected_version=body.expected_version,
             principal=_principal(request),
             correlation_id=correlation_id,

@@ -37,7 +37,14 @@ from bashgym.campaigns.contracts import (
     CredentialKind,
     canonical_hash,
 )
+from bashgym.campaigns.diagnostic_actions import AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME
 from bashgym.campaigns.human_oversight import HumanOversightRepository
+from bashgym.campaigns.remote import (
+    ApprovedRemoteExecutorProfile,
+    DiagnosticCapability,
+    DiagnosticStageContract,
+    PinnedRemoteStageProfile,
+)
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.visibility import PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
@@ -71,6 +78,14 @@ from tests.campaigns.test_persistence import campaign, manifest, persist_legacy_
 from tests.campaigns.test_proposals import proposal as study_proposal
 from tests.campaigns.test_remote_persistence import _claimed_attempt
 from tests.campaigns.test_worker import START
+
+CONTROL_STOP_RULES = {
+    "schema_version": "autoresearch_stop_rules.v1",
+    "max_attempts": 2,
+    "budget_unit": "gpu_hours",
+    "max_total_cost": 0.2,
+    "minimum_improvement": 0.0,
+}
 
 
 def campaign_client(tmp_path, *, profile=AutonomyProfile.CODEX_TRUSTED):
@@ -130,6 +145,58 @@ def create_from_template(http: TestClient, token: str, campaign_id="campaign-1")
             "template_id": "memexai-approved-v1",
         },
     )
+
+
+def register_autoresearch_spec(
+    repository: CampaignRuntimeRepository,
+    *,
+    max_attempts: int = 3,
+    max_total_cost: float = 3.0,
+) -> AutoResearchRepository:
+    autoresearch = AutoResearchRepository(repository.db_path)
+    autoresearch.initialize()
+    autoresearch.create_autoresearch_spec(
+        AutoResearchCampaignSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            primary_metric="mrr_at_10",
+            metric_direction=MetricDirection.MAXIMIZE,
+            stop_rules=AutoResearchStopRules(
+                max_attempts=max_attempts,
+                budget_unit="gpu_hours",
+                max_total_cost=max_total_cost,
+                minimum_improvement=0.0,
+            ),
+        )
+    )
+    return autoresearch
+
+
+def test_candidate_input_accepts_exploratory_intervention_bundle():
+    body = study_proposal("candidate-exploratory", estimated_cost=0.2).model_dump(
+        mode="json", exclude={"schema_version", "workspace_id", "campaign_id"}
+    )
+    candidate = campaign_routes.AutoResearchCandidateCreateInput.model_validate(
+        {
+            **body,
+            "workspace_id": "workspace-a",
+            "expected_version": 7,
+            "parent_proposal_id": "candidate-parent",
+            "intervention_mode": "exploratory",
+            "changed_variables": [
+                "training_recipe.learning_rate",
+                "training_recipe.seed",
+            ],
+            "hypothesis_family_id": "family-optimizer-schedule",
+        }
+    )
+
+    assert candidate.intervention_mode.value == "exploratory"
+    assert candidate.changed_variables == (
+        "training_recipe.learning_rate",
+        "training_recipe.seed",
+    )
+    assert candidate.hypothesis_family_id == "family-optimizer-schedule"
 
 
 def seed_human_work(repository, *, campaign_id="campaign-1"):
@@ -199,6 +266,7 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
         "/api/campaigns/{campaign_id}/autoresearch",
         "/api/campaigns/{campaign_id}/autoresearch/baseline",
         "/api/campaigns/{campaign_id}/autoresearch/candidates",
+        "/api/campaigns/{campaign_id}/autoresearch/diagnostics",
         "/api/campaigns/{campaign_id}/autoresearch/results",
         "/api/campaigns/{campaign_id}/autoresearch/ingest-evaluation",
         "/api/campaigns/{campaign_id}/manifest/{revision}",
@@ -476,7 +544,7 @@ def test_builtin_autoresearch_template_prepares_to_authorized_start_gate(tmp_pat
     assert built_in["manifest"]["promotion_gates"]["quality_claim_eligible"] is False
     assert "C:\\" not in json.dumps(built_in)
 
-    created = http.post(
+    missing_limits = http.post(
         "/api/campaigns/from-template",
         headers={**bearer(access), "Idempotency-Key": "create-autoresearch-smoke"},
         json={
@@ -484,6 +552,65 @@ def test_builtin_autoresearch_template_prepares_to_authorized_start_gate(tmp_pat
             "campaign_id": "autoresearch-smoke-1",
             "title": "AutoResearch control smoke",
             "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+        },
+    )
+    assert missing_limits.status_code == 422
+
+    excessive_attempts = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-autoresearch-too-many"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-too-many",
+            "title": "AutoResearch excessive attempts",
+            "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+            "stop_rules": {**CONTROL_STOP_RULES, "max_attempts": 4},
+        },
+    )
+    excessive_budget = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-autoresearch-too-costly"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-too-costly",
+            "title": "AutoResearch excessive budget",
+            "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+            "stop_rules": {**CONTROL_STOP_RULES, "max_total_cost": 0.3},
+        },
+    )
+    altered_scientific_gate = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-autoresearch-gate-drift"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-gate-drift",
+            "title": "AutoResearch altered protected gate",
+            "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+            "stop_rules": {
+                **CONTROL_STOP_RULES,
+                "protected_metrics": [
+                    {
+                        "metric_name": "recovery_rate",
+                        "direction": "maximize",
+                        "max_regression": 0.0,
+                    }
+                ],
+            },
+        },
+    )
+    assert excessive_attempts.status_code == 422
+    assert excessive_budget.status_code == 422
+    assert altered_scientific_gate.status_code == 422
+
+    created = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-autoresearch-smoke-limited"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-smoke-1",
+            "title": "AutoResearch control smoke",
+            "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+            "stop_rules": CONTROL_STOP_RULES,
         },
     )
     assert created.status_code == 200
@@ -508,6 +635,11 @@ def test_builtin_autoresearch_template_prepares_to_authorized_start_gate(tmp_pat
     )
     assert state.status_code == 200
     assert state.json()["spec"]["primary_metric"] == "control_path_score"
+    assert state.json()["spec"]["stop_rules"] == CONTROL_STOP_RULES | {
+        "target_metric": None,
+        "protected_metrics": [],
+        "deadline": None,
+    }
     assert state.json()["state"]["next_action"] == "start_campaign"
     assert state.json()["diagnostics"] == {
         "schema_version": "autoresearch_diagnostics.v1",
@@ -541,6 +673,7 @@ def test_autoresearch_start_recomputes_controller_readiness_and_does_not_consume
             "campaign_id": "autoresearch-start-gate-1",
             "title": "AutoResearch start gate",
             "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+            "stop_rules": CONTROL_STOP_RULES,
         },
     )
     assert created.status_code == 200
@@ -615,6 +748,7 @@ def test_autoresearch_start_resolves_replay_conflict_and_version_before_readines
             "campaign_id": "autoresearch-start-ordering-1",
             "title": "AutoResearch Start ordering",
             "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+            "stop_rules": CONTROL_STOP_RULES,
         },
     )
     assert created.status_code == 200
@@ -687,6 +821,7 @@ def test_autoresearch_start_fails_closed_for_unverified_controller_identity(tmp_
             "campaign_id": "autoresearch-unverified-controller-1",
             "title": "AutoResearch controller identity gate",
             "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+            "stop_rules": CONTROL_STOP_RULES,
         },
     )
     assert created.status_code == 200
@@ -754,6 +889,7 @@ def test_autoresearch_start_rechecks_current_bindings_and_never_leaks_private_va
             "campaign_id": "autoresearch-binding-recheck-1",
             "title": "AutoResearch binding recheck",
             "template_id": definition.template_id,
+            "stop_rules": definition.policy.stop_rules.model_dump(mode="json"),
         },
     )
     assert created.status_code == 200
@@ -885,6 +1021,7 @@ def test_autoresearch_start_rejects_source_profile_that_is_no_longer_git(tmp_pat
             "campaign_id": "autoresearch-source-drift-1",
             "title": "AutoResearch source drift",
             "template_id": definition.template_id,
+            "stop_rules": definition.policy.stop_rules.model_dump(mode="json"),
         },
     )
     assert created.status_code == 200
@@ -924,6 +1061,7 @@ def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path)
     assert doctor.json()["blocking_codes"] == [
         "data_binding_unresolved",
         "evaluator_binding_unresolved",
+        "evaluator_readiness_contract_unresolved",
         "compute_binding_unresolved",
         "source_repository_binding_unresolved",
         "code_lineage_execution_binding_unresolved",
@@ -938,6 +1076,7 @@ def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path)
             "campaign_id": "autoresearch-real-1",
             "title": "Installation-bound AutoResearch",
             "template_id": installed.template_id,
+            "stop_rules": installed.policy.stop_rules.model_dump(mode="json"),
         },
     )
     assert created.status_code == 422
@@ -956,6 +1095,7 @@ def test_autoresearch_requires_explicit_role_and_accepts_bounded_baseline(tmp_pa
             "campaign_id": "autoresearch-baseline-1",
             "title": "AutoResearch baseline smoke",
             "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+            "stop_rules": CONTROL_STOP_RULES,
         },
     )
     assert created.status_code == 200
@@ -1315,21 +1455,7 @@ def test_research_state_projects_the_same_control_room_into_agent_goal_and_markd
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
-    autoresearch = AutoResearchRepository(repository.db_path)
-    autoresearch.initialize()
-    autoresearch.create_autoresearch_spec(
-        AutoResearchCampaignSpec(
-            workspace_id="workspace-a",
-            campaign_id="campaign-1",
-            primary_metric="mrr_at_10",
-            metric_direction=MetricDirection.MAXIMIZE,
-            stop_rules=AutoResearchStopRules(
-                max_attempts=3,
-                budget_unit="gpu_hours",
-                max_total_cost=3.0,
-            ),
-        )
-    )
+    register_autoresearch_spec(repository)
     current = repository.get_campaign("workspace-a", "campaign-1")
     repository.record_export(
         "workspace-a",
@@ -1372,10 +1498,41 @@ def test_research_state_projects_the_same_control_room_into_agent_goal_and_markd
     assert payload["goal"]["resume"]["reference"] == "workspace-a/campaign-1"
     assert payload["goal"]["resume"]["aggregate_version"] == 2
     assert payload["goal"]["stop_conditions"] == [
-        "At most 3 experiment attempts",
-        "At most 3 gpu_hours",
+        "At most 3 experiment attempts (baseline included)",
+        "At most 3 gpu_hours for the full campaign",
     ]
     assert payload["autoresearch"]["next_action"] == "prepare_campaign"
+    assert payload["decision_packet"]["schema_version"] == (
+        "bashgym.autoresearch_decision_packet.v1"
+    )
+    assert payload["decision_packet"]["campaign"]["primary_metric"] == "mrr_at_10"
+    assert payload["decision_packet"]["last_experiment"] is None
+    assert payload["decision_packet"]["result"] is None
+    assert payload["decision_packet"]["campaign_knowledge"]["schema_version"] == (
+        "bashgym.autoresearch_history.v1"
+    )
+    assert payload["decision_packet"]["campaign_knowledge"]["total_experiments"] == 0
+    assert payload["decision_packet"]["campaign_knowledge"]["experiments"] == []
+    assert payload["decision_packet"]["decision_required"] == {
+        "action": "prepare_campaign",
+        "reason_code": "campaign_requires_controller_preparation",
+        "agent_action_required": True,
+    }
+    assert payload["decision_packet"]["plasticity"] == {
+        "schema_version": "bashgym.autoresearch_plasticity_comparison.v1",
+        "status": "insufficient_comparable_probes",
+        "reason_code": "matching_fixed_probe_required",
+        "classification": None,
+        "observations": [],
+        "comparison": None,
+    }
+    assert payload["diagnostic_capabilities"] == {
+        "schema_version": "bashgym.research_diagnostic_capabilities.v1",
+        "available": False,
+        "runner": None,
+        "limits": None,
+        "capabilities": [],
+    }
     assert payload["control_room"] == {
         "api_path": "/api/campaigns/campaign-1/control-room-snapshot",
         "url": (
@@ -1403,25 +1560,109 @@ def test_research_state_projects_the_same_control_room_into_agent_goal_and_markd
     assert "[Open experiment view](http://testserver/" in payload["markdown"]
 
 
+def test_research_state_projects_exact_installed_diagnostic_capabilities(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    register_autoresearch_spec(repository)
+    script = tmp_path / "diagnose.py"
+    key = tmp_path / "id_ed25519"
+    script.write_text("print('diagnose')\n", encoding="utf-8")
+    key.write_text("test-only-key\n", encoding="utf-8")
+    stage = PinnedRemoteStageProfile(
+        stage="contract_evaluation",
+        script_path=script,
+        script_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
+        input_files=(),
+        input_sha256={},
+        output_paths=(AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,),
+        budget_reservation=0.05,
+        diagnostic_contract=DiagnosticStageContract(
+            runner_id="scientific-diagnostic-runner",
+            runner_version="1",
+            max_sample_limit=256,
+            max_measurements=8,
+            capabilities=(
+                DiagnosticCapability(
+                    capability_id="optimization_health",
+                    description="Summarize bounded optimization metrics.",
+                    measurements=("gradient_norm", "train_loss"),
+                    evidence_sources=("training_metrics",),
+                ),
+            ),
+        ),
+    )
+    profile = ApprovedRemoteExecutorProfile(
+        profile_id="research-executor-v1",
+        profile_revision=1,
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="memexai-embedding-v1",
+        target_model_digest="d" * 64,
+        host="192.0.2.10",
+        username="trainer",
+        key_path=str(key),
+        stages=(stage,),
+    )
+    http.app.state.campaign_executor_profiles = {
+        (profile.compute_profile_id, profile.target_contract_key): profile
+    }
+
+    response = http.get(
+        "/api/campaigns/campaign-1/research-state",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["diagnostic_capabilities"] == {
+        "schema_version": "bashgym.research_diagnostic_capabilities.v1",
+        "available": True,
+        "runner": {"runner_id": "scientific-diagnostic-runner", "runner_version": "1"},
+        "limits": {"max_sample_limit": 256, "max_measurements": 8},
+        "capabilities": [
+            {
+                "schema_version": "campaign_diagnostic_capability.v1",
+                "capability_id": "optimization_health",
+                "description": "Summarize bounded optimization metrics.",
+                "measurements": ["gradient_norm", "train_loss"],
+                "evidence_sources": ["training_metrics"],
+            }
+        ],
+    }
+
+
+def test_research_failures_is_an_authenticated_bounded_read(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    register_autoresearch_spec(repository)
+    route = "/api/campaigns/campaign-1/research-failures"
+
+    denied = http.get(route, params={"workspace_id": "workspace-a"})
+    response = http.get(
+        route,
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+
+    assert denied.status_code == 401
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.json() == {
+        "schema_version": "bashgym.research_failures.v1",
+        "campaign_id": "campaign-1",
+        "reference": None,
+        "candidate": None,
+        "comparison": [],
+        "truncated": False,
+    }
+
+
 def test_research_wait_returns_action_required_with_the_existing_agent_brief(tmp_path):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
-    autoresearch = AutoResearchRepository(repository.db_path)
-    autoresearch.initialize()
-    autoresearch.create_autoresearch_spec(
-        AutoResearchCampaignSpec(
-            workspace_id="workspace-a",
-            campaign_id="campaign-1",
-            primary_metric="mrr_at_10",
-            metric_direction=MetricDirection.MAXIMIZE,
-            stop_rules=AutoResearchStopRules(
-                max_attempts=3,
-                budget_unit="gpu_hours",
-                max_total_cost=3.0,
-            ),
-        )
-    )
+    register_autoresearch_spec(repository)
     cursor = repository.list_events("workspace-a", "campaign-1")[-1][0]
     route = "/api/campaigns/campaign-1/research-wait"
 
@@ -1452,6 +1693,12 @@ def test_research_wait_returns_action_required_with_the_existing_agent_brief(tmp
     assert payload["after_cursor"] == cursor
     assert payload["next_cursor"] == cursor
     assert payload["research"]["next_action"] == "prepare_campaign"
+    assert payload["research"]["decision_packet"]["schema_version"] == (
+        "bashgym.autoresearch_decision_packet.v1"
+    )
+    assert payload["research"]["decision_packet"]["decision_required"]["action"] == (
+        "prepare_campaign"
+    )
     assert payload["research"]["goal"]["resume"]["reference"] == "workspace-a/campaign-1"
     assert "### AutoResearch" in payload["research"]["markdown"]
 
@@ -1639,21 +1886,7 @@ def test_control_room_definition_must_align_with_persisted_autoresearch_spec(tmp
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
-    autoresearch = AutoResearchRepository(repository.db_path)
-    autoresearch.initialize()
-    autoresearch.create_autoresearch_spec(
-        AutoResearchCampaignSpec(
-            workspace_id="workspace-a",
-            campaign_id="campaign-1",
-            primary_metric="mrr_at_10",
-            metric_direction=MetricDirection.MAXIMIZE,
-            stop_rules=AutoResearchStopRules(
-                max_attempts=1,
-                budget_unit="gpu_hours",
-                max_total_cost=1.0,
-            ),
-        )
-    )
+    register_autoresearch_spec(repository, max_attempts=1, max_total_cost=1.0)
     definition = _exact_control_room_definition()
     http.app.state.campaign_autoresearch_templates = {definition.template_id: definition}
     http.app.state.campaign_experiment_ledger = ExperimentLedgerRepository(repository.db_path)
@@ -2577,7 +2810,31 @@ def test_proposal_manifest_evidence_and_advance_rest_contract(tmp_path):
     proposal_body = study_proposal("proposal-rest").model_dump(
         mode="json", exclude={"schema_version", "workspace_id", "campaign_id"}
     )
-    proposal_body.update({"workspace_id": "workspace-a", "expected_version": version})
+    proposal_body.update(
+        {
+            "workspace_id": "workspace-a",
+            "expected_version": version,
+            "research_context": {
+                "schema_version": "bashgym.research_context.v1",
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "proposal_id": "proposal-rest",
+                "query": "verifiable training data",
+                "categories": ["research"],
+                "status": "available",
+                "sources": [
+                    {
+                        "schema_version": "bashgym.research_context_source.v1",
+                        "title": "A bounded research source",
+                        "url": "https://example.com/research",
+                        "summary": "Supports the candidate hypothesis.",
+                        "source_type": "research",
+                        "published_at": None,
+                    }
+                ],
+            },
+        }
+    )
     headers = {**bearer(access), "Idempotency-Key": "submit-rest"}
     submitted = http.post(
         "/api/campaigns/campaign-1/proposals", headers=headers, json=proposal_body
@@ -2604,6 +2861,9 @@ def test_proposal_manifest_evidence_and_advance_rest_contract(tmp_path):
     )
     assert listed.status_code == manifest_response.status_code == evidence.status_code == 200
     assert listed.json()["proposals"][0]["proposal"]["proposal_id"] == "proposal-rest"
+    assert listed.json()["proposals"][0]["proposal"]["research_context"]["query"] == (
+        "verifiable training data"
+    )
     assert manifest_response.json()["manifest_hash"]
     assert evidence.json()["snapshot_digest"]
     assert "artifact_references" in evidence.json()

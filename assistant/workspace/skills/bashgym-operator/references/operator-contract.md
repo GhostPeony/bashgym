@@ -49,6 +49,7 @@ bashgym campaign --json start|pause|resume|cancel|advance|conclude ...
 bashgym campaign proposal lineage-prepare --campaign <id> --proposal <id> ...
 bashgym campaign proposal lineage-capture --campaign <id> --proposal <id> ...
 bashgym campaign --json export ...
+bashgym research failures --campaign <id> ... --json
 ```
 
 If `doctor` reports `mutate_desktop_campaign: false`, do not run or fabricate these commands. A guarded local trainer may still create a real BashGym run manifest, but it does not mutate the desktop campaign ledger.
@@ -82,6 +83,25 @@ Classify each field as `verified`, `missing`, `stale`, or `blocked`:
 - promotion/publication/product-edit authority.
 
 Launch only when required fields are verified. A missing optional report format is not a compute blocker; an ambiguous dataset split or evaluation boundary is.
+
+For AutoResearch, `max_attempts`, `budget_unit`, `max_total_cost`, and
+`minimum_improvement` are explicit campaign inputs. Attempts include the fixed
+baseline and candidate experiments. The selected template defines the primary
+metric, metric direction, protected gates, and upper bounds; do not replace
+those choices with conversational defaults.
+
+Method-readiness thresholds are persisted campaign evidence criteria. They
+help the host agent distinguish an eligible method from one that needs a cheap
+probe, but they do not select a method or authorize a runner. Inspect only the
+bounded `research failures` categories and declared readiness evidence; never
+open protected rows to make the choice.
+
+`research state.diagnostic_capabilities` is the exact active-probe surface for
+the installed executor. Use already-recorded failure categories, checkpoint
+trajectory, dataset-quality, and training-metric projections before spending a
+diagnostic reservation. The capability matrix describes what the runner can
+measure; it does not constrain the agent's hypothesis or authorize BashGym to
+substitute a different probe. Record an unsupported result as a capability gap.
 
 ## Compute activation
 

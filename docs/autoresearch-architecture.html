@@ -1168,7 +1168,7 @@
       ];
 
       const modules = [
-        ["Research interface", "High-level tools prepare, read, wait for progress, start, submit, and report an experiment."],
+        ["Research interface", "High-level tools prepare, read state and installed diagnostic capabilities, wait for progress, submit experiments, and report results."],
         ["Proposal validation", "Checks roles, parent relationships, required stage sequence, and registered runtimes."],
         ["Runtime", "Derives deterministic action specifications and binds stage inputs to the proposal."],
         ["Worker", "Reconciles, claims, launches, observes, and settles durable actions."],
@@ -1330,7 +1330,7 @@
         ["research_state", "Read the compact goal, current runs, latest result, budget, and next required action."],
         ["research_wait", "Wait for changed, action-required, or terminal state and resume from the returned event cursor."],
         ["research_start", "Start the prepared campaign through the canonical campaign mutation."],
-        ["research_submit_iteration", "Submit a baseline or candidate proposal with role and parent validation."],
+        ["research_submit_iteration", "Submit a baseline, diagnostic, or candidate proposal with role and parent validation."],
         ["research_report", "Retrieve the current experiment report and export information."]
       ];
 

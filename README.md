@@ -209,6 +209,11 @@ bashgym research onboard --contract <onboarding.json> --json
 bashgym research onboard --contract <onboarding.json> --apply --json
 ```
 
+The onboarding contract must explicitly choose `max_attempts`, `budget_unit`,
+`max_total_cost`, and `minimum_improvement`. Attempts include the fixed baseline
+and candidate experiments. The selected values must fit inside the installed
+template's approved ceilings; BashGym does not silently choose them.
+
 The apply command can register or acquire the exact model on the selected
 execution target, activate the installation, start the resident API and worker,
 sync the registered bindings, complete guided setup, and create one `READY`
@@ -230,8 +235,28 @@ bashgym research submit-iteration --help
 bashgym research report --help
 ```
 
+The state response distinguishes two kinds of evidence. Passive diagnostics
+such as fixed-suite failure categories, checkpoint trajectories, deterministic
+data-quality summaries, and recorded training metrics are derived from work
+that already ran. A budgeted diagnostic action is a separate experiment used
+only when a decision-relevant measurement is still missing. When an optional
+diagnostic runner is installed, `diagnostic_capabilities` reports its exact
+runner identity, limits, evidence sources, and measurement names. The agent may
+still propose a new bounded probe outside that matrix; the runner must report
+it as unsupported rather than BashGym silently choosing another experiment.
+
 The exact setup, proposal file, start, resume, and report commands are in the
 [AutoResearch campaign guide](docs/training/autoresearch-campaign.md).
+
+Before Start, define what each evaluation signal means. Choose one primary
+objective, declare only genuinely non-negotiable metrics as protected gates
+with explicit regression tolerances, retain other metrics and error slices as
+informational evidence, and state whether the hypothesis needs repeated seeds
+or robustness variants. A regression in an informational metric is a tradeoff,
+not automatically a failed experiment. BashGym reserves failure for invalid or
+unverifiable execution and predeclared protected-gate breaches; completed
+results can instead be clear improvements, acceptable tradeoffs, mixed
+evidence, or no demonstrated gain.
 
 For a single known training job instead of a repeated experiment loop, use:
 
@@ -248,8 +273,8 @@ bashgym training start --help
   the connected coding agent performs that reasoning.
 - Campaign keep/discard requires the configured primary metric to clear its
   improvement threshold and every configured protected metric to remain within
-  its allowed regression. Other standalone diagnostics are not automatically
-  composed into that decision.
+  its allowed regression. Informational regressions and standalone diagnostics
+  remain visible to the agent but are not silently converted into hard gates.
 - Data Designer utilities generate and validate candidate data, but the hidden
   legacy schema-search API is not the current campaign data-build path.
 - Planning and smoke commands prove a contract or integration path, not model

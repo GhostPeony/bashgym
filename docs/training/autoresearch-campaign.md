@@ -10,7 +10,10 @@ flowchart LR
     A["Read experiment state"] --> B["Evaluate starting model"]
     B --> C["Inspect failures"]
     C --> D["Form one testable hypothesis"]
-    D --> E["Change data, recipe, reward, evaluator, or code"]
+    D --> Q{"Missing measurement?"}
+    Q -->|Yes| P["Run bounded diagnostic"]
+    P --> C
+    Q -->|No| E["Change data, recipe, reward, evaluator, or code"]
     E --> F["Train one candidate"]
     F --> G["Evaluate on the fixed suite"]
     G --> H["Keep or discard"]
@@ -31,7 +34,7 @@ For the component map, see [BashGym architecture](../PLATFORM_OVERVIEW.md).
 | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Keeps the objective and next action in its native goal or plan | Returns compact durable state and the next valid action                    |
 | Examines failed tasks, traces, slices, data, and prior results | Preserves the fixed evaluation contract and experiment lineage             |
-| Forms a falsifiable hypothesis                                 | Validates baseline-first and one-variable proposal rules                   |
+| Forms a falsifiable hypothesis and declared intervention       | Validates baseline-first, declared-change, and lineage rules               |
 | Edits approved data, recipes, rewards, evaluators, or code     | Schedules registered data, training, and evaluation stages                 |
 | Interprets the comparison and proposes the next experiment     | Verifies evaluation evidence and records baseline, keep, discard, or crash |
 | Decides when the scientific question is answered               | Enforces configured attempt, cost, deadline, target, and proposal limits   |
@@ -72,24 +75,79 @@ repeated scores stayed within that bound. The reported primary metric must equal
 the repeat mean. Candidate evaluations remain single-pass unless their own method
 requires repeated measurement.
 
-### 3. Propose one controlled candidate
+### 3. Diagnose only when evidence is missing
 
-After the baseline, the agent inspects task-level failures and changes exactly
-one declared primary variable. A candidate must:
+`research state` already derives passive diagnostics from completed work:
+fixed-suite failure categories, error-slice comparisons, checkpoint
+trajectories, deterministic dataset-quality summaries, and training metrics
+that the installed runner actually emitted. Reading these projections does not
+schedule compute or spend campaign budget.
 
-- name the current incumbent as its parent;
-- depend on the incumbent study;
-- declare the changed variable and the variables held constant;
+If a method choice or intervention still depends on a measurable unknown, the
+agent can submit one diagnostic proposal. It authors the probe family,
+question, falsifiable hypothesis, requested aggregate measurements, sample
+limit, seed, safe parameters, and the methods the result may inform. No
+pre-registered experiment-design ID is required.
+
+Before submitting, inspect `diagnostic_capabilities` in `research state`:
+
+- `available: false` means this installation has no diagnostic execution stage;
+- when available, the projection gives the exact runner/version, sample and
+  measurement ceilings, and its declared measurement capabilities;
+- the capability IDs and measurement names are installation-authored and open,
+  not a BashGym experiment enum.
+
+The matrix is descriptive rather than restrictive. A bounded request outside
+it remains valid, but the runner must return `unsupported`; BashGym never swaps
+in a different probe, model, dataset, method, or execution target. A completed
+diagnostic consumes its declared reservation and a proposal round, but not a
+model-candidate attempt. It never changes the retained reference or produces a
+KEEP/DISCARD decision.
+
+Submit the diagnostic through the same proposal command:
+
+```bash
+bashgym research submit-iteration \
+  --workspace-id <workspace> --credential-ref <credential-ref> \
+  --campaign <campaign-id> --expected-version <version> \
+  --proposal diagnostic.json --role diagnostic \
+  --parent-proposal <current-reference-proposal-id> \
+  --idempotency-key <key> --json
+```
+
+### 4. Propose one candidate intervention
+
+After the baseline, the agent inspects task-level failures and chooses the
+smallest experiment that can discriminate its hypothesis. There are two modes:
+
+- `controlled` changes exactly one declared scientific path and may support a
+  causal claim about that path;
+- `exploratory` changes a declared bundle of 2–16 scientific paths and
+  attributes the result to the complete bundle rather than one component.
+
+A candidate must:
+
+- name a completed real proposal in the same campaign as its exact parent;
+- depend on that parent's study;
+- declare every changed path and the variables held constant;
+- give exploratory work a hypothesis-family ID so related branches remain
+  recognizable across long sessions;
 - fit inside the remaining experiment budget; and
 - include captured Git lineage when the changed variable represents trainer,
   algorithm, environment, reward, evaluator, verifier, or other approved code.
 
 Examples of useful variables are a dataset revision, sampling policy, learning
 rate, training method, reward definition, evaluator implementation, or bounded
-source change. A candidate is an experiment, not a claim that the intervention
-will work.
+source change. Code mutation remains controlled-only until its exact lineage is
+captured. A candidate is an experiment, not a claim that the intervention will
+work.
 
-### 4. Run the candidate stages
+Every completed candidate is compared with the current retained reference for
+KEEP or DISCARD. When the exact training parent is a different branch, the
+history also reports the parent delta. A discarded but valid candidate may
+remain useful as a branch parent; it does not become the retained reference.
+
+### 5. Run the candidate stages
 
 A candidate stage plan can be:
 
@@ -102,12 +160,57 @@ dataset. Training consumes the declared dataset and starting-model binding.
 Evaluation consumes the trained output and the same pinned suite used by the
 baseline.
 
+When a compatible trainer and evaluator are installed, activation may set
+`--intermediate-checkpoint-limit N` (maximum 8). The training stage then retains
+the newest `N` checkpoint directories and the fixed evaluator scores each one
+on the same held-out suite. BashGym accepts those observations only when their
+model-manifest digests match the sealed training inventory. Checkpoint scores
+are diagnostic trajectory evidence: they can reveal an early peak or collapse,
+but they cannot become the retained reference without a separate declared
+candidate experiment.
+
+A generated-dataset receipt may include bounded deterministic-verification
+counts: generated and accepted rows, verifier pass/fail counts, duplicate and
+contamination removals, and the verifier digest. BashGym checks those counts
+against the retained shard manifest and places only the summary in the next
+decision packet; rows and execution-target paths remain outside agent context.
+The receipt also binds the effective generation configuration and generator
+implementation by digest. Generation randomness and the deterministic train/
+validation split are recorded separately: when the installed generator has no
+seeded API, the receipt says `provider_unseeded` rather than implying that the
+recipe's split seed made generation reproducible.
+
+For verifier-based RL, the installed environment may define a decomposed reward
+with named weighted components and optional hard component bounds. NeMo Gym
+rollout evidence already preserves those component values. A bounded
+`reward_integrity_probe` joins their distributions with BashGym's existing
+reward-hacking canary summary and the exact reward-spec digest; it exposes no
+verifier command, path, or raw rollout. GRPO/RLVR is advisory-eligible only when
+all ordinary rollout thresholds pass, the reward spec is verified, the
+campaign's minimum canary count is met, and both canary failures and hard-bound
+violations stay within the campaign's explicit maximum rates. These checks do
+not pick a method. They stop a useful blended reward from hiding a broken
+non-negotiable component or a trivial exploit, while leaving the host agent free
+to test a declared component weight, reward definition, data, or training
+hypothesis.
+
+For DPO, row-format validation is necessary but not sufficient. When the
+installed runner exposes it, a `preference_integrity_probe` binds the exact
+preference dataset digest and labeling-contract digest, then measures pair
+count, agreement lower bound, ambiguous labels, position-order sensitivity,
+contradictory labels for the same response pair, and held-out overlap. Only
+aggregate rates enter campaign state and reports. DPO is advisory-eligible only
+when those measurements clear the campaign's explicit thresholds. The agent
+may repair the labeling protocol, rebalance or regenerate pairs, or test a
+different method; BashGym does not choose the response or impose universal
+cutoffs.
+
 The durable worker selects one proposal, schedules one stage at a time, claims
 the work, executes outside SQLite, verifies the result, settles the reserved
 cost, and advances the stage cursor. It can recover persisted work after a
 process restart without relaunching a completed stage.
 
-### 5. Compare, keep, or discard
+### 6. Compare, keep, or discard
 
 `CampaignEvaluationProjector` reads verified evaluation evidence and derives
 the campaign result. For a primary metric `m`:
@@ -120,17 +223,58 @@ KEEP iff improvement > 0 and improvement >= minimum_improvement
 otherwise DISCARD
 ```
 
-A kept candidate becomes the incumbent. A discarded candidate remains in the
-history, but the prior incumbent stays unchanged. The agent should inspect the
-aggregate metric, protected regressions that are part of the pinned suite, and
-the underlying failed and recovered tasks before choosing the next variable.
+KEEP/DISCARD selects the next reference; it is not a complete scientific
+interpretation. Before Start, the campaign should separate evaluation evidence
+into five roles:
 
-### 6. Continue or report
+1. the primary objective used for reference selection;
+2. protected metrics with explicit directions and maximum regressions;
+3. informational metrics and behavioral error categories used to understand
+   tradeoffs;
+4. validity checks such as evaluator canaries, leakage checks, and
+   reward-hacking checks;
+5. replication or robustness expectations needed before making a general claim.
+
+A crash, contaminated evaluation, invalid evaluator, or unverifiable result is
+an execution/evidence failure. A protected-metric breach is an unacceptable
+scientific regression because that boundary was declared before the run. An
+unprotected regression is evidence of a tradeoff, not automatically a failed
+candidate. Likewise, a discarded candidate with a useful secondary gain is
+mixed evidence rather than proof that the hypothesis had no value.
+
+A kept candidate becomes the incumbent. A discarded candidate remains in the
+history, but the prior incumbent stays unchanged. The outcome assessment names
+the result as a clear improvement, acceptable tradeoff, mixed evidence, no
+demonstrated gain, unacceptable regression, invalid execution, or inconclusive.
+The agent should inspect the aggregate metric, protected gates, behavioral
+error categories, checkpoint trajectory, and replication evidence before
+choosing the next intervention.
+
+### 7. Continue or report
 
 The loop stops when a configured deadline, attempt limit, proposal limit, cost
 limit, or target metric is reached. It may also end through an authorized
 pause, cancellation, or conclusion. `research report` exports bounded Markdown
-and JSON evidence from the same durable record.
+and JSON evidence from the same durable record. The report preserves the
+baseline and completed candidates in chronological order, including the exact
+reference proposal, hypothesis, declared change, prediction, fixed-suite
+primary result, configured protected-metric checks, dataset-quality summary,
+KEEP or DISCARD decision, and evidence identifiers. `research state` and
+`research wait` reuse the latest bounded portion of that same history so the
+host agent does not have to reconstruct prior experiments from chat context.
+
+This history is a deterministic projection, not a second research planner. It
+does not retain prompts, raw dataset rows, model outputs, logs, or agent
+transcripts, and it does not infer causality from one run. Candidates that share
+a `hypothesis_family_id` are summarized together. A family is marked replicated
+only when completed real candidates share the same immutable parent, reference,
+data, training, evaluation, and stage-plan contract and differ only in the
+declared seed. The history then reports the observed mean, sample standard
+deviation, standard error, and range. These are
+descriptive between-run statistics, not a confidence interval or proof that the
+intervention generalizes. Diagnostics and factual summaries can guide the agent
+toward what to inspect next, but they cannot change the fixed evaluation result,
+override KEEP or DISCARD, or submit another experiment.
 
 ## Use the agent platform directly
 
@@ -175,6 +319,31 @@ contract names:
 - an exact target-model registration request with an immutable revision;
 - workspace, installation, resident-controller, credential-reference, and
   campaign identities.
+- the explicit campaign attempt count, budget unit and cap, and minimum
+  improvement threshold. Attempts include the fixed baseline and candidate
+  experiments; the installed template supplies ceilings, not defaults.
+
+The selected evaluator fixes the primary metric, direction, and protected
+metric gates. Guided validation displays that scientific contract and seals it
+with the selected limits before campaign creation. A missing limit or a value
+outside the approved template envelope prevents `READY`.
+
+An installation that supports active diagnostic actions pins them during
+activation with one typed runner contract:
+
+```text
+--diagnostic-script <runner.py>
+--diagnostic-contract-file <diagnostic-contract.json>
+--diagnostic-budget-reservation <cost>
+[--diagnostic-input <pinned-input>]...
+[--diagnostic-arg <installation-owned-argument>]...
+```
+
+The contract publishes runner identity, resource ceilings, and open capability
+descriptors. These fields describe executable measurements; they do not select
+a hypothesis or method. Omitting the complete group leaves active diagnostics
+unavailable while preserving all passive diagnostics derived from stored
+campaign evidence.
 
 Keep target addresses, credentials, and local paths in this operator-owned
 contract and its referenced inputs. They do not belong in a campaign proposal
@@ -260,11 +429,19 @@ bashgym research submit-iteration \
   --proposal baseline.json --role baseline \
   --idempotency-key <key> --json
 
+# Optional: use only when a missing measurement changes the next decision.
+bashgym research submit-iteration \
+  --workspace-id <workspace> --credential-ref <credential-ref> \
+  --campaign <campaign-id> --expected-version <version> \
+  --proposal diagnostic.json --role diagnostic \
+  --parent-proposal <current-reference-proposal-id> \
+  --idempotency-key <key> --json
+
 bashgym research submit-iteration \
   --workspace-id <workspace> --credential-ref <credential-ref> \
   --campaign <campaign-id> --expected-version <version> \
   --proposal candidate.json --role candidate \
-  --parent-proposal <incumbent-proposal-id> \
+  --parent-proposal <verified-parent-proposal-id> \
   --idempotency-key <key> --json
 
 bashgym research report \
@@ -348,8 +525,7 @@ quality.
 - Fake executors and smoke templates prove orchestration, persistence, and
   evidence wiring only. They cannot establish a real baseline or model-quality
   result.
-- The older `/api/autoresearch/*` routes are optional compatibility code. New
-  durable work uses `/api/campaigns/*` through the `research` tools.
+- Durable work uses `/api/campaigns/*` through the `research` tools.
 
 These boundaries are implementation facts, not restrictions on which model,
 dataset, or research question an installation may register.

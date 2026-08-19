@@ -107,6 +107,10 @@ include-package-data = false
 "bashgym.agent.skills" = ["**/*.json"]
 "bashgym.judge" = ["verify.sh"]
 "assistant.workspace.skills" = [
+    "autoresearch-publication/SKILL.md",
+    "autoresearch-publication/assets/research-post.template.json",
+    "autoresearch-publication/references/output-contract.md",
+    "autoresearch-publication/scripts/research_post.py",
     "bashgym-operator/SKILL.md",
     "bashgym-operator/bundle.lock.json",
     "bashgym-operator/references/operator-contract.md",

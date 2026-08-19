@@ -106,8 +106,13 @@ ds-bundle/
 # (not for the public repo)
 tasks/
 .claude/
+.agents/
+.codex/
 .superpowers/
 WORKSTREAMS.md
+
+# Local test and agent scratch directories
+.tmp-*/
 
 # Local BashGym state (never source-controlled)
 .bashgym/

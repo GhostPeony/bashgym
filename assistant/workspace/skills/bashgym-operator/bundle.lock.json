@@ -1,21 +1,25 @@
 {
   "schema_version": "bashgym.operator-bundle-lock.v2",
   "files": {
-    "SKILL.md": "3eba87d2400891107dc2f0d33ae9f12dea3dcf6997c54c0ceecf8d6c5eabdd05",
-    "references/operator-contract.md": "14d202a2c9a116c300fbd9a1bf76cee83ac6ea6385bd4252094a8ea0317b092a",
+    "SKILL.md": "253604185d6df92dd275a70764d47fc91dc169ca88706baed2ffc01b8b63c65f",
+    "references/operator-contract.md": "7f29f077b3fb12c18b771e80686d477e7cab2d496ceaf24445cb507169775cab",
     "scripts/operator_context.py": "e3ed9f81532711e7d98ca96ff2da89f5ec43a06726696bc8856be88737af9b3e",
     "scripts/curate_activity.py": "4c6bc70990af8ba7671c2e6da4ec2601fe0c615cef959092e69b2d4ac5d52752",
     "scripts/gbrain_bridge.py": "9356708c9c6e7a3294b539753ec8b335b5707d6d1d88bce68c5f59d45d5ca1ee",
-    "../bashgym/SKILL.md": "9493e213e5957f680ae663ea8819beec91573996bb46f8e4e79bc568433a1d47",
-    "../bashgym/references/architecture-overview.md": "19556a488217fde771c703f3a4ecee5e81e003ac95c9bfd18a51f644216cc8a7",
+    "../autoresearch-publication/SKILL.md": "101c253fac8ee246e3210bbe72d1a74590f7b63a63363fc813a679d3a0f637e1",
+    "../autoresearch-publication/assets/research-post.template.json": "97018700b9974c2e6ec1a6a55ec566436dcb2d877e6eb8ecf02a6be6532848eb",
+    "../autoresearch-publication/references/output-contract.md": "376f0bd5ba7126031d1e0543391a22cc7fc5c467fcce4101616e1a84617d5e70",
+    "../autoresearch-publication/scripts/research_post.py": "cf2b8c52382ba63e02bba4d9cadd3b8832a816264bf8b912b699036661e7e79e",
+    "../bashgym/SKILL.md": "a962ac7b49e0d5bf5deb4d532241658024f3d61aa2c7f8aed1b3778d9da7d661",
+    "../bashgym/references/architecture-overview.md": "d7535e7cdc91a4c962dcc3ea3bfdc1fe66e677709e62f6f087e7539717cfd41e",
     "../bashgym/references/eval-capabilities.md": "48b7ea276c174a8d649ab1dd12d333cc9f8b06fe76f9e843d482a296be8f4c60",
     "../factory/SKILL.md": "7309d201b607e66b2d94bac349bd292bc163b2ae1c1aabe0d1df410b3707c4f7",
     "../models/SKILL.md": "cafcf3ca58bcb4519b85d1ec59447dff9cef4eefaa7735dde193e590b124a0e0",
     "../system/SKILL.md": "0033fe33c5ef83e9895543992c3f3d17aed28f8b4a558806b5a026e6fd2d7d7b",
     "../traces/SKILL.md": "2f920a4d944c9e955f9d450c040b20de59c270e6cd720c30b277cbac04573cc1",
-    "../training/SKILL.md": "9ceefe63538c8c4afeddf6d271a8043638fc7cb96a32b3b5f1435eac2bee8209",
+    "../training/SKILL.md": "c658ff3850efeeed887904049391a43997a0d376ea39efe5f65edf145072f2d3",
     "../training/references/bashgym-launch-recipes.md": "3ecc67b458b1fe841edf6a4565d46e7c7cc6f2a08d6ef33931b28057d05e9fea",
-    "../training/references/bashgym-methods-and-evals.md": "84a072bf259a20e74c07487b7f6d2c0b0c2359eabaa01c00c07045f110b4364a",
+    "../training/references/bashgym-methods-and-evals.md": "e35936afceb8ac50b0cbcdd4cf143b5c2f703864ae9ef637d16840cf9fff0c03",
     "../training/references/compute-target-activation.md": "5cad866e6ebb862a66fe3fdca405f898390534889ccd10aa7e9d8099649020f9"
   }
 }

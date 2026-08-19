@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
-from bashgym.campaigns.autoresearch import AutoResearchTemplateDefinition
+from bashgym.campaigns.autoresearch import AutoResearchStopRules, AutoResearchTemplateDefinition
 from bashgym.campaigns.contracts import (
     Campaign,
     CampaignEvent,
@@ -72,6 +72,7 @@ class GuidedSetupDraft(BaseModel):
     )
     installation_id: str = Field(pattern=r"^ins_[0-9a-f]{32}$")
     bindings: GuidedSetupBindings
+    stop_rules: AutoResearchStopRules
 
 
 _KIND_MAP: tuple[tuple[Literal["model", "data", "compute", "evaluation"], str], ...] = (
@@ -337,6 +338,9 @@ class GuidedSetupRepository:
     @staticmethod
     def template_summary(definition: AutoResearchTemplateDefinition) -> dict[str, Any]:
         expected = _expected_bindings(definition)
+        policy = definition.policy
+        if policy is None:
+            raise GuidedSetupError("template AutoResearch policy is unavailable")
         return {
             "schema_version": "guided_setup_template.v1",
             "template_id": definition.template_id,
@@ -345,6 +349,15 @@ class GuidedSetupRepository:
                 definition.policy and definition.policy.quality_claim_eligible
             ),
             "required_bindings": expected.model_dump(mode="json"),
+            "experiment_contract": {
+                "primary_metric": policy.primary_metric,
+                "metric_direction": policy.metric_direction.value,
+                "max_attempts_limit": definition.manifest.max_proposal_rounds,
+                "budget_limits": dict(sorted(definition.manifest.budget_limits.items())),
+                "protected_metrics": [
+                    item.model_dump(mode="json") for item in policy.stop_rules.protected_metrics
+                ],
+            },
         }
 
     @staticmethod
@@ -1021,6 +1034,7 @@ class GuidedSetupRepository:
             if reference["availability"] != "reachable":
                 blocking.append(f"{reference['kind']}_binding_unavailable")
         blocking = sorted(set(blocking))
+        definition.validate_campaign_stop_rules(draft.stop_rules)
         return (
             {
                 "schema_version": "guided_setup_doctor.v1",
@@ -1031,6 +1045,10 @@ class GuidedSetupRepository:
                 "ready": doctor.materializable and not blocking,
                 "blocking_codes": blocking,
                 "binding_references": references,
+                "stop_rules": draft.stop_rules.model_dump(mode="json"),
+                "method_thresholds": definition.policy.method_thresholds.model_dump(
+                    mode="json", exclude_none=True
+                ),
             },
             binding_state_digest,
         )
@@ -1173,6 +1191,9 @@ class GuidedSetupRepository:
                 template_id=str(row["template_id"]),
                 installation_id=str(row["installation_id"]),
                 bindings=GuidedSetupBindings.model_validate_json(str(row["bindings_json"])),
+                stop_rules=AutoResearchStopRules.model_validate(
+                    json.loads(str(row["response_json"]))["stop_rules"]
+                ),
             )
             _references, current_digest = self._binding_rows(connection, draft)
             if not hmac.compare_digest(str(row["binding_state_digest"]), current_digest):
@@ -1287,6 +1308,9 @@ class GuidedSetupRepository:
                 template_id=str(row["template_id"]),
                 installation_id=str(row["installation_id"]),
                 bindings=GuidedSetupBindings.model_validate_json(str(row["bindings_json"])),
+                stop_rules=AutoResearchStopRules.model_validate(
+                    json.loads(str(row["response_json"]))["stop_rules"]
+                ),
             )
             _references, current_digest = self._binding_rows(connection, draft)
             if not hmac.compare_digest(str(row["binding_state_digest"]), current_digest):

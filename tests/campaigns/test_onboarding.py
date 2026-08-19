@@ -6,6 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from bashgym.campaigns.autoresearch import (
+    AutoResearchStopRules,
+    AutoResearchTemplateDefinition,
+)
 from bashgym.campaigns.onboarding import (
     AutoResearchOnboardingConflict,
     AutoResearchOnboardingContract,
@@ -38,6 +42,12 @@ def _contract(root: Path) -> AutoResearchOnboardingContract:
         credential_ref="campaign_local_operator",
         campaign_id="campaign-demo",
         campaign_title="Demo experiment",
+        stop_rules=AutoResearchStopRules(
+            max_attempts=3,
+            budget_unit="gpu_hours",
+            max_total_cost=2.0,
+            minimum_improvement=0.01,
+        ),
     )
 
 
@@ -140,6 +150,10 @@ def test_contract_digest_binds_the_three_input_files(tmp_path: Path) -> None:
 
 def test_plan_is_pure_and_names_the_existing_boundaries(tmp_path: Path) -> None:
     contract = _valid_contract(tmp_path)
+    definition = AutoResearchTemplateDefinition.model_validate_json(
+        contract.definition_file.read_text(encoding="utf-8")
+    )
+    assert definition.policy is not None
     services = _RecordingServices()
 
     plan = AutoResearchOnboardingCoordinator(services).plan(contract)
@@ -154,6 +168,9 @@ def test_plan_is_pure_and_names_the_existing_boundaries(tmp_path: Path) -> None:
         "campaign_prepare",
     )
     assert plan.next_action == "apply_onboarding"
+    assert plan.experiment_contract.primary_metric == definition.policy.primary_metric
+    assert plan.experiment_contract.metric_direction == definition.policy.metric_direction
+    assert plan.experiment_contract.stop_rules == contract.stop_rules
     assert services.calls == []
     assert not (tmp_path / "campaigns" / "onboarding").exists()
 
@@ -257,7 +274,7 @@ def test_matching_running_service_definition_is_left_undisturbed(kind: str, tmp_
 
 
 def test_apply_stops_at_ready_without_start_or_training_steps(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
+    contract = _valid_contract(tmp_path)
     services = _RecordingServices()
 
     receipt = AutoResearchOnboardingCoordinator(services).apply(contract)
@@ -265,6 +282,7 @@ def test_apply_stops_at_ready_without_start_or_training_steps(tmp_path: Path) ->
     assert receipt.applied is True
     assert receipt.campaign_status == "ready"
     assert receipt.next_action == "explicit_start_confirmation_required"
+    assert receipt.experiment_contract.stop_rules == contract.stop_rules
     assert tuple(item.step for item in receipt.completed_steps) == (
         "target_model",
         "activation",
@@ -286,13 +304,16 @@ def test_apply_stops_at_ready_without_start_or_training_steps(tmp_path: Path) ->
         (tmp_path / "campaigns" / "onboarding" / "onboarding-demo-v1.json").read_text()
     )
     assert serialized["campaign_status"] == "ready"
+    assert serialized["experiment_contract"]["stop_rules"] == contract.stop_rules.model_dump(
+        mode="json"
+    )
     assert {item["step"] for item in serialized["completed_steps"]}.isdisjoint(
         {"start", "training", "launch"}
     )
 
 
 def test_apply_resumes_after_the_last_completed_step(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
+    contract = _valid_contract(tmp_path)
     first = _RecordingServices(fail_on="registry_sync")
 
     with pytest.raises(RuntimeError, match="failed:registry_sync"):
@@ -318,13 +339,14 @@ def test_apply_resumes_after_the_last_completed_step(tmp_path: Path) -> None:
 
 
 def test_replay_is_idempotent_and_changed_contract_conflicts(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
+    contract = _valid_contract(tmp_path)
     AutoResearchOnboardingCoordinator(_RecordingServices()).apply(contract)
     replay_services = _RecordingServices()
 
     replay = AutoResearchOnboardingCoordinator(replay_services).apply(contract)
 
     assert replay.replayed is True
+    assert replay.experiment_contract.stop_rules == contract.stop_rules
     assert replay_services.calls == [
         "reconcile:target_model,activation,resident_services,registry_sync,guided_setup,campaign_prepare",
         "campaign_status",
@@ -335,7 +357,7 @@ def test_replay_is_idempotent_and_changed_contract_conflicts(tmp_path: Path) -> 
 
 
 def test_replay_preserves_completed_onboarding_after_campaign_start(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
+    contract = _valid_contract(tmp_path)
     AutoResearchOnboardingCoordinator(_RecordingServices()).apply(contract)
     replay_services = _RecordingServices(final_status="active")
 
@@ -355,13 +377,28 @@ def test_apply_never_claims_success_for_a_non_ready_campaign(tmp_path: Path) -> 
     services = _RecordingServices(final_status="validating")
 
     with pytest.raises(AutoResearchOnboardingConflict, match="campaign_not_ready"):
-        AutoResearchOnboardingCoordinator(services).apply(_contract(tmp_path))
+        AutoResearchOnboardingCoordinator(services).apply(_valid_contract(tmp_path))
 
     receipt = json.loads(
         (tmp_path / "campaigns" / "onboarding" / "onboarding-demo-v1.json").read_text()
     )
     assert receipt["applied"] is False
     assert receipt["campaign_status"] == "validating"
+
+
+def test_apply_validates_campaign_limits_before_running_any_step(tmp_path: Path) -> None:
+    contract = _valid_contract(tmp_path).model_copy(
+        update={
+            "stop_rules": _contract(tmp_path).stop_rules.model_copy(update={"max_attempts": 100})
+        }
+    )
+    services = _RecordingServices()
+
+    with pytest.raises(AutoResearchOnboardingError, match="onboarding_definition_binding_invalid"):
+        AutoResearchOnboardingCoordinator(services).apply(contract)
+
+    assert services.calls == []
+    assert not (tmp_path / "campaigns" / "onboarding").exists()
 
 
 def test_local_services_join_existing_boundaries_and_stop_at_ready(

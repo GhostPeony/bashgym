@@ -84,10 +84,31 @@ const artifactArgsSchema = z
     limit: z.number().int().min(1).max(50).optional()
   })
   .strict()
+const waitArgsSchema = z
+  .object({
+    afterCursor: z.number().int().safe().min(0),
+    timeoutSeconds: z.number().int().min(1).max(55).optional()
+  })
+  .strict()
+const waitSchema = z
+  .object({
+    schemaVersion: z.literal('campaign_agent_wait.v1'),
+    scope: scopeSchema,
+    status: z.enum(['changed', 'terminal', 'timeout']),
+    afterCursor: z.number().int().safe().min(0),
+    nextCursor: z.number().int().safe().min(0),
+    observation: observationSchema
+  })
+  .strict()
 
 export interface CampaignAgentArtifactArgs {
   afterCursor?: string
   limit?: number
+}
+
+export interface CampaignAgentWaitArgs {
+  afterCursor: number
+  timeoutSeconds: number
 }
 
 export interface CampaignAgentMcpHostOptions {
@@ -95,6 +116,7 @@ export interface CampaignAgentMcpHostOptions {
   generation: string
   scope: { workspaceId: string; campaignId: string }
   observe(): Promise<unknown>
+  wait(args: CampaignAgentWaitArgs): Promise<unknown>
   artifacts(args: CampaignAgentArtifactArgs): Promise<unknown>
 }
 
@@ -210,6 +232,45 @@ export class CampaignAgentMcpHost {
         try {
           const value = observationSchema.parse(await this.options.observe())
           if (!this.sameScope(value.scope)) return authorityUnavailable()
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(value) }],
+            structuredContent: value
+          }
+        } catch {
+          return authorityUnavailable()
+        }
+      }
+    )
+    server.registerTool(
+      'campaign_wait',
+      {
+        description:
+          'Wait quietly for the next milestone in the authorized campaign; use this instead of shell polling.',
+        inputSchema: waitArgsSchema,
+        outputSchema: waitSchema,
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        }
+      },
+      async (args) => {
+        if (!this.authorityAvailable || this.closed) return authorityUnavailable()
+        try {
+          const validatedArgs = waitArgsSchema.parse(args)
+          const normalizedArgs = {
+            afterCursor: validatedArgs.afterCursor,
+            timeoutSeconds: validatedArgs.timeoutSeconds ?? 30
+          }
+          const value = waitSchema.parse(await this.options.wait(normalizedArgs))
+          if (
+            !this.sameScope(value.scope) ||
+            value.afterCursor !== normalizedArgs.afterCursor ||
+            !this.sameScope(value.observation.scope) ||
+            value.nextCursor !== value.observation.campaign.latestEventCursor
+          )
+            return authorityUnavailable()
           return {
             content: [{ type: 'text' as const, text: JSON.stringify(value) }],
             structuredContent: value

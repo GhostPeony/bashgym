@@ -18,6 +18,7 @@ from bashgym.campaigns.contracts import (
     Identifier,
     canonical_hash,
 )
+from bashgym.campaigns.failure_observations import AUTORESEARCH_FAILURE_OBSERVATIONS_KEY
 
 DiagnosticSeverity = Literal["info", "warning", "critical"]
 DiagnosticDirection = Literal["maximize", "minimize", "unknown"]
@@ -83,6 +84,7 @@ _SLICE_CONTROL_KEYS = frozenset(
     {
         "_metric_directions",
         "autoresearch_role",
+        AUTORESEARCH_FAILURE_OBSERVATIONS_KEY,
         "baseline_delta",
         "checkpoint",
         "checkpoint_step",
@@ -228,6 +230,8 @@ def build_autoresearch_diagnostics(
     outcomes: Sequence[Mapping[str, Any]],
     evaluations: Sequence[Mapping[str, Any]],
     runs: Sequence[Mapping[str, Any]],
+    dataset_versions: Sequence[Mapping[str, Any]] = (),
+    training_metrics: Sequence[Mapping[str, Any]] = (),
 ) -> AutoResearchDiagnostics:
     """Build a replay-safe diagnostic projection from authoritative evidence."""
 
@@ -255,6 +259,14 @@ def build_autoresearch_diagnostics(
         outcome for outcome in outcomes if outcome.get("result", {}).get("role") == "candidate"
     ]
     candidate_outcome = candidate_outcomes[-1] if candidate_outcomes else None
+    candidate_attempt_ids = frozenset(
+        str(value)
+        for value in (
+            candidate_outcome.get("result", {}).get("attempt_ids", ())
+            if candidate_outcome is not None
+            else ()
+        )
+    )
     baseline_evaluation = _outcome_evaluation(baseline_outcome, evaluations_by_id)
     candidate_evaluation = _outcome_evaluation(candidate_outcome, evaluations_by_id)
     baseline_evaluation_id = (
@@ -267,6 +279,86 @@ def build_autoresearch_diagnostics(
     signals: list[AutoResearchDiagnosticSignal] = []
     error_slices: list[AutoResearchErrorSlice] = []
     comparisons: list[AutoResearchCheckpointComparison] = []
+    candidate_dataset_version: Mapping[str, Any] | None = None
+    for version in reversed(dataset_versions):
+        metadata = version.get("metadata")
+        if (
+            isinstance(metadata, Mapping)
+            and str(metadata.get("producer_attempt_id")) in candidate_attempt_ids
+        ):
+            candidate_dataset_version = version
+            break
+    dataset_version_id = (
+        str(candidate_dataset_version.get("dataset_version_id") or "")
+        if candidate_dataset_version is not None
+        else ""
+    )
+    dataset_quality = (
+        candidate_dataset_version.get("metadata", {}).get("data_quality")
+        if candidate_dataset_version is not None
+        else None
+    )
+    if candidate_dataset_version is not None and not isinstance(dataset_quality, Mapping):
+        signals.append(
+            _signal(
+                "dataset_quality_missing",
+                "warning",
+                "The generated dataset has no deterministic quality summary.",
+                dataset_version_id,
+            )
+        )
+    if isinstance(dataset_quality, Mapping):
+        generated_rows = _finite_number(dataset_quality.get("generated_rows"))
+        accepted_rows = _finite_number(dataset_quality.get("accepted_rows"))
+        if (
+            generated_rows is not None
+            and generated_rows > 0
+            and accepted_rows is not None
+            and accepted_rows / generated_rows < 0.5
+        ):
+            signals.append(
+                _signal(
+                    "dataset_acceptance_low",
+                    "warning",
+                    "Fewer than half of generated rows passed the declared dataset checks.",
+                    dataset_version_id,
+                )
+            )
+
+    metric_series: dict[str, list[tuple[int, float, str]]] = {
+        "train_loss": [],
+        "validation_loss": [],
+    }
+    for metric in training_metrics:
+        attempt_id = str(metric.get("attempt_id") or "")
+        name = str(metric.get("metric_name") or "")
+        step = metric.get("step")
+        value = _finite_number(metric.get("value"))
+        if (
+            attempt_id in candidate_attempt_ids
+            and name in metric_series
+            and isinstance(step, int)
+            and not isinstance(step, bool)
+            and step >= 0
+            and value is not None
+        ):
+            metric_series[name].append((step, value, attempt_id))
+    train_loss = sorted(metric_series["train_loss"])
+    validation_loss = sorted(metric_series["validation_loss"])
+    if (
+        len(train_loss) >= 2
+        and len(validation_loss) >= 2
+        and train_loss[-1][1] < train_loss[0][1]
+        and validation_loss[-1][1] > validation_loss[0][1]
+    ):
+        signals.append(
+            _signal(
+                "train_validation_divergence",
+                "warning",
+                "Training loss fell while validation loss rose over the observed trajectory.",
+                train_loss[-1][2],
+            )
+        )
 
     baseline_metric = None
     if baseline_evaluation is not None:
@@ -412,6 +504,37 @@ def build_autoresearch_diagnostics(
         for evaluation in relevant_evaluations
         if candidate_run_id and str(evaluation.get("run_id")) == candidate_run_id
     ]
+    if candidate_evaluation is not None:
+        trajectory = (candidate_evaluation.get("slice_metrics") or {}).get(
+            "autoresearch_checkpoint_trajectory"
+        )
+        if isinstance(trajectory, list):
+            for observation in trajectory[:8]:
+                if not isinstance(observation, Mapping):
+                    continue
+                step = observation.get("checkpoint_step")
+                metrics = observation.get("metrics")
+                observation_id = observation.get("observation_id")
+                if (
+                    isinstance(step, int)
+                    and not isinstance(step, bool)
+                    and step > 0
+                    and isinstance(metrics, Mapping)
+                    and isinstance(observation_id, str)
+                    and observation_id
+                ):
+                    run_evaluations.append(
+                        {
+                            "evaluation_result_id": observation_id,
+                            "evaluation_suite_id": evaluation_suite_id,
+                            "run_id": candidate_run_id,
+                            "metrics": dict(metrics),
+                            "slice_metrics": {
+                                "autoresearch_role": "checkpoint",
+                                "checkpoint_step": step,
+                            },
+                        }
+                    )
     sortable: list[tuple[int, str, Mapping[str, Any], int | None]] = []
     for evaluation in run_evaluations:
         run = runs_by_id.get(str(evaluation.get("run_id")), {})
@@ -508,6 +631,37 @@ def build_autoresearch_diagnostics(
                 "expected_outcome": "The targeted slice improves without regressing the exact primary metric.",
                 "falsification_criterion": "The targeted slice or exact primary metric fails to improve on the fixed suite.",
                 "evidence_references": list(worst.evidence_references),
+            }
+        )
+    if "dataset_acceptance_low" in signal_codes and regressed_slices:
+        worst = sorted(
+            regressed_slices,
+            key=lambda item: (item.improvement or 0.0, item.slice_path),
+        )[0]
+        hypothesis_specs.append(
+            {
+                "action_kind": "candidate",
+                "changed_variable": "dataset_recipe.generation_brief",
+                "hypothesis": (
+                    f"A predeclared dataset design targeting {worst.slice_path} may improve "
+                    "coverage while retaining more verified rows."
+                ),
+                "rationale": (
+                    "The generated dataset retained fewer than half of its rows and the fixed "
+                    f"evaluation regressed most on {worst.slice_path}."
+                ),
+                "expected_outcome": (
+                    "The targeted slice and primary metric improve under the unchanged training "
+                    "and evaluation contracts."
+                ),
+                "falsification_criterion": (
+                    "The targeted slice or primary metric fails to improve, or a protected metric "
+                    "regresses."
+                ),
+                "evidence_references": [
+                    dataset_version_id,
+                    *worst.evidence_references,
+                ],
             }
         )
     if "format_only_gain" in signal_codes:

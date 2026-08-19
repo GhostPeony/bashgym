@@ -75,6 +75,63 @@ _PREVIEW_REDACTIONS = (
 )
 
 
+def _autoresearch_history_for_export(
+    repository: CampaignRuntimeRepository,
+    campaign: Campaign,
+) -> dict[str, Any] | None:
+    """Project AutoResearch history when its durable schema owns this campaign."""
+
+    with repository._connection() as connection:
+        schema_exists = connection.execute("""
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'autoresearch_campaign_specs'
+            """).fetchone()
+    if schema_exists is None:
+        return None
+
+    from bashgym.campaigns.autoresearch import AutoResearchRepository
+    from bashgym.campaigns.persistence import RecordNotFoundError
+    from bashgym.campaigns.research_history import build_autoresearch_history
+    from bashgym.ledger.persistence import ExperimentLedgerRepository
+
+    autoresearch = (
+        repository
+        if isinstance(repository, AutoResearchRepository)
+        else AutoResearchRepository(repository.db_path)
+    )
+    try:
+        spec = autoresearch.get_autoresearch_spec(campaign.workspace_id, campaign.campaign_id)
+    except RecordNotFoundError:
+        return None
+    proposal_records = repository.list_proposals(campaign.workspace_id, campaign.campaign_id)
+    controls = autoresearch.list_autoresearch_proposals(campaign.workspace_id, campaign.campaign_id)
+    outcomes = autoresearch.list_autoresearch_outcomes(campaign.workspace_id, campaign.campaign_id)
+    dataset_versions = ()
+    evaluations = ()
+    if spec.ledger_project_id is not None:
+        ledger = ExperimentLedgerRepository.open_existing(repository.db_path)
+        dataset_versions = ledger.list_dataset_versions(
+            campaign.workspace_id, spec.ledger_project_id
+        )
+        evaluations = ledger.list_evaluation_results(
+            campaign.workspace_id, spec.ledger_project_id, limit=1000
+        )
+    history = build_autoresearch_history(
+        objective=campaign.objective,
+        spec=spec,
+        proposals=tuple(item.proposal for item in proposal_records),
+        controls=controls,
+        outcomes=outcomes,
+        dataset_versions=dataset_versions,
+        evaluations=evaluations,
+    )
+    diagnostics = autoresearch.list_autoresearch_diagnostic_results(
+        campaign.workspace_id, campaign.campaign_id
+    )
+    history["diagnostic_results"] = [item.projection for item in diagnostics]
+    return history
+
+
 class ArtifactPreviewIntegrityError(RuntimeError):
     code = "campaign_artifact_preview_integrity_failed"
 
@@ -662,6 +719,7 @@ class CampaignService:
             attempts = self.repository.list_attempts(workspace_id, campaign_id)
             artifacts = self.repository.list_artifacts(workspace_id, campaign_id)
             comparisons = self.repository.list_development_comparisons(workspace_id, campaign_id)
+            autoresearch_history = _autoresearch_history_for_export(self.repository, campaign)
             losses: dict[str, tuple[dict[str, Any], ...]] = {}
             for attempt in attempts:
                 values = self.repository.get_metric_series(
@@ -685,6 +743,7 @@ class CampaignService:
                 ),
                 comparisons=tuple(item.model_dump(mode="json") for item in comparisons),
                 loss_by_attempt=losses,
+                autoresearch_history=autoresearch_history,
             )
             export_manifest = export_campaign_evidence(snapshot, output_directory)
         return self.repository.record_export(

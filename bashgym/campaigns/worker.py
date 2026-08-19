@@ -46,6 +46,18 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.diagnostic_actions import (
+    AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+    AUTORESEARCH_DIAGNOSTIC_EVIDENCE_SCHEMA,
+    AUTORESEARCH_DIAGNOSTIC_REQUEST_FILENAME,
+    AUTORESEARCH_NORMALIZED_DIAGNOSTIC_DOMAIN,
+    MAX_AUTORESEARCH_DIAGNOSTIC_BYTES,
+    AutoResearchDiagnosticRecipe,
+    AutoResearchDiagnosticRequest,
+    diagnostic_request_bytes,
+    public_diagnostic_projection,
+    validated_diagnostic_evidence,
+)
 from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
@@ -589,6 +601,26 @@ class CampaignWorker:
         evaluation_suite = None
         dataset_version = None
         evaluation_context_path = None
+        diagnostic_recipe = None
+        diagnostic_request_path = None
+        if attempt.stage.value == "contract_evaluation":
+            try:
+                diagnostic_recipe = AutoResearchDiagnosticRecipe.model_validate(
+                    executor["diagnostic_recipe"]
+                )
+                diagnostic_contract = profile.stage_profile(attempt.stage).diagnostic_contract
+                if diagnostic_contract is None or executor.get(
+                    "diagnostic_contract"
+                ) != diagnostic_contract.model_dump(mode="json"):
+                    raise ValueError("diagnostic contract mismatch")
+                campaign = self.repository.get_campaign(attempt.workspace_id, attempt.campaign_id)
+                manifest = self.repository.get_manifest_revision(
+                    attempt.workspace_id,
+                    attempt.campaign_id,
+                    campaign.manifest_revision,
+                ).manifest
+            except (KeyError, RecordNotFoundError, ValueError) as exc:
+                raise RuntimeError("campaign_remote_diagnostic_contract_invalid") from exc
         if (
             attempt.stage.value == "full_training"
             and executor.get("training_base_model") is not None
@@ -922,6 +954,12 @@ class CampaignWorker:
                     attempt.stage.value == "full_training" and registered_base_model is not None
                 ),
                 evaluate_registered_base_model=registered_base_model is not None,
+                diagnostic_recipe=diagnostic_recipe,
+                approved_data_scopes=(
+                    frozenset(manifest.approved_data_scopes)
+                    if diagnostic_recipe is not None
+                    else frozenset()
+                ),
             )
         except (KeyError, OSError, ValueError) as exc:
             raise RuntimeError("campaign_remote_executor_material_invalid") from exc
@@ -929,6 +967,10 @@ class CampaignWorker:
         expected_executor = {"kind": "ssh_remote", **expected}
         if persisted_context_sha is not None:
             expected_executor["evaluation_context_sha256"] = persisted_context_sha
+        persisted_diagnostic_sha = executor.get("diagnostic_request_sha256")
+        if diagnostic_recipe is not None:
+            expected_executor["diagnostic_proposal_id"] = executor.get("diagnostic_proposal_id")
+            expected_executor["diagnostic_request_sha256"] = persisted_diagnostic_sha
         if executor != expected_executor:
             raise RuntimeError("campaign_remote_executor_profile_mismatch")
         script_args = tuple(executor["script_args"])
@@ -966,6 +1008,35 @@ class CampaignWorker:
                 remote_resident_dataset.remote_dataset_path,
             )
         input_files = tuple(Path(value) for value in executor["input_files"])
+        if diagnostic_recipe is not None:
+            diagnostic_contract = profile.stage_profile(attempt.stage).diagnostic_contract
+            assert diagnostic_contract is not None
+            request = AutoResearchDiagnosticRequest(
+                workspace_id=attempt.workspace_id,
+                campaign_id=attempt.campaign_id,
+                proposal_id=executor["diagnostic_proposal_id"],
+                study_id=attempt.study_id,
+                action_id=attempt.action_id,
+                attempt_id=attempt.attempt_id,
+                recipe=diagnostic_recipe,
+                recipe_digest=executor["recipe_digest"],
+                runner_id=diagnostic_contract.runner_id,
+                runner_version=diagnostic_contract.runner_version,
+            )
+            request_bytes = diagnostic_request_bytes(request)
+            if persisted_diagnostic_sha != hashlib.sha256(request_bytes).hexdigest():
+                raise RuntimeError("campaign_remote_diagnostic_request_digest_mismatch")
+            request_directory = self.evaluation_context_root / attempt.attempt_id
+            diagnostic_request_path = request_directory / AUTORESEARCH_DIAGNOSTIC_REQUEST_FILENAME
+            self._write_evaluation_context(diagnostic_request_path, request_bytes)
+            input_files = (diagnostic_request_path, *input_files)
+            script_args = (
+                *script_args,
+                "--request",
+                AUTORESEARCH_DIAGNOSTIC_REQUEST_FILENAME,
+                "--output",
+                AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+            )
         if evaluation_suite is not None and dataset_version is not None:
             context = AutoResearchEvaluationContext(
                 workspace_id=attempt.workspace_id,
@@ -1483,6 +1554,58 @@ class CampaignWorker:
                 "projection_signature": self.sealer.sign_canonical_payload(
                     normalized,
                     domain=AUTORESEARCH_NORMALIZED_EVALUATION_DOMAIN,
+                ),
+            }
+        if attempt.stage.value == "contract_evaluation":
+            diagnostic_outputs = tuple(
+                output
+                for output in verified.outputs
+                if output.schema_name == AUTORESEARCH_DIAGNOSTIC_EVIDENCE_SCHEMA
+                and output.path == AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME
+            )
+            if len(diagnostic_outputs) != 1:
+                raise RuntimeError("campaign_remote_diagnostic_output_invalid")
+            output = diagnostic_outputs[0]
+            payload = await adapter.read_output_bytes(
+                record.identity,
+                output.path,
+                expected_sha256=output.sha256,
+                expected_size_bytes=output.size_bytes,
+                max_bytes=MAX_AUTORESEARCH_DIAGNOSTIC_BYTES,
+            )
+            recipe = AutoResearchDiagnosticRecipe.model_validate(
+                attempt.executor.get("diagnostic_recipe")
+            )
+            contract = attempt.executor.get("diagnostic_contract")
+            if not isinstance(contract, dict):
+                raise RuntimeError("campaign_remote_diagnostic_output_invalid")
+            try:
+                evidence = validated_diagnostic_evidence(
+                    payload,
+                    recipe=recipe,
+                    expected_identity={
+                        "workspace_id": attempt.workspace_id,
+                        "campaign_id": attempt.campaign_id,
+                        "proposal_id": str(attempt.executor.get("diagnostic_proposal_id", "")),
+                        "study_id": attempt.study_id,
+                        "action_id": attempt.action_id,
+                        "attempt_id": attempt.attempt_id,
+                    },
+                    expected_runner_id=str(contract.get("runner_id", "")),
+                    expected_runner_version=str(contract.get("runner_version", "")),
+                )
+            except ValueError as exc:
+                raise RuntimeError("campaign_remote_diagnostic_output_invalid") from exc
+            normalized = {
+                "evidence": evidence.model_dump(mode="json"),
+                "projection": public_diagnostic_projection(recipe, evidence),
+            }
+            artifact_metadata[output.path] = {
+                "normalized_diagnostic": normalized,
+                "projection_key_version": self.sealer.key_version,
+                "projection_signature": self.sealer.sign_canonical_payload(
+                    normalized,
+                    domain=AUTORESEARCH_NORMALIZED_DIAGNOSTIC_DOMAIN,
                 ),
             }
         self.repository.complete_from_seal(

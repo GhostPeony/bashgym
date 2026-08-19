@@ -26,6 +26,7 @@ from bashgym.campaigns.autoresearch import (
 from bashgym.campaigns.autoresearch_dataset import (
     AUTORESEARCH_DATASET_RECEIPT_FILENAME,
     AutoResearchDatasetFile,
+    AutoResearchDatasetQuality,
     AutoResearchDatasetReceipt,
 )
 from bashgym.campaigns.autoresearch_evidence import (
@@ -51,6 +52,7 @@ from bashgym.campaigns.contracts import (
     StagePlanItem,
     canonical_hash,
 )
+from bashgym.campaigns.failure_observations import AutoResearchFailureObservation
 from bashgym.campaigns.remote import (
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
@@ -64,6 +66,7 @@ from bashgym.campaigns.remote import (
     RemoteRunState,
     RemoteStreamChunk,
 )
+from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.worker import CampaignWorker
 from bashgym.ledger.contracts import (
@@ -106,15 +109,14 @@ def _sha256(path: Path) -> str:
 
 def _dataset_recipe() -> dict[str, object]:
     return {
-        "schema_version": "bashgym.terminal_data_recipe.v1",
-        "data_scope_id": "memexai-approved-training",
-        "runtime": {"executor_kind": "registered_compute"},
-        "script_args": [
-            "--pipeline",
-            "terminal_env_generation",
-            "--rows",
-            "64",
-        ],
+        "schema_version": "bashgym.autoresearch_data_design_recipe.v1",
+        "runtime": {"executor_kind": "registered_training"},
+        "hypothesis": "Target the measured high-count failure slice.",
+        "pipeline": "terminal_env_generation",
+        "generation_brief": "Generate balanced examples targeting the measured failure slice.",
+        "target_rows": 64,
+        "train_fraction": 0.8,
+        "seed": 17,
     }
 
 
@@ -225,6 +227,18 @@ class _CredentialFreeRemoteAdapter:
             baseline_scores=(metric - 0.005, metric, metric + 0.005),
         )
 
+    @staticmethod
+    def _failure_observations(metric: float):
+        return (
+            AutoResearchFailureObservation(
+                observation_id="task-failure",
+                category="task_failure",
+                summary="The fixed evaluator marked the task response incorrect.",
+                slice_path="behavior.task_failure",
+                count=round((1.0 - metric) * 100),
+            ),
+        )
+
     async def discover(self, request):
         return self.identities.get(request.run_id)
 
@@ -288,6 +302,15 @@ class _CredentialFreeRemoteAdapter:
                     "kind": "nvidia_data_designer",
                     "pipeline": "terminal_env_generation",
                 },
+                quality=AutoResearchDatasetQuality(
+                    generated_rows=3,
+                    accepted_rows=2,
+                    deterministic_verified_rows=2,
+                    verification_failed_rows=1,
+                    duplicate_rows_removed=0,
+                    contamination_rows_removed=0,
+                    verifier_digest="e" * 64,
+                ),
             )
             files[AUTORESEARCH_DATASET_RECEIPT_FILENAME] = receipt.model_dump_json().encode()
         elif request.evaluation_context_sha256 is not None:
@@ -311,6 +334,7 @@ class _CredentialFreeRemoteAdapter:
                 dataset_version_id=context.dataset_version_id,
                 evaluated_model_manifest_digest=context.evaluated_model_manifest_digest,
                 metrics={"mrr_at_10": metric},
+                failure_observations=self._failure_observations(metric),
                 evaluator_readiness=self._baseline_readiness(request, metric),
                 started_at=identity.launched_at,
                 completed_at=identity.launched_at + timedelta(seconds=1),
@@ -366,6 +390,7 @@ class _CredentialFreeRemoteAdapter:
                 dataset_version_id=context.dataset_version_id,
                 evaluated_model_manifest_digest=context.evaluated_model_manifest_digest,
                 metrics={"mrr_at_10": metric},
+                failure_observations=self._failure_observations(metric),
                 evaluator_readiness=self._baseline_readiness(request, metric),
                 started_at=identity.launched_at,
                 completed_at=identity.launched_at + timedelta(seconds=1),
@@ -432,7 +457,7 @@ class _CredentialFreeRemoteAdapter:
         return True
 
 
-def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_path):
+def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute(tmp_path):
     database = tmp_path / "campaigns.sqlite3"
     repository = AutoResearchRepository(database)
     repository.initialize()
@@ -440,14 +465,14 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
     campaign_value = campaign()
     campaign_manifest = manifest().model_copy(
         update={
-            "budget_limits": {"gpu_hours": 0.7, "study_count": 3.0},
+            "budget_limits": {"gpu_hours": 1.0, "study_count": 4.0},
             "evaluation_plan": {
                 **manifest().evaluation_plan,
                 "ledger_project_id": "project-a",
                 "evaluation_suite_id": "suite-held-out",
                 "dataset_binding_id": "dataset-held-out-v1",
             },
-            "max_proposal_rounds": 3,
+            "max_proposal_rounds": 4,
         }
     )
     repository.create_campaign(
@@ -541,9 +566,9 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
             primary_metric="mrr_at_10",
             metric_direction=MetricDirection.MAXIMIZE,
             stop_rules=AutoResearchStopRules(
-                max_attempts=3,
+                max_attempts=4,
                 budget_unit="gpu_hours",
-                max_total_cost=0.7,
+                max_total_cost=1.0,
                 minimum_improvement=0.01,
             ),
             ledger_project_id="project-a",
@@ -641,7 +666,7 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
     core = AutoResearchCampaignCore(repository, evaluation_reader=reader)
     projector = CampaignEvaluationProjector(repository, core.ledger, reader)
     coordinator = AutoResearchLoopCoordinator(repository, projector, core)
-    adapter = _CredentialFreeRemoteAdapter((0.50, 0.70, 0.65))
+    adapter = _CredentialFreeRemoteAdapter((0.50, 0.70, 0.65, 0.72))
     artifact_root = tmp_path / "sealed-artifacts"
     worker = CampaignWorker(
         repository,
@@ -775,6 +800,9 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
     assert worker.run_once(now=NOW + timedelta(seconds=4)) == "completed"
     first_data_build = repository.list_attempts("workspace-a", "campaign-1")[-1]
     assert first_data_build.stage == StageKind.DATA_BUILD
+    assert first_data_build.executor["script_args"][-2] == "--recipe-json"
+    rendered_data_recipe = json.loads(first_data_build.executor["script_args"][-1])
+    assert rendered_data_recipe["generation_brief"].startswith("Generate balanced examples")
     assert worker.run_once(now=NOW + timedelta(seconds=5)) == "completed"
     first_training = repository.list_attempts("workspace-a", "campaign-1")[-1]
     assert first_training.stage == StageKind.FULL_TRAINING
@@ -863,23 +891,73 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
     second_state = core.state("workspace-a", "campaign-1", now=NOW + timedelta(seconds=13))
     assert second_state.latest_decision == ResultDecision.DISCARD
     assert second_state.best_proposal_id == candidate_one.proposal_id
-    assert second_state.next_action == AutoResearchNextAction.STOP
+    assert second_state.next_action == AutoResearchNextAction.PROPOSE_CANDIDATE
+    failure_packet = core.failures("workspace-a", "campaign-1")
+    assert failure_packet["comparison"] == [
+        {
+            "category": "task_failure",
+            "reference_count": 30,
+            "candidate_count": 35,
+            "delta": 5,
+            "status": "regressed",
+        }
+    ]
+    assert "prediction" not in json.dumps(failure_packet, sort_keys=True).lower()
+    candidate_two_outcome = repository.list_autoresearch_outcomes("workspace-a", "campaign-1")[-1]
+
+    candidate_three = _candidate_submission(
+        "candidate-learning-rate-branch",
+        learning_rate=0.0025,
+        prerequisite_study_id=candidate_two_outcome.result.study_id,
+    ).model_copy(update={"primary_variable": "training_recipe.learning_rate"})
+    core.submit_controlled_candidate(
+        candidate_three,
+        parent_proposal_id=candidate_two.proposal_id,
+        changed_variable="training_recipe.learning_rate",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-candidate-three",
+        idempotency_key="submit-candidate-three",
+    )
+    assert worker.run_once(now=NOW + timedelta(seconds=14)) == "completed"
+    third_data_build = repository.list_attempts("workspace-a", "campaign-1")[-1]
+    assert third_data_build.stage == StageKind.DATA_BUILD
+    assert worker.run_once(now=NOW + timedelta(seconds=15)) == "completed"
+    third_training = repository.list_attempts("workspace-a", "campaign-1")[-1]
+    assert third_training.stage == StageKind.FULL_TRAINING
+    third_training_request = adapter.launch_requests[-1]
+    assert third_training_request.registered_base_model is None
+    assert third_training_request.remote_resident_model is not None
+    assert third_training_request.remote_resident_model.attempt_id == second_training.attempt_id
+    assert worker.run_once(now=NOW + timedelta(seconds=16)) == "completed"
+    third_evaluation = repository.list_attempts("workspace-a", "campaign-1")[-1]
+    assert third_evaluation.stage == StageKind.DEVELOPMENT_EVALUATION
+    assert worker.run_once(now=NOW + timedelta(seconds=18)) == ("autoresearch_evaluation_ingested")
+    third_state = core.state("workspace-a", "campaign-1", now=NOW + timedelta(seconds=18))
+    assert third_state.latest_decision == ResultDecision.KEEP
+    assert third_state.best_proposal_id == candidate_three.proposal_id
+    assert third_state.next_action == AutoResearchNextAction.STOP
 
     outcomes = repository.list_autoresearch_outcomes("workspace-a", "campaign-1")
     assert [item.result.proposal_id for item in outcomes] == [
         "baseline-registered",
         "candidate-learning-rate-1",
         "candidate-learning-rate-2",
+        "candidate-learning-rate-branch",
     ]
     assert [item.decision.decision for item in outcomes] == [
         ResultDecision.BASELINE,
         ResultDecision.KEEP,
         ResultDecision.DISCARD,
+        ResultDecision.KEEP,
     ]
-    assert [item.result.metric_value for item in outcomes] == [0.50, 0.70, 0.65]
+    assert [item.result.metric_value for item in outcomes] == [0.50, 0.70, 0.65, 0.72]
+    assert outcomes[-1].decision.previous_best_proposal_id == candidate_one.proposal_id
+    assert outcomes[-1].decision.previous_best_metric == 0.70
+    assert outcomes[-1].decision.improvement == pytest.approx(0.02)
     assert submitted_baseline.record.proposal.planner_actor_id == actor.actor_id
     assert candidate_one_submission.record.proposal.planner_actor_id == actor.actor_id
-    assert len(adapter.launch_requests) == len(adapter.collected_run_ids) == 7
+    assert len(adapter.launch_requests) == len(adapter.collected_run_ids) == 10
     assert adapter.evaluation_metrics == []
     assert not artifact_root.exists()
 
@@ -888,7 +966,11 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
         for item in core.ledger.list_dataset_versions("workspace-a", "project-a")
         if item["metadata"].get("source_kind") == "remote_data_build"
     ]
-    assert len(generated_dataset_versions) == 2
+    assert len(generated_dataset_versions) == 3
+    assert all(
+        item["metadata"]["data_quality"]["acceptance_rate"] == 2 / 3
+        for item in generated_dataset_versions
+    )
     assert all(
         item["source_uri"].startswith("autoresearch-remote-dataset://sha256/")
         for item in generated_dataset_versions
@@ -904,7 +986,7 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
         for item in repository.list_attempts("workspace-a", "campaign-1")
         if item.stage == StageKind.DEVELOPMENT_EVALUATION
     ]
-    assert len(evaluation_attempts) == 3
+    assert len(evaluation_attempts) == 4
     assert {
         (
             item.executor["evaluation_binding"]["evaluation_suite_id"],
@@ -917,14 +999,16 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
         for item in evaluation_attempts
     )
 
-    assert worker.run_once(now=NOW + timedelta(seconds=14)) == "autoresearch_stop_enforced"
-    stopped = core.state("workspace-a", "campaign-1", now=NOW + timedelta(seconds=14))
+    assert worker.run_once(now=NOW + timedelta(seconds=19)) == "autoresearch_stop_enforced"
+    stopped = core.state("workspace-a", "campaign-1", now=NOW + timedelta(seconds=19))
     assert stopped.campaign_status == CampaignStatus.EXHAUSTED
     assert stopped.reason_code == "attempt_limit_reached"
 
     export_root = tmp_path / "reports"
     terminal = repository.get_campaign("workspace-a", "campaign-1")
-    exported = CampaignService(repository, export_root=export_root).export(
+    api_repository = CampaignRuntimeRepository(repository.db_path)
+    api_repository.initialize()
+    exported = CampaignService(api_repository, export_root=export_root).export(
         "workspace-a",
         "campaign-1",
         ("markdown", "json"),
@@ -939,7 +1023,45 @@ def test_start_to_two_candidate_decisions_stops_and_exports_without_compute(tmp_
     assert "# Campaign Evidence Report" in report
     assert "- Status: `exhausted`" in report
     assert evidence["campaign"]["stop_reason"] == "attempt_limit_reached"
-    assert len(evidence["attempts"]) == 7
+    assert len(evidence["attempts"]) == 10
+    history = evidence["autoresearch_history"]
+    assert history["schema_version"] == "bashgym.autoresearch_history.v1"
+    assert history["evaluation_suite_id"] == "suite-held-out"
+    assert history["total_experiments"] == 4
+    assert [item["proposal_id"] for item in history["experiments"]] == [
+        "baseline-registered",
+        "candidate-learning-rate-1",
+        "candidate-learning-rate-2",
+        "candidate-learning-rate-branch",
+    ]
+    assert [item["decision"]["decision"] for item in history["experiments"]] == [
+        "baseline",
+        "keep",
+        "discard",
+        "keep",
+    ]
+    assert [
+        item["performance"]["primary"]["candidate_value"] for item in history["experiments"]
+    ] == [0.50, 0.70, 0.65, 0.72]
+    assert [
+        item["performance"]["primary"]["reference_proposal_id"] for item in history["experiments"]
+    ] == [
+        None,
+        "baseline-registered",
+        "candidate-learning-rate-1",
+        "candidate-learning-rate-1",
+    ]
+    branch_history = history["experiments"][-1]
+    assert branch_history["performance"]["parent"]["proposal_id"] == ("candidate-learning-rate-2")
+    assert branch_history["performance"]["parent"]["value"] == 0.65
+    assert branch_history["performance"]["parent"]["improvement"] == pytest.approx(0.07)
+    assert branch_history["performance"]["primary"]["reference_value"] == 0.70
+    assert branch_history["performance"]["primary"]["improvement"] == pytest.approx(0.02)
+    assert history["experiments"][1]["data"]["quality"]["acceptance_rate"] == 2 / 3
+    assert history["experiments"][2]["data"]["quality"]["acceptance_rate"] == 2 / 3
+    assert "## AutoResearch experiment history" in report
+    assert "### 2. candidate-learning-rate-1" in report
+    assert "### 3. candidate-learning-rate-2" in report
     assert {item["name"] for item in exported.details["files"]} >= {
         "campaign_evidence.json",
         "campaign_report.md",

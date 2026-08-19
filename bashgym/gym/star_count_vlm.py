@@ -7,6 +7,7 @@ import gc
 import hashlib
 import json
 import re
+import shutil
 import stat
 import zipfile
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from typing import Any
 
 from PIL import Image
 
+from bashgym.campaigns.contracts import canonical_hash
 from bashgym.environments.star_count import score_star_count_prediction
 
 _IMMUTABLE_REVISION = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -22,6 +24,9 @@ _LORA_TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj",
 _LORA_EXCLUDES = ("vision_tower", "multi_modal_projector", "audio_tower")
 _MAX_ARCHIVE_FILES = 10_000
 _MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
+_MAX_AUTORESEARCH_CHECKPOINTS = 8
+_CHECKPOINT_DIRECTORY = re.compile(r"^checkpoint-(?P<step>[1-9][0-9]*)$")
+_PUBLISHED_CHECKPOINT_DIRECTORY = re.compile(r"^step-(?P<step>[1-9][0-9]*)$")
 
 
 def _sha256(path: Path) -> str:
@@ -30,6 +35,53 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _checkpoint_manifest_digest(directory: Path) -> str:
+    entries: list[list[str | int]] = []
+    for path in sorted(directory.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("autoresearch checkpoint contains a symbolic link")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(directory).as_posix()
+        entries.append([relative, _sha256(path), path.stat().st_size])
+    if not entries or len(entries) > 1000:
+        raise ValueError("autoresearch checkpoint file inventory is invalid")
+    return canonical_hash(entries)
+
+
+def _publish_retained_checkpoints(training_root: Path, destination: Path) -> None:
+    candidates: list[tuple[int, Path]] = []
+    for path in training_root.iterdir():
+        match = _CHECKPOINT_DIRECTORY.fullmatch(path.name)
+        if match is None:
+            continue
+        if path.is_symlink() or not path.is_dir():
+            raise ValueError("autoresearch checkpoint directory is invalid")
+        candidates.append((int(match.group("step")), path))
+    if not candidates:
+        return
+    if destination.exists():
+        raise ValueError("autoresearch checkpoint destination already exists")
+    destination.mkdir(parents=True)
+    selected = sorted(candidates)[-_MAX_AUTORESEARCH_CHECKPOINTS:]
+    selected_paths = {path for _step, path in selected}
+    for step, path in selected:
+        path.replace(destination / f"step-{step}")
+    for _step, path in candidates:
+        if path not in selected_paths:
+            shutil.rmtree(path)
+
+
+def _release_cuda_cache() -> None:
+    gc.collect()
+    try:
+        import torch
+
+        torch.cuda.empty_cache()
+    except (ImportError, RuntimeError):
+        pass
 
 
 def _verify_extracted_dataset(root: Path) -> None:
@@ -353,6 +405,44 @@ def summarize_star_count_predictions(rows: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def summarize_star_count_failures(rows: list[dict[str, Any]]):
+    """Return aggregate behavioral categories without retaining held-out examples."""
+
+    from bashgym.campaigns.failure_observations import AutoResearchFailureObservation
+
+    categories = {
+        "count_and_format_error": 0,
+        "count_error": 0,
+        "format_error": 0,
+    }
+    for row in rows:
+        score = score_star_count_prediction(str(row["prediction"]), row["counts"])
+        if score.count_accuracy == 1.0 and score.format_accuracy == 1.0:
+            continue
+        if score.count_accuracy < 1.0 and score.format_accuracy < 1.0:
+            categories["count_and_format_error"] += 1
+        elif score.count_accuracy < 1.0:
+            categories["count_error"] += 1
+        else:
+            categories["format_error"] += 1
+    summaries = {
+        "count_and_format_error": "The response had incorrect counts and did not match the required format.",
+        "count_error": "The response matched the required format but contained incorrect counts.",
+        "format_error": "The counts were correct but the response did not match the required format.",
+    }
+    return tuple(
+        AutoResearchFailureObservation(
+            observation_id=category.replace("_", "-"),
+            category=category,
+            summary=summaries[category],
+            slice_path=f"behavior.{category}",
+            count=count,
+        )
+        for category, count in categories.items()
+        if count
+    )
+
+
 def evaluate_star_count_model(
     recipe: StarCountVLMRecipe,
     *,
@@ -443,6 +533,12 @@ def main(argv: list[str] | None = None) -> int:
     autoresearch_evaluate.add_argument("--model-dir", required=True)
     autoresearch_evaluate.add_argument("--dataset", required=True)
     autoresearch_evaluate.add_argument("--output", required=True)
+    autoresearch_evaluate.add_argument(
+        "--checkpoint-limit",
+        type=int,
+        choices=range(0, _MAX_AUTORESEARCH_CHECKPOINTS + 1),
+        default=0,
+    )
     args = parser.parse_args(argv)
 
     if args.command == "autoresearch-train":
@@ -501,6 +597,10 @@ def main(argv: list[str] | None = None) -> int:
             validation_jsonl=validation_jsonl,
             output_dir=Path("training").resolve(),
         )
+        _publish_retained_checkpoints(
+            Path("training").resolve(),
+            Path("checkpoints").resolve(),
+        )
         adapter = Path("training/final_adapter").resolve()
         final = Path("final").resolve()
         if not adapter.is_dir() or final.exists():
@@ -511,6 +611,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "autoresearch-evaluate":
         from bashgym.campaigns.autoresearch_evidence import (
+            AutoResearchCheckpointObservation,
             AutoResearchEvaluationContext,
             AutoResearchEvaluationEvidence,
         )
@@ -542,6 +643,60 @@ def main(argv: list[str] | None = None) -> int:
             model_revision=args.model_revision,
         )
         started_at = utc_now()
+        checkpoint_observations = []
+        checkpoint_root = model_dir.parent / "checkpoints"
+        if args.checkpoint_limit and checkpoint_root.is_dir() and not checkpoint_root.is_symlink():
+            candidates: list[tuple[int, Path]] = []
+            for path in checkpoint_root.iterdir():
+                match = _PUBLISHED_CHECKPOINT_DIRECTORY.fullmatch(path.name)
+                if match is not None and path.is_dir() and not path.is_symlink():
+                    candidates.append((int(match.group("step")), path))
+            for step, checkpoint in sorted(candidates)[-args.checkpoint_limit :]:
+                checkpoint_config = checkpoint / "adapter_config.json"
+                if not checkpoint_config.is_file() or checkpoint_config.is_symlink():
+                    raise ValueError("autoresearch checkpoint adapter config is unavailable")
+                checkpoint_payload = json.loads(checkpoint_config.read_text(encoding="utf-8"))
+                checkpoint_base = checkpoint_payload.get("base_model_name_or_path")
+                if (
+                    not isinstance(checkpoint_base, str)
+                    or not Path(checkpoint_base).expanduser().is_dir()
+                ):
+                    raise ValueError("autoresearch checkpoint base model is unavailable")
+                checkpoint_recipe = StarCountVLMRecipe(
+                    model_id=str(Path(checkpoint_base).expanduser().resolve()),
+                    model_revision=args.model_revision,
+                )
+                checkpoint_started = utc_now()
+                checkpoint_result = evaluate_star_count_model(
+                    checkpoint_recipe,
+                    heldout_jsonl=heldout_jsonl,
+                    output_path=Path(
+                        f"star_count_checkpoint_{step}_evaluation_detail.json"
+                    ).resolve(),
+                    adapter_path=checkpoint,
+                )
+                checkpoint_metrics_raw = checkpoint_result.get("metrics")
+                if not isinstance(checkpoint_metrics_raw, dict):
+                    raise ValueError("star-count checkpoint evaluator did not return metrics")
+                checkpoint_metrics = {
+                    key: float(value)
+                    for key, value in checkpoint_metrics_raw.items()
+                    if key != "example_count" and isinstance(value, (int, float))
+                }
+                checkpoint_observations.append(
+                    AutoResearchCheckpointObservation(
+                        checkpoint_step=step,
+                        evaluated_model_manifest_digest=(_checkpoint_manifest_digest(checkpoint)),
+                        metrics=checkpoint_metrics,
+                        slice_metrics={
+                            "adapter_evaluated": True,
+                            "example_count": int(checkpoint_metrics_raw.get("example_count", 0)),
+                        },
+                        started_at=checkpoint_started,
+                        completed_at=utc_now(),
+                    )
+                )
+                _release_cuda_cache()
         result = evaluate_star_count_model(
             recipe,
             heldout_jsonl=heldout_jsonl,
@@ -556,6 +711,9 @@ def main(argv: list[str] | None = None) -> int:
             for key, value in raw_metrics.items()
             if key != "example_count" and isinstance(value, (int, float))
         }
+        predictions = result.get("predictions")
+        if not isinstance(predictions, list):
+            raise ValueError("star-count evaluator did not return prediction observations")
         evidence = AutoResearchEvaluationEvidence(
             campaign_id=context.campaign_id,
             study_id=context.study_id,
@@ -571,6 +729,8 @@ def main(argv: list[str] | None = None) -> int:
                 "adapter_evaluated": bool(result.get("adapter_evaluated", adapter_path)),
                 "example_count": int(raw_metrics.get("example_count", 0)),
             },
+            checkpoint_observations=tuple(checkpoint_observations),
+            failure_observations=summarize_star_count_failures(predictions),
             started_at=started_at,
             completed_at=utc_now(),
         )
@@ -657,6 +817,7 @@ __all__ = [
     "extract_star_count_archive",
     "load_star_count_records",
     "main",
+    "summarize_star_count_failures",
     "summarize_star_count_predictions",
     "train_star_count_lora",
 ]

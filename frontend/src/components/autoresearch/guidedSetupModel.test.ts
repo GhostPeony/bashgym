@@ -10,11 +10,37 @@ import {
   parseGuidedSetupValidation
 } from './guidedSetupModel'
 
+const stopRules = {
+  schema_version: 'autoresearch_stop_rules.v1',
+  max_attempts: 5,
+  budget_unit: 'gpu_hours',
+  max_total_cost: 10,
+  target_metric: null,
+  minimum_improvement: 0.01,
+  protected_metrics: [],
+  deadline: null
+}
+
+const methodThresholds = {
+  schema_version: 'autoresearch_method_thresholds.v1',
+  min_demonstration_examples: 64,
+  min_target_slice_coverage: 0.8,
+  max_contamination_rate: 0.01
+}
+
 const required = {
   model: 'model.registered',
   data: 'data.registered',
   compute: 'compute.private',
   evaluation: 'evaluation.registered'
+}
+
+const experimentContract = {
+  primary_metric: 'exact_task_accuracy',
+  metric_direction: 'maximize',
+  max_attempts_limit: 6,
+  budget_limits: { gpu_hours: 10 },
+  protected_metrics: []
 }
 
 function context(overrides: Record<string, unknown> = {}) {
@@ -27,7 +53,8 @@ function context(overrides: Record<string, unknown> = {}) {
         template_id: 'template-modern',
         definition_digest: 'a'.repeat(64),
         quality_claim_eligible: true,
-        required_bindings: required
+        required_bindings: required,
+        experiment_contract: experimentContract
       }
     ],
     installations: [
@@ -197,9 +224,11 @@ test('strictly parses session, doctor, and validation authority responses', () =
       kind,
       logical_id,
       availability: 'reachable'
-    }))
+    })),
+    stop_rules: stopRules,
+    method_thresholds: methodThresholds
   }
-  assert.ok(parseGuidedSetupDoctor(doctor))
+  assert.deepEqual(parseGuidedSetupDoctor(doctor)?.method_thresholds, methodThresholds)
   assert.equal(parseGuidedSetupDoctor({ ...doctor, secret: true }), null)
   assert.equal(
     parseGuidedSetupDoctor({
@@ -234,7 +263,9 @@ test('projects only the safe creation handoff from an exact response envelope', 
     setup: {
       schema_version: 'guided_setup_creation.v1',
       validation_receipt_id: `setuprcpt_${'a'.repeat(32)}`,
-      binding_references: required
+      binding_references: required,
+      stop_rules: stopRules,
+      method_thresholds: methodThresholds
     }
   }
   assert.deepEqual(parseGuidedSetupCreation(creation), {
@@ -244,7 +275,19 @@ test('projects only the safe creation handoff from an exact response envelope', 
     status: 'ready',
     replayed: false,
     validation_receipt_id: `setuprcpt_${'a'.repeat(32)}`,
-    binding_references: required
+    binding_references: required,
+    stop_rules: stopRules,
+    method_thresholds: methodThresholds
   })
+  assert.equal(
+    parseGuidedSetupCreation({
+      ...creation,
+      setup: {
+        ...creation.setup,
+        method_thresholds: { ...methodThresholds, max_contamination_rate: 1.1 }
+      }
+    }),
+    null
+  )
   assert.equal(parseGuidedSetupCreation({ ...creation, private_path: 'C:/secret' }), null)
 })

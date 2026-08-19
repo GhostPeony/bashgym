@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
+from time import monotonic
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
@@ -50,6 +52,8 @@ campaign_agent_router = APIRouter(prefix="/api/campaigns", tags=["campaign-agent
 campaign_agent_credential_router = APIRouter(
     prefix="/api/campaign-agent", tags=["campaign-agent-credential"]
 )
+
+_TERMINAL_CAMPAIGN_STATUSES = frozenset({"completed", "exhausted", "failed", "cancelled"})
 
 IdentifierField = Annotated[
     str,
@@ -641,6 +645,36 @@ def campaign_agent_heartbeat(body: Annotated[Any, Body()], request: Request):
         _raise_api(exc)
 
 
+def _agent_observation(service: CampaignAgentService, authorization: Any) -> dict[str, Any]:
+    scope = authorization.scope
+    state = service.campaign_repository.read_control_room_snapshot(
+        scope.workspace_id, scope.campaign_id
+    )
+    authorization.require_scope(state.campaign.workspace_id, state.campaign.campaign_id)
+    return {
+        "schemaVersion": "campaign_agent_observation.v1",
+        "scope": {
+            "workspaceId": scope.workspace_id,
+            "campaignId": scope.campaign_id,
+        },
+        "campaign": {
+            "status": state.campaign.status.value,
+            "version": state.campaign.version,
+            "manifestRevision": state.campaign.manifest_revision,
+            "activeStudyId": state.campaign.active_study_id,
+            "activeActionId": state.campaign.active_action_id,
+            "latestEventCursor": state.latest_event_cursor,
+        },
+        "agent": {
+            "attachmentId": authorization.attachment_id,
+            "attachmentVersion": authorization.attachment_version,
+            "agentFamily": authorization.agent_family.value,
+            "agentPrincipalId": authorization.principal.actor_id,
+            "authorizedCapability": authorization.required_capability.value,
+        },
+    }
+
+
 @campaign_agent_credential_router.get("/actions/observe")
 def observe_campaign_as_agent(request: Request):
     """Return a bounded status projection for the bearer-bound campaign only."""
@@ -651,32 +685,62 @@ def observe_campaign_as_agent(request: Request):
             _bearer(request),
             required_capability=CampaignAgentCapability.CAMPAIGN_OBSERVE,
         )
-        scope = authorization.scope
-        state = service.campaign_repository.read_control_room_snapshot(
-            scope.workspace_id, scope.campaign_id
+        return _agent_observation(service, authorization)
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_agent_credential_router.get("/actions/wait")
+async def wait_for_campaign_as_agent(
+    request: Request,
+    after_cursor: int = Query(default=0, ge=0),
+    timeout_seconds: int = Query(default=30, ge=1, le=55),
+):
+    """Wait for one bearer-scoped campaign change without shell polling."""
+
+    try:
+        service, _auth = _service(request)
+        bearer = _bearer(request)
+        authorization = service.authorize_bearer_action(
+            bearer,
+            required_capability=CampaignAgentCapability.CAMPAIGN_OBSERVE,
         )
-        authorization.require_scope(state.campaign.workspace_id, state.campaign.campaign_id)
+        deadline = monotonic() + timeout_seconds
+        poll_interval = 0.25
+        while True:
+            observation = await asyncio.to_thread(_agent_observation, service, authorization)
+            campaign = observation["campaign"]
+            next_cursor = int(campaign["latestEventCursor"])
+            if campaign["status"] in _TERMINAL_CAMPAIGN_STATUSES:
+                break
+            if next_cursor > after_cursor:
+                break
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(poll_interval, remaining))
+            poll_interval = min(poll_interval * 2, 4.0)
+
+        # Revalidate the bearer after the wait and return the final canonical snapshot.
+        authorization = service.authorize_bearer_action(
+            bearer,
+            required_capability=CampaignAgentCapability.CAMPAIGN_OBSERVE,
+        )
+        observation = await asyncio.to_thread(_agent_observation, service, authorization)
+        final_campaign = observation["campaign"]
+        if final_campaign["status"] in _TERMINAL_CAMPAIGN_STATUSES:
+            status = "terminal"
+        elif int(final_campaign["latestEventCursor"]) > after_cursor:
+            status = "changed"
+        else:
+            status = "timeout"
         return {
-            "schemaVersion": "campaign_agent_observation.v1",
-            "scope": {
-                "workspaceId": scope.workspace_id,
-                "campaignId": scope.campaign_id,
-            },
-            "campaign": {
-                "status": state.campaign.status.value,
-                "version": state.campaign.version,
-                "manifestRevision": state.campaign.manifest_revision,
-                "activeStudyId": state.campaign.active_study_id,
-                "activeActionId": state.campaign.active_action_id,
-                "latestEventCursor": state.latest_event_cursor,
-            },
-            "agent": {
-                "attachmentId": authorization.attachment_id,
-                "attachmentVersion": authorization.attachment_version,
-                "agentFamily": authorization.agent_family.value,
-                "agentPrincipalId": authorization.principal.actor_id,
-                "authorizedCapability": authorization.required_capability.value,
-            },
+            "schemaVersion": "campaign_agent_wait.v1",
+            "scope": observation["scope"],
+            "status": status,
+            "afterCursor": after_cursor,
+            "nextCursor": observation["campaign"]["latestEventCursor"],
+            "observation": observation,
         }
     except Exception as exc:
         _raise_api(exc)

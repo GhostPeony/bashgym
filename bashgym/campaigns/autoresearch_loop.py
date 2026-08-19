@@ -136,7 +136,8 @@ class AutoResearchLoopCoordinator:
         with self.repository._connection() as connection:
             return connection.execute(
                 """
-                SELECT a.workspace_id, a.campaign_id, s.proposal_id, a.action_id
+                SELECT a.workspace_id, a.campaign_id, s.study_id, s.proposal_id,
+                       a.action_id, t.attempt_id
                 FROM campaign_actions a
                 JOIN campaign_studies s
                   ON s.workspace_id = a.workspace_id AND s.study_id = a.study_id
@@ -152,6 +153,10 @@ class AutoResearchLoopCoordinator:
                   ON r.workspace_id = p.workspace_id
                  AND r.campaign_id = p.campaign_id
                  AND r.proposal_id = p.proposal_id
+                LEFT JOIN autoresearch_diagnostic_results d
+                  ON d.workspace_id = p.workspace_id
+                 AND d.campaign_id = p.campaign_id
+                 AND d.proposal_id = p.proposal_id
                 WHERE c.status = ?
                   AND a.stage_kind = 'development_evaluation'
                   AND a.status = 'completed'
@@ -159,6 +164,48 @@ class AutoResearchLoopCoordinator:
                   AND a.sealed_result_uri IS NOT NULL
                   AND a.sealed_result_uri != ''
                   AND r.proposal_id IS NULL
+                  AND d.proposal_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM campaign_attempts newer
+                      WHERE newer.workspace_id = t.workspace_id
+                        AND newer.action_id = t.action_id
+                        AND newer.attempt_number > t.attempt_number
+                  )
+                ORDER BY a.updated_at, a.workspace_id, a.campaign_id, a.action_id
+                LIMIT 1
+                """,
+                (CampaignStatus.ACTIVE.value,),
+            ).fetchone()
+
+    def _next_completed_diagnostic(self):
+        with self.repository._connection() as connection:
+            return connection.execute(
+                """
+                SELECT a.workspace_id, a.campaign_id, s.study_id, s.proposal_id,
+                       a.action_id, t.attempt_id
+                FROM campaign_actions a
+                JOIN campaign_studies s
+                  ON s.workspace_id = a.workspace_id AND s.study_id = a.study_id
+                JOIN campaign_attempts t
+                  ON t.workspace_id = a.workspace_id AND t.action_id = a.action_id
+                JOIN campaigns c
+                  ON c.workspace_id = a.workspace_id AND c.campaign_id = a.campaign_id
+                JOIN autoresearch_proposal_controls p
+                  ON p.workspace_id = s.workspace_id
+                 AND p.campaign_id = s.campaign_id
+                 AND p.proposal_id = s.proposal_id
+                LEFT JOIN autoresearch_diagnostic_results d
+                  ON d.workspace_id = p.workspace_id
+                 AND d.campaign_id = p.campaign_id
+                 AND d.proposal_id = p.proposal_id
+                WHERE c.status = ?
+                  AND p.role = 'diagnostic'
+                  AND a.stage_kind = 'contract_evaluation'
+                  AND a.status = 'completed'
+                  AND t.status = 'completed'
+                  AND a.sealed_result_uri IS NOT NULL
+                  AND a.sealed_result_uri != ''
+                  AND d.proposal_id IS NULL
                   AND NOT EXISTS (
                       SELECT 1 FROM campaign_attempts newer
                       WHERE newer.workspace_id = t.workspace_id
@@ -177,7 +224,7 @@ class AutoResearchLoopCoordinator:
             return connection.execute(
                 """
                 SELECT a.workspace_id, a.campaign_id, a.study_id, a.action_id,
-                       s.proposal_id, t.attempt_id, t.attempt_number,
+                       s.proposal_id, p.role, t.attempt_id, t.attempt_number,
                        c.version AS campaign_version
                 FROM campaign_actions a
                 JOIN campaign_studies s
@@ -194,12 +241,17 @@ class AutoResearchLoopCoordinator:
                   ON r.workspace_id = p.workspace_id
                  AND r.campaign_id = p.campaign_id
                  AND r.proposal_id = p.proposal_id
+                LEFT JOIN autoresearch_diagnostic_results d
+                  ON d.workspace_id = p.workspace_id
+                 AND d.campaign_id = p.campaign_id
+                 AND d.proposal_id = p.proposal_id
                 WHERE c.status = ?
                   AND c.active_study_id IS NULL
                   AND c.active_action_id IS NULL
                   AND a.status IN (?, ?, ?)
                   AND t.status IN (?, ?, ?)
                   AND r.proposal_id IS NULL
+                  AND d.proposal_id IS NULL
                   AND NOT EXISTS (
                       SELECT 1 FROM campaign_attempts newer
                       WHERE newer.workspace_id = t.workspace_id
@@ -295,6 +347,58 @@ class AutoResearchLoopCoordinator:
             )
         )
 
+    def _record_diagnostic_failure(
+        self, failed, *, reason: str = "diagnostic_execution_failed"
+    ) -> None:
+        from bashgym.campaigns.autoresearch import AutoResearchDiagnosticResult
+        from bashgym.campaigns.diagnostic_actions import AutoResearchDiagnosticRecipe
+
+        proposal = self.repository.get_proposal(
+            failed["workspace_id"], failed["campaign_id"], failed["proposal_id"]
+        ).proposal
+        recipe = AutoResearchDiagnosticRecipe.model_validate(
+            {key: value for key, value in proposal.evaluation_recipe.items() if key != "runtime"}
+        )
+        spec = self.repository.get_autoresearch_spec(failed["workspace_id"], failed["campaign_id"])
+        usage = self.repository.study_budget_usage(
+            failed["workspace_id"],
+            failed["campaign_id"],
+            failed["study_id"],
+            spec.stop_rules.budget_unit,
+        )
+        attempts = self.repository.list_study_attempts(
+            failed["workspace_id"], failed["campaign_id"], failed["study_id"]
+        )
+        self.repository.record_autoresearch_diagnostic_result(
+            AutoResearchDiagnosticResult(
+                workspace_id=failed["workspace_id"],
+                campaign_id=failed["campaign_id"],
+                proposal_id=failed["proposal_id"],
+                study_id=failed["study_id"],
+                attempt_id=failed["attempt_id"],
+                status="unsupported",
+                projection={
+                    "schema_version": "bashgym.research_diagnostic_result.v1",
+                    "probe_family": recipe.probe_family,
+                    "question": recipe.question,
+                    "hypothesis": recipe.hypothesis,
+                    "informs_methods": list(recipe.informs_methods),
+                    "status": "unsupported",
+                    "measurements": [],
+                    "observations": [],
+                    "resource_usage": [],
+                    "unsupported_reason": reason,
+                    "evidence_reference": {
+                        "proposal_id": failed["proposal_id"],
+                        "study_id": failed["study_id"],
+                        "attempt_id": failed["attempt_id"],
+                    },
+                },
+                actual_cost=float(usage["actual"]),
+                recorded_at=max(item.updated_at for item in attempts),
+            )
+        )
+
     def _record_invalid_evaluation(self, completed) -> None:
         proposal = self.repository.get_proposal(
             completed["workspace_id"], completed["campaign_id"], completed["proposal_id"]
@@ -364,6 +468,29 @@ class AutoResearchLoopCoordinator:
         return None
 
     def tick(self, *, now: datetime | None = None) -> AutoResearchLoopTickResult:
+        diagnostic = self._next_completed_diagnostic()
+        if diagnostic is not None:
+            diagnostic_status = "diagnostic_ingested"
+            try:
+                self.projector.project_diagnostic_and_ingest(
+                    diagnostic["workspace_id"],
+                    diagnostic["campaign_id"],
+                    diagnostic["proposal_id"],
+                )
+            except (ValueError, AutoResearchError, LedgerPersistenceError):
+                self._record_diagnostic_failure(diagnostic, reason="diagnostic_evidence_invalid")
+                diagnostic_status = "invalid_diagnostic_recorded"
+            state = self.core.state(diagnostic["workspace_id"], diagnostic["campaign_id"], now=now)
+            return AutoResearchLoopTickResult(
+                status=diagnostic_status,
+                effect_performed=True,
+                workspace_id=diagnostic["workspace_id"],
+                campaign_id=diagnostic["campaign_id"],
+                proposal_id=diagnostic["proposal_id"],
+                action_id=diagnostic["action_id"],
+                state=state,
+                agent_action_required=self._agent_action_required(state),
+            )
         completed = self._next_completed_evaluation()
         if completed is not None:
             try:
@@ -428,7 +555,10 @@ class AutoResearchLoopCoordinator:
                 state=state,
             )
         if failed is not None:
-            self._record_crash(failed)
+            if failed["role"] == "diagnostic":
+                self._record_diagnostic_failure(failed)
+            else:
+                self._record_crash(failed)
             state = self.core.state(failed["workspace_id"], failed["campaign_id"], now=now)
             return AutoResearchLoopTickResult(
                 status="crash_recorded",

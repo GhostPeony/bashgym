@@ -121,6 +121,7 @@ def _default_command_runner(
         timeout=timeout,
         check=False,
         shell=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 

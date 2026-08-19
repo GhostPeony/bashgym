@@ -69,6 +69,7 @@ import {
 } from './humanWorkModel'
 import {
   buildGuidedSetupView,
+  type AutoResearchStopRules,
   type GuidedSetupContext,
   type GuidedSetupDoctor,
   type GuidedSetupValidation
@@ -1220,9 +1221,17 @@ export function ControlRoomContent(props: ControlRoomContentProps) {
               selectedOptionId=""
               campaignId=""
               title=""
+              budgetUnit=""
+              budgetLimit=""
+              maxAttempts=""
+              minimumImprovement=""
               onSelectedOptionChange={() => {}}
               onCampaignIdChange={() => {}}
               onTitleChange={() => {}}
+              onBudgetUnitChange={() => {}}
+              onBudgetLimitChange={() => {}}
+              onMaxAttemptsChange={() => {}}
+              onMinimumImprovementChange={() => {}}
               onAdvance={() => {}}
               onDoctor={() => {}}
               onValidate={() => {}}
@@ -1299,16 +1308,47 @@ function randomAuthorityHex(): string {
   return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
 }
 
-function guidedSetupDraft(context: GuidedSetupContext) {
+function guidedStopRules(
+  budgetUnit: string,
+  budgetLimit: string,
+  maxAttempts: string,
+  minimumImprovement: string,
+  protectedMetrics: AutoResearchStopRules['protected_metrics'] | null
+): AutoResearchStopRules | null {
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(budgetUnit) ||
+    !/^[1-9][0-9]*$/.test(maxAttempts) ||
+    Number(maxAttempts) > 100 ||
+    !Number.isFinite(Number(budgetLimit)) ||
+    Number(budgetLimit) <= 0 ||
+    !Number.isFinite(Number(minimumImprovement)) ||
+    Number(minimumImprovement) < 0 ||
+    protectedMetrics === null
+  )
+    return null
+  return {
+    schema_version: 'autoresearch_stop_rules.v1',
+    max_attempts: Number(maxAttempts),
+    budget_unit: budgetUnit,
+    max_total_cost: Number(budgetLimit),
+    target_metric: null,
+    minimum_improvement: Number(minimumImprovement),
+    protected_metrics: protectedMetrics,
+    deadline: null
+  }
+}
+
+function guidedSetupDraft(context: GuidedSetupContext, stopRules: AutoResearchStopRules | null) {
   const selections = context.session?.selections
-  if (!selections?.template_id || !selections.installation_id) return null
+  if (!selections?.template_id || !selections.installation_id || !stopRules) return null
   const { model, data, compute, evaluation } = selections.bindings
   if (!model || !data || !compute || !evaluation) return null
   return {
     workspaceId: context.workspace_id,
     templateId: selections.template_id,
     installationId: selections.installation_id,
-    bindings: { model, data, compute, evaluation }
+    bindings: { model, data, compute, evaluation },
+    stopRules
   }
 }
 
@@ -1341,6 +1381,10 @@ export function AutoResearchControlRoom() {
   const [setupValidation, setSetupValidation] = useState<GuidedSetupValidation | null>(null)
   const [setupCampaignId, setSetupCampaignId] = useState('')
   const [setupTitle, setSetupTitle] = useState('')
+  const [setupBudgetUnit, setSetupBudgetUnit] = useState('')
+  const [setupBudgetLimit, setSetupBudgetLimit] = useState('')
+  const [setupMaxAttempts, setSetupMaxAttempts] = useState('')
+  const [setupMinimumImprovement, setSetupMinimumImprovement] = useState('')
   const humanLoadGeneration = useRef(0)
   const recoveryLoadGeneration = useRef(0)
   const setupLoadGeneration = useRef(0)
@@ -1825,7 +1869,18 @@ export function AutoResearchControlRoom() {
 
   const handleSetupDoctor = () => {
     if (!setupContext || setupConnection !== 'live' || setupPending) return
-    const draft = guidedSetupDraft(setupContext)
+    const draft = guidedSetupDraft(
+      setupContext,
+      guidedStopRules(
+        setupBudgetUnit,
+        setupBudgetLimit,
+        setupMaxAttempts,
+        setupMinimumImprovement,
+        setupContext.templates.find(
+          (item) => item.template_id === setupContext.session?.selections.template_id
+        )?.experiment_contract.protected_metrics ?? null
+      )
+    )
     if (!draft) return
     void (async () => {
       setSetupPending(true)
@@ -1856,7 +1911,18 @@ export function AutoResearchControlRoom() {
       setupPending
     )
       return
-    const draft = guidedSetupDraft(setupContext)
+    const draft = guidedSetupDraft(
+      setupContext,
+      guidedStopRules(
+        setupBudgetUnit,
+        setupBudgetLimit,
+        setupMaxAttempts,
+        setupMinimumImprovement,
+        setupContext.templates.find(
+          (item) => item.template_id === setupContext.session?.selections.template_id
+        )?.experiment_contract.protected_metrics ?? null
+      )
+    )
     const receiptId = setupContext.session?.latest_receipt.receipt_id
     if (!draft || !receiptId) return
     const scope = {
@@ -2159,9 +2225,33 @@ export function AutoResearchControlRoom() {
       selectedOptionId={setupSelectedOptionId}
       campaignId={setupCampaignId}
       title={setupTitle}
+      budgetUnit={setupBudgetUnit}
+      budgetLimit={setupBudgetLimit}
+      maxAttempts={setupMaxAttempts}
+      minimumImprovement={setupMinimumImprovement}
       onSelectedOptionChange={setSetupSelectedOptionId}
       onCampaignIdChange={setSetupCampaignId}
       onTitleChange={setSetupTitle}
+      onBudgetUnitChange={(value) => {
+        setSetupBudgetUnit(value)
+        setSetupDoctor(null)
+        setSetupValidation(null)
+      }}
+      onBudgetLimitChange={(value) => {
+        setSetupBudgetLimit(value)
+        setSetupDoctor(null)
+        setSetupValidation(null)
+      }}
+      onMaxAttemptsChange={(value) => {
+        setSetupMaxAttempts(value)
+        setSetupDoctor(null)
+        setSetupValidation(null)
+      }}
+      onMinimumImprovementChange={(value) => {
+        setSetupMinimumImprovement(value)
+        setSetupDoctor(null)
+        setSetupValidation(null)
+      }}
       onAdvance={handleSetupAdvance}
       onDoctor={handleSetupDoctor}
       onValidate={handleSetupValidation}

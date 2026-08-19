@@ -52,6 +52,61 @@ class AutoResearchDatasetFile(FrozenContractModel):
         return value
 
 
+class AutoResearchDatasetQuality(FrozenContractModel):
+    """Bounded deterministic-verification counts for one generated dataset."""
+
+    schema_version: Literal["autoresearch_dataset_quality.v1"] = "autoresearch_dataset_quality.v1"
+    generated_rows: int = Field(ge=1)
+    accepted_rows: int = Field(ge=1)
+    deterministic_verified_rows: int = Field(ge=0)
+    verification_failed_rows: int = Field(ge=0)
+    duplicate_rows_removed: int = Field(default=0, ge=0)
+    contamination_rows_removed: int = Field(default=0, ge=0)
+    verifier_digest: HexDigest
+
+    @model_validator(mode="after")
+    def coherent_counts(self) -> AutoResearchDatasetQuality:
+        if (
+            self.deterministic_verified_rows + self.verification_failed_rows != self.generated_rows
+            or self.accepted_rows > self.deterministic_verified_rows
+            or self.duplicate_rows_removed > self.generated_rows - self.accepted_rows
+            or self.contamination_rows_removed > self.generated_rows - self.accepted_rows
+        ):
+            raise ValueError("dataset quality counts are inconsistent")
+        return self
+
+
+class AutoResearchDatasetGeneration(FrozenContractModel):
+    """Typed, path-free provenance for one Data Designer dataset build."""
+
+    schema_version: Literal["autoresearch_dataset_generation.v1"] = (
+        "autoresearch_dataset_generation.v1"
+    )
+    kind: Literal["data_designer"] = "data_designer"
+    parent_dataset_version_id: Identifier
+    hypothesis: str = Field(min_length=10, max_length=2000)
+    generation_brief: str = Field(min_length=10, max_length=4000)
+    pipeline: Identifier
+    target_rows: int = Field(ge=2, le=1_000_000)
+    train_fraction: float = Field(gt=0.0, lt=1.0)
+    recipe_digest: HexDigest
+    provider_config_digest: HexDigest
+    generation_config_digest: HexDigest
+    generator_implementation_digest: HexDigest
+    models: dict[Identifier, str]
+    generation_determinism: Literal["provider_unseeded"] = "provider_unseeded"
+    generation_seed: None = None
+    split_seed: int = Field(ge=0, le=2_147_483_647)
+
+    @model_validator(mode="after")
+    def exact_model_roles(self) -> AutoResearchDatasetGeneration:
+        if set(self.models) != {"text", "code", "judge"} or any(
+            not value.strip() for value in self.models.values()
+        ):
+            raise ValueError("dataset generation requires exact text, code, and judge models")
+        return self
+
+
 class AutoResearchDatasetReceipt(FrozenContractModel):
     """Small, typed description of generated rows that never copies those rows."""
 
@@ -59,7 +114,8 @@ class AutoResearchDatasetReceipt(FrozenContractModel):
     files: tuple[AutoResearchDatasetFile, ...] = Field(min_length=1, max_length=1000)
     row_counts: dict[Identifier, int] = Field(default_factory=dict)
     split_manifest: dict[Identifier, list[str]] = Field(default_factory=dict)
-    generator: dict[str, Any] = Field(default_factory=dict)
+    generator: AutoResearchDatasetGeneration | dict[str, Any] = Field(default_factory=dict)
+    quality: AutoResearchDatasetQuality | None = None
     content_digest: HexDigest = ""
 
     @model_validator(mode="after")
@@ -68,7 +124,11 @@ class AutoResearchDatasetReceipt(FrozenContractModel):
         if tuple(sorted(set(paths))) != paths:
             raise ValueError("generated dataset files must be sorted and unique")
         generator_bytes = json.dumps(
-            self.generator,
+            (
+                self.generator.model_dump(mode="json")
+                if isinstance(self.generator, AutoResearchDatasetGeneration)
+                else self.generator
+            ),
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
@@ -82,6 +142,8 @@ class AutoResearchDatasetReceipt(FrozenContractModel):
             expected_manifest.setdefault(item.split, []).append(item.path)
         if sum(expected_counts.values()) < 1:
             raise ValueError("generated dataset receipt must contain at least one row")
+        if self.quality is not None and self.quality.accepted_rows != sum(expected_counts.values()):
+            raise ValueError("dataset quality accepted row count does not match retained rows")
         if self.row_counts and self.row_counts != expected_counts:
             raise ValueError("dataset row counts do not match the file manifest")
         if self.split_manifest and self.split_manifest != expected_manifest:
@@ -101,6 +163,28 @@ class AutoResearchDatasetReceipt(FrozenContractModel):
         if not self.content_digest:
             object.__setattr__(self, "content_digest", expected_digest)
         return self
+
+
+def project_dataset_quality_summary(
+    receipt: AutoResearchDatasetReceipt,
+) -> dict[str, Any] | None:
+    """Return the small agent-facing quality summary without rows or target paths."""
+
+    quality = receipt.quality
+    if quality is None:
+        return None
+    return {
+        "generated_rows": quality.generated_rows,
+        "accepted_rows": quality.accepted_rows,
+        "rejected_rows": quality.generated_rows - quality.accepted_rows,
+        "acceptance_rate": quality.accepted_rows / quality.generated_rows,
+        "deterministic_verified_rows": quality.deterministic_verified_rows,
+        "verification_failed_rows": quality.verification_failed_rows,
+        "verification_pass_rate": quality.deterministic_verified_rows / quality.generated_rows,
+        "duplicate_rows_removed": quality.duplicate_rows_removed,
+        "contamination_rows_removed": quality.contamination_rows_removed,
+        "verifier_digest": quality.verifier_digest,
+    }
 
 
 def build_dataset_ledger_specs(
@@ -136,6 +220,20 @@ def build_dataset_ledger_specs(
         metadata={"source_kind": "remote_data_build"},
         created_at=created_at,
     )
+    quality_summary = project_dataset_quality_summary(receipt)
+    metadata: dict[str, Any] = {
+        "source_kind": "remote_data_build",
+        "producer_action_id": attempt.action_id,
+        "producer_attempt_id": attempt.attempt_id,
+        "producer_study_id": attempt.study_id,
+        "generator": (
+            receipt.generator.model_dump(mode="json")
+            if isinstance(receipt.generator, AutoResearchDatasetGeneration)
+            else receipt.generator
+        ),
+    }
+    if quality_summary is not None:
+        metadata["data_quality"] = quality_summary
     version = DatasetVersionSpec(
         workspace_id=attempt.workspace_id,
         project_id=project_id,
@@ -145,13 +243,7 @@ def build_dataset_ledger_specs(
         content_digest=receipt.content_digest,
         split_manifest=receipt.split_manifest,
         row_counts=receipt.row_counts,
-        metadata={
-            "source_kind": "remote_data_build",
-            "producer_action_id": attempt.action_id,
-            "producer_attempt_id": attempt.attempt_id,
-            "producer_study_id": attempt.study_id,
-            "generator": receipt.generator,
-        },
+        metadata=metadata,
         created_at=created_at,
     )
     return dataset, version
@@ -162,7 +254,10 @@ __all__ = [
     "AUTORESEARCH_DATASET_RECEIPT_FILENAME",
     "AUTORESEARCH_DATASET_RECEIPT_SCHEMA",
     "AutoResearchDatasetFile",
+    "AutoResearchDatasetGeneration",
+    "AutoResearchDatasetQuality",
     "AutoResearchDatasetReceipt",
     "MAX_AUTORESEARCH_DATASET_RECEIPT_BYTES",
     "build_dataset_ledger_specs",
+    "project_dataset_quality_summary",
 ]

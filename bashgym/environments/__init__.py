@@ -12,6 +12,7 @@ _MODULE_EXPORTS = {
         "EnvironmentSpec",
         "FixtureSpec",
         "RewardComponentSpec",
+        "RewardConstraintSpec",
         "RolloutSpec",
         "VerifierSpec",
     ),

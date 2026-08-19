@@ -28,6 +28,12 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.diagnostic_actions import (
+    AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+    AutoResearchDiagnosticRecipe,
+    diagnostic_recipe_digest,
+    validate_diagnostic_envelope,
+)
 from bashgym.campaigns.lineage import canonical_model_manifest_digest
 from bashgym.campaigns.nemo_rl import ApprovedNemoRLProfile, NemoRLRuntimeReceipt
 from bashgym.gym.remote_trainer import HAS_ASYNCSSH, SSHConfig
@@ -41,6 +47,7 @@ REMOTE_OUTPUT_SEAL_EXECUTOR_VERSION = "1"
 _REMOTE_CONTROLLER_READABLE_OUTPUTS = frozenset(
     {
         "autoresearch_dataset_receipt.json",
+        AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
         AUTORESEARCH_EVALUATION_FILENAME,
     }
 )
@@ -891,6 +898,63 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+class DiagnosticCapability(FrozenContractModel):
+    """One installation-owned measurement capability exposed to the host agent."""
+
+    schema_version: Literal["campaign_diagnostic_capability.v1"] = (
+        "campaign_diagnostic_capability.v1"
+    )
+    capability_id: Identifier
+    description: str = Field(min_length=1, max_length=1000)
+    measurements: tuple[Identifier, ...] = Field(min_length=1, max_length=32)
+    evidence_sources: tuple[Identifier, ...] = Field(default=(), max_length=16)
+
+    @field_validator("description")
+    @classmethod
+    def plain_description(cls, value: str) -> str:
+        normalized = value.strip()
+        if any(character in normalized for character in "\x00\r\n"):
+            raise ValueError("diagnostic capability description must be one line")
+        return normalized
+
+    @field_validator("measurements")
+    @classmethod
+    def canonical_measurements(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if tuple(sorted(set(value))) != value:
+            raise ValueError("diagnostic capability measurements must be sorted and unique")
+        return value
+
+    @field_validator("evidence_sources")
+    @classmethod
+    def canonical_evidence_sources(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if tuple(sorted(set(value))) != value:
+            raise ValueError("diagnostic capability evidence sources must be sorted and unique")
+        return value
+
+
+class DiagnosticStageContract(FrozenContractModel):
+    """Installation-owned limits for the open diagnostic request ABI."""
+
+    schema_version: Literal["campaign_diagnostic_stage_contract.v1"] = (
+        "campaign_diagnostic_stage_contract.v1"
+    )
+    runner_id: Identifier
+    runner_version: str = Field(min_length=1, max_length=240)
+    max_sample_limit: int = Field(ge=1, le=10_000)
+    max_measurements: int = Field(ge=1, le=16)
+    capabilities: tuple[DiagnosticCapability, ...] = Field(default=(), max_length=32)
+
+    @field_validator("capabilities")
+    @classmethod
+    def canonical_capabilities(
+        cls, value: tuple[DiagnosticCapability, ...]
+    ) -> tuple[DiagnosticCapability, ...]:
+        identifiers = tuple(item.capability_id for item in value)
+        if tuple(sorted(set(identifiers))) != identifiers:
+            raise ValueError("diagnostic capability IDs must be sorted and unique")
+        return value
+
+
 class PinnedRemoteStageProfile(FrozenContractModel):
     """Exact server-owned launch material for one approved private-compute stage."""
 
@@ -913,12 +977,14 @@ class PinnedRemoteStageProfile(FrozenContractModel):
     budget_reservation: float = Field(gt=0)
     python_executable: str = Field(default="python3", min_length=1, max_length=512)
     code_lineage_binding: ApprovedCodeLineageExecutionBinding | None = None
+    diagnostic_contract: DiagnosticStageContract | None = None
 
     @field_validator("stage")
     @classmethod
     def approved_compute_stage_only(cls, value: StageKind) -> StageKind:
         if value not in {
             StageKind.DATA_BUILD,
+            StageKind.CONTRACT_EVALUATION,
             StageKind.SMOKE_TRAINING,
             StageKind.FULL_TRAINING,
             StageKind.DEVELOPMENT_EVALUATION,
@@ -985,7 +1051,14 @@ class PinnedRemoteStageProfile(FrozenContractModel):
 
     @model_validator(mode="after")
     def verify_contract_and_materials(self) -> PinnedRemoteStageProfile:
-        if self.stage != StageKind.DEVELOPMENT_EVALUATION and not self.input_files:
+        if (
+            self.stage
+            not in {
+                StageKind.CONTRACT_EVALUATION,
+                StageKind.DEVELOPMENT_EVALUATION,
+            }
+            and not self.input_files
+        ):
             raise ValueError("training and data-build profiles require at least one input file")
         if self.script_path.name in {path.name for path in self.input_files}:
             raise ValueError("approved script and input files must have distinct basenames")
@@ -1000,6 +1073,20 @@ class PinnedRemoteStageProfile(FrozenContractModel):
                 for flag in reserved
             ):
                 raise ValueError("reserved evaluator argument must be supplied by the ABI")
+        if self.stage == StageKind.CONTRACT_EVALUATION:
+            if self.diagnostic_contract is None or self.output_paths != (
+                AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+            ):
+                raise ValueError("diagnostic stage requires its fixed ABI")
+            reserved = ("--request", "--output")
+            if any(
+                argument.casefold() == flag or argument.casefold().startswith(f"{flag}=")
+                for argument in self.script_args
+                for flag in reserved
+            ):
+                raise ValueError("reserved diagnostic argument must be supplied by the ABI")
+        elif self.diagnostic_contract is not None:
+            raise ValueError("diagnostic contract is stage-specific")
         if self.stage == StageKind.FULL_TRAINING and any(
             argument.casefold() in {"--dataset-dir", "--model-dir"}
             or argument.casefold().startswith(("--dataset-dir=", "--model-dir="))
@@ -1131,7 +1218,15 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
         payload = self.model_dump(mode="json", exclude=excluded)
         expected = canonical_hash(payload)
         if self.profile_digest and self.profile_digest != expected:
-            raise ValueError("approved remote executor profile digest mismatch")
+            legacy_payload = json.loads(json.dumps(payload))
+            legacy_stages = legacy_payload.get("stages", [])
+            for stage in legacy_stages:
+                stage.pop("diagnostic_contract", None)
+            legacy_digest_matches = all(
+                stage.diagnostic_contract is None for stage in self.stages
+            ) and self.profile_digest == canonical_hash(legacy_payload)
+            if not legacy_digest_matches:
+                raise ValueError("approved remote executor profile digest mismatch")
         if not self.profile_digest:
             object.__setattr__(self, "profile_digest", expected)
         self.verify_materials()
@@ -1163,6 +1258,8 @@ def remote_executor_config(
     remote_resident_dataset: RemoteResidentDatasetSource | dict[str, Any] | None = None,
     bind_registered_training_base: bool = False,
     evaluate_registered_base_model: bool = False,
+    diagnostic_recipe: AutoResearchDiagnosticRecipe | dict[str, Any] | None = None,
+    approved_data_scopes: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Project one protected profile stage into the persisted executor contract."""
 
@@ -1197,6 +1294,23 @@ def remote_executor_config(
         "budget_reservation": configured.budget_reservation,
         "recipe_digest": recipe_digest,
     }
+    if stage == StageKind.CONTRACT_EVALUATION:
+        if diagnostic_recipe is None or configured.diagnostic_contract is None:
+            raise ValueError("diagnostic stage requires one typed recipe")
+        recipe = AutoResearchDiagnosticRecipe.model_validate(diagnostic_recipe)
+        if diagnostic_recipe_digest(recipe) != recipe_digest:
+            raise ValueError("diagnostic recipe digest mismatch")
+        contract = configured.diagnostic_contract
+        validate_diagnostic_envelope(
+            recipe,
+            approved_data_scopes=approved_data_scopes,
+            max_sample_limit=contract.max_sample_limit,
+            max_measurements=contract.max_measurements,
+        )
+        result["diagnostic_recipe"] = recipe.model_dump(mode="json")
+        result["diagnostic_contract"] = contract.model_dump(mode="json")
+    elif diagnostic_recipe is not None:
+        raise ValueError("diagnostic recipe is restricted to contract evaluation")
     if recipe_script_args:
         result["recipe_script_args"] = list(recipe_script_args)
     if remote_resident_dataset is not None:
@@ -2605,6 +2719,8 @@ __all__ = [
     "ApprovedRemoteExecutorProfile",
     "AsyncSSHSession",
     "CodeLineageLaunchSnapshot",
+    "DiagnosticCapability",
+    "DiagnosticStageContract",
     "PinnedRemoteStageProfile",
     "RegisteredRemoteEvaluationDatasetSource",
     "RegisteredRemoteModelSource",

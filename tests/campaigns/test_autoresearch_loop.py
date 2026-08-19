@@ -11,10 +11,12 @@ import pytest
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.autoresearch import (
     AutoResearchCampaignCore,
+    AutoResearchDiagnosticResult,
     AutoResearchRepository,
     AutoResearchResult,
     ExperimentOutcome,
     ExperimentProvenance,
+    ExperimentRole,
     ResultDecision,
 )
 from bashgym.campaigns.contracts import (
@@ -31,10 +33,17 @@ from bashgym.campaigns.runtime import ActionSpec, CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignControllerService
 from bashgym.campaigns.worker import CampaignWorker
 from bashgym.campaigns.worker_service import build_worker
-from tests.campaigns.test_autoresearch_campaign import NOW, activate, fresh_core
+from tests.campaigns.test_autoresearch_campaign import (
+    NOW,
+    _authoritative_outcome,
+    _insert_authoritative_outcome,
+    activate,
+    fresh_core,
+    select_and_finish,
+)
 from tests.campaigns.test_persistence import campaign as campaign_fixture
 from tests.campaigns.test_persistence import create as create_campaign_fixture
-from tests.campaigns.test_proposals import principal, proposal
+from tests.campaigns.test_proposals import diagnostic_proposal, principal, proposal
 from tests.campaigns.test_worker import (
     START,
     FakeRemoteAdapter,
@@ -73,6 +82,29 @@ class _OutcomeWritingProjector:
                 actual_cost=0.0,
                 attempt_ids=tuple(item.attempt_id for item in attempts),
                 recorded_at=max(item.updated_at for item in attempts),
+            )
+        )
+
+    def project_diagnostic_and_ingest(self, workspace_id: str, campaign_id: str, proposal_id: str):
+        repository = self.core.repository
+        proposal_record = repository.get_proposal(workspace_id, campaign_id, proposal_id)
+        attempts = repository.list_study_attempts(
+            workspace_id, campaign_id, proposal_record.study_id
+        )
+        return repository.record_autoresearch_diagnostic_result(
+            AutoResearchDiagnosticResult(
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                proposal_id=proposal_id,
+                study_id=proposal_record.study_id,
+                attempt_id=attempts[-1].attempt_id,
+                status="completed",
+                projection={
+                    "schema_version": "bashgym.research_diagnostic_result.v1",
+                    "probe_family": "loss_landscape",
+                },
+                actual_cost=0.01,
+                recorded_at=attempts[-1].updated_at,
             )
         )
 
@@ -206,6 +238,114 @@ def _terminalize(repository, attempt, status: AttemptStatus, *, sealed_uri: str 
                 finished_at.isoformat(),
             ),
         )
+
+
+def test_coordinator_ingests_diagnostic_then_returns_agent_to_method_choice(tmp_path):
+    from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
+
+    _path, repository, core = fresh_core(tmp_path, max_attempts=3, target=None)
+    activate(core)
+    actor = principal(repository)
+    core.submit_baseline(
+        proposal("baseline-diagnostic-loop", estimated_cost=0.1),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-baseline-diagnostic-loop",
+        idempotency_key="submit-baseline-diagnostic-loop",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline-diagnostic-loop")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline-diagnostic-loop",
+            baseline_study,
+            baseline_attempt,
+            0.5,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+    submission = diagnostic_proposal("diagnostic-loop").model_copy(
+        update={"prerequisite_study_ids": (baseline_study,)}
+    )
+    core.submit_diagnostic(
+        submission,
+        parent_proposal_id="baseline-diagnostic-loop",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-diagnostic-loop",
+        idempotency_key="submit-diagnostic-loop",
+    )
+    selected = CampaignControllerService(
+        repository, controller_id="autoresearch-loop"
+    ).select_next_proposal(
+        "workspace-a",
+        "campaign-1",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        correlation_id="select-diagnostic-loop",
+        idempotency_key="select-diagnostic-loop",
+    )
+    assert selected is not None
+    leader = repository.acquire_lease(
+        "scheduler:diagnostic-loop",
+        "loop-worker",
+        ttl=timedelta(minutes=1),
+        now=NOW,
+    )
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id=selected.study.study_id,
+            stage_index=0,
+            stage=StageKind.CONTRACT_EVALUATION,
+            input_contract={},
+            candidate_digest=selected.study.candidate_digest,
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.05,
+            fake_steps=2,
+        ),
+        leader,
+        expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        now=NOW,
+    )
+    _terminalize(
+        repository,
+        scheduled,
+        AttemptStatus.COMPLETED,
+        sealed_uri="bashgym-remote-seal://registered/diagnostic",
+    )
+    coordinator = AutoResearchLoopCoordinator(repository, _OutcomeWritingProjector(core), core)
+
+    result = coordinator.tick(now=NOW + timedelta(seconds=3))
+
+    assert result.status == "diagnostic_ingested"
+    assert result.agent_action_required is True
+    assert result.state is not None
+    assert result.state.reason_code == "diagnostic_evidence_ready"
+    assert result.state.attempts_used == 1
+    candidate = proposal("candidate-after-diagnostic", estimated_cost=0.2).model_copy(
+        update={
+            "primary_variable": "training_recipe.learning_rate",
+            "training_recipe": {
+                "schema_version": "recipe.v1",
+                "learning_rate": 0.0002,
+            },
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    mutation = core.submit_controlled_candidate(
+        candidate,
+        parent_proposal_id="baseline-diagnostic-loop",
+        changed_variable="training_recipe.learning_rate",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-candidate-after-diagnostic",
+        idempotency_key="submit-candidate-after-diagnostic",
+    )
+    assert mutation.record.validation.valid is True
 
 
 def _insert_failed_side_action(repository, attempt) -> None:

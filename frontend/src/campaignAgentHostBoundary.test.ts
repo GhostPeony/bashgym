@@ -179,6 +179,7 @@ test('bgag authorization is limited to fixed, read-only campaign-agent action ad
   assert.deepEqual(credentialRoutes, [
     '/heartbeat',
     '/actions/observe',
+    '/actions/wait',
     '/actions/artifacts',
     '/sessions',
     '/sessions/{registration_id}/deliveries/claim',

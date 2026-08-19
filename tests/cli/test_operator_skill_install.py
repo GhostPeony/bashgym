@@ -251,7 +251,14 @@ def test_operator_skills_auto_detection_fails_closed_when_multiple_hosts_are_con
 
 def test_operator_bundle_lock_covers_every_packaged_public_skill_file():
     tracked = subprocess.run(
-        ["git", "ls-files", "assistant/workspace/skills"],
+        [
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "assistant/workspace/skills",
+        ],
         check=True,
         capture_output=True,
         text=True,

@@ -19,6 +19,7 @@ from bashgym.gym.star_count_vlm import (
     extract_star_count_archive,
     load_star_count_records,
     main,
+    summarize_star_count_failures,
     summarize_star_count_predictions,
 )
 
@@ -114,6 +115,43 @@ def test_prediction_summary_uses_fixed_exact_count_metric():
     assert summary["example_count"] == 2
 
 
+def test_failure_summary_emits_mutually_exclusive_aggregate_categories():
+    rows = [
+        {
+            "example_id": "exact",
+            "prediction": "red=1, blue=0, green=2, yellow=0",
+            "counts": {"red": 1, "blue": 0, "green": 2, "yellow": 0},
+        },
+        {
+            "example_id": "count",
+            "prediction": "red=1, blue=1, green=2, yellow=0",
+            "counts": {"red": 1, "blue": 0, "green": 2, "yellow": 0},
+        },
+        {
+            "example_id": "format",
+            "prediction": "red: 1 blue: 0 green: 2 yellow: 0",
+            "counts": {"red": 1, "blue": 0, "green": 2, "yellow": 0},
+        },
+        {
+            "example_id": "both",
+            "prediction": "I see several stars.",
+            "counts": {"red": 1, "blue": 0, "green": 2, "yellow": 0},
+        },
+    ]
+
+    summaries = [item.model_dump(mode="json") for item in summarize_star_count_failures(rows)]
+
+    assert [(item["category"], item["count"]) for item in summaries] == [
+        ("count_and_format_error", 1),
+        ("count_error", 1),
+        ("format_error", 1),
+    ]
+    serialized = json.dumps(summaries, sort_keys=True)
+    assert "example_id" not in serialized
+    assert "prediction" not in serialized
+    assert '"counts"' not in serialized
+
+
 def test_archive_extraction_rejects_path_traversal(tmp_path):
     archive = tmp_path / "unsafe.zip"
     with zipfile.ZipFile(archive, "w") as bundle:
@@ -190,7 +228,7 @@ def test_train_command_can_evaluate_the_sealed_candidate(monkeypatch, tmp_path):
     assert calls["evaluation"]["output_path"] == str(output / "evaluation_result.json")
 
 
-def test_autoresearch_train_publishes_only_the_final_adapter(monkeypatch, tmp_path):
+def test_autoresearch_train_publishes_final_and_bounded_retained_checkpoints(monkeypatch, tmp_path):
     model_dir = tmp_path / "base-model"
     model_dir.mkdir()
     train_jsonl = tmp_path / "train.jsonl"
@@ -220,6 +258,13 @@ def test_autoresearch_train_publishes_only_the_final_adapter(monkeypatch, tmp_pa
             json.dumps({"base_model_name_or_path": str(model_dir)}), encoding="utf-8"
         )
         (adapter / "adapter_model.safetensors").write_bytes(b"adapter")
+        for step in range(10, 100, 10):
+            checkpoint = output / f"checkpoint-{step}"
+            checkpoint.mkdir()
+            (checkpoint / "adapter_config.json").write_text(
+                json.dumps({"base_model_name_or_path": str(model_dir)}), encoding="utf-8"
+            )
+            (checkpoint / "adapter_model.safetensors").write_bytes(f"step-{step}".encode())
         return {"train_loss": 0.25}
 
     monkeypatch.setattr("bashgym.gym.star_count_vlm.train_star_count_lora", fake_train)
@@ -239,6 +284,18 @@ def test_autoresearch_train_publishes_only_the_final_adapter(monkeypatch, tmp_pa
     assert (tmp_path / "final" / "adapter_config.json").is_file()
     assert (tmp_path / "final" / "adapter_model.safetensors").read_bytes() == b"adapter"
     assert not (tmp_path / "final" / "final_adapter").exists()
+    retained = sorted(path.name for path in (tmp_path / "checkpoints").iterdir())
+    assert retained == [
+        "step-20",
+        "step-30",
+        "step-40",
+        "step-50",
+        "step-60",
+        "step-70",
+        "step-80",
+        "step-90",
+    ]
+    assert not (tmp_path / "training" / "checkpoint-10").exists()
 
 
 def test_autoresearch_evaluate_emits_context_bound_standard_evidence(monkeypatch, tmp_path):
@@ -282,6 +339,13 @@ def test_autoresearch_evaluate_emits_context_bound_standard_evidence(monkeypatch
                 "mean_reward": 0.88125,
                 "example_count": 64,
             },
+            "predictions": [
+                {
+                    "example_id": "heldout-1",
+                    "prediction": "red=1, blue=0, green=2, yellow=0",
+                    "counts": {"red": 1, "blue": 0, "green": 2, "yellow": 0},
+                }
+            ],
         }
 
     monkeypatch.setattr("bashgym.gym.star_count_vlm.evaluate_star_count_model", fake_evaluate)
@@ -319,3 +383,87 @@ def test_autoresearch_evaluate_emits_context_bound_standard_evidence(monkeypatch
         "adapter_evaluated": True,
         "example_count": 64,
     }
+
+
+def test_autoresearch_evaluate_records_bounded_checkpoint_trajectory(monkeypatch, tmp_path):
+    context = {
+        "schema_version": "autoresearch_evaluation_context.v1",
+        "workspace_id": "workspace-demo",
+        "campaign_id": "campaign-demo",
+        "study_id": "study-demo",
+        "action_id": "action-demo",
+        "attempt_id": "attempt-demo",
+        "candidate_digest": "1" * 64,
+        "evaluation_suite_id": "suite-demo",
+        "evaluation_code_digest": "2" * 64,
+        "dataset_version_id": "dataset-version-demo",
+        "dataset_content_digest": "3" * 64,
+        "evaluated_model_manifest_digest": "4" * 64,
+    }
+    context_path = tmp_path / "autoresearch_evaluation_context.json"
+    context_path.write_text(json.dumps(context), encoding="utf-8")
+    dataset_path = tmp_path / "heldout.jsonl"
+    dataset_path.write_text("{}\n", encoding="utf-8")
+    base_model = tmp_path / "base-model"
+    base_model.mkdir()
+    final = tmp_path / "run" / "final"
+    final.mkdir(parents=True)
+    checkpoints = tmp_path / "run" / "checkpoints"
+    for step in (20, 40, 60):
+        checkpoint = checkpoints / f"step-{step}"
+        checkpoint.mkdir(parents=True)
+        (checkpoint / "adapter_config.json").write_text(
+            json.dumps({"base_model_name_or_path": str(base_model)}), encoding="utf-8"
+        )
+        (checkpoint / "adapter_model.safetensors").write_bytes(f"step-{step}".encode())
+    (final / "adapter_config.json").write_text(
+        json.dumps({"base_model_name_or_path": str(base_model)}), encoding="utf-8"
+    )
+    output_path = tmp_path / "autoresearch_evaluation.json"
+
+    def fake_evaluate(_recipe, **kwargs):
+        adapter = Path(kwargs["adapter_path"])
+        step = int(adapter.name.removeprefix("step-")) if adapter.name.startswith("step-") else 80
+        return {
+            "adapter_evaluated": True,
+            "metrics": {
+                "exact_count_accuracy": step / 100,
+                "example_count": 64,
+            },
+            "predictions": [
+                {
+                    "example_id": "heldout-1",
+                    "prediction": "red=1, blue=0, green=2, yellow=0",
+                    "counts": {"red": 1, "blue": 0, "green": 2, "yellow": 0},
+                }
+            ],
+        }
+
+    monkeypatch.setattr("bashgym.gym.star_count_vlm.evaluate_star_count_model", fake_evaluate)
+
+    assert (
+        main(
+            [
+                "autoresearch-evaluate",
+                "--model-revision",
+                "a" * 40,
+                "--context",
+                str(context_path),
+                "--model-dir",
+                str(final),
+                "--dataset",
+                str(dataset_path),
+                "--output",
+                str(output_path),
+                "--checkpoint-limit",
+                "2",
+            ]
+        )
+        == 0
+    )
+
+    evidence = json.loads(output_path.read_text(encoding="utf-8"))
+    observations = evidence["checkpoint_observations"]
+    assert [item["checkpoint_step"] for item in observations] == [40, 60]
+    assert [item["metrics"]["exact_count_accuracy"] for item in observations] == [0.4, 0.6]
+    assert all(len(item["evaluated_model_manifest_digest"]) == 64 for item in observations)

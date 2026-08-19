@@ -9,7 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from bashgym.campaigns.artifacts import ArtifactSealer
-from bashgym.campaigns.autoresearch import builtin_autoresearch_template_definitions
+from bashgym.campaigns.autoresearch import (
+    AutoResearchStopRules,
+    builtin_autoresearch_template_definitions,
+)
 from bashgym.campaigns.campaign_recovery import CampaignRecoveryRepository
 from bashgym.campaigns.contracts import Campaign, CredentialKind, ManifestRevision
 from bashgym.campaigns.guided_setup import (
@@ -109,6 +112,12 @@ def _draft() -> GuidedSetupDraft:
         template_id=_definition().template_id,
         installation_id="ins_0123456789abcdef0123456789abcdef",
         bindings=_bindings(),
+        stop_rules=AutoResearchStopRules(
+            max_attempts=2,
+            budget_unit="gpu_hours",
+            max_total_cost=0.2,
+            minimum_improvement=0.0,
+        ),
     )
 
 

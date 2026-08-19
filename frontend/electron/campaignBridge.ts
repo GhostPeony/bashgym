@@ -35,6 +35,11 @@ export interface CampaignAgentArtifactQuery {
   limit?: number
 }
 
+export interface CampaignAgentWaitQuery {
+  afterCursor: number
+  timeoutSeconds: number
+}
+
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>
 
 const IDENTIFIER = '[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}'
@@ -150,9 +155,61 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
   return actual.length === keys.length && keys.every((key) => key in value)
 }
 
+function validStopRules(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false
+  if (
+    !exactKeys(value, [
+      'schema_version',
+      'max_attempts',
+      'budget_unit',
+      'max_total_cost',
+      'target_metric',
+      'minimum_improvement',
+      'protected_metrics',
+      'deadline'
+    ]) ||
+    value.schema_version !== 'autoresearch_stop_rules.v1' ||
+    !Number.isSafeInteger(value.max_attempts) ||
+    Number(value.max_attempts) < 1 ||
+    Number(value.max_attempts) > 100 ||
+    typeof value.budget_unit !== 'string' ||
+    !PUBLIC_IDENTIFIER.test(value.budget_unit) ||
+    typeof value.max_total_cost !== 'number' ||
+    !Number.isFinite(value.max_total_cost) ||
+    value.max_total_cost <= 0 ||
+    typeof value.minimum_improvement !== 'number' ||
+    !Number.isFinite(value.minimum_improvement) ||
+    value.minimum_improvement < 0 ||
+    !Array.isArray(value.protected_metrics) ||
+    value.protected_metrics.length > 64 ||
+    (value.target_metric !== null &&
+      (typeof value.target_metric !== 'number' || !Number.isFinite(value.target_metric))) ||
+    (value.deadline !== null &&
+      (typeof value.deadline !== 'string' || Number.isNaN(Date.parse(value.deadline))))
+  )
+    return false
+  return value.protected_metrics.every(
+    (metric) =>
+      isPlainRecord(metric) &&
+      exactKeys(metric, ['metric_name', 'direction', 'max_regression']) &&
+      typeof metric.metric_name === 'string' &&
+      PUBLIC_IDENTIFIER.test(metric.metric_name) &&
+      ['maximize', 'minimize'].includes(String(metric.direction)) &&
+      typeof metric.max_regression === 'number' &&
+      Number.isFinite(metric.max_regression) &&
+      metric.max_regression >= 0
+  )
+}
+
 function validSetupDraft(body: CampaignBody): boolean {
   if (
-    !exactKeys(body, ['workspace_id', 'template_id', 'installation_id', 'bindings']) ||
+    !exactKeys(body, [
+      'workspace_id',
+      'template_id',
+      'installation_id',
+      'bindings',
+      'stop_rules'
+    ]) ||
     typeof body.workspace_id !== 'string' ||
     !PUBLIC_IDENTIFIER.test(body.workspace_id) ||
     typeof body.template_id !== 'string' ||
@@ -160,7 +217,8 @@ function validSetupDraft(body: CampaignBody): boolean {
     typeof body.installation_id !== 'string' ||
     !SETUP_INSTALLATION_ID.test(body.installation_id) ||
     !isPlainRecord(body.bindings) ||
-    !exactKeys(body.bindings, SETUP_BINDING_KEYS)
+    !exactKeys(body.bindings, SETUP_BINDING_KEYS) ||
+    !validStopRules(body.stop_rules)
   )
     return false
   const bindings = body.bindings
@@ -589,6 +647,35 @@ export class CampaignBridgeClient {
           signal: AbortSignal.timeout(5_000)
         }
       )
+      return await campaignAgentCredentialPayload(response)
+    } catch (error) {
+      throw sanitizedCampaignAgentError(error)
+    }
+  }
+
+  async waitForCampaignAsAgent(
+    credential: Buffer,
+    query: CampaignAgentWaitQuery
+  ): Promise<unknown> {
+    try {
+      const token = campaignAgentCredentialToken(credential)
+      if (
+        !Number.isSafeInteger(query.afterCursor) ||
+        query.afterCursor < 0 ||
+        !Number.isSafeInteger(query.timeoutSeconds) ||
+        query.timeoutSeconds < 1 ||
+        query.timeoutSeconds > 55
+      ) {
+        throw new Error(CAMPAIGN_AGENT_CREDENTIAL_FAILURE)
+      }
+      const url = new URL('/api/campaign-agent/actions/wait', this.apiOrigin)
+      url.searchParams.set('after_cursor', String(query.afterCursor))
+      url.searchParams.set('timeout_seconds', String(query.timeoutSeconds))
+      const response = await this.fetchImpl(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(query.timeoutSeconds * 1_000 + 5_000)
+      })
       return await campaignAgentCredentialPayload(response)
     } catch (error) {
       throw sanitizedCampaignAgentError(error)

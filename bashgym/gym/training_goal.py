@@ -5,8 +5,7 @@ Replaces the single-scalar val_loss optimization with weighted goals,
 hard/soft constraints, and actionable recommendations. Inspired by
 the OutcomeAggregator pattern.
 
-Backward compatible: when no goal is provided, AutoResearcher and
-TraceResearcher behave exactly as before (single metric optimization).
+When no goal is provided, AutoResearcher uses single-metric optimization.
 """
 
 from __future__ import annotations

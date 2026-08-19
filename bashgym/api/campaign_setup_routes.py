@@ -20,6 +20,7 @@ from bashgym.api.campaign_routes import (
     _templates,
     create_campaign_from_template,
 )
+from bashgym.campaigns.autoresearch import AutoResearchStopRules
 from bashgym.campaigns.campaign_recovery import CampaignRecoveryRepository
 from bashgym.campaigns.contracts import Campaign, Capability, ManifestRevision
 from bashgym.campaigns.guided_setup import (
@@ -55,6 +56,7 @@ class GuidedSetupDraftInput(SetupModel):
     )
     installation_id: str = Field(pattern=r"^ins_[0-9a-f]{32}$")
     bindings: GuidedSetupBindings
+    stop_rules: AutoResearchStopRules
 
     def contract(self) -> GuidedSetupDraft:
         return GuidedSetupDraft.model_validate(self.model_dump(mode="json"))
@@ -369,6 +371,7 @@ async def create_guided_setup_campaign(request: Request):
                 campaign_id=body.campaign_id,
                 title=body.title,
                 template_id=receipt.template_id,
+                stop_rules=receipt.stop_rules,
             ),
             request,
             idempotency_key=idempotency_key,
@@ -379,6 +382,10 @@ async def create_guided_setup_campaign(request: Request):
             "schema_version": "guided_setup_creation.v1",
             "validation_receipt_id": body.validation_receipt_id,
             "binding_references": receipt.bindings.model_dump(mode="json"),
+            "stop_rules": receipt.stop_rules.model_dump(mode="json"),
+            "method_thresholds": definition.policy.method_thresholds.model_dump(
+                mode="json", exclude_none=True
+            ),
         }
         return payload
     except Exception as exc:

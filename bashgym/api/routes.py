@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 from bashgym.api.achievements_routes import router as achievements_router  # noqa: E402
 from bashgym.api.agent_routes import router as agent_router  # noqa: E402
-from bashgym.api.autoresearch_routes import router as autoresearch_router  # noqa: E402
 from bashgym.api.campaign_agent_routes import (  # noqa: E402
     campaign_agent_credential_router,
     campaign_agent_router,
@@ -327,8 +326,6 @@ def create_app() -> FastAPI:
     app.state.evaluation_jobs = {}  # Evaluation job storage
     app.state.training_monitor = OrphanedTrainingMonitor()  # Orphaned process monitor
     app.state.provider_registry = None
-    app.state.autoresearcher = None  # AutoResearch hyperparameter search
-    app.state.trace_researcher = None  # Trace Research data curation search
     app.state.campaign_worker_supervisor = None
     app.state.campaign_worker_bootstrap_failure_code = None
     app.state.campaign_worker_managed = False
@@ -5917,12 +5914,6 @@ def create_app() -> FastAPI:
 
     # Include curated public source library routes
     app.include_router(source_router)
-
-    # Legacy prototype AutoResearch routes (in-process hyperparameter/trace/
-    # data-recipe/schema search). Superseded by the durable campaign surface
-    # under /api/campaigns/*; hidden unless explicitly re-enabled.
-    if os.environ.get("BASHGYM_ENABLE_LEGACY_AUTORESEARCH", "").lower() in {"1", "true", "yes"}:
-        app.include_router(autoresearch_router)
 
     # Include Cascade RL routes (domain-by-domain sequential training)
     app.include_router(cascade_router)

@@ -5,6 +5,7 @@ from bashgym.environments.contracts import (
     EnvironmentAxis,
     EnvironmentSpec,
     RewardComponentSpec,
+    RewardConstraintSpec,
     RolloutSpec,
     VerifierSpec,
 )
@@ -27,7 +28,10 @@ def test_environment_spec_round_trips():
             path="tests/test_parser.py",
             reward_type="components",
             reward_components=[
-                RewardComponentSpec(name="correctness"),
+                RewardComponentSpec(
+                    name="correctness",
+                    hard_constraint=RewardConstraintSpec(minimum=0.8),
+                ),
                 RewardComponentSpec(name="format", weight=0.25),
             ],
         ),
@@ -45,6 +49,9 @@ def test_environment_spec_round_trips():
     assert restored.verifier.command == "pytest tests"
     assert restored.verifier.is_multi_reward is True
     assert restored.verifier.reward_components[1].weight == 0.25
+    assert restored.verifier.reward_components[0].hard_constraint == RewardConstraintSpec(
+        minimum=0.8
+    )
     assert restored.verifier.combine_reward_components({"correctness": 1.0, "format": 0.5}) == 1.125
     assert restored.build.base_image == "python:3.11-slim"
     assert restored.validation_errors() == []

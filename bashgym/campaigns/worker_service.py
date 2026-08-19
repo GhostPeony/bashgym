@@ -1391,7 +1391,13 @@ class CommandRunner(Protocol):
     def __call__(self, argv: Sequence[str]) -> CommandResult: ...
 
 
-def run_command(argv: Sequence[str]) -> CommandResult:
+def run_command(argv: Sequence[str], *, platform: WorkerPlatform | None = None) -> CommandResult:
+    target = platform or WorkerPlatform.current()
+    creation_flags = (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        if target is WorkerPlatform.WINDOWS
+        else 0
+    )
     completed = subprocess.run(  # noqa: S603 - fixed executable + typed argv, never a shell
         list(argv),
         shell=False,
@@ -1399,6 +1405,7 @@ def run_command(argv: Sequence[str]) -> CommandResult:
         capture_output=True,
         text=True,
         timeout=30,
+        creationflags=creation_flags,
     )
     return CommandResult(completed.returncode, completed.stdout, completed.stderr)
 

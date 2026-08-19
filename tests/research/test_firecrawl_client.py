@@ -7,6 +7,7 @@ import subprocess
 
 import httpx
 
+from bashgym.research import firecrawl_client
 from bashgym.research.firecrawl_client import FirecrawlResearchClient
 
 
@@ -16,6 +17,24 @@ def _client(handler, api_key="fc-test"):
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         prefer_cli=False,
     )
+
+
+def test_default_cli_runner_suppresses_the_windows_console(monkeypatch):
+    captured = {}
+
+    def run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(firecrawl_client.os, "name", "nt")
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(subprocess, "run", run)
+
+    firecrawl_client._default_command_runner(["firecrawl", "--status"], 12.0)
+
+    assert captured["argv"] == ["firecrawl", "--status"]
+    assert captured["kwargs"]["creationflags"] == 0x08000000
 
 
 async def test_search_papers_parses_auth_and_params():

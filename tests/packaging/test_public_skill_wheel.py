@@ -19,6 +19,10 @@ ROOT = Path(__file__).parents[2]
 SKILL_PREFIX = "assistant/workspace/skills/"
 PUBLIC_SKILL_FILES = frozenset(
     {
+        "autoresearch-publication/SKILL.md",
+        "autoresearch-publication/assets/research-post.template.json",
+        "autoresearch-publication/references/output-contract.md",
+        "autoresearch-publication/scripts/research_post.py",
         "bashgym-operator/SKILL.md",
         "bashgym-operator/bundle.lock.json",
         "bashgym-operator/references/operator-contract.md",
@@ -39,6 +43,7 @@ PUBLIC_SKILL_FILES = frozenset(
     }
 )
 PUBLIC_SKILL_NAMES = {
+    "autoresearch-publication",
     "bashgym",
     "bashgym-operator",
     "factory",

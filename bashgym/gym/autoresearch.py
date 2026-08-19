@@ -5,11 +5,9 @@ Inspired by Karpathy's autoresearch: runs short experiments,
 evaluates them, keeps improvements, and iterates. A simple evolutionary
 search with a pluggable SearchSpace abstraction.
 
-The core pattern (mutate -> evaluate -> keep if better) is generic.
-Strategy-specific behavior is encapsulated in SearchSpace subclasses:
-- HyperparamSearchSpace: mutates TrainerConfig fields (learning_rate, lora_r, etc.)
-- SchemaSearchSpace: (future) mutates Data Designer pipeline configs
-- DataRecipeSearchSpace: mutates source/domain/quality mixes
+The core pattern (mutate -> evaluate -> keep if better) is generic. The
+maintained built-in search space mutates TrainerConfig fields; callers may
+provide another SearchSpace implementation explicitly.
 """
 
 import asyncio
@@ -39,10 +37,8 @@ class SearchSpace(ABC):
     """Abstract search space for evolutionary optimization.
 
     Defines what gets mutated and how candidates are evaluated.
-    AutoResearcher uses this to support different optimization targets:
-    - HyperparamSearchSpace: mutates TrainerConfig fields (learning_rate, lora_r, etc.)
-    - SchemaSearchSpace: mutates Data Designer pipeline configs (temperatures, columns, judges)
-    - DataRecipeSearchSpace: mutates source/domain/quality mixes
+    AutoResearcher uses this to support an explicitly supplied optimization
+    target. HyperparamSearchSpace is the maintained built-in implementation.
     """
 
     @abstractmethod

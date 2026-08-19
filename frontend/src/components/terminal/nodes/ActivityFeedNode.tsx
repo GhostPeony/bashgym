@@ -43,7 +43,6 @@ const SEVERITY_ICON = {
 const COMPACT_FILTERS = ['training', 'orchestration', 'designer', 'guardrail', 'hf']
 
 const CATEGORY_LABEL: Record<string, string> = {
-  autoresearch: 'AutoResearch',
   cascade: 'Cascade',
   designer: 'Data Designer',
   guardrail: 'Guardrails',
@@ -52,7 +51,6 @@ const CATEGORY_LABEL: Record<string, string> = {
   orchestration: 'Orchestration',
   pipeline: 'Pipeline',
   router: 'Router',
-  'schema-research': 'Schema Research',
   'skill-eval': 'Skill Lab',
   trace: 'Traces',
   training: 'Training',

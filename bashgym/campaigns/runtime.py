@@ -6,11 +6,12 @@ import base64
 import binascii
 import hashlib
 import json
+import math
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
@@ -41,6 +42,16 @@ from bashgym.campaigns.contracts import (
     StudyStatus,
     canonical_hash,
     utc_now,
+)
+from bashgym.campaigns.data_designer_recipe import (
+    AUTORESEARCH_DATA_DESIGN_RECIPE_SCHEMA,
+    AutoResearchDataDesignRecipe,
+)
+from bashgym.campaigns.diagnostic_actions import (
+    AutoResearchDiagnosticRecipe,
+    AutoResearchDiagnosticRequest,
+    diagnostic_recipe_digest,
+    diagnostic_request_bytes,
 )
 from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
@@ -106,6 +117,47 @@ class ActionIdentityMismatchError(CampaignPersistenceError):
     code = "campaign_action_identity_mismatch"
 
 
+def _recipe_script_args_for_stage(
+    stage: StageKind,
+    recipe: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Render a typed recipe ABI or validate the legacy bounded argument list."""
+
+    schema_version = recipe.get("schema_version")
+    if schema_version == AUTORESEARCH_DATA_DESIGN_RECIPE_SCHEMA:
+        if stage != StageKind.DATA_BUILD:
+            raise CampaignPersistenceError("campaign_data_design_recipe_stage_invalid")
+        try:
+            return AutoResearchDataDesignRecipe.model_validate(recipe).script_args()
+        except ValueError as exc:
+            raise CampaignPersistenceError("campaign_data_design_recipe_invalid") from exc
+    if schema_version == TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA:
+        try:
+            return TMaxCompositeTrainingRecipe.model_validate(recipe).script_args()
+        except ValueError as exc:
+            raise CampaignPersistenceError("campaign_tmax_recipe_invalid") from exc
+    raw_recipe_script_args = recipe.get("script_args", ())
+    if not isinstance(raw_recipe_script_args, (list, tuple)) or not all(
+        isinstance(argument, str) for argument in raw_recipe_script_args
+    ):
+        raise CampaignPersistenceError("campaign_recipe_script_args_invalid")
+    return tuple(raw_recipe_script_args)
+
+
+def _settlement_actual_cost(
+    *, unit: str, reservation_amount: float, manifest: SealedActionResult
+) -> float:
+    """Convert signed measured usage into the campaign budget unit when possible."""
+
+    measured = tuple(item for item in manifest.resource_usage if item.confidence == "measured")
+    direct = sum(item.amount for item in measured if item.unit == unit)
+    if unit == "gpu_hours":
+        direct += sum(item.amount / 3600 for item in measured if item.unit == "wall_clock_seconds")
+    if direct <= 0 or not math.isfinite(direct):
+        return float(reservation_amount)
+    return min(float(reservation_amount), direct)
+
+
 class ActionSpec(ContractModel):
     """Immutable logical stage input scheduled under the global leader fence."""
 
@@ -127,6 +179,7 @@ class ActionSpec(ContractModel):
     def model_post_init(self, __context: Any) -> None:
         if self.executor_kind == "ssh_remote" and self.stage not in {
             StageKind.DATA_BUILD,
+            StageKind.CONTRACT_EVALUATION,
             StageKind.SMOKE_TRAINING,
             StageKind.FULL_TRAINING,
             StageKind.DEVELOPMENT_EVALUATION,
@@ -487,6 +540,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}:
             if item.stage not in {
                 StageKind.DATA_BUILD,
+                StageKind.CONTRACT_EVALUATION,
                 StageKind.SMOKE_TRAINING,
                 StageKind.FULL_TRAINING,
                 StageKind.DEVELOPMENT_EVALUATION,
@@ -519,30 +573,27 @@ class CampaignRuntimeRepository(CampaignRepository):
                     raise CampaignPersistenceError(
                         "campaign_code_lineage_execution_binding_mismatch"
                     )
-            if recipe.get("schema_version") == TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA:
+            recipe_script_args = _recipe_script_args_for_stage(item.stage, recipe)
+            diagnostic_recipe = None
+            if item.stage == StageKind.CONTRACT_EVALUATION:
                 try:
-                    recipe_script_args = TMaxCompositeTrainingRecipe.model_validate(
-                        recipe
-                    ).script_args()
+                    diagnostic_recipe = AutoResearchDiagnosticRecipe.model_validate(
+                        {key: value for key, value in recipe.items() if key != "runtime"}
+                    )
                 except ValueError as exc:
-                    raise CampaignPersistenceError("campaign_tmax_recipe_invalid") from exc
+                    raise CampaignPersistenceError("campaign_diagnostic_recipe_invalid") from exc
+                recipe_digest = diagnostic_recipe_digest(diagnostic_recipe)
             else:
-                raw_recipe_script_args = recipe.get("script_args", ())
-                if not isinstance(raw_recipe_script_args, (list, tuple)) or not all(
-                    isinstance(argument, str) for argument in raw_recipe_script_args
-                ):
-                    raise CampaignPersistenceError("campaign_recipe_script_args_invalid")
-                recipe_script_args = tuple(raw_recipe_script_args)
-            recipe_digest = canonical_hash(
-                {
-                    "stage_recipe": recipe,
-                    "profile_digest": profile.profile_digest,
-                    "stage": item.stage.value,
-                    "code_lineage_record_digest": (
-                        code_lineage.record_digest if code_lineage is not None else None
-                    ),
-                }
-            )
+                recipe_digest = canonical_hash(
+                    {
+                        "stage_recipe": recipe,
+                        "profile_digest": profile.profile_digest,
+                        "stage": item.stage.value,
+                        "code_lineage_record_digest": (
+                            code_lineage.record_digest if code_lineage is not None else None
+                        ),
+                    }
+                )
             try:
                 sealed_stage_inputs: tuple[SealedStageArtifactInput, ...] = ()
                 source_training = None
@@ -622,7 +673,11 @@ class CampaignRuntimeRepository(CampaignRepository):
                         item.stage == StageKind.FULL_TRAINING and remote_resident_model is None
                     ),
                     evaluate_registered_base_model=evaluate_registered_base_model,
+                    diagnostic_recipe=diagnostic_recipe,
+                    approved_data_scopes=frozenset(manifest.approved_data_scopes),
                 )
+                if diagnostic_recipe is not None:
+                    executor_config["diagnostic_proposal_id"] = study.proposal_id
             except (KeyError, OSError, ValueError) as exc:
                 raise CampaignPersistenceError("campaign_remote_profile_material_invalid") from exc
             budget_unit = configured_stage.budget_unit
@@ -664,6 +719,8 @@ class CampaignRuntimeRepository(CampaignRepository):
         if "evaluation_binding" in executor_config:
             input_contract["evaluation_binding"] = executor_config["evaluation_binding"]
             input_contract["model_manifest_digest"] = executor_config["evaluated_model_digest"]
+        if "diagnostic_recipe" in executor_config:
+            input_contract["diagnostic_recipe_digest"] = executor_config["recipe_digest"]
         if "remote_resident_dataset" in executor_config:
             source = executor_config["remote_resident_dataset"]
             input_contract["training_dataset"] = {
@@ -1773,7 +1830,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         campaign_id: str,
         study_id: str,
     ) -> RemoteResidentModelSource | None:
-        """Resolve the exact kept parent checkpoint for one controlled candidate."""
+        """Resolve the exact completed parent checkpoint for a candidate branch."""
 
         self._require_initialized()
         with self._connection() as connection:
@@ -1846,8 +1903,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 or not attempt_ids
                 or any(not isinstance(attempt_id, str) for attempt_id in attempt_ids)
                 or decision.get("proposal_id") != parent_proposal_id
-                or decision.get("decision") != "keep"
-                or decision.get("eligible_for_best") is not True
+                or decision.get("decision") not in {"keep", "discard"}
             ):
                 raise CampaignPersistenceError("campaign_training_parent_checkpoint_invalid")
             parent_study = connection.execute(
@@ -2987,6 +3043,27 @@ class CampaignRuntimeRepository(CampaignRepository):
             executor["evaluation_context_sha256"] = hashlib.sha256(
                 evaluation_context_bytes(context)
             ).hexdigest()
+        if (
+            executor.get("kind") == "ssh_remote"
+            and executor.get("stage") == StageKind.CONTRACT_EVALUATION.value
+        ):
+            recipe = AutoResearchDiagnosticRecipe.model_validate(executor["diagnostic_recipe"])
+            contract = executor["diagnostic_contract"]
+            request = AutoResearchDiagnosticRequest(
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                proposal_id=executor["diagnostic_proposal_id"],
+                study_id=study_id,
+                action_id=action_id,
+                attempt_id=attempt_id,
+                recipe=recipe,
+                recipe_digest=executor["recipe_digest"],
+                runner_id=contract["runner_id"],
+                runner_version=contract["runner_version"],
+            )
+            executor["diagnostic_request_sha256"] = hashlib.sha256(
+                diagnostic_request_bytes(request)
+            ).hexdigest()
         return executor
 
     def claim_next_action(
@@ -3277,6 +3354,11 @@ class CampaignRuntimeRepository(CampaignRepository):
                 (manifest.workspace_id, manifest.action_id),
             ).fetchone()
             reservation = json.loads(action_row["reservation_json"])
+            actual_cost = _settlement_actual_cost(
+                unit=reservation["unit"],
+                reservation_amount=float(reservation["amount"]),
+                manifest=manifest,
+            )
             for output in manifest.outputs:
                 artifact_id = f"artifact-{hashlib.sha256(f'{manifest.attempt_id}:{output.path}'.encode()).hexdigest()[:24]}"
                 connection.execute(
@@ -3324,7 +3406,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                     reservation["unit"],
                     BudgetEntryKind.SETTLE.value,
                     -float(reservation["amount"]),
-                    float(reservation["amount"]),
+                    actual_cost,
                     manifest.action_id,
                     _json(
                         {
@@ -3656,6 +3738,19 @@ class CampaignRuntimeRepository(CampaignRepository):
                     "final/"
                 ):
                     metadata["relative_path"] = output.path.removeprefix("final/")
+                if output.schema_name == "huggingface_checkpoint_file.v1":
+                    parts = PurePosixPath(output.path).parts
+                    if (
+                        len(parts) < 3
+                        or parts[0] != "checkpoints"
+                        or not parts[1].startswith("step-")
+                        or not parts[1].removeprefix("step-").isdigit()
+                    ):
+                        raise CampaignPersistenceError(
+                            "campaign_training_checkpoint_artifact_invalid"
+                        )
+                    metadata["checkpoint_step"] = int(parts[1].removeprefix("step-"))
+                    metadata["relative_path"] = PurePosixPath(*parts[2:]).as_posix()
                 if (
                     output.schema_name == NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
                     and not _sealed_reference(sealed_directory).startswith("bashgym-remote-seal://")
@@ -3700,7 +3795,11 @@ class CampaignRuntimeRepository(CampaignRepository):
                 unit=reservation["unit"],
                 kind=BudgetEntryKind.SETTLE,
                 reserved_delta=-float(reservation["amount"]),
-                actual_delta=float(reservation["amount"]),
+                actual_delta=_settlement_actual_cost(
+                    unit=reservation["unit"],
+                    reservation_amount=float(reservation["amount"]),
+                    manifest=manifest,
+                ),
                 action_id=manifest.action_id,
                 evidence={
                     "seal_uri": str(sealed_directory),

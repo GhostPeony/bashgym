@@ -53,6 +53,29 @@ def test_operator_skill_requires_separate_explicit_start_confirmation():
     assert "Never run `research start` in the preparation turn" in operator
 
 
+def test_operator_skill_preserves_hypothesis_diversity_without_parallel_training():
+    operator = (SKILLS / "bashgym-operator" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "small hypothesis portfolio" in operator
+    assert "exploit" in operator
+    assert "near-miss" in operator
+    assert "structural" in operator
+    assert "Execute one declared candidate at a time" in operator
+    assert "cheap diagnostic or evaluation probe" in operator
+
+
+def test_operator_skill_preserves_bounded_scientific_handoff_and_training_metrics():
+    operator = (SKILLS / "bashgym-operator" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "bounded scientific handoff" in operator
+    assert "active`, `tested`, `retired`, or `deferred`" in operator
+    assert "next discriminating probe" in operator
+    assert "live campaign state" in operator
+    assert "new brainstorming" in operator
+    assert "training_metrics.jsonl" in operator
+    assert "loss unavailable for this recipe" in operator
+
+
 def test_source_clone_agent_guides_route_autoresearch_through_the_shared_skill():
     codex = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")

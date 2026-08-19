@@ -17,6 +17,7 @@ import {
   parseGuidedSetupDoctor,
   parseGuidedSetupMutation,
   parseGuidedSetupValidation,
+  type AutoResearchStopRules,
   type GuidedSetupBindings,
   type GuidedSetupContext,
   type GuidedSetupCreation,
@@ -826,6 +827,7 @@ export interface GuidedSetupDraftRequest {
   templateId: string
   installationId: string
   bindings: GuidedSetupBindings
+  stopRules: AutoResearchStopRules
 }
 
 export interface GuidedSetupSessionRequest {
@@ -972,7 +974,8 @@ export const campaignApi = {
       workspace_id: draft.workspaceId,
       template_id: draft.templateId,
       installation_id: draft.installationId,
-      bindings: draft.bindings
+      bindings: draft.bindings,
+      stop_rules: draft.stopRules
     })
     if (!response.ok) return failedGuidedSetupResponse(response)
     const parsed = parseGuidedSetupDoctor(response.data)
@@ -993,7 +996,8 @@ export const campaignApi = {
         workspace_id: draft.workspaceId,
         template_id: draft.templateId,
         installation_id: draft.installationId,
-        bindings: draft.bindings
+        bindings: draft.bindings,
+        stop_rules: draft.stopRules
       },
       undefined,
       { idempotencyKey }

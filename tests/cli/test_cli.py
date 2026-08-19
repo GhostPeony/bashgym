@@ -2,6 +2,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from bashgym.campaigns.contracts import StageKind
 from bashgym.cli import DOCS, build_parser, main
 from bashgym.environments.contracts import EnvironmentSpec
@@ -31,6 +33,7 @@ def test_manifest_json_is_agent_readable(capsys):
     assert "research onboard" in payload["commands"]
     assert "research context" in payload["commands"]
     assert "research state" in payload["commands"]
+    assert "research failures" in payload["commands"]
     assert "research wait" in payload["commands"]
     assert "research start" in payload["commands"]
     assert "research submit-iteration" in payload["commands"]
@@ -102,6 +105,8 @@ def test_activate_autoresearch_parser_binds_an_existing_model_and_evaluator():
             "evaluate.py",
             "--evaluation-budget-reservation",
             "0.1",
+            "--intermediate-checkpoint-limit",
+            "2",
             "--evaluation-name",
             "Terminal heldout",
             "--remote-model-path",
@@ -237,13 +242,36 @@ def test_activate_autoresearch_plan_binds_remote_heldout_without_ssh_or_local_ro
 
     evaluator = tmp_path / "evaluate.py"
     trainer = tmp_path / "train.py"
+    diagnostic_runner = tmp_path / "diagnose.py"
+    diagnostic_contract = tmp_path / "diagnostic-contract.json"
     runner_config = tmp_path / "runner-config.json"
     for path, content in (
         (evaluator, "print('evaluate')\n"),
         (trainer, "print('train')\n"),
+        (diagnostic_runner, "print('diagnose')\n"),
         (runner_config, "{}\n"),
     ):
         path.write_text(content, encoding="utf-8")
+    diagnostic_contract.write_text(
+        json.dumps(
+            {
+                "runner_id": "scientific-diagnostic-runner",
+                "runner_version": "1",
+                "max_sample_limit": 256,
+                "max_measurements": 8,
+                "capabilities": [
+                    {
+                        "capability_id": "checkpoint_trajectory",
+                        "description": "Summarize fixed-suite checkpoint scores.",
+                        "measurements": ["best_checkpoint_step", "peak_metric"],
+                        "evidence_sources": ["checkpoint_evaluations"],
+                    }
+                ],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
     args = build_parser().parse_args(
         [
@@ -275,6 +303,8 @@ def test_activate_autoresearch_plan_binds_remote_heldout_without_ssh_or_local_ro
             "0.1",
             "--evaluation-name",
             "Terminal heldout",
+            "--intermediate-checkpoint-limit",
+            "2",
             "--remote-model-path",
             "/srv/bashgym/models/research-model",
             "--source-repository",
@@ -287,6 +317,12 @@ def test_activate_autoresearch_plan_binds_remote_heldout_without_ssh_or_local_ro
             str(trainer),
             "--training-input",
             str(runner_config),
+            "--diagnostic-script",
+            str(diagnostic_runner),
+            "--diagnostic-contract-file",
+            str(diagnostic_contract),
+            "--diagnostic-budget-reservation",
+            "0.05",
             "--executor-profile",
             "registered-training-v1",
             "--full-budget-reservation",
@@ -308,7 +344,27 @@ def test_activate_autoresearch_plan_binds_remote_heldout_without_ssh_or_local_ro
     assert resident.dataset_version_id == "terminal-heldout-v1"
     evaluation_stage = request.executor_profile.stage_profile(StageKind.DEVELOPMENT_EVALUATION)
     assert evaluation_stage.input_files == ()
+    assert evaluation_stage.script_args[-2:] == ("--checkpoint-limit", "2")
     assert "evaluator_readiness" not in request.evaluation_suite.metric_contract
+    training_stage = request.executor_profile.stage_profile(StageKind.FULL_TRAINING)
+    assert training_stage.output_paths == (
+        "checkpoints",
+        "final",
+        "training_manifest.json",
+        "training_metrics.jsonl",
+    )
+    diagnostic_stage = request.executor_profile.stage_profile(StageKind.CONTRACT_EVALUATION)
+    assert diagnostic_stage.script_path == diagnostic_runner.resolve()
+    assert diagnostic_stage.budget_reservation == 0.05
+    assert diagnostic_stage.diagnostic_contract.runner_id == "scientific-diagnostic-runner"
+    assert diagnostic_stage.diagnostic_contract.capabilities[0].measurements == (
+        "best_checkpoint_step",
+        "peak_metric",
+    )
+
+    args.diagnostic_contract_file = None
+    with pytest.raises(ValueError, match="diagnostic activation requires"):
+        args.func(args)
 
 
 def test_canvas_action_commands_send_origin_and_runtime_metadata(monkeypatch, capsys):
@@ -656,6 +712,11 @@ def test_campaign_read_commands_preserve_workspace_and_pagination(monkeypatch, c
     assert client.calls[-1]["path"] == "/campaigns/templates"
     assert client.calls[-1]["query"] == {"workspace_id": "workspace-a"}
 
+    assert main(["research", "failures", *connection, "--campaign", "campaign:1"]) == 0
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == "/campaigns/campaign%3A1/research-failures"
+    assert client.calls[-1]["query"] == {"workspace_id": "workspace-a"}
+
     assert main(["campaign", "status", *connection, "--campaign", "campaign:1"]) == 0
     json.loads(capsys.readouterr().out)
     assert client.calls[-1]["path"] == "/campaigns/campaign%3A1"
@@ -939,6 +1000,32 @@ def test_research_commands_are_thin_aliases_for_the_campaign_api(monkeypatch, ca
         **proposal,
         "parent_proposal_id": "baseline-1",
     }
+
+    assert (
+        main(
+            [
+                "research",
+                "submit-iteration",
+                *connection,
+                "--campaign",
+                "campaign:1",
+                "--expected-version",
+                "5",
+                "--role",
+                "diagnostic",
+                "--parent-proposal",
+                "candidate-2",
+                "--proposal",
+                str(proposal_path),
+                "--idempotency-key",
+                "diagnostic-1",
+            ]
+        )
+        == 0
+    )
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == ("/campaigns/campaign%3A1/autoresearch/diagnostics")
+    assert client.calls[-1]["payload"]["parent_proposal_id"] == "candidate-2"
 
     assert (
         main(
@@ -1367,6 +1454,8 @@ def test_campaign_setup_autoresearch_installs_explicit_binding_without_credentia
                 "4",
                 "--max-attempts",
                 "4",
+                "--minimum-improvement",
+                "0.01",
                 "--install-dir",
                 str(install_dir),
                 "--json",
@@ -1671,6 +1760,8 @@ def test_campaign_setup_autoresearch_can_bind_inspected_trainable_artifact(tmp_p
                 "4",
                 "--max-attempts",
                 "4",
+                "--minimum-improvement",
+                "0.01",
                 "--install-dir",
                 str(install_dir),
                 "--json",
@@ -1739,6 +1830,8 @@ def test_campaign_setup_autoresearch_rejects_inspected_task_mismatch(tmp_path, c
             "4",
             "--max-attempts",
             "4",
+            "--minimum-improvement",
+            "0.01",
             "--install-dir",
             str(install_dir),
             "--json",
@@ -4046,6 +4139,7 @@ def _write_onboarding_contract(path: Path, data_directory: Path) -> None:
     input_directory = path.parent / "onboarding-inputs"
     input_directory.mkdir(parents=True, exist_ok=True)
     definition, activation = _activation_fixture(input_directory / "fixture")
+    assert definition.policy is not None
     registered = activation.executor_profile.registered_base_model
     assert registered is not None and registered.artifact_receipt is not None
     model_request = RemoteModelRegistrationRequest(
@@ -4080,6 +4174,7 @@ def _write_onboarding_contract(path: Path, data_directory: Path) -> None:
                 "credential_ref": "campaign_local_operator",
                 "campaign_id": "campaign-cli-v1",
                 "campaign_title": "CLI experiment",
+                "stop_rules": definition.policy.stop_rules.model_dump(mode="json"),
             }
         ),
         encoding="utf-8",
@@ -4107,6 +4202,9 @@ def test_research_onboard_plan_is_local_and_side_effect_free(
     assert payload["mode"] == "plan"
     assert payload["onboarding"]["applied"] is False
     assert payload["onboarding"]["next_action"] == "apply_onboarding"
+    rules = payload["onboarding"]["experiment_contract"]["stop_rules"]
+    assert rules["max_attempts"] == 3
+    assert rules["max_total_cost"] == 2.0
     assert not (tmp_path / "data").exists()
 
 
@@ -4152,6 +4250,7 @@ def test_research_onboard_apply_stops_at_ready(monkeypatch, tmp_path: Path, caps
     assert payload["mode"] == "apply"
     assert payload["onboarding"]["campaign_status"] == "ready"
     assert payload["onboarding"]["next_action"] == ("explicit_start_confirmation_required")
+    assert payload["onboarding"]["experiment_contract"]["stop_rules"]["max_attempts"] == 3
 
 
 def test_research_onboard_failure_is_stable_json_without_traceback(tmp_path: Path, capsys) -> None:

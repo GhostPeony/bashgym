@@ -18,6 +18,7 @@ from bashgym.campaigns.contracts import (
     Identifier,
     canonical_hash,
 )
+from bashgym.campaigns.reward_integrity import build_reward_spec
 from bashgym.environments.contracts import EnvironmentSpec
 from bashgym.environments.nemo_gym import validate_nemo_gym_rollout_batch
 
@@ -263,6 +264,7 @@ class NemoGymCampaignEvidence(FrozenContractModel):
 
     def bounded_reference(self, *, artifact_id: str, artifact_sha256: str) -> dict[str, Any]:
         refit = self.rollouts[0].refit
+        reward_spec = build_reward_spec(EnvironmentSpec.from_dict(self.environment_contract))
         return {
             "artifact_id": artifact_id,
             "artifact_sha256": artifact_sha256,
@@ -276,6 +278,7 @@ class NemoGymCampaignEvidence(FrozenContractModel):
             "mean_total_reward": self.mean_total_reward,
             "training_step": refit.training_step,
             "policy_revision": refit.policy_revision,
+            "reward_spec_digest": reward_spec.reward_spec_digest,
         }
 
 

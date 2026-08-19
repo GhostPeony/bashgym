@@ -40,9 +40,9 @@ Treat raw exports as private input. They may contain nested paths, executor deta
 9. Attach evidence references to quantitative claims and source references to contextual or methodological claims.
 10. Validate the JSON:
 
-   ```bash
-   python scripts/research_post.py validate <research-post.json>
-   ```
+```bash
+python scripts/research_post.py validate <research-post.json>
+```
 
 11. Render the review copy:
 

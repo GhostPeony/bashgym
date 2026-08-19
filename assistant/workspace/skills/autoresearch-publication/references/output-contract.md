@@ -6,18 +6,18 @@
 
 ## Required top-level fields
 
-| Field | Purpose |
-|---|---|
-| `schema_version` | Exact value `open_frontiers.research_post.v1` |
-| `publication` | Public slug, title, summary, and human approval state |
-| `experiment` | Question, hypothesis, public model, method, controlled intervention, fixed evaluation, and optional method-selection rationale |
-| `results` | Primary metric, optional secondary metrics, bounded failure-category comparison, and keep/discard/baseline decision |
-| `narrative` | Simple explanation, technical explanation, judgment, limitations, and next experiment |
-| `training_rungs` | Ordered sequence of training and evaluation work that actually ran |
-| `visuals` | Typed data for downstream rendering |
-| `claims` | Public claims linked to evidence and source identifiers |
-| `sources` | Primary or authoritative contextual sources |
-| `provenance` | Public evidence digests and generation timestamp |
+| Field            | Purpose                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `schema_version` | Exact value `open_frontiers.research_post.v1`                                                                                  |
+| `publication`    | Public slug, title, summary, and human approval state                                                                          |
+| `experiment`     | Question, hypothesis, public model, method, controlled intervention, fixed evaluation, and optional method-selection rationale |
+| `results`        | Primary metric, optional secondary metrics, bounded failure-category comparison, and keep/discard/baseline decision            |
+| `narrative`      | Simple explanation, technical explanation, judgment, limitations, and next experiment                                          |
+| `training_rungs` | Ordered sequence of training and evaluation work that actually ran                                                             |
+| `visuals`        | Typed data for downstream rendering                                                                                            |
+| `claims`         | Public claims linked to evidence and source identifiers                                                                        |
+| `sources`        | Primary or authoritative contextual sources                                                                                    |
+| `provenance`     | Public evidence digests and generation timestamp                                                                               |
 
 ## Approval
 

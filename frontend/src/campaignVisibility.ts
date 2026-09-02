@@ -2,11 +2,13 @@ export interface CampaignPublicEventSummary {
   schema_version: 'public_campaign_event_summary.v1'
   action_id?: string
   attempt_id?: string
+  reused_from_attempt_id?: string
   study_id?: string
   proposal_id?: string
   entry_id?: string
   stage?: string
   code?: string
+  failure_class?: string
   manifest_revision?: number
   stage_index?: number
   next_stage_index?: number
@@ -77,11 +79,13 @@ const SUMMARY_FIELDS = new Set([
   'schema_version',
   'action_id',
   'attempt_id',
+  'reused_from_attempt_id',
   'study_id',
   'proposal_id',
   'entry_id',
   'stage',
   'code',
+  'failure_class',
   'manifest_revision',
   'stage_index',
   'next_stage_index',
@@ -103,7 +107,14 @@ const ARTIFACT_FIELDS = new Set([
   'valid',
   'created_at'
 ])
-const ID_FIELDS = new Set(['action_id', 'attempt_id', 'study_id', 'proposal_id', 'entry_id'])
+const ID_FIELDS = new Set([
+  'action_id',
+  'attempt_id',
+  'reused_from_attempt_id',
+  'study_id',
+  'proposal_id',
+  'entry_id'
+])
 const INTEGER_FIELDS = new Set([
   'manifest_revision',
   'stage_index',
@@ -160,6 +171,7 @@ const ARTIFACT_SCHEMA_NAMES = new Set([
   'training_metrics_jsonl.v1',
   'unclassified_artifact.v1'
 ])
+const FAILURE_CLASSES = new Set(['infrastructure', 'permission', 'configuration', 'execution'])
 const CREDENTIAL_KINDS = new Set(['desktop_bootstrap', 'refresh', 'access', 'controller'])
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/
 const SHA256 = /^[0-9a-f]{64}$/
@@ -207,7 +219,14 @@ function publicSummary(value: unknown): CampaignPublicEventSummary | null {
       if (typeof field !== 'boolean') return null
       safe[key] = field
     } else {
-      const allowed = key === 'stage' ? STAGES : key === 'code' ? BLOCKER_CODES : null
+      const allowed =
+        key === 'stage'
+          ? STAGES
+          : key === 'code'
+            ? BLOCKER_CODES
+            : key === 'failure_class'
+              ? FAILURE_CLASSES
+              : null
       if (!allowed || typeof field !== 'string' || !allowed.has(field)) return null
       safe[key] = field
     }
@@ -244,11 +263,14 @@ export function toCampaignActivityFields(value: unknown): Record<string, unknown
     if (!summary) return null
     if (summary.action_id !== undefined) fields.action_id = summary.action_id
     if (summary.attempt_id !== undefined) fields.attempt_id = summary.attempt_id
+    if (summary.reused_from_attempt_id !== undefined)
+      fields.reused_from_attempt_id = summary.reused_from_attempt_id
     if (summary.study_id !== undefined) fields.study_id = summary.study_id
     if (summary.proposal_id !== undefined) fields.proposal_id = summary.proposal_id
     if (summary.entry_id !== undefined) fields.entry_id = summary.entry_id
     if (summary.stage !== undefined) fields.stage = summary.stage
     if (summary.code !== undefined) fields.code = summary.code
+    if (summary.failure_class !== undefined) fields.failure_class = summary.failure_class
     if (summary.manifest_revision !== undefined)
       fields.manifest_revision = summary.manifest_revision
     if (summary.stage_index !== undefined) fields.stage_index = summary.stage_index

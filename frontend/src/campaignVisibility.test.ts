@@ -61,6 +61,64 @@ test('Activity projector explicitly picks approved public primitives', () => {
   })
 })
 
+test('Activity projector carries the reuse source and the failure class', () => {
+  const completed = toCampaignActivityFields(
+    event({
+      schema_version: 'public_campaign_event_summary.v1',
+      action_id: 'action-2',
+      attempt_id: 'attempt-2',
+      reused_from_attempt_id: 'attempt-1',
+      study_id: 'study-2',
+      stage: 'data_build'
+    })
+  )
+  const failed = toCampaignActivityFields(
+    event({
+      schema_version: 'public_campaign_event_summary.v1',
+      attempt_id: 'attempt-3',
+      failure_class: 'infrastructure'
+    })
+  )
+
+  assert.deepEqual(completed, {
+    event_id: 'event-1',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-1',
+    aggregate_version: 3,
+    action_id: 'action-2',
+    attempt_id: 'attempt-2',
+    reused_from_attempt_id: 'attempt-1',
+    study_id: 'study-2',
+    stage: 'data_build'
+  })
+  assert.deepEqual(failed, {
+    event_id: 'event-1',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-1',
+    aggregate_version: 3,
+    attempt_id: 'attempt-3',
+    failure_class: 'infrastructure'
+  })
+  assert.equal(
+    toCampaignActivityFields(
+      event({
+        schema_version: 'public_campaign_event_summary.v1',
+        reused_from_attempt_id: 'C:/reuse source canary'
+      })
+    ),
+    null
+  )
+  assert.equal(
+    toCampaignActivityFields(
+      event({
+        schema_version: 'public_campaign_event_summary.v1',
+        failure_class: 'unclassified-canary'
+      })
+    ),
+    null
+  )
+})
+
 test('Activity projector rejects schema skew, runtime extras, nested values, and lists', () => {
   assert.equal(toCampaignActivityFields({ ...event(), schema_version: 'campaign_event.v1' }), null)
   assert.equal(

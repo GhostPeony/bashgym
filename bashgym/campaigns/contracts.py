@@ -511,6 +511,20 @@ class StagePlanItem(FrozenContractModel):
     reason: str = Field(min_length=1, max_length=2000)
     input_contract: dict[str, Any] = Field(default_factory=dict)
     output_contract: dict[str, Any] = Field(default_factory=dict)
+    consumes: tuple[StageKind, ...] = ()
+
+    @field_validator("consumes")
+    @classmethod
+    def validate_consumes(cls, value: tuple[StageKind, ...]) -> tuple[StageKind, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("stage plan item cannot consume a stage twice")
+        return value
+
+
+_IMPLICIT_EDGES: dict[StageKind, StageKind] = {
+    StageKind.FULL_TRAINING: StageKind.DATA_BUILD,
+    StageKind.DEVELOPMENT_EVALUATION: StageKind.FULL_TRAINING,
+}
 
 
 class StagePlan(FrozenContractModel):
@@ -525,7 +539,34 @@ class StagePlan(FrozenContractModel):
         stages = [item.stage for item in value]
         if len(set(stages)) != len(stages):
             raise ValueError("stage plan cannot repeat a stage")
+        position = {stage: index for index, stage in enumerate(stages)}
+        for index, item in enumerate(value):
+            for consumed in item.consumes:
+                if consumed == item.stage:
+                    raise ValueError("stage plan item cannot consume itself")
+                if consumed not in position:
+                    raise ValueError("stage plan consumes an unknown stage")
+                if position[consumed] > index:
+                    raise ValueError("stage plan consumes a later stage")
         return value
+
+    def consumed_stages(self, index: int) -> tuple[StageKind, ...]:
+        """Declared edges, or the positional rule for plans that predate `consumes`."""
+
+        item = self.items[index]
+        if item.consumes:
+            return item.consumes
+        upstream = _IMPLICIT_EDGES.get(item.stage)
+        if upstream is None:
+            return ()
+        if item.stage == StageKind.FULL_TRAINING:
+            if index > 0 and self.items[index - 1].stage == upstream:
+                return (upstream,)
+            return ()
+        for earlier in reversed(self.items[:index]):
+            if earlier.stage == upstream:
+                return (upstream,)
+        return ()
 
 
 class StudyProposalSubmission(FrozenContractModel):

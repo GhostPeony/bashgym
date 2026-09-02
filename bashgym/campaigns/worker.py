@@ -726,6 +726,7 @@ class CampaignWorker:
                 )
                 if (
                     actual_dataset_source != remote_resident_dataset
+                    or remote_resident_dataset.stage_index + 1 != attempt.stage_index
                     or data_attempt.status.value != "completed"
                     or data_attempt.stage.value != "data_build"
                     or data_attempt.candidate_digest != attempt.candidate_digest
@@ -737,19 +738,16 @@ class CampaignWorker:
                     compute_profile_id=remote_resident_dataset.compute_profile_id,
                 )
                 reuse_chain = self.repository.reuse_source_chain(data_attempt)
-                source_attempt = reuse_chain[-1] if reuse_chain else data_attempt
+                source_attempt = reuse_chain[-1][0] if reuse_chain else data_attempt
                 if (
                     source_attempt.attempt_id != remote_resident_dataset.attempt_id
                     or source_attempt.action_id != remote_resident_dataset.action_id
                 ):
                     raise ValueError("remote dataset source mismatch")
-                for reused_attempt in reuse_chain:
+                for reused_attempt, reused_manifest in reuse_chain:
                     self._verify_sealed_data_build(
                         reused_attempt,
-                        self.repository.get_attempt_result_manifest(
-                            attempt.workspace_id,
-                            reused_attempt.attempt_id,
-                        ),
+                        reused_manifest,
                         compute_profile_id=remote_resident_dataset.compute_profile_id,
                     )
                 sealed_files = {

@@ -1098,9 +1098,8 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
     assert history["experiments"][1]["data"]["dataset_version_id"] == (
         generated_dataset_versions[0]["dataset_version_id"]
     )
-    # Studies whose data build was reused register no dataset version of their own, so the
-    # history projection reports no dataset section for them. Following the reuse link in
-    # that projection is not part of remote-resident resolution.
+    # Known gap, fixed in the follow-up task: a study whose data build was reused registers
+    # no dataset version of its own, so the history projection reports no dataset section.
     assert history["experiments"][2]["data"] is None
     assert history["experiments"][3]["data"] is None
     assert "## AutoResearch experiment history" in report

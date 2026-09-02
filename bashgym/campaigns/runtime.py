@@ -351,6 +351,7 @@ class CampaignRuntimeRepository(CampaignRepository):
             candidate_digest=row["candidate_digest"],
             manifest_revision=row["manifest_revision"],
             stage=row["stage_kind"],
+            stage_index=row["stage_index"],
             lease_owner=row["lease_owner"],
             lease_expires_at=row["lease_expires_at"],
             heartbeat_at=row["heartbeat_at"],
@@ -1694,45 +1695,63 @@ class CampaignRuntimeRepository(CampaignRepository):
             attempt=attempt, manifest=manifest, artifact_metadata_by_path=metadata_by_path
         )
 
-    def _reuse_link_attempt(self, attempt: ActionAttempt) -> ActionAttempt | None:
-        """Return the completed attempt one reuse link away, or None when not reused."""
+    def _completed_reuse_source(self, workspace_id: str, attempt_id: str) -> ActionAttempt | None:
+        """Load one reuse source only when its action and its attempt are both completed."""
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                self._attempt_select() + """
+                WHERE t.workspace_id = ? AND t.attempt_id = ?
+                  AND a.status = ? AND t.status = ?
+                """,
+                (
+                    workspace_id,
+                    attempt_id,
+                    ActionStatus.COMPLETED.value,
+                    AttemptStatus.COMPLETED.value,
+                ),
+            ).fetchone()
+        return None if row is None else self._attempt_from_row(row)
+
+    def reuse_source_chain(
+        self, attempt: ActionAttempt
+    ) -> tuple[tuple[ActionAttempt, SealedActionResult], ...]:
+        """Follow reuse links hop by hop, newest first, until an attempt that executed.
+
+        Each hop carries the manifest this walk read, so a caller verifies exactly the
+        manifests the resolution trusted.
+        """
 
         try:
             manifest = self.get_attempt_result_manifest(attempt.workspace_id, attempt.attempt_id)
         except (RecordNotFoundError, CampaignPersistenceError):
-            return None
-        source_id = reused_from_attempt_id(manifest)
-        if source_id is None or source_id == attempt.attempt_id:
-            return None
-        try:
-            source = self.get_attempt(attempt.workspace_id, source_id)
-        except RecordNotFoundError as exc:
-            raise CampaignPersistenceError("campaign_reuse_source_invalid") from exc
-        if source.status != AttemptStatus.COMPLETED or source.stage != attempt.stage:
-            raise CampaignPersistenceError("campaign_reuse_source_invalid")
-        return source
-
-    def reuse_source_chain(self, attempt: ActionAttempt) -> tuple[ActionAttempt, ...]:
-        """Follow reuse links hop by hop, newest first, until an attempt that executed."""
-
-        chain: list[ActionAttempt] = []
+            return ()
+        chain: list[tuple[ActionAttempt, SealedActionResult]] = []
         seen = {attempt.attempt_id}
         current = attempt
         while True:
-            source = self._reuse_link_attempt(current)
-            if source is None:
+            source_id = reused_from_attempt_id(manifest)
+            if source_id is None:
                 return tuple(chain)
-            if source.attempt_id in seen or len(chain) >= _REUSE_CHAIN_LIMIT:
+            if source_id in seen or len(chain) >= _REUSE_CHAIN_LIMIT:
                 raise CampaignPersistenceError("campaign_reuse_source_invalid")
-            seen.add(source.attempt_id)
-            chain.append(source)
+            source = self._completed_reuse_source(attempt.workspace_id, source_id)
+            if source is None or source.stage != current.stage:
+                raise CampaignPersistenceError("campaign_reuse_source_invalid")
+            try:
+                manifest = self.get_attempt_result_manifest(attempt.workspace_id, source_id)
+            except (RecordNotFoundError, CampaignPersistenceError) as exc:
+                raise CampaignPersistenceError("campaign_reuse_source_invalid") from exc
+            seen.add(source_id)
+            chain.append((source, manifest))
             current = source
 
     def reuse_source_attempt(self, attempt: ActionAttempt) -> ActionAttempt:
         """Resolve a reused attempt to the attempt whose execution produced its bytes."""
 
         chain = self.reuse_source_chain(attempt)
-        return chain[-1] if chain else attempt
+        return chain[-1][0] if chain else attempt
 
     def completed_stage_outputs(
         self, workspace_id: str, campaign_id: str, study_id: str, stage: StageKind

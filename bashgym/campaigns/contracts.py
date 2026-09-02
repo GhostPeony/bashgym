@@ -1247,6 +1247,7 @@ class ActionAttempt(ContractModel):
     candidate_digest: HexDigest
     manifest_revision: int = Field(ge=1)
     stage: StageKind
+    stage_index: int = Field(default=0, ge=0)
     lease_owner: Identifier | None = None
     lease_expires_at: datetime | None = None
     heartbeat_at: datetime | None = None

@@ -106,6 +106,9 @@ def _autoresearch_history_for_export(
     proposal_records = repository.list_proposals(campaign.workspace_id, campaign.campaign_id)
     controls = autoresearch.list_autoresearch_proposals(campaign.workspace_id, campaign.campaign_id)
     outcomes = autoresearch.list_autoresearch_outcomes(campaign.workspace_id, campaign.campaign_id)
+    conclusions = autoresearch.list_hypothesis_family_conclusions(
+        campaign.workspace_id, campaign.campaign_id
+    )
     dataset_versions = ()
     evaluations = ()
     if spec.ledger_project_id is not None:
@@ -124,6 +127,7 @@ def _autoresearch_history_for_export(
         outcomes=outcomes,
         dataset_versions=dataset_versions,
         evaluations=evaluations,
+        hypothesis_family_conclusions=conclusions,
     )
     diagnostics = autoresearch.list_autoresearch_diagnostic_results(
         campaign.workspace_id, campaign.campaign_id

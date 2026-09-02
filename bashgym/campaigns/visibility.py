@@ -199,6 +199,8 @@ PUBLIC_EVENT_TYPE_FIELDS = MappingProxyType(
         "campaign:proposal-rejected": _fields("proposal_id"),
         "campaign:proposal-withdrawn": _fields("proposal_id"),
         "campaign:proposal-accepted": _fields("proposal_id", "study_id"),
+        # Family conclusion wakes observers; the authenticated research state carries details.
+        "campaign:autoresearch-family-concluded": _fields(),
         "campaign:advance-requested": _fields(),
         "campaign:manifest-revised": _fields("manifest_revision"),
         "campaign:source-approved": _fields(),

@@ -25,6 +25,7 @@ from bashgym.campaigns.contracts import (
     ActionAttempt,
     ActorPrincipal,
     Campaign,
+    CampaignEvent,
     CampaignKind,
     CampaignManifest,
     CampaignStatus,
@@ -53,6 +54,7 @@ from bashgym.campaigns.persistence import (
     MigrationChecksumError,
     ProposalMutation,
     RecordNotFoundError,
+    RevisionConflictError,
 )
 from bashgym.campaigns.research_diagnostics import (
     AutoResearchDiagnostics,
@@ -189,6 +191,12 @@ class ExperimentRole(str, Enum):
 class InterventionMode(str, Enum):
     CONTROLLED = "controlled"
     EXPLORATORY = "exploratory"
+
+
+class HypothesisFamilyDisposition(str, Enum):
+    SUPPORTED = "supported"
+    EXHAUSTED = "exhausted"
+    INCONCLUSIVE = "inconclusive"
 
 
 class ExperimentProvenance(str, Enum):
@@ -352,6 +360,49 @@ class AutoResearchProposalControl(FrozenContractModel):
         if self.hypothesis_family_id is not None:
             payload["hypothesis_family_id"] = self.hypothesis_family_id
         return canonical_hash(payload)
+
+
+class AutoResearchHypothesisFamilyConclusion(FrozenContractModel):
+    """One immutable, evidence-bound conclusion for a hypothesis family."""
+
+    schema_version: Literal["autoresearch_hypothesis_family_conclusion.v1"] = (
+        "autoresearch_hypothesis_family_conclusion.v1"
+    )
+    workspace_id: Identifier
+    campaign_id: Identifier
+    hypothesis_family_id: Identifier
+    disposition: HypothesisFamilyDisposition
+    summary: str = Field(min_length=1, max_length=2000)
+    proposal_ids: tuple[Identifier, ...] = Field(min_length=1, max_length=32)
+    result_ids: tuple[Identifier, ...] = Field(min_length=1, max_length=32)
+    follow_up_family_id: Identifier | None = None
+    follow_up_hypothesis: str | None = Field(default=None, min_length=1, max_length=2000)
+    aggregate_version: int = Field(ge=1)
+    created_at: datetime = Field(default_factory=utc_now)
+    replayed: bool = False
+
+    @model_validator(mode="after")
+    def validate_conclusion(self) -> AutoResearchHypothesisFamilyConclusion:
+        if len(self.proposal_ids) != len(self.result_ids):
+            raise ValueError("hypothesis family proposals and results must have equal length")
+        if len(set(self.proposal_ids)) != len(self.proposal_ids):
+            raise ValueError("hypothesis family proposal IDs must be unique")
+        if len(set(self.result_ids)) != len(self.result_ids):
+            raise ValueError("hypothesis family result IDs must be unique")
+        if (self.follow_up_family_id is None) != (self.follow_up_hypothesis is None):
+            raise ValueError("follow-up family ID and hypothesis must be supplied together")
+        if self.follow_up_family_id == self.hypothesis_family_id:
+            raise ValueError("follow-up family must differ from the concluded family")
+        return self
+
+    @property
+    def conclusion_digest(self) -> str:
+        return canonical_hash(
+            self.model_dump(
+                mode="json",
+                exclude={"created_at", "replayed"},
+            )
+        )
 
 
 class AutoResearchDiagnosticResult(FrozenContractModel):
@@ -815,6 +866,28 @@ _AUTORESEARCH_MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "CREATE INDEX idx_autoresearch_diagnostics_campaign ON autoresearch_diagnostic_results(workspace_id, campaign_id, created_at, proposal_id)",
         ),
     ),
+    (
+        3,
+        "durable_autoresearch_hypothesis_family_conclusions",
+        (
+            """
+            CREATE TABLE autoresearch_hypothesis_family_conclusions (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                hypothesis_family_id TEXT NOT NULL,
+                request_digest TEXT NOT NULL,
+                conclusion_json TEXT NOT NULL,
+                conclusion_digest TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, campaign_id, hypothesis_family_id),
+                FOREIGN KEY(workspace_id, campaign_id)
+                    REFERENCES autoresearch_campaign_specs(workspace_id, campaign_id)
+                    ON DELETE RESTRICT
+            )
+            """,
+            "CREATE INDEX idx_autoresearch_family_conclusions_campaign ON autoresearch_hypothesis_family_conclusions(workspace_id, campaign_id, created_at, hypothesis_family_id)",
+        ),
+    ),
 )
 
 
@@ -1083,6 +1156,215 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             )
             for row in rows
         )
+
+    def get_hypothesis_family_conclusion(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        hypothesis_family_id: str,
+    ) -> AutoResearchHypothesisFamilyConclusion | None:
+        self.get_autoresearch_spec(workspace_id, campaign_id)
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT conclusion_json
+                FROM autoresearch_hypothesis_family_conclusions
+                WHERE workspace_id = ? AND campaign_id = ? AND hypothesis_family_id = ?
+                """,
+                (workspace_id, campaign_id, hypothesis_family_id),
+            ).fetchone()
+        return (
+            AutoResearchHypothesisFamilyConclusion.model_validate_json(row["conclusion_json"])
+            if row is not None
+            else None
+        )
+
+    def list_hypothesis_family_conclusions(
+        self, workspace_id: str, campaign_id: str
+    ) -> tuple[AutoResearchHypothesisFamilyConclusion, ...]:
+        self.get_autoresearch_spec(workspace_id, campaign_id)
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT conclusion_json
+                FROM autoresearch_hypothesis_family_conclusions
+                WHERE workspace_id = ? AND campaign_id = ?
+                ORDER BY created_at, hypothesis_family_id
+                """,
+                (workspace_id, campaign_id),
+            ).fetchall()
+        return tuple(
+            AutoResearchHypothesisFamilyConclusion.model_validate_json(row["conclusion_json"])
+            for row in rows
+        )
+
+    def conclude_hypothesis_family(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        hypothesis_family_id: str,
+        *,
+        disposition: HypothesisFamilyDisposition,
+        summary: str,
+        follow_up_family_id: str | None,
+        follow_up_hypothesis: str | None,
+        expected_version: int,
+        actor_id: str,
+        credential_kind: CredentialKind,
+        correlation_id: str,
+        idempotency_key: str,
+    ) -> AutoResearchHypothesisFamilyConclusion:
+        """Close one completed family and wake observers without choosing new work."""
+
+        request_digest = canonical_hash(
+            {
+                "workspace_id": workspace_id,
+                "campaign_id": campaign_id,
+                "hypothesis_family_id": hypothesis_family_id,
+                "disposition": disposition.value,
+                "summary": summary,
+                "follow_up_family_id": follow_up_family_id,
+                "follow_up_hypothesis": follow_up_hypothesis,
+            }
+        )
+        concluded_at = utc_now()
+        with self._connection(immediate=True) as connection:
+            existing = connection.execute(
+                """
+                SELECT request_digest, conclusion_json
+                FROM autoresearch_hypothesis_family_conclusions
+                WHERE workspace_id = ? AND campaign_id = ? AND hypothesis_family_id = ?
+                """,
+                (workspace_id, campaign_id, hypothesis_family_id),
+            ).fetchone()
+            if existing is not None:
+                if existing["request_digest"] != request_digest:
+                    raise AutoResearchConflictError(
+                        "autoresearch_hypothesis_family_conclusion_conflict"
+                    )
+                stored = AutoResearchHypothesisFamilyConclusion.model_validate_json(
+                    existing["conclusion_json"]
+                )
+                return stored.model_copy(update={"replayed": True})
+
+            campaign_row = connection.execute(
+                """
+                SELECT * FROM campaigns
+                WHERE workspace_id = ? AND campaign_id = ?
+                """,
+                (workspace_id, campaign_id),
+            ).fetchone()
+            if campaign_row is None:
+                raise RecordNotFoundError("campaign not found")
+            campaign = self._campaign_from_row(campaign_row)
+            if campaign.version != expected_version:
+                raise RevisionConflictError(expected_version, campaign.version)
+
+            rows = connection.execute(
+                """
+                SELECT control_json
+                FROM autoresearch_proposal_controls
+                WHERE workspace_id = ? AND campaign_id = ? AND role = ?
+                ORDER BY created_at, proposal_id
+                """,
+                (workspace_id, campaign_id, ExperimentRole.CANDIDATE.value),
+            ).fetchall()
+            controls = tuple(
+                control
+                for control in (
+                    AutoResearchProposalControl.model_validate_json(row["control_json"])
+                    for row in rows
+                )
+                if control.hypothesis_family_id == hypothesis_family_id
+            )
+            if not controls:
+                raise AutoResearchInvariantError("autoresearch_hypothesis_family_not_found")
+            if len(controls) > 32:
+                raise AutoResearchInvariantError("autoresearch_hypothesis_family_too_large")
+
+            proposal_ids: list[str] = []
+            result_ids: list[str] = []
+            for control in controls:
+                result_row = connection.execute(
+                    """
+                    SELECT result_json FROM autoresearch_results
+                    WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+                    """,
+                    (workspace_id, campaign_id, control.proposal_id),
+                ).fetchone()
+                if result_row is None:
+                    raise AutoResearchInvariantError(
+                        "autoresearch_hypothesis_family_has_pending_results"
+                    )
+                result = AutoResearchResult.model_validate_json(result_row["result_json"])
+                proposal_ids.append(control.proposal_id)
+                result_ids.append(result.result_id)
+
+            aggregate_version = campaign.version + 1
+            conclusion = AutoResearchHypothesisFamilyConclusion(
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                hypothesis_family_id=hypothesis_family_id,
+                disposition=disposition,
+                summary=summary,
+                proposal_ids=tuple(proposal_ids),
+                result_ids=tuple(result_ids),
+                follow_up_family_id=follow_up_family_id,
+                follow_up_hypothesis=follow_up_hypothesis,
+                aggregate_version=aggregate_version,
+                created_at=concluded_at,
+            )
+            connection.execute(
+                """
+                INSERT INTO autoresearch_hypothesis_family_conclusions(
+                    workspace_id, campaign_id, hypothesis_family_id, request_digest,
+                    conclusion_json, conclusion_digest, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    workspace_id,
+                    campaign_id,
+                    hypothesis_family_id,
+                    request_digest,
+                    conclusion.model_dump_json(),
+                    conclusion.conclusion_digest,
+                    conclusion.created_at.isoformat(),
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE campaigns SET version = ?, updated_at = ?
+                WHERE workspace_id = ? AND campaign_id = ? AND version = ?
+                """,
+                (
+                    aggregate_version,
+                    conclusion.created_at.isoformat(),
+                    workspace_id,
+                    campaign_id,
+                    expected_version,
+                ),
+            )
+            event = CampaignEvent(
+                event_id=f"evt-{request_digest[:24]}",
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                sequence=self._next_event_sequence(connection, workspace_id, campaign_id),
+                aggregate_version=aggregate_version,
+                event_type="campaign:autoresearch-family-concluded",
+                payload={
+                    "hypothesis_family_id": hypothesis_family_id,
+                    "disposition": disposition.value,
+                    "conclusion_digest": conclusion.conclusion_digest,
+                    "follow_up_family_id": follow_up_family_id,
+                },
+                actor_id=actor_id,
+                credential_kind=credential_kind,
+                correlation_id=correlation_id,
+                idempotency_key=idempotency_key,
+                created_at=conclusion.created_at,
+            )
+            self._insert_event(connection, event)
+        return conclusion
 
     def list_autoresearch_diagnostic_results(
         self, workspace_id: str, campaign_id: str
@@ -1906,6 +2188,16 @@ class AutoResearchCampaignCore:
             except ValueError as exc:
                 raise AutoResearchInvariantError("autoresearch_diagnostic_recipe_invalid") from exc
         else:
+            if (
+                control.hypothesis_family_id is not None
+                and self.repository.get_hypothesis_family_conclusion(
+                    submission.workspace_id,
+                    submission.campaign_id,
+                    control.hypothesis_family_id,
+                )
+                is not None
+            ):
+                raise AutoResearchInvariantError("autoresearch_hypothesis_family_concluded")
             if control.changed_variables[0] != submission.primary_variable.strip():
                 raise AutoResearchInvariantError(
                     "autoresearch_candidate_primary_variable_must_lead_intervention"
@@ -2133,6 +2425,41 @@ class AutoResearchCampaignCore:
             idempotency_key=idempotency_key,
         )
 
+    def conclude_hypothesis_family(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        hypothesis_family_id: str,
+        *,
+        disposition: HypothesisFamilyDisposition,
+        summary: str,
+        expected_version: int,
+        principal: ActorPrincipal,
+        correlation_id: str,
+        idempotency_key: str,
+        follow_up_family_id: str | None = None,
+        follow_up_hypothesis: str | None = None,
+    ) -> AutoResearchHypothesisFamilyConclusion:
+        """Record the agent's evidence-bound conclusion without proposing new work."""
+
+        principal.require(workspace_id, Capability.STUDY_PROPOSE)
+        return self.repository.conclude_hypothesis_family(
+            workspace_id,
+            campaign_id,
+            hypothesis_family_id,
+            disposition=disposition,
+            summary=summary.strip(),
+            follow_up_family_id=follow_up_family_id,
+            follow_up_hypothesis=(
+                follow_up_hypothesis.strip() if follow_up_hypothesis is not None else None
+            ),
+            expected_version=expected_version,
+            actor_id=principal.actor_id,
+            credential_kind=principal.credential_kind,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+        )
+
     @staticmethod
     def _proposal_is_simulated(submission) -> bool:
         runtime = submission.training_recipe.get("runtime")
@@ -2290,6 +2617,7 @@ __all__ = [
     "AutoResearchDiagnostics",
     "AutoResearchError",
     "AutoResearchInvariantError",
+    "AutoResearchHypothesisFamilyConclusion",
     "AutoResearchNextAction",
     "AutoResearchOutcomeRecord",
     "AutoResearchProposalControl",
@@ -2304,6 +2632,7 @@ __all__ = [
     "ExperimentProvenance",
     "ExperimentRole",
     "InterventionMode",
+    "HypothesisFamilyDisposition",
     "MetricDirection",
     "ResultDecision",
     "autoresearch_spec_for_template",

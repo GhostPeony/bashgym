@@ -23,9 +23,11 @@ from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.autoresearch import (
     AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
     AutoResearchCampaignSpec,
+    AutoResearchHypothesisFamilyConclusion,
     AutoResearchRepository,
     AutoResearchStopRules,
     AutoResearchTemplateDefinition,
+    HypothesisFamilyDisposition,
     MetricDirection,
 )
 from bashgym.campaigns.contracts import (
@@ -152,6 +154,7 @@ def register_autoresearch_spec(
     *,
     max_attempts: int = 3,
     max_total_cost: float = 3.0,
+    ledger_project_id: str | None = None,
 ) -> AutoResearchRepository:
     autoresearch = AutoResearchRepository(repository.db_path)
     autoresearch.initialize()
@@ -159,6 +162,8 @@ def register_autoresearch_spec(
         AutoResearchCampaignSpec(
             workspace_id="workspace-a",
             campaign_id="campaign-1",
+            ledger_project_id=ledger_project_id,
+            evaluation_suite_id="suite-power" if ledger_project_id is not None else None,
             primary_metric="mrr_at_10",
             metric_direction=MetricDirection.MAXIMIZE,
             stop_rules=AutoResearchStopRules(
@@ -170,6 +175,73 @@ def register_autoresearch_spec(
         )
     )
     return autoresearch
+
+
+def test_research_state_joins_ledger_evaluations_into_campaign_knowledge(
+    tmp_path, monkeypatch
+) -> None:
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    register_autoresearch_spec(repository, ledger_project_id="project-power")
+    monkeypatch.setattr(
+        ExperimentLedgerRepository,
+        "list_evaluation_results",
+        lambda *_args, **_kwargs: [
+            {
+                "evaluation_result_id": "evaluation-power",
+                "slice_metrics": {"example_count": 64},
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        ExperimentLedgerRepository,
+        "list_dataset_versions",
+        lambda *_args, **_kwargs: [],
+    )
+    family_conclusion = AutoResearchHypothesisFamilyConclusion(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        hypothesis_family_id="family-closed",
+        disposition=HypothesisFamilyDisposition.INCONCLUSIVE,
+        summary="The completed evidence did not distinguish the alternatives.",
+        proposal_ids=("candidate-closed",),
+        result_ids=("result-closed",),
+        aggregate_version=4,
+        created_at=datetime(2026, 7, 16, 11, 0, tzinfo=UTC),
+    )
+    monkeypatch.setattr(
+        AutoResearchRepository,
+        "list_hypothesis_family_conclusions",
+        lambda *_args, **_kwargs: (family_conclusion,),
+    )
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    captured: dict[str, object] = {}
+    original = campaign_routes.build_autoresearch_history
+
+    def capture_history(**kwargs):
+        captured["evaluations"] = kwargs.get("evaluations")
+        captured["family_conclusions"] = kwargs.get("hypothesis_family_conclusions")
+        return original(**kwargs)
+
+    monkeypatch.setattr(campaign_routes, "build_autoresearch_history", capture_history)
+
+    response = http.get(
+        "/api/campaigns/campaign-1/research-state",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+
+    assert response.status_code == 200, response.json()
+    evaluations = captured["evaluations"]
+    assert isinstance(evaluations, list)
+    assert evaluations[0]["evaluation_result_id"] == "evaluation-power"
+    assert captured["family_conclusions"] == (family_conclusion,)
 
 
 def test_candidate_input_accepts_exploratory_intervention_bundle():
@@ -197,6 +269,67 @@ def test_candidate_input_accepts_exploratory_intervention_bundle():
         "training_recipe.seed",
     )
     assert candidate.hypothesis_family_id == "family-optimizer-schedule"
+
+
+def test_agent_can_conclude_a_completed_hypothesis_family_through_the_api(tmp_path, monkeypatch):
+    http, _repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    captured = {}
+    conclusion = AutoResearchHypothesisFamilyConclusion(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        hypothesis_family_id="family-longer-training",
+        disposition=HypothesisFamilyDisposition.EXHAUSTED,
+        summary="Every completed continuation regressed on the fixed suite.",
+        proposal_ids=("candidate-1", "candidate-2"),
+        result_ids=("result-1", "result-2"),
+        follow_up_family_id="family-data-coverage",
+        follow_up_hypothesis="Target uncovered failure clusters with more varied data.",
+        aggregate_version=9,
+        created_at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+    )
+
+    class FakeCore:
+        def conclude_hypothesis_family(
+            self, workspace_id, campaign_id, hypothesis_family_id, **kwargs
+        ):
+            captured.update(
+                {
+                    "workspace_id": workspace_id,
+                    "campaign_id": campaign_id,
+                    "hypothesis_family_id": hypothesis_family_id,
+                }
+            )
+            captured.update(kwargs)
+            return conclusion
+
+    monkeypatch.setattr(campaign_routes, "_autoresearch_core", lambda _repository: FakeCore())
+    response = http.post(
+        (
+            "/api/campaigns/campaign-1/autoresearch/hypothesis-families/"
+            "family-longer-training/conclude"
+        ),
+        headers={
+            **bearer(access),
+            "Idempotency-Key": "conclude-family-1",
+            "X-Correlation-ID": "research-family-review",
+        },
+        json={
+            "workspace_id": "workspace-a",
+            "expected_version": 8,
+            "disposition": "exhausted",
+            "summary": "Every completed continuation regressed on the fixed suite.",
+            "follow_up_family_id": "family-data-coverage",
+            "follow_up_hypothesis": ("Target uncovered failure clusters with more varied data."),
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["hypothesis_family_id"] == "family-longer-training"
+    assert response.json()["disposition"] == "exhausted"
+    assert captured["expected_version"] == 8
+    assert captured["idempotency_key"] == "conclude-family-1"
+    assert captured["principal"].actor_id == "codex-agent"
 
 
 def seed_human_work(repository, *, campaign_id="campaign-1"):
@@ -267,6 +400,10 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
         "/api/campaigns/{campaign_id}/autoresearch/baseline",
         "/api/campaigns/{campaign_id}/autoresearch/candidates",
         "/api/campaigns/{campaign_id}/autoresearch/diagnostics",
+        (
+            "/api/campaigns/{campaign_id}/autoresearch/hypothesis-families/"
+            "{hypothesis_family_id}/conclude"
+        ),
         "/api/campaigns/{campaign_id}/autoresearch/results",
         "/api/campaigns/{campaign_id}/autoresearch/ingest-evaluation",
         "/api/campaigns/{campaign_id}/manifest/{revision}",

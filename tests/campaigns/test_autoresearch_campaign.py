@@ -12,6 +12,7 @@ from bashgym.campaigns.autoresearch import (
     AutoResearchCampaignSpec,
     AutoResearchDecision,
     AutoResearchDiagnosticResult,
+    AutoResearchHypothesisFamilyConclusion,
     AutoResearchInvariantError,
     AutoResearchNextAction,
     AutoResearchOutcomeRecord,
@@ -23,6 +24,7 @@ from bashgym.campaigns.autoresearch import (
     ExperimentOutcome,
     ExperimentProvenance,
     ExperimentRole,
+    HypothesisFamilyDisposition,
     MetricDirection,
     ProtectedMetricGate,
     ResultDecision,
@@ -441,6 +443,195 @@ def test_legacy_control_digest_is_stable_when_new_fields_use_defaults():
     )
 
     assert control.control_digest == expected
+
+
+def _completed_hypothesis_family(tmp_path):
+    _path, repository, core = fresh_core(tmp_path, max_attempts=4, target=None)
+    activate(core)
+    baseline = _recipe_proposal("baseline-family", learning_rate=0.001, seed=17)
+    core.submit_baseline(
+        baseline,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-baseline-family",
+        idempotency_key="submit-baseline-family",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline-family")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline-family",
+            baseline_study,
+            baseline_attempt,
+            0.5,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+    candidate = _recipe_proposal("candidate-family", learning_rate=0.002, seed=17).model_copy(
+        update={"prerequisite_study_ids": (baseline_study,)}
+    )
+    core.submit_candidate(
+        candidate,
+        parent_proposal_id="baseline-family",
+        changed_variables=("learning_rate",),
+        hypothesis_family_id="family-learning-rate",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-candidate-family",
+        idempotency_key="submit-candidate-family",
+    )
+    candidate_study, candidate_attempt = select_and_finish(repository, "candidate-family")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "candidate-family",
+            candidate_study,
+            candidate_attempt,
+            0.48,
+            role=ExperimentRole.CANDIDATE,
+            decision=ResultDecision.DISCARD,
+            eligible_for_best=False,
+            previous_best_proposal_id="baseline-family",
+            previous_best_metric=0.5,
+        ),
+    )
+    return repository, core, baseline_study
+
+
+def test_agent_concludes_completed_family_and_records_open_follow_up(tmp_path) -> None:
+    repository, core, _baseline_study = _completed_hypothesis_family(tmp_path)
+    campaign = repository.get_campaign("workspace-a", "campaign-1")
+
+    conclusion = core.conclude_hypothesis_family(
+        "workspace-a",
+        "campaign-1",
+        "family-learning-rate",
+        disposition=HypothesisFamilyDisposition.EXHAUSTED,
+        summary="The tested learning-rate direction did not improve the fixed suite.",
+        follow_up_family_id="family-data-coverage",
+        follow_up_hypothesis="Targeted data coverage may address the remaining failures.",
+        expected_version=campaign.version,
+        principal=principal(repository),
+        correlation_id="conclude-learning-rate",
+        idempotency_key="conclude-learning-rate",
+    )
+
+    assert conclusion == AutoResearchHypothesisFamilyConclusion(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        hypothesis_family_id="family-learning-rate",
+        disposition=HypothesisFamilyDisposition.EXHAUSTED,
+        summary="The tested learning-rate direction did not improve the fixed suite.",
+        proposal_ids=("candidate-family",),
+        result_ids=("result-candidate-family",),
+        follow_up_family_id="family-data-coverage",
+        follow_up_hypothesis="Targeted data coverage may address the remaining failures.",
+        aggregate_version=campaign.version + 1,
+        created_at=conclusion.created_at,
+    )
+    assert repository.list_hypothesis_family_conclusions("workspace-a", "campaign-1") == (
+        conclusion,
+    )
+    event_types = [
+        event.event_type for _cursor, event in repository.list_events("workspace-a", "campaign-1")
+    ]
+    assert event_types[-1] == "campaign:autoresearch-family-concluded"
+
+    replay = core.conclude_hypothesis_family(
+        "workspace-a",
+        "campaign-1",
+        "family-learning-rate",
+        disposition=HypothesisFamilyDisposition.EXHAUSTED,
+        summary="The tested learning-rate direction did not improve the fixed suite.",
+        follow_up_family_id="family-data-coverage",
+        follow_up_hypothesis="Targeted data coverage may address the remaining failures.",
+        expected_version=campaign.version,
+        principal=principal(repository),
+        correlation_id="conclude-learning-rate-replay",
+        idempotency_key="conclude-learning-rate-replay",
+    )
+    assert replay.replayed is True
+
+
+def test_family_conclusion_requires_complete_results_and_closes_only_that_family(tmp_path) -> None:
+    repository, core, baseline_study = _completed_hypothesis_family(tmp_path)
+    campaign = repository.get_campaign("workspace-a", "campaign-1")
+    conclusion = core.conclude_hypothesis_family(
+        "workspace-a",
+        "campaign-1",
+        "family-learning-rate",
+        disposition=HypothesisFamilyDisposition.INCONCLUSIVE,
+        summary="The completed arm does not justify another learning-rate run.",
+        expected_version=campaign.version,
+        principal=principal(repository),
+        correlation_id="conclude-family",
+        idempotency_key="conclude-family",
+    )
+    closed_candidate = _recipe_proposal(
+        "candidate-closed-family", learning_rate=0.003, seed=17
+    ).model_copy(update={"prerequisite_study_ids": (baseline_study,)})
+    with pytest.raises(
+        AutoResearchInvariantError, match="autoresearch_hypothesis_family_concluded"
+    ):
+        core.submit_candidate(
+            closed_candidate,
+            parent_proposal_id="baseline-family",
+            changed_variables=("learning_rate",),
+            hypothesis_family_id="family-learning-rate",
+            expected_version=campaign.version,
+            principal=principal(repository),
+            correlation_id="reuse-closed-family",
+            idempotency_key="reuse-closed-family",
+        )
+
+    follow_up = closed_candidate.model_copy(update={"proposal_id": "candidate-follow-up"})
+    mutation = core.submit_candidate(
+        follow_up,
+        parent_proposal_id="baseline-family",
+        changed_variables=("learning_rate",),
+        hypothesis_family_id="family-new-agent-idea",
+        expected_version=conclusion.aggregate_version,
+        principal=principal(repository),
+        correlation_id="submit-open-family",
+        idempotency_key="submit-open-family",
+    )
+    assert mutation.record.proposal.proposal_id == "candidate-follow-up"
+
+
+def test_family_conclusion_rejects_a_family_with_pending_results(tmp_path) -> None:
+    repository, core, baseline_study = _completed_hypothesis_family(tmp_path)
+    pending = _recipe_proposal("candidate-pending-family", learning_rate=0.004, seed=17).model_copy(
+        update={"prerequisite_study_ids": (baseline_study,)}
+    )
+    campaign = repository.get_campaign("workspace-a", "campaign-1")
+    core.submit_candidate(
+        pending,
+        parent_proposal_id="baseline-family",
+        changed_variables=("learning_rate",),
+        hypothesis_family_id="family-pending",
+        expected_version=campaign.version,
+        principal=principal(repository),
+        correlation_id="submit-pending-family",
+        idempotency_key="submit-pending-family",
+    )
+
+    with pytest.raises(
+        AutoResearchInvariantError,
+        match="autoresearch_hypothesis_family_has_pending_results",
+    ):
+        core.conclude_hypothesis_family(
+            "workspace-a",
+            "campaign-1",
+            "family-pending",
+            disposition=HypothesisFamilyDisposition.EXHAUSTED,
+            summary="This must wait for the pending result.",
+            expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+            principal=principal(repository),
+            correlation_id="conclude-pending-family",
+            idempotency_key="conclude-pending-family",
+        )
 
 
 def test_diagnostic_result_satisfies_pending_without_consuming_candidate_attempt(tmp_path):

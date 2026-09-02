@@ -56,6 +56,7 @@ research state
 research wait
 research start
 research submit-iteration
+research conclude-family
 research report
 ```
 
@@ -232,6 +233,7 @@ bashgym research state \
 
 bashgym research wait --help
 bashgym research submit-iteration --help
+bashgym research conclude-family --help
 bashgym research report --help
 ```
 
@@ -244,6 +246,15 @@ diagnostic runner is installed, `diagnostic_capabilities` reports its exact
 runner identity, limits, evidence sources, and measurement names. The agent may
 still propose a new bounded probe outside that matrix; the runner must report
 it as unsupported rather than BashGym silently choosing another experiment.
+
+BashGym also ships an optional aggregate diagnostic runner for five common
+questions: fixed-budget plasticity, reward-integrity canaries, preference-data
+integrity, fixed-suite teacher-versus-student gaps, and paired session-recovery
+lift. It derives measurements from already-produced immutable summaries; it
+does not read raw rows, run teacher inference, or invent a probe. Activation
+pins those summaries and a separate diagnostic reservation. An installation
+may instead pin its own runner when a question requires executable
+measurements that the built-in runner cannot provide.
 
 The exact setup, proposal file, start, resume, and report commands are in the
 [AutoResearch campaign guide](docs/training/autoresearch-campaign.md).

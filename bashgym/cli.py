@@ -2183,6 +2183,9 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "research submit-iteration": (
                 "Submit one baseline or candidate iteration through the campaign authority."
             ),
+            "research conclude-family": (
+                "Record an evidence-bound conclusion for a completed hypothesis family."
+            ),
             "research report": "Request reproducible AutoResearch report artifacts.",
             "service status": "Read resident API and worker liveness without opening the UI.",
             "ledger projects": "List isolated ML projects in the authorized workspace.",
@@ -3494,6 +3497,7 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
     import asyncio
     import hashlib
 
+    from bashgym.campaigns import first_party_diagnostic_runner
     from bashgym.campaigns.activation import (
         AutoResearchActivationRequest,
         activate_autoresearch,
@@ -3507,6 +3511,11 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
     from bashgym.campaigns.contracts import CodeMutationKind, StageKind
     from bashgym.campaigns.diagnostic_actions import (
         AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+    )
+    from bashgym.campaigns.first_party_diagnostic_runner import (
+        FIRST_PARTY_DIAGNOSTIC_SOURCE_FILENAME,
+        FirstPartyDiagnosticSourceBundle,
+        first_party_diagnostic_contract,
     )
     from bashgym.campaigns.installation import autoresearch_binding_plan
     from bashgym.campaigns.lineage import ApprovedSourceRepositoryProfile
@@ -3556,8 +3565,24 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         args.diagnostic_contract_file,
         args.diagnostic_budget_reservation,
     )
-    if any(value is not None for value in diagnostic_values) and not all(
-        value is not None for value in diagnostic_values
+    first_party_diagnostic = args.first_party_diagnostic_source_bundle
+    if first_party_diagnostic and (
+        args.diagnostic_script
+        or args.diagnostic_contract_file
+        or args.diagnostic_input
+        or args.diagnostic_arg
+    ):
+        raise ValueError(
+            "the first-party diagnostic bundle cannot be combined with manual diagnostic options"
+        )
+    if first_party_diagnostic and args.diagnostic_budget_reservation is None:
+        raise ValueError(
+            "first-party diagnostic activation requires --diagnostic-budget-reservation"
+        )
+    if (
+        not first_party_diagnostic
+        and any(value is not None for value in diagnostic_values)
+        and not all(value is not None for value in diagnostic_values)
     ):
         raise ValueError(
             "diagnostic activation requires --diagnostic-script, "
@@ -3739,7 +3764,19 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         python_executable=args.python_executable,
     )
     diagnostic_stage = None
-    if all(value is not None for value in diagnostic_values):
+    if first_party_diagnostic:
+        source_bundle = Path(first_party_diagnostic).expanduser().resolve()
+        if source_bundle.name != FIRST_PARTY_DIAGNOSTIC_SOURCE_FILENAME:
+            raise ValueError(
+                "the first-party diagnostic source bundle must be named "
+                f"{FIRST_PARTY_DIAGNOSTIC_SOURCE_FILENAME}"
+            )
+        FirstPartyDiagnosticSourceBundle.from_file(source_bundle)
+        diagnostic_script = Path(first_party_diagnostic_runner.__file__).resolve()
+        diagnostic_contract = first_party_diagnostic_contract()
+        diagnostic_inputs = (source_bundle,)
+        diagnostic_args: tuple[str, ...] = ()
+    elif all(value is not None for value in diagnostic_values):
         diagnostic_script = Path(args.diagnostic_script).expanduser().resolve()
         diagnostic_contract_path = Path(args.diagnostic_contract_file).expanduser().resolve()
         diagnostic_contract = DiagnosticStageContract.model_validate_json(
@@ -3751,13 +3788,20 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
                 key=lambda path: path.name,
             )
         )
+        diagnostic_args = tuple(args.diagnostic_arg)
+    else:
+        diagnostic_script = None
+        diagnostic_contract = None
+        diagnostic_inputs = ()
+        diagnostic_args = ()
+    if diagnostic_script is not None and diagnostic_contract is not None:
         diagnostic_stage = PinnedRemoteStageProfile(
             stage=StageKind.CONTRACT_EVALUATION,
             script_path=diagnostic_script,
             script_sha256=sha256_file(diagnostic_script),
             input_files=diagnostic_inputs,
             input_sha256={path.name: sha256_file(path) for path in diagnostic_inputs},
-            script_args=tuple(args.diagnostic_arg),
+            script_args=diagnostic_args,
             output_paths=(AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,),
             capacity_policy=capacity,
             budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
@@ -4869,6 +4913,28 @@ def cmd_campaign_autoresearch_result(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_research_conclude_family(args: argparse.Namespace) -> int:
+    if (args.follow_up_family_id is None) != (args.follow_up_hypothesis is None):
+        raise ValueError("--follow-up-family and --follow-up-hypothesis must be provided together")
+    payload: dict[str, Any] = {
+        "workspace_id": args.workspace_id,
+        "expected_version": args.expected_version,
+        "disposition": args.disposition,
+        "summary": args.summary,
+    }
+    if args.follow_up_family_id is not None:
+        payload["follow_up_family_id"] = args.follow_up_family_id
+        payload["follow_up_hypothesis"] = args.follow_up_hypothesis
+    return _campaign_post(
+        args,
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}/autoresearch/"
+            f"hypothesis-families/{_quoted_identifier(args.hypothesis_family_id)}/conclude"
+        ),
+        payload,
+    )
+
+
 def cmd_campaign_code_lineage(args: argparse.Namespace) -> int:
     return _campaign_post(
         args,
@@ -5548,6 +5614,13 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_activate.add_argument(
         "--diagnostic-contract-file",
         help="Typed runner limits and open measurement capability manifest",
+    )
+    campaign_activate.add_argument(
+        "--first-party-diagnostic-source-bundle",
+        help=(
+            "Pinned aggregate diagnostic receipts for BashGym's built-in scientific "
+            "diagnostic runner"
+        ),
     )
     campaign_activate.add_argument("--diagnostic-input", action="append", default=[])
     campaign_activate.add_argument("--diagnostic-arg", action="append", default=[])
@@ -6283,6 +6356,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reference proposal ID; required for a candidate or diagnostic",
     )
     research_submit.set_defaults(func=cmd_campaign_propose)
+
+    research_conclude_family = research_sub.add_parser(
+        "conclude-family",
+        help="Record an evidence-bound conclusion for one completed hypothesis family",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(research_conclude_family)
+    research_conclude_family.add_argument("--family", dest="hypothesis_family_id", required=True)
+    research_conclude_family.add_argument(
+        "--disposition",
+        choices=("supported", "exhausted", "inconclusive"),
+        required=True,
+    )
+    research_conclude_family.add_argument("--summary", required=True)
+    research_conclude_family.add_argument("--follow-up-family", dest="follow_up_family_id")
+    research_conclude_family.add_argument("--follow-up-hypothesis", dest="follow_up_hypothesis")
+    research_conclude_family.set_defaults(func=cmd_research_conclude_family)
 
     research_report = research_sub.add_parser(
         "report",

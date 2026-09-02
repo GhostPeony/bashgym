@@ -428,6 +428,54 @@ def test_autoresearch_export_reports_cumulative_fixed_suite_performance(tmp_path
             },
         ],
     }
+    history["experiments"][-1]["experiment_power"] = {
+        "schema_version": "bashgym.autoresearch_experiment_power.v1",
+        "evaluation": {
+            "evaluation_result_id": "evaluation-candidate",
+            "sample_count": 64,
+            "sample_count_source": "slice_metrics.example_count",
+            "comparison_design": "paired",
+            "uncertainty": {
+                "method": "paired_bootstrap",
+                "confidence_level": 0.95,
+                "interval_lower": 0.04,
+                "interval_upper": 0.2,
+                "minimum_detectable_effect": 0.03,
+            },
+            "sufficiency": {"status": "not_assessed", "criteria": []},
+        },
+        "seed_uncertainty": {
+            "status": "single_observation",
+            "completed_real_results": 1,
+            "distinct_training_seeds": 1,
+            "sample_standard_deviation": None,
+            "standard_error": None,
+            "uncertainty_method": None,
+            "limitation": "Between-run variation is not a per-example confidence interval.",
+        },
+        "sequential_stopping": {"status": "not_predeclared", "evidence": None},
+        "limitations": ["An observed sample count is not evidence of adequate power."],
+    }
+    history["hypothesis_families"] = [
+        {
+            "hypothesis_family_id": "family-longer-training",
+            "status": "replicated",
+            "completed_real_results": 3,
+            "lifecycle": {
+                "status": "exhausted",
+                "conclusion": {
+                    "summary": "Repeated continuations did not improve the fixed suite.",
+                    "proposal_ids": ["candidate-1", "candidate-2", "candidate-3"],
+                    "result_ids": ["result-1", "result-2", "result-3"],
+                    "aggregate_version": 9,
+                },
+                "follow_up": {
+                    "hypothesis_family_id": "family-data-coverage",
+                    "hypothesis": "Increase coverage of residual failure clusters.",
+                },
+            },
+        }
+    ]
     value = CampaignExportSnapshot(
         campaign={
             "campaign_id": "campaign-1",
@@ -463,6 +511,14 @@ def test_autoresearch_export_reports_cumulative_fixed_suite_performance(tmp_path
     assert "Fixed evaluation suite: `suite-heldout`" in report
     assert "`invalid_tool_calls`: 0.03 vs 0.04; regression 0; limit 0.01; pass" in report
     assert "Data quality: 60/90 accepted; verification pass rate 0.8." in report
+    assert "## Experiment power" in report
+    assert "## Hypothesis families" in report
+    assert "`family-longer-training`: evidence `replicated`; lifecycle `exhausted`" in report
+    assert "Repeated continuations did not improve the fixed suite." in report
+    assert "Follow-up `family-data-coverage`" in report
+    assert "Evaluation sample count: `64`" in report
+    assert "Sample-size sufficiency: `not_assessed`" in report
+    assert "Sequential stopping: `not_predeclared`" in report
     assert "Method-readiness thresholds: `min_demonstration_examples=64`." in report
     assert "`task_failure`: 20 to 7 (-13; improved)" in report
     assert "Outcome assessment: `acceptable_tradeoff`; not a failed experiment" in report

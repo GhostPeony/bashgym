@@ -7,6 +7,7 @@ import pytest
 from bashgym.campaigns.autoresearch import (
     AutoResearchCampaignSpec,
     AutoResearchDecision,
+    AutoResearchHypothesisFamilyConclusion,
     AutoResearchOutcomeRecord,
     AutoResearchProposalControl,
     AutoResearchResult,
@@ -14,6 +15,7 @@ from bashgym.campaigns.autoresearch import (
     ExperimentOutcome,
     ExperimentProvenance,
     ExperimentRole,
+    HypothesisFamilyDisposition,
     InterventionMode,
     MetricDirection,
     ProtectedMetricGate,
@@ -651,12 +653,26 @@ def test_branch_history_separates_exact_parent_from_current_reference():
         ),
     )
 
+    conclusion = AutoResearchHypothesisFamilyConclusion(
+        workspace_id="workspace-a",
+        campaign_id="campaign-a",
+        hypothesis_family_id="family-optimizer-schedule",
+        disposition=HypothesisFamilyDisposition.EXHAUSTED,
+        summary="The optimizer-schedule bundle did not justify another arm.",
+        proposal_ids=("candidate-branch",),
+        result_ids=("result-candidate-branch",),
+        follow_up_family_id="family-data-coverage",
+        follow_up_hypothesis="Target the remaining error categories with better data coverage.",
+        aggregate_version=9,
+        created_at=NOW,
+    )
     history = build_autoresearch_history(
         objective="Improve task success.",
         spec=_spec(),
         proposals=proposals,
         controls=controls,
         outcomes=outcomes,
+        hypothesis_family_conclusions=(conclusion,),
     )
 
     branch = history["experiments"][-1]
@@ -676,6 +692,19 @@ def test_branch_history_separates_exact_parent_from_current_reference():
     assert branch["performance"]["primary"]["reference_proposal_id"] == ("candidate-best")
     assert branch["performance"]["primary"]["improvement"] == 0.02
     assert history["hypothesis_families"][0]["status"] == "single_observation"
+    assert history["hypothesis_families"][0]["lifecycle"] == {
+        "status": "exhausted",
+        "conclusion": {
+            "summary": "The optimizer-schedule bundle did not justify another arm.",
+            "proposal_ids": ["candidate-branch"],
+            "result_ids": ["result-candidate-branch"],
+            "aggregate_version": 9,
+        },
+        "follow_up": {
+            "hypothesis_family_id": "family-data-coverage",
+            "hypothesis": "Target the remaining error categories with better data coverage.",
+        },
+    }
 
 
 def test_history_summarizes_completed_seed_replications_without_inventing_confidence():
@@ -769,11 +798,56 @@ def test_history_summarizes_completed_seed_replications_without_inventing_confid
                 "maximum": 0.66,
                 "uncertainty_method": "between_run_sample_standard_deviation",
             },
+            "lifecycle": {
+                "status": "open",
+                "conclusion": None,
+                "follow_up": None,
+            },
         }
     ]
     assert {item["outcome_assessment"]["evidence_strength"] for item in history["experiments"]} == {
         "replicated"
     }
+    assert {
+        item["experiment_power"]["seed_uncertainty"]["status"] for item in history["experiments"]
+    } == {"replicated"}
+
+
+def test_history_attaches_exact_evaluation_power_without_inventing_sufficiency() -> None:
+    proposal = _proposal(
+        "baseline",
+        sequence=1,
+        variable="baseline",
+        hypothesis="Record starting performance.",
+    )
+    outcome = _outcome(
+        "baseline",
+        role=ExperimentRole.BASELINE,
+        decision=ResultDecision.BASELINE,
+        metric=0.5,
+        metrics={"task_success": 0.5},
+        reason="real_baseline_verified",
+        minute=1,
+    )
+
+    history = build_autoresearch_history(
+        objective="Establish a fixed-suite baseline.",
+        spec=_spec(),
+        proposals=(proposal,),
+        controls=(_control("baseline", role=ExperimentRole.BASELINE),),
+        outcomes=(outcome,),
+        evaluations=(
+            {
+                "evaluation_result_id": "evaluation-baseline",
+                "slice_metrics": {"example_count": 64},
+            },
+        ),
+    )
+
+    power = history["experiments"][0]["experiment_power"]
+    assert power["evaluation"]["sample_count"] == 64
+    assert power["evaluation"]["sufficiency"]["status"] == "not_assessed"
+    assert power["sequential_stopping"]["status"] == "not_predeclared"
 
 
 @pytest.mark.parametrize("mismatch", ("shared_factor", "reference"))

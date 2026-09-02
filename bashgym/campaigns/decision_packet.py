@@ -179,18 +179,16 @@ def method_evidence_from_diagnostic_results(
     """Return latest complete contract-bound measurements for method readiness."""
 
     probe_contracts = {
-        "reward_integrity_probe": (
-            "reward_spec_digest",
-            {
+        "reward_integrity_probe": {
+            "measurements": {
                 "reward_canary_cases",
                 "reward_canary_failure_rate",
                 "hard_constraint_violation_rate",
             },
-            "reward_spec_verified",
-        ),
-        "preference_integrity_probe": (
-            ("preference_dataset_digest", "labeling_contract_digest"),
-            {
+            "verified_key": "reward_spec_verified",
+        },
+        "preference_integrity_probe": {
+            "measurements": {
                 "preference_pairs",
                 "preference_agreement_lower_bound",
                 "ambiguous_pair_rate",
@@ -198,9 +196,44 @@ def method_evidence_from_diagnostic_results(
                 "preference_label_conflict_rate",
                 "preference_contamination_rate",
             },
-            "preference_contract_verified",
-        ),
+            "verified_key": "preference_contract_verified",
+        },
+        "teacher_gap_probe": {
+            "measurements": {
+                "teacher_metric_gap",
+                "teacher_output_acceptance_rate",
+            },
+            "verified_key": None,
+        },
+        "recovery_trace_probe": {
+            "measurements": {"recovery_traces", "recovery_lift_lower_bound"},
+            "verified_key": None,
+        },
     }
+
+    def valid_contract(probe_family: str, contract: Mapping[str, Any]) -> bool:
+        def digest(key: str) -> bool:
+            return re.fullmatch(r"[0-9a-f]{64}", str(contract.get(key) or "")) is not None
+
+        if probe_family == "reward_integrity_probe":
+            return digest("reward_spec_digest") and isinstance(contract.get("canary_suite_id"), str)
+        if probe_family == "preference_integrity_probe":
+            return digest("preference_dataset_digest") and digest("labeling_contract_digest")
+        if probe_family == "teacher_gap_probe":
+            return (
+                isinstance(contract.get("evaluation_suite_id"), str)
+                and contract.get("metric_direction") in {"maximize", "minimize"}
+                and digest("teacher_model_digest")
+                and digest("student_model_digest")
+                and digest("output_validation_contract_digest")
+                and contract.get("teacher_model_digest") != contract.get("student_model_digest")
+            )
+        return (
+            digest("recovery_dataset_digest")
+            and digest("reader_contract_digest")
+            and contract.get("confidence_level") == 0.95
+        )
+
     latest_by_probe: dict[str, dict[str, bool | float]] = {}
     for result in diagnostic_results:
         value = getattr(result, "projection", result)
@@ -210,13 +243,10 @@ def method_evidence_from_diagnostic_results(
         probe_contract = probe_contracts.get(str(probe_family))
         if probe_contract is None or value.get("status") != "completed":
             continue
-        digest_keys, required, verified_key = probe_contract
-        keys = (digest_keys,) if isinstance(digest_keys, str) else digest_keys
         contract = value.get("comparison_contract")
-        if not isinstance(contract, Mapping) or any(
-            re.fullmatch(r"[0-9a-f]{64}", str(contract.get(key) or "")) is None for key in keys
-        ):
+        if not isinstance(contract, Mapping) or not valid_contract(str(probe_family), contract):
             continue
+        required = probe_contract["measurements"]
         measurements = value.get("measurements")
         if not isinstance(measurements, Sequence) or isinstance(
             measurements, (str, bytes, bytearray)
@@ -233,7 +263,10 @@ def method_evidence_from_diagnostic_results(
             if math.isfinite(numeric):
                 observed[str(item["name"])] = numeric
         if set(observed) == required:
-            latest_by_probe[str(probe_family)] = {verified_key: True, **observed}
+            verified_key = probe_contract["verified_key"]
+            latest_by_probe[str(probe_family)] = (
+                {str(verified_key): True, **observed} if verified_key else observed
+            )
     combined: dict[str, bool | float] = {}
     for probe_family in probe_contracts:
         combined.update(latest_by_probe.get(probe_family, {}))

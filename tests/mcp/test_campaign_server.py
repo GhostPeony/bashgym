@@ -337,6 +337,7 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
             "research_wait",
             "research_start",
             "research_submit_iteration",
+            "research_conclude_hypothesis_family",
             "research_report",
             "campaign_list",
             "campaign_inspect",
@@ -393,6 +394,7 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
         }
         assert tools["research_start"]["annotations"]["openWorldHint"] is True
         assert tools["research_submit_iteration"]["annotations"]["openWorldHint"] is True
+        assert tools["research_conclude_hypothesis_family"]["annotations"]["openWorldHint"] is True
         assert tools["research_report"]["annotations"]["openWorldHint"] is True
         assert tools["campaign_metrics"]["annotations"]["openWorldHint"] is False
         assert tools["campaign_start"]["annotations"]["destructiveHint"] is False
@@ -819,6 +821,43 @@ async def test_research_submit_iteration_routes_agent_designed_diagnostic():
             "schema_version": "bashgym.autoresearch_diagnostic_recipe.v1",
             "probe_family": "loss_landscape",
         },
+    }
+
+
+async def test_research_concludes_hypothesis_family_with_optional_follow_up():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    result = await call_tool(
+        server,
+        "research_conclude_hypothesis_family",
+        {
+            "campaign_id": "campaign-1",
+            "expected_version": 8,
+            "hypothesis_family_id": "family-longer-training",
+            "disposition": "exhausted",
+            "summary": "Longer continuation did not improve the fixed suite.",
+            "follow_up_family_id": "family-data-coverage",
+            "follow_up_hypothesis": "Increase coverage of residual failure clusters.",
+        },
+    )
+
+    assert result["ok"] is True
+    assert client.calls[0]["path"] == (
+        "/campaigns/campaign-1/autoresearch/hypothesis-families/" "family-longer-training/conclude"
+    )
+    assert client.calls[0]["payload"] == {
+        "workspace_id": "workspace-a",
+        "expected_version": 8,
+        "disposition": "exhausted",
+        "summary": "Longer continuation did not improve the fixed suite.",
+        "follow_up_family_id": "family-data-coverage",
+        "follow_up_hypothesis": "Increase coverage of residual failure clusters.",
     }
 
 

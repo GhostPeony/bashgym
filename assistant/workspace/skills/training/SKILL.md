@@ -179,6 +179,14 @@ tradeoff, and a discarded result with another measured gain is mixed evidence.
 Keep single-run findings descriptive until the declared seed or robustness
 replication is complete.
 
+Read the AutoResearch `experiment_power` packet before interpreting evaluation
+size or stopping. A recorded sample count is not a sufficiency result. Only a
+fixed evaluator's typed predeclared precision/power criterion can mark it
+assessed, and repeated ordinary evaluations are not sequential evidence.
+Between-seed variation describes run-to-run sensitivity; it is not a
+per-example confidence interval. Do not add an undeclared cutoff after seeing
+the result.
+
 When the run belongs to a durable AutoResearch campaign, do not infer a campaign
 decision from the training endpoint's completion status. Finish the pinned
 evaluation and register its run/attempt/artifact/evaluation lineage. A completed

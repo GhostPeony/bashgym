@@ -82,6 +82,7 @@ from bashgym.campaigns.runtime import (
     ActionSpec,
     CampaignArtifactRecord,
     CampaignRuntimeRepository,
+    _artifact_reference,
 )
 from bashgym.campaigns.worker import (
     CampaignWorker,
@@ -3178,6 +3179,26 @@ def test_find_reusable_completion_returns_newest_completed_match(tmp_path):
     assert set(found.artifact_metadata_by_path) == {
         output.path for output in found.manifest.outputs
     }
+    for value in found.artifact_metadata_by_path.values():
+        assert "attempt_id" not in value
+
+    # Give one output real metadata beyond the attempt_id every artifact carries, so
+    # the mapping above cannot be satisfied by the {} fallback alone.
+    target_path = found.manifest.outputs[0].path
+    target_uri = _artifact_reference(str(found.attempt.sealed_result_uri), target_path)
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaign_artifacts SET metadata_json = ? WHERE workspace_id = ? AND uri = ?",
+            (
+                json.dumps({"attempt_id": found.attempt.attempt_id, "checkpoint_step": 3}),
+                "workspace-a",
+                target_uri,
+            ),
+        )
+    enriched = repository.find_reusable_completion("workspace-a", key, exclude_action_id="none")
+    assert enriched is not None
+    assert enriched.artifact_metadata_by_path[target_path] == {"checkpoint_step": 3}
+
     assert (
         repository.find_reusable_completion(
             "workspace-a", key, exclude_action_id=scheduled.action_id
@@ -3188,3 +3209,121 @@ def test_find_reusable_completion_returns_newest_completed_match(tmp_path):
         "workspace-a", "campaign-1", "study-1", StageKind.FULL_TRAINING
     )
     assert outputs == found.manifest.outputs
+
+
+def test_find_reusable_completion_prefers_the_newest_match_in_the_same_workspace(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plans = {
+        study_id: seed_validated_study(repository, study_id, sequence=index)
+        for index, study_id in enumerate(("study-1", "study-2"), start=1)
+    }
+    worker = make_worker(repository, tmp_path, "worker-a")
+    key = "e" * 64
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+
+    def schedule_with_key(study_id, version, now):
+        return repository.schedule_action_under_leader(
+            ActionSpec(
+                workspace_id="workspace-a",
+                campaign_id="campaign-1",
+                study_id=study_id,
+                stage_index=0,
+                stage=StageKind.FULL_TRAINING,
+                input_contract=plans[study_id].items[0].input_contract,
+                candidate_digest=fake_digest(f"candidate:{study_id}"),
+                manifest_revision=1,
+                budget_unit="gpu_hours",
+                budget_reservation=0.25,
+                fake_steps=6,
+                result_key=key,
+            ),
+            worker.leader,
+            expected_campaign_version=version,
+            now=now,
+        )
+
+    older = schedule_with_key("study-1", 4, START)
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+
+    newer = schedule_with_key("study-2", 6, START + timedelta(seconds=1))
+    assert worker.run_once(now=START + timedelta(seconds=30)) == "completed"
+
+    found = repository.find_reusable_completion("workspace-a", key, exclude_action_id="none")
+    assert found is not None
+    assert found.attempt.attempt_id == newer.attempt_id
+
+    excluding_newer = repository.find_reusable_completion(
+        "workspace-a", key, exclude_action_id=newer.action_id
+    )
+    assert excluding_newer is not None
+    assert excluding_newer.attempt.attempt_id == older.attempt_id
+
+
+def test_completed_stage_outputs_filters_by_study_and_stage(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plans = {
+        study_id: seed_validated_study(repository, study_id, sequence=index)
+        for index, study_id in enumerate(("study-1", "study-2"), start=1)
+    }
+    worker = make_worker(repository, tmp_path, "worker-a")
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+
+    first = repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-1",
+            stage_index=0,
+            stage=StageKind.FULL_TRAINING,
+            input_contract=plans["study-1"].items[0].input_contract,
+            candidate_digest=fake_digest("candidate:study-1"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            fake_steps=6,
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+
+    repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-2",
+            stage_index=0,
+            stage=StageKind.FULL_TRAINING,
+            input_contract=plans["study-2"].items[0].input_contract,
+            candidate_digest=fake_digest("candidate:study-2"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            fake_steps=6,
+        ),
+        worker.leader,
+        expected_campaign_version=6,
+        now=START + timedelta(seconds=1),
+    )
+
+    assert (
+        repository.completed_stage_outputs(
+            "workspace-a", "campaign-1", "study-1", StageKind.DATA_BUILD
+        )
+        is None
+    )
+    assert (
+        repository.completed_stage_outputs(
+            "workspace-a", "campaign-1", "study-2", StageKind.FULL_TRAINING
+        )
+        is None
+    )
+
+    outputs = repository.completed_stage_outputs(
+        "workspace-a", "campaign-1", "study-1", StageKind.FULL_TRAINING
+    )
+    manifest = repository.get_attempt_result_manifest("workspace-a", first.attempt_id)
+    assert outputs == manifest.outputs

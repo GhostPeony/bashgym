@@ -1628,7 +1628,6 @@ class CampaignRuntimeRepository(CampaignRepository):
             if row is None:
                 return None
             attempt = self._attempt_from_row(row)
-            manifest = self.get_attempt_result_manifest(workspace_id, attempt.attempt_id)
             artifact_rows = connection.execute(
                 """
                 SELECT uri, metadata_json FROM campaign_artifacts
@@ -1637,6 +1636,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 """,
                 (workspace_id, attempt.action_id, attempt.attempt_id),
             ).fetchall()
+        manifest = self.get_attempt_result_manifest(workspace_id, attempt.attempt_id)
         metadata_by_path: dict[str, dict[str, Any]] = {}
         for output in manifest.outputs:
             reference = _artifact_reference(str(attempt.sealed_result_uri), output.path)
@@ -1663,6 +1663,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 self._attempt_select() + """
                 WHERE a.workspace_id = ? AND a.campaign_id = ? AND a.study_id = ?
                   AND a.stage_kind = ? AND a.status = ? AND t.status = ?
+                  AND t.result_json IS NOT NULL
                 ORDER BY t.attempt_number DESC LIMIT 1
                 """,
                 (
@@ -4038,6 +4039,7 @@ __all__ = [
     "ActionSpec",
     "CampaignRuntimeRepository",
     "CampaignArtifactRecord",
+    "ReusableCompletion",
     "RuntimeCompletion",
     "RemoteRunRecord",
 ]

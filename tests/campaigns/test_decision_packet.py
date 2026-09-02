@@ -355,6 +355,7 @@ def test_builds_bounded_scientific_decision_packet_from_existing_records():
             previous_best_proposal_id="baseline-1",
             previous_best_metric=0.42,
             improvement=0.24,
+            protected_metric_margins={"valid_tool_calls": 0.01},
             result_digest="a" * 64,
             decided_at=NOW,
         ),
@@ -480,6 +481,7 @@ def test_builds_bounded_scientific_decision_packet_from_existing_records():
         "decision": "keep",
         "reason_code": "candidate_improved",
         "improvement": 0.24,
+        "protected_metric_margins": {"valid_tool_calls": 0.01},
     }
     assert len(packet["diagnostics"]["signals"]) == 5
     assert [item["rank"] for item in packet["diagnostics"]["ranked_hypotheses"]] == [1, 2, 3]

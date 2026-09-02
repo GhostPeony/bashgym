@@ -866,6 +866,35 @@ def test_protected_metric_gate_blocks_a_primary_gain_with_a_regression() -> None
     assert AutoResearchRepository._protected_metric_failure(gates, incumbent, acceptable) is None
 
 
+def test_protected_metric_margins_report_headroom_and_breach() -> None:
+    incumbent = result(
+        "baseline", "study-baseline", "attempt-baseline", 0.50, role=ExperimentRole.BASELINE
+    ).model_copy(update={"metrics": {"mrr_at_10": 0.50, "valid_tool_calls": 0.98}})
+    candidate = result(
+        "candidate", "study-candidate", "attempt-candidate", 0.55, role=ExperimentRole.CANDIDATE
+    ).model_copy(update={"metrics": {"mrr_at_10": 0.55, "valid_tool_calls": 0.97}})
+    gates = (
+        ProtectedMetricGate(
+            metric_name="valid_tool_calls",
+            direction=MetricDirection.MAXIMIZE,
+            max_regression=0.02,
+        ),
+    )
+
+    margins = AutoResearchRepository._protected_metric_margins(gates, incumbent, candidate)
+
+    assert margins == {"valid_tool_calls": pytest.approx(0.01)}
+    breached = candidate.model_copy(
+        update={"metrics": {"mrr_at_10": 0.55, "valid_tool_calls": 0.90}}
+    )
+    assert AutoResearchRepository._protected_metric_margins(gates, incumbent, breached) == {
+        "valid_tool_calls": pytest.approx(-0.06)
+    }
+    assert AutoResearchRepository._protected_metric_failure(gates, incumbent, breached) == (
+        "valid_tool_calls"
+    )
+
+
 def test_result_write_rejects_unbounded_candidate_references_before_lineage_lookup(
     tmp_path,
 ):

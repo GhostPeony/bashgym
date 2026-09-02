@@ -494,6 +494,7 @@ class AutoResearchDecision(FrozenContractModel):
     previous_best_proposal_id: Identifier | None = None
     previous_best_metric: float | None = None
     improvement: float | None = None
+    protected_metric_margins: dict[Identifier, float] = Field(default_factory=dict)
     result_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     decided_at: datetime = Field(default_factory=utc_now)
 
@@ -1447,19 +1448,35 @@ class AutoResearchRepository(CampaignRuntimeRepository):
         )
 
     @classmethod
+    def _protected_metric_margins(
+        cls,
+        gates: tuple[ProtectedMetricGate, ...],
+        incumbent: AutoResearchResult,
+        candidate: AutoResearchResult,
+    ) -> dict[str, float]:
+        """Headroom per protected metric; negative means the gate is breached."""
+
+        margins: dict[str, float] = {}
+        for gate in gates:
+            previous = incumbent.metrics.get(gate.metric_name)
+            current = candidate.metrics.get(gate.metric_name)
+            if previous is None or current is None:
+                continue
+            regression = -cls._improvement(gate.direction, previous, current)
+            margins[gate.metric_name] = gate.max_regression - regression
+        return margins
+
+    @classmethod
     def _protected_metric_failure(
         cls,
         gates: tuple[ProtectedMetricGate, ...],
         incumbent: AutoResearchResult,
         candidate: AutoResearchResult,
     ) -> str | None:
+        margins = cls._protected_metric_margins(gates, incumbent, candidate)
         for gate in gates:
-            previous = incumbent.metrics.get(gate.metric_name)
-            current = candidate.metrics.get(gate.metric_name)
-            if previous is None or current is None:
-                return gate.metric_name
-            regression = -cls._improvement(gate.direction, previous, current)
-            if regression > gate.max_regression:
+            margin = margins.get(gate.metric_name)
+            if margin is None or margin < 0:
                 return gate.metric_name
         return None
 
@@ -1691,6 +1708,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             previous_metric = incumbent.result.metric_value if incumbent else None
 
             improvement: float | None = None
+            protected_margins: dict[str, float] = {}
             if result.outcome == ExperimentOutcome.CRASHED:
                 choice = ResultDecision.CRASH
                 reason = "experiment_crashed"
@@ -1733,6 +1751,11 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                     incumbent.result,
                     result,
                 )
+                protected_margins = self._protected_metric_margins(
+                    spec.stop_rules.protected_metrics,
+                    incumbent.result,
+                    result,
+                )
                 improved = clears_primary and protected_failure is None
                 choice = ResultDecision.KEEP if improved else ResultDecision.DISCARD
                 if protected_failure is not None:
@@ -1751,6 +1774,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 previous_best_proposal_id=previous_id,
                 previous_best_metric=previous_metric,
                 improvement=improvement,
+                protected_metric_margins=protected_margins,
                 result_digest=result.result_digest,
                 decided_at=result.recorded_at,
             )

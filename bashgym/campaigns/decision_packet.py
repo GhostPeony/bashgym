@@ -113,6 +113,7 @@ def _project_result(outcome: AutoResearchOutcomeRecord | None) -> dict[str, Any]
         "decision": decision.decision.value,
         "reason_code": decision.reason_code,
         "improvement": decision.improvement,
+        "protected_metric_margins": dict(sorted(decision.protected_metric_margins.items())),
     }
 
 

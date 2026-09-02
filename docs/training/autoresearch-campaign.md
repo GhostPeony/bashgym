@@ -258,6 +258,10 @@ KEEP iff improvement > 0 and improvement >= minimum_improvement
 otherwise DISCARD
 ```
 
+Each decision records `protected_metric_margins`, the remaining headroom per
+protected metric in metric units; a negative margin names the gate that
+failed.
+
 KEEP/DISCARD selects the next reference; it is not a complete scientific
 interpretation. Before Start, the campaign should separate evaluation evidence
 into five roles:

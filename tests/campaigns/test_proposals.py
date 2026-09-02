@@ -1214,3 +1214,38 @@ def test_evidence_snapshot_is_bounded_and_excludes_rows_and_uris(repository, tmp
     assert service.evidence("workspace-a", "campaign-1", actor).snapshot_digest == (
         snapshot.snapshot_digest
     )
+
+
+def test_credential_shaped_values_and_placeholders_are_rejected(repository) -> None:
+    leaked = proposal("proposal-leak").model_copy(
+        update={
+            "rationale": "Fetch the corpus with ghp_" + "a" * 36 + " before training.",
+            "training_recipe": {
+                "schema_version": "recipe.v1",
+                "hub_token_name": "<ASK_USER: which secret holds the token>",
+            },
+        }
+    )
+
+    validation = validate_proposal_submission(
+        leaked, manifest(), principal(repository), existing_prerequisite_ids=frozenset()
+    )
+
+    assert validation.valid is False
+    assert "proposal_credential_shaped_value" in validation.reason_codes
+    assert "proposal_unresolved_placeholder" in validation.reason_codes
+
+
+def test_clean_proposal_has_no_scan_reasons(repository) -> None:
+    validation = validate_proposal_submission(
+        proposal("proposal-clean"),
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert not {
+        "proposal_credential_shaped_value",
+        "proposal_unresolved_placeholder",
+        "proposal_content_unscannable",
+    } & set(validation.reason_codes)

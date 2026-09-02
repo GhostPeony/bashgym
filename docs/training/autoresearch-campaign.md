@@ -161,6 +161,8 @@ A candidate must:
 - include captured Git lineage when the changed variable represents trainer,
   algorithm, environment, reward, evaluator, verifier, or other approved code.
 
+Proposals are rejected with `proposal_credential_shaped_value` when any recipe or free-text field contains a credential-shaped string, and with `proposal_unresolved_placeholder` when a placeholder such as `REPLACE_ME` or `<ASK_USER` remains; credentials belong in the secret store and are referenced by name.
+
 Examples of useful variables are a dataset revision, sampling policy, learning
 rate, training method, reward definition, evaluator implementation, or bounded
 source change. Code mutation remains controlled-only until its exact lineage is

@@ -3247,7 +3247,8 @@ def test_find_reusable_completion_prefers_the_newest_match_in_the_same_workspace
     assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
 
     newer = schedule_with_key("study-2", 6, START + timedelta(seconds=1))
-    assert worker.run_once(now=START + timedelta(seconds=30)) == "completed"
+    # The second action carries the same content key, so the worker reuses the first seal.
+    assert worker.run_once(now=START + timedelta(seconds=30)) == "reused"
 
     found = repository.find_reusable_completion("workspace-a", key, exclude_action_id="none")
     assert found is not None
@@ -3428,3 +3429,179 @@ def test_next_action_spec_carries_a_result_key_only_for_reusable_stages(tmp_path
 
     assert unresolved_spec.stage == StageKind.DEVELOPMENT_EVALUATION
     assert unresolved_spec.result_key is None
+
+
+def test_identical_data_build_is_reused_across_studies_without_execution(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plans = {
+        study_id: seed_validated_study(
+            repository, study_id, sequence=index, stage=StageKind.DATA_BUILD
+        )
+        for index, study_id in enumerate(("study-1", "study-2"), start=1)
+    }
+    worker = make_worker(repository, tmp_path, "worker-a")
+    key = "e" * 64
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+
+    def schedule_with_key(study_id, now):
+        return repository.schedule_action_under_leader(
+            ActionSpec(
+                workspace_id="workspace-a",
+                campaign_id="campaign-1",
+                study_id=study_id,
+                stage_index=0,
+                stage=StageKind.DATA_BUILD,
+                input_contract=plans[study_id].items[0].input_contract,
+                candidate_digest=fake_digest(f"candidate:{study_id}"),
+                manifest_revision=1,
+                budget_unit="gpu_hours",
+                budget_reservation=0.25,
+                fake_steps=6,
+                result_key=key,
+            ),
+            worker.leader,
+            expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+            now=now,
+        )
+
+    schedule_with_key("study-1", START)
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    schedule_with_key("study-2", START + timedelta(seconds=2))
+
+    assert worker.run_once(now=START + timedelta(seconds=3)) == "reused"
+
+    assert worker.executor.execution_count == 1
+    attempts = repository.list_attempts("workspace-a", "campaign-1")
+    completed = [item for item in attempts if item.status == AttemptStatus.COMPLETED]
+    assert len(completed) == 2
+    reused = next(item for item in completed if item.study_id == "study-2")
+    source = next(item for item in completed if item.study_id == "study-1")
+    manifest = repository.get_attempt_result_manifest("workspace-a", reused.attempt_id)
+    source_manifest = repository.get_attempt_result_manifest("workspace-a", source.attempt_id)
+    assert manifest.attempt_id == reused.attempt_id
+    assert manifest.action_id == reused.action_id
+    assert manifest.study_id == "study-2"
+    assert manifest.remote_process_identity["reused_from_attempt_id"] == source.attempt_id
+    assert manifest.remote_process_identity["reused_from_action_id"] == source.action_id
+    assert manifest.outputs == source_manifest.outputs
+    assert reused.sealed_result_uri != source.sealed_result_uri
+    reused_seal = Path(str(reused.sealed_result_uri))
+    for output in manifest.outputs:
+        assert (reused_seal / output.path).read_bytes() == (
+            Path(str(source.sealed_result_uri)) / output.path
+        ).read_bytes()
+    worker.sealer.verify(
+        reused_seal,
+        expected_workspace_id="workspace-a",
+        expected_attempt_id=reused.attempt_id,
+        expected_action_id=reused.action_id,
+    )
+    with repository._connection() as connection:
+        actual = connection.execute(
+            """
+            SELECT actual_delta FROM campaign_budget_ledger
+            WHERE entry_id = ?
+            """,
+            (f"budget-settle-{reused.action_id}",),
+        ).fetchone()[0]
+    assert actual == 0.0
+    events = repository.list_events("workspace-a", "campaign-1")
+    reuse_events = [
+        event
+        for _, event in events
+        if event.event_type == "campaign:action-completed"
+        and event.payload.get("reused_from_attempt_id") == source.attempt_id
+    ]
+    assert len(reuse_events) == 1
+    assert reuse_events[0].payload["attempt_id"] == reused.attempt_id
+
+
+def test_remote_sealed_result_is_reused_without_launching_a_second_run(tmp_path):
+    """The stage here is a fixture for the remote seal shape, not a reuse policy claim."""
+
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plans = {
+        study_id: seed_validated_study(repository, study_id, sequence=index)
+        for index, study_id in enumerate(("study-1", "study-2"), start=1)
+    }
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.RUNNING, RemoteRunState.COMPLETED))
+    artifact_root = tmp_path / "artifacts"
+    worker = CampaignWorker(
+        repository,
+        artifact_root,
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+    )
+    profile = approved_remote_profile(tmp_path)
+    worker.remote_executor_profiles[(profile.compute_profile_id, profile.target_contract_key)] = (
+        profile
+    )
+    key = "f" * 64
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+
+    def schedule_with_key(study_id, now):
+        return repository.schedule_action_under_leader(
+            ActionSpec(
+                workspace_id="workspace-a",
+                campaign_id="campaign-1",
+                study_id=study_id,
+                stage_index=0,
+                stage=StageKind.FULL_TRAINING,
+                input_contract=plans[study_id].items[0].input_contract,
+                candidate_digest=fake_digest(f"candidate:{study_id}"),
+                manifest_revision=1,
+                budget_unit="gpu_hours",
+                budget_reservation=0.25,
+                executor_kind="ssh_remote",
+                executor_config=remote_executor_config(
+                    profile, StageKind.FULL_TRAINING, recipe_digest="e" * 64
+                ),
+                result_key=key,
+            ),
+            worker.leader,
+            expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+            now=now,
+        )
+
+    source_attempt = schedule_with_key("study-1", START)
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_running"
+    assert worker.run_once(now=START + timedelta(seconds=2)) == "completed"
+    reused_attempt = schedule_with_key("study-2", START + timedelta(seconds=3))
+
+    assert worker.run_once(now=START + timedelta(seconds=4)) == "reused"
+
+    assert adapter.launch_count == 1
+    assert adapter.collect_count == 1
+    assert repository.get_remote_run("workspace-a", reused_attempt.attempt_id) is None
+    assert not artifact_root.exists()
+    source = repository.get_attempt("workspace-a", source_attempt.attempt_id)
+    reused = repository.get_attempt("workspace-a", reused_attempt.attempt_id)
+    assert reused.status == AttemptStatus.COMPLETED
+    manifest = repository.get_attempt_result_manifest("workspace-a", reused.attempt_id)
+    assert manifest.remote_process_identity["reused_from_attempt_id"] == source.attempt_id
+    assert manifest.remote_process_identity["reused_from_action_id"] == source.action_id
+    assert manifest.resource_usage == ()
+    assert (
+        manifest.outputs
+        == repository.get_attempt_result_manifest("workspace-a", source.attempt_id).outputs
+    )
+    expected_digest = hashlib.sha256(worker.sealer.envelope_bytes(manifest)).hexdigest()
+    assert reused.sealed_result_uri == (
+        f"bashgym-remote-seal://ssh-gpu-lab/{reused.attempt_id}/sha256/{expected_digest}"
+    )
+    assert reused.sealed_result_uri != source.sealed_result_uri
+    with repository._connection() as connection:
+        settled = connection.execute(
+            "SELECT actual_delta FROM campaign_budget_ledger WHERE entry_id = ?",
+            (f"budget-settle-{reused.action_id}",),
+        ).fetchone()[0]
+    assert settled == 0.0
+    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours") == {
+        "reserved": 0.0,
+        "actual": pytest.approx(2 / 3600),
+        "limit_delta": 0.0,
+    }

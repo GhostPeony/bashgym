@@ -10,9 +10,9 @@ from bashgym.campaigns.contracts import SealedActionResult, StageKind, canonical
 RESULT_KEY_SCHEMA = "campaign_result_key.v1"
 REUSED_FROM_ATTEMPT_KEY = "reused_from_attempt_id"
 REUSED_FROM_ACTION_KEY = "reused_from_action_id"
-REUSABLE_STAGES = frozenset(
-    {StageKind.DATA_BUILD, StageKind.CONTRACT_EVALUATION, StageKind.DEVELOPMENT_EVALUATION}
-)
+# Contract evaluation is excluded: its sealed diagnostic evidence embeds the producing
+# proposal identity, which the evidence reader validates against the consuming attempt.
+REUSABLE_STAGES = frozenset({StageKind.DATA_BUILD, StageKind.DEVELOPMENT_EVALUATION})
 REMOTE_IDENTITY_KEYS = frozenset(
     {
         "remote_resident_model",

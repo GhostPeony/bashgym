@@ -1297,6 +1297,7 @@ class PublicCampaignEventSummaryV1(FrozenContractModel):
     schema_version: Literal["public_campaign_event_summary.v1"] = "public_campaign_event_summary.v1"
     action_id: Identifier | None = None
     attempt_id: Identifier | None = None
+    reused_from_attempt_id: Identifier | None = None
     study_id: Identifier | None = None
     proposal_id: Identifier | None = None
     entry_id: Identifier | None = None

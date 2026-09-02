@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import shutil
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
@@ -99,7 +100,11 @@ from bashgym.campaigns.remote import (
     SealedStageArtifactSource,
     remote_executor_config,
 )
-from bashgym.campaigns.runtime import CampaignRuntimeRepository
+from bashgym.campaigns.result_reuse import (
+    REUSED_FROM_ACTION_KEY,
+    REUSED_FROM_ATTEMPT_KEY,
+)
+from bashgym.campaigns.runtime import CampaignRuntimeRepository, ReusableCompletion
 from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 
 if TYPE_CHECKING:
@@ -1645,6 +1650,65 @@ class CampaignWorker:
         )
         return "completed"
 
+    def _reuse_tick(
+        self, attempt: ActionAttempt, source: ReusableCompletion, *, now: datetime
+    ) -> str:
+        """Complete the claimed attempt from a content-identical sealed result."""
+
+        provenance = {
+            **source.manifest.remote_process_identity,
+            REUSED_FROM_ATTEMPT_KEY: source.attempt.attempt_id,
+            REUSED_FROM_ACTION_KEY: source.attempt.action_id,
+        }
+        derived = source.manifest.model_copy(
+            update={
+                "workspace_id": attempt.workspace_id,
+                "campaign_id": attempt.campaign_id,
+                "study_id": attempt.study_id,
+                "action_id": attempt.action_id,
+                "attempt_id": attempt.attempt_id,
+                "manifest_revision": attempt.manifest_revision,
+                "candidate_digest": attempt.candidate_digest,
+                "input_digest": attempt.input_digest,
+                "claim_generation": attempt.claim_generation,
+                "remote_process_identity": provenance,
+                "started_at": now,
+                "ended_at": now,
+                "exit_reason": f"reused sealed result from {source.attempt.attempt_id}",
+                "resource_usage": (),
+            }
+        )
+        source_uri = str(source.attempt.sealed_result_uri or "")
+        if source_uri.startswith("bashgym-remote-seal://"):
+            envelope = self.sealer.envelope_bytes(derived)
+            sealed_reference: Path | str = (
+                f"bashgym-remote-seal://{derived.compute_profile_id}/"
+                f"{attempt.attempt_id}/sha256/{hashlib.sha256(envelope).hexdigest()}"
+            )
+        else:
+            source_directory = Path(source_uri)
+            sealed_directory = self.sealed_path(attempt)
+            temporary = sealed_directory.with_name(sealed_directory.name + ".reuse-tmp")
+            if temporary.exists():
+                shutil.rmtree(temporary)
+            for output in derived.outputs:
+                destination = temporary / output.path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.link(source_directory / output.path, destination)
+                except OSError:
+                    shutil.copyfile(source_directory / output.path, destination)
+            sealed_reference = self.sealer.seal(temporary, sealed_directory, derived)
+            self._verify(attempt, Path(sealed_reference))
+        self.repository.complete_from_seal(
+            derived,
+            sealed_reference,
+            worker_id=self.worker_id,
+            artifact_metadata_by_path=source.artifact_metadata_by_path,
+            now=now,
+        )
+        return "reused"
+
     def run_once(
         self,
         *,
@@ -1690,6 +1754,12 @@ class CampaignWorker:
         )
         if attempt is None:
             return controller_result or deferred_autoresearch_status or "idle"
+        if attempt.result_key is not None:
+            source = self.repository.find_reusable_completion(
+                attempt.workspace_id, attempt.result_key, exclude_action_id=attempt.action_id
+            )
+            if source is not None:
+                return self._reuse_tick(attempt, source, now=tick_at)
         if attempt.executor.get("kind") == "ssh_remote":
             return asyncio.run(self._remote_tick(attempt, now=tick_at))
         if attempt.executor.get("kind") == "development_evaluation":
@@ -1750,6 +1820,7 @@ class CampaignWorker:
                         if result
                         in {
                             "completed",
+                            "reused",
                             "reconciled",
                             "unknown",
                             "remote_running",

@@ -103,6 +103,7 @@ from bashgym.campaigns.remote import (
 )
 from bashgym.campaigns.result_reuse import (
     reuse_enabled,
+    reused_from_attempt_id,
     stage_result_key,
 )
 from bashgym.campaigns.tmax_recipe import (
@@ -154,6 +155,8 @@ def _settlement_actual_cost(
 ) -> float:
     """Charge measured usage; a completed seal with none charges its reservation."""
 
+    if reused_from_attempt_id(manifest) is not None:
+        return 0.0
     measured = tuple(item for item in manifest.resource_usage if item.confidence == "measured")
     direct = sum(item.amount for item in measured if item.unit == unit)
     if unit == "gpu_hours":
@@ -221,6 +224,7 @@ class RuntimeCompletion:
     campaign_version: int
     event: CampaignEvent
     replayed: bool = False
+    reused_from_attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3823,6 +3827,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                     int(campaign_row["version"]),
                     self._event_from_row(event_row),
                     replayed=True,
+                    reused_from_attempt_id=reused_from_attempt_id(manifest),
                 )
             if attempt.status not in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}:
                 raise ActionClaimConflictError(ActionClaimConflictError.code)
@@ -4053,6 +4058,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                     "study_id": manifest.study_id,
                     "stage": attempt.stage.value,
                     "sealed_result_uri": str(sealed_directory),
+                    "reused_from_attempt_id": reused_from_attempt_id(manifest),
                 },
                 actor_id="campaign-controller",
                 credential_kind=CredentialKind.CONTROLLER,
@@ -4065,7 +4071,12 @@ class CampaignRuntimeRepository(CampaignRepository):
                 self._attempt_select() + " WHERE t.workspace_id = ? AND t.attempt_id = ?",
                 (manifest.workspace_id, manifest.attempt_id),
             ).fetchone()
-        return RuntimeCompletion(self._attempt_from_row(completed), campaign.version + 1, event)
+        return RuntimeCompletion(
+            self._attempt_from_row(completed),
+            campaign.version + 1,
+            event,
+            reused_from_attempt_id=reused_from_attempt_id(manifest),
+        )
 
 
 __all__ = [

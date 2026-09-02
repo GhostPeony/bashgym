@@ -61,6 +61,9 @@ def test_reuse_policy_excludes_training_and_opt_in_fake() -> None:
         stage=StageKind.DEVELOPMENT_EVALUATION, executor_kind="development_evaluation", runtime={}
     )
     assert not reuse_enabled(stage=StageKind.FULL_TRAINING, executor_kind="ssh_remote", runtime={})
+    assert not reuse_enabled(
+        stage=StageKind.CONTRACT_EVALUATION, executor_kind="ssh_remote", runtime={}
+    )
     assert not reuse_enabled(stage=StageKind.DATA_BUILD, executor_kind="fake", runtime={})
     assert reuse_enabled(
         stage=StageKind.DATA_BUILD, executor_kind="fake", runtime={"memoize": True}

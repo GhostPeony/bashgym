@@ -58,6 +58,7 @@ PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS = frozenset(
         "schema_version",
         "action_id",
         "attempt_id",
+        "reused_from_attempt_id",
         "study_id",
         "proposal_id",
         "entry_id",
@@ -78,6 +79,7 @@ _IDENTITY_FIELDS = frozenset(
     {
         "action_id",
         "attempt_id",
+        "reused_from_attempt_id",
         "study_id",
         "proposal_id",
         "entry_id",
@@ -227,7 +229,9 @@ PUBLIC_EVENT_TYPE_FIELDS = MappingProxyType(
             "action_id", "attempt_id", "study_id", "stage", "failure_class"
         ),
         "campaign:action-cancelled": _fields("action_id", "attempt_id", "study_id", "stage"),
-        "campaign:action-completed": _fields("action_id", "attempt_id", "study_id", "stage"),
+        "campaign:action-completed": _fields(
+            "action_id", "attempt_id", "study_id", "stage", "reused_from_attempt_id"
+        ),
         "campaign:action-force-stopped": _fields("action_id", "attempt_id", "study_id", "stage"),
         "campaign:budget-recorded": _fields("entry_id"),
         "campaign:budget-overrun": _fields("entry_id"),

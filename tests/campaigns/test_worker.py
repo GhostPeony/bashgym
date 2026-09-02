@@ -3761,3 +3761,185 @@ def test_remote_data_build_seal_is_reused_without_launching_a_second_run(tmp_pat
             (f"budget-settle-{reused.action_id}",),
         ).fetchone()[0]
     assert settled == 0.0
+
+
+def approved_data_build_and_training_profile(tmp_path):
+    """One approved profile whose data build and full training share a compute target."""
+
+    data_build = approved_data_build_profile(tmp_path)
+    script = tmp_path / "train.py"
+    config = tmp_path / "trainer-config.json"
+    script.write_text("print('train')\n", encoding="utf-8")
+    config.write_text("{}\n", encoding="utf-8")
+    training = PinnedRemoteStageProfile(
+        stage=StageKind.FULL_TRAINING,
+        script_path=script,
+        script_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
+        input_files=(config,),
+        input_sha256={config.name: hashlib.sha256(config.read_bytes()).hexdigest()},
+        output_paths=("final",),
+        budget_unit="gpu_hours",
+        budget_reservation=0.25,
+    )
+    return ApprovedRemoteExecutorProfile(
+        **data_build.model_dump(
+            exclude={"profile_digest", "stages", "registered_base_model"},
+        ),
+        stages=(*data_build.stages, training),
+        registered_base_model=RegisteredRemoteModelSource(
+            source_id="registered-base-v1",
+            compute_profile_id="ssh-gpu-lab",
+            target_contract_key="memexai-embedding-v1",
+            model_digest=data_build.target_model_digest,
+            remote_model_path="/models/registered-base-v1",
+        ),
+    )
+
+
+def seed_data_build_then_training_study(repository, study_id, *, sequence):
+    """Seed a validated study whose full training consumes its own data build."""
+
+    plan = seed_validated_study(repository, study_id, sequence=sequence, stage=StageKind.DATA_BUILD)
+    extended = StagePlan(
+        items=(
+            *plan.items,
+            StagePlanItem(
+                stage=StageKind.FULL_TRAINING,
+                disposition=StageDisposition.REQUIRED,
+                reason="Consume the study's data build without copying its rows.",
+                input_contract={"fixture": study_id},
+                output_contract={"schema": "training_metrics_jsonl.v1"},
+                consumes=(StageKind.DATA_BUILD,),
+            ),
+        )
+    )
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE campaign_studies SET stage_plan_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND study_id = ?
+            """,
+            (extended.model_dump_json(), "workspace-a", "campaign-1", study_id),
+        )
+    return extended
+
+
+def test_training_after_a_reused_data_build_launches_against_the_producing_run(tmp_path):
+    database = tmp_path / "campaigns.sqlite3"
+    repository = active_repository(database)
+    source_plan = seed_validated_study(
+        repository, "study-1", sequence=1, stage=StageKind.DATA_BUILD
+    )
+    consuming_plan = seed_data_build_then_training_study(repository, "study-2", sequence=2)
+    bind_generated_dataset_project(repository, database)
+    profile = approved_data_build_and_training_profile(tmp_path)
+    adapter = FakeDataBuildRemoteAdapter(states=(RemoteRunState.RUNNING, RemoteRunState.COMPLETED))
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles={("ssh-gpu-lab", "memexai-embedding-v1"): profile},
+    )
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+
+    def schedule_data_build(study_id, plan, now):
+        return repository.schedule_action_under_leader(
+            ActionSpec(
+                workspace_id="workspace-a",
+                campaign_id="campaign-1",
+                study_id=study_id,
+                stage_index=0,
+                stage=StageKind.DATA_BUILD,
+                input_contract=plan.items[0].input_contract,
+                candidate_digest=fake_digest(f"candidate:{study_id}"),
+                manifest_revision=1,
+                budget_unit="gpu_hours",
+                budget_reservation=0.25,
+                executor_kind="ssh_remote",
+                executor_config=remote_executor_config(
+                    profile, StageKind.DATA_BUILD, recipe_digest="e" * 64
+                ),
+                result_key="f" * 64,
+            ),
+            worker.leader,
+            expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+            now=now,
+        )
+
+    source_attempt = schedule_data_build("study-1", source_plan, START)
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_running"
+    assert worker.run_once(now=START + timedelta(seconds=2)) == "completed"
+    reused_attempt = schedule_data_build("study-2", consuming_plan, START + timedelta(seconds=3))
+    assert worker.run_once(now=START + timedelta(seconds=4)) == "reused"
+    assert adapter.launch_count == 1
+
+    resident = repository.remote_resident_data_build_source(
+        "workspace-a", "campaign-1", "study-2", 1
+    )
+    assert resident.attempt_id == source_attempt.attempt_id
+    assert resident.action_id == source_attempt.action_id
+    assert resident.study_id == "study-1"
+    assert resident.stage_index == 0
+    assert resident.remote_dataset_path == (
+        f"/home/trainer/bashgym-training/{source_attempt.attempt_id}/dataset"
+    )
+    assert resident.content_digest == adapter.receipt.content_digest
+
+    training_attempt = repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-2",
+            stage_index=1,
+            stage=StageKind.FULL_TRAINING,
+            input_contract=consuming_plan.items[1].input_contract,
+            candidate_digest=fake_digest("candidate:study-2"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            executor_kind="ssh_remote",
+            executor_config=remote_executor_config(
+                profile,
+                StageKind.FULL_TRAINING,
+                recipe_digest="e" * 64,
+                remote_resident_dataset=resident,
+            ),
+        ),
+        worker.leader,
+        expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        now=START + timedelta(seconds=5),
+    )
+    # No remote run exists for the training attempt yet, and holding it at RUNNING keeps
+    # this test on the launch inputs rather than output ingestion.
+    adapter.identity = None
+    adapter.states = [RemoteRunState.RUNNING]
+
+    assert worker.run_once(now=START + timedelta(seconds=6)) == "remote_running"
+
+    request = adapter.last_request
+    assert request.run_id == training_attempt.attempt_id
+    assert request.remote_resident_dataset == resident
+    assert request.remote_resident_dataset.remote_dataset_path == (
+        f"/home/trainer/bashgym-training/{source_attempt.attempt_id}/dataset"
+    )
+    assert adapter.launch_count == 2
+    assert repository.get_remote_run("workspace-a", reused_attempt.attempt_id) is None
+    assert repository.get_remote_run("workspace-a", training_attempt.attempt_id) is not None
+
+    names_the_reusing_attempt = training_attempt.model_copy(deep=True)
+    names_the_reusing_attempt.executor["remote_resident_dataset"][
+        "attempt_id"
+    ] = reused_attempt.attempt_id
+    with pytest.raises(RuntimeError, match="campaign_remote_training_dataset_invalid"):
+        worker._remote_request(names_the_reusing_attempt)
+
+    names_another_directory = training_attempt.model_copy(deep=True)
+    names_another_directory.executor["remote_resident_dataset"][
+        "remote_dataset_path"
+    ] = "/home/trainer/bashgym-training/elsewhere/dataset"
+    with pytest.raises(RuntimeError, match="campaign_remote_training_dataset_invalid"):
+        worker._remote_request(names_another_directory)

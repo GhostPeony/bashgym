@@ -1685,14 +1685,21 @@ class CampaignWorker:
     def _reuse_tick(
         self, attempt: ActionAttempt, source: ReusableCompletion, *, now: datetime
     ) -> str:
-        """Complete the claimed attempt from a content-identical sealed result."""
+        """Complete the claimed attempt from a content-identical sealed result.
 
+        The match may itself be a reusing attempt. The link is written against the
+        attempt that executed, so every recorded link is one hop and repeated reuse
+        of one content key cannot grow a chain.
+        """
+
+        chain = self.repository.reuse_source_chain(source.attempt)
+        producer, producer_manifest = chain[-1] if chain else (source.attempt, source.manifest)
         provenance = {
-            **source.manifest.remote_process_identity,
-            REUSED_FROM_ATTEMPT_KEY: source.attempt.attempt_id,
-            REUSED_FROM_ACTION_KEY: source.attempt.action_id,
+            **producer_manifest.remote_process_identity,
+            REUSED_FROM_ATTEMPT_KEY: producer.attempt_id,
+            REUSED_FROM_ACTION_KEY: producer.action_id,
         }
-        derived = source.manifest.model_copy(
+        derived = producer_manifest.model_copy(
             update={
                 "workspace_id": attempt.workspace_id,
                 "campaign_id": attempt.campaign_id,
@@ -1706,7 +1713,7 @@ class CampaignWorker:
                 "remote_process_identity": provenance,
                 "started_at": now,
                 "ended_at": now,
-                "exit_reason": f"reused sealed result from {source.attempt.attempt_id}",
+                "exit_reason": f"reused sealed result from {producer.attempt_id}",
                 "resource_usage": (),
             }
         )

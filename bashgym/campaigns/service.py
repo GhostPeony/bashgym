@@ -375,7 +375,7 @@ class CampaignService:
 
     def attempts(self, workspace_id: str, campaign_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)
-        reuse_links = self.repository.resolved_reuse_links(workspace_id, campaign_id)
+        reuse_links = self.repository.reuse_source_links(workspace_id, campaign_id)
         return tuple(
             project_public_campaign_attempt(
                 attempt, reused_from_attempt_id=reuse_links.get(attempt.attempt_id)

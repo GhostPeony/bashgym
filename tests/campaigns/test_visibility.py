@@ -9,12 +9,14 @@ from bashgym.campaigns.contracts import (
     CredentialKind,
     FailureClass,
     PublicCampaignArtifactV1,
+    PublicCampaignAttemptV1,
     PublicCampaignEventSummaryV1,
     PublicCampaignEventV1,
 )
 from bashgym.campaigns.visibility import (
     PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_ARTIFACT_FIELDS,
+    PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_ATTEMPT_FIELDS,
     PUBLIC_CAMPAIGN_EVENT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_EVENT_FIELDS,
@@ -64,6 +66,12 @@ def test_public_event_contract_has_an_exact_recursive_visibility_allowlist():
     assert "idempotency_identity" not in PUBLIC_CAMPAIGN_EVENT_FIELDS
     assert set(PublicCampaignArtifactV1.model_fields) == PUBLIC_CAMPAIGN_ARTIFACT_FIELDS
     assert set(PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES) == PUBLIC_CAMPAIGN_ARTIFACT_FIELDS
+    assert set(PublicCampaignAttemptV1.model_fields) == PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
+    assert set(PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES) == PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
+    assert set(PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES.values()) <= {
+        "public_metadata",
+        "workspace_safe",
+    }
 
 
 def test_unknown_events_and_fields_fail_closed_to_safe_identity():

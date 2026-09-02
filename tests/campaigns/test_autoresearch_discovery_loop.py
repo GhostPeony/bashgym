@@ -9,9 +9,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from bashgym._compat import UTC
+from bashgym.api.campaign_routes import campaign_auth_router, campaign_router
 from bashgym.campaigns.artifacts import ArtifactSealer
+from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.autoresearch import (
     AutoResearchCampaignCore,
     AutoResearchCampaignSpec,
@@ -40,6 +44,7 @@ from bashgym.campaigns.autoresearch_evidence import (
 )
 from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
 from bashgym.campaigns.contracts import (
+    AutonomyProfile,
     CampaignStatus,
     CampaignTrigger,
     Capability,
@@ -78,6 +83,7 @@ from bashgym.ledger.contracts import (
 )
 from tests.campaigns.test_persistence import campaign, manifest
 from tests.campaigns.test_proposals import principal, proposal
+from tests.campaigns.test_worker import set_reuse_link
 
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
@@ -936,7 +942,7 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
         reused_from_attempt_id(
             repository.get_attempt_result_manifest("workspace-a", third_data_build.attempt_id)
         )
-        == second_data_build.attempt_id
+        == first_data_build.attempt_id
     )
     assert worker.run_once(now=NOW + timedelta(seconds=15)) == "completed"
     third_training = repository.list_attempts("workspace-a", "campaign-1")[-1]
@@ -1111,3 +1117,68 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
         "campaign_evidence.json",
         "campaign_report.md",
     }
+
+    set_reuse_link(repository, second_data_build.attempt_id, second_data_build.attempt_id)
+    auth = CampaignAuthService(api_repository)
+    refresh = auth.issue_refresh_credential(
+        actor_id="codex-agent",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-a",),
+    )
+    access = auth.exchange_refresh(refresh.raw_token).raw_token
+    app = FastAPI()
+    app.state.campaign_repository = api_repository
+    app.state.campaign_auth_service = auth
+    app.state.campaign_service = CampaignService(api_repository, export_root=export_root)
+    app.state.campaign_templates = {}
+    app.state.campaign_worker_config_path = tmp_path / "worker-config.v1.json"
+    app.include_router(campaign_auth_router)
+    app.include_router(campaign_router)
+    http = TestClient(app)
+    headers = {"Authorization": f"Bearer {access}"}
+    query = {"workspace_id": "workspace-a"}
+
+    attempts_response = http.get(
+        "/api/campaigns/campaign-1/attempts", headers=headers, params=query
+    )
+    research_response = http.get(
+        "/api/campaigns/campaign-1/research-state", headers=headers, params=query
+    )
+    damaged = CampaignService(api_repository, export_root=export_root).export(
+        "workspace-a",
+        "campaign-1",
+        ("json",),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="export-damaged-link",
+        idempotency_key="export-damaged-link",
+    )
+
+    assert attempts_response.status_code == 200
+    assert research_response.status_code == 200
+    reused_projection = {
+        item["attempt_id"]: item["reused_from_attempt_id"]
+        for item in attempts_response.json()["attempts"]
+    }
+    assert reused_projection[second_data_build.attempt_id] == second_data_build.attempt_id
+    assert reused_projection[third_data_build.attempt_id] == first_data_build.attempt_id
+    assert reused_projection[first_data_build.attempt_id] is None
+    decision_packet = research_response.json()["decision_packet"]
+    assert decision_packet["data_quality"]["acceptance_rate"] == 2 / 3
+    damaged_history = decision_packet["campaign_knowledge"]
+    assert damaged_history["experiments"][1]["data"]["dataset_version_id"] == (
+        generated_dataset_versions[0]["dataset_version_id"]
+    )
+    assert damaged_history["experiments"][2]["data"] is None
+    assert damaged_history["experiments"][3]["data"]["dataset_version_id"] == (
+        generated_dataset_versions[0]["dataset_version_id"]
+    )
+    damaged_directory = export_root / "workspace-a" / "campaign-1" / damaged.details["export_id"]
+    damaged_evidence = json.loads(
+        (damaged_directory / "campaign_evidence.json").read_text(encoding="utf-8")
+    )
+    damaged_experiments = damaged_evidence["autoresearch_history"]["experiments"]
+    assert damaged_experiments[2]["data"] is None
+    assert damaged_experiments[3]["data"]["dataset_version_id"] == (
+        generated_dataset_versions[0]["dataset_version_id"]
+    )

@@ -91,6 +91,7 @@ from bashgym.campaigns.runtime import (
     CampaignRuntimeRepository,
     _artifact_reference,
 )
+from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.worker import (
     CampaignWorker,
     SimulatedWorkerCrashError,
@@ -109,6 +110,7 @@ from bashgym.ledger.contracts import (
 )
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 from tests.campaigns.test_persistence import campaign, create, transition
+from tests.campaigns.test_proposals import principal
 
 START = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
 
@@ -4150,35 +4152,83 @@ def test_reuse_link_resolves_only_to_a_completed_same_stage_source(tmp_path):
         repository.reuse_source_attempt(other_stage)
 
 
-def test_resolved_reuse_links_collapse_every_hop_of_one_campaign(tmp_path):
+def test_repeated_reuse_of_one_build_records_one_hop_to_the_executing_attempt(tmp_path):
     fixture = reuse_remote_data_build(tmp_path)
     repository = fixture.repository
-    third_plan = seed_data_build_then_training_study(repository, "study-3", sequence=3)
-    third = schedule_remote_data_build(
-        repository,
-        fixture.worker,
-        fixture.profile,
-        "campaign-1",
-        "study-3",
-        third_plan,
-        START + timedelta(seconds=5),
-    )
+    reusing = [fixture.consumer]
+    for index, study_id in enumerate(("study-3", "study-4"), start=3):
+        plan = seed_data_build_then_training_study(repository, study_id, sequence=index)
+        reusing.append(
+            schedule_remote_data_build(
+                repository,
+                fixture.worker,
+                fixture.profile,
+                "campaign-1",
+                study_id,
+                plan,
+                START + timedelta(seconds=index + 2),
+            )
+        )
+        assert fixture.worker.run_once(now=START + timedelta(seconds=index + 3)) == "reused"
 
-    assert fixture.worker.run_once(now=START + timedelta(seconds=6)) == "reused"
     assert fixture.adapter.launch_count == 1
-    third_manifest = repository.get_attempt_result_manifest("workspace-a", third.attempt_id)
-    assert third_manifest.remote_process_identity["reused_from_attempt_id"] == (
-        fixture.consumer.attempt_id
-    )
+    for attempt in reusing:
+        manifest = repository.get_attempt_result_manifest("workspace-a", attempt.attempt_id)
+        assert manifest.remote_process_identity["reused_from_attempt_id"] == (
+            fixture.producer.attempt_id
+        )
+        assert manifest.remote_process_identity["reused_from_action_id"] == (
+            fixture.producer.action_id
+        )
+        assert len(repository.reuse_source_chain(attempt)) == 1
     assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {
-        fixture.consumer.attempt_id: fixture.producer.attempt_id,
-        third.attempt_id: fixture.producer.attempt_id,
+        attempt.attempt_id: fixture.producer.attempt_id for attempt in reusing
+    }
+    assert repository.reuse_source_links("workspace-a", "campaign-1") == {
+        attempt.attempt_id: fixture.producer.attempt_id for attempt in reusing
     }
     assert repository.resolved_reuse_links("workspace-a", "campaign-2") == {}
 
-    set_reuse_link(repository, fixture.consumer.attempt_id, third.attempt_id)
-    with pytest.raises(CampaignPersistenceError, match="campaign_reuse_source_invalid"):
-        repository.resolved_reuse_links("workspace-a", "campaign-1")
+
+def test_reuse_links_drop_from_the_collapsed_map_without_failing_the_projection(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    consumer = fixture.consumer
+    stored = {consumer.attempt_id: fixture.producer.attempt_id}
+
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == stored
+
+    set_reuse_link(repository, consumer.attempt_id, consumer.attempt_id)
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {}
+    assert repository.reuse_source_links("workspace-a", "campaign-1") == {
+        consumer.attempt_id: consumer.attempt_id
+    }
+
+    set_reuse_link(repository, consumer.attempt_id, "attempt-does-not-exist")
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {}
+    assert repository.reuse_source_links("workspace-a", "campaign-1") == {
+        consumer.attempt_id: "attempt-does-not-exist"
+    }
+
+    set_reuse_link(repository, consumer.attempt_id, fixture.producer.attempt_id)
+    set_action_status(repository, fixture.producer.action_id, ActionStatus.FAILED.value)
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {}
+    set_action_status(repository, fixture.producer.action_id, ActionStatus.COMPLETED.value)
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == stored
+
+
+def test_reused_attempt_projects_its_producer_through_the_campaign_service(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    service = CampaignService(fixture.repository, export_root=tmp_path / "reports")
+    actor = principal(fixture.repository)
+
+    projected = {
+        item.attempt_id: item.reused_from_attempt_id
+        for item in service.attempts("workspace-a", "campaign-1", actor)
+    }
+
+    assert projected[fixture.consumer.attempt_id] == fixture.producer.attempt_id
+    assert projected[fixture.producer.attempt_id] is None
 
 
 def test_reuse_across_campaigns_binds_the_producing_campaign_dataset(tmp_path):

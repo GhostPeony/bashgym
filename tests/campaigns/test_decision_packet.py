@@ -708,8 +708,34 @@ def test_latest_data_quality_uses_only_the_outcomes_data_build_attempt():
         ),
         outcome,
     )
+    reused = latest_data_quality_for_outcome(
+        (
+            {"metadata": {"producer_attempt_id": "unrelated", "data_quality": {}}},
+            {
+                "metadata": {
+                    "producer_attempt_id": "attempt-producer",
+                    "data_quality": expected,
+                }
+            },
+        ),
+        outcome,
+        {"attempt-data": "attempt-producer"},
+    )
+    unlinked = latest_data_quality_for_outcome(
+        (
+            {
+                "metadata": {
+                    "producer_attempt_id": "attempt-producer",
+                    "data_quality": expected,
+                }
+            },
+        ),
+        outcome,
+    )
 
     assert selected == expected
+    assert reused == expected
+    assert unlinked is None
 
 
 def test_decision_packet_infers_only_the_typed_runner_method():

@@ -11,6 +11,7 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from types import MappingProxyType
 from typing import Any
 
 from bashgym.campaigns.autoresearch import (
@@ -47,12 +48,20 @@ _AGENT_ACTIONS = frozenset(
 def latest_data_quality_for_outcome(
     dataset_versions: Sequence[Mapping[str, Any]],
     outcome: AutoResearchOutcomeRecord | None,
+    reuse_links: Mapping[str, str] = MappingProxyType({}),
 ) -> dict[str, Any] | None:
-    """Select quality metadata bound to one of the outcome's exact attempts."""
+    """Select quality metadata bound to one of the outcome's exact attempts.
+
+    A study whose data build was reused registers no dataset version of its own, so
+    the attempt that executed that build is searched alongside the study's own.
+    """
 
     if outcome is None:
         return None
-    attempt_ids = frozenset(outcome.result.attempt_ids)
+    own_attempt_ids = tuple(outcome.result.attempt_ids)
+    attempt_ids = frozenset(own_attempt_ids) | frozenset(
+        reuse_links[attempt_id] for attempt_id in own_attempt_ids if attempt_id in reuse_links
+    )
     for version in reversed(dataset_versions):
         metadata = version.get("metadata")
         if not isinstance(metadata, Mapping):

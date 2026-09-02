@@ -1755,13 +1755,13 @@ class CampaignRuntimeRepository(CampaignRepository):
         chain = self.reuse_source_chain(attempt)
         return chain[-1][0] if chain else attempt
 
-    def resolved_reuse_links(self, workspace_id: str, campaign_id: str) -> dict[str, str]:
-        """Map each reused attempt of one campaign to the attempt that executed.
+    def _completed_data_build_links(
+        self, workspace_id: str
+    ) -> tuple[tuple[str, str, str | None], ...]:
+        """Read (attempt, campaign, immediate reuse link) for completed data builds.
 
-        One workspace-scoped query loads every completed reuse link, because a chain
-        can leave the campaign that consumes it. Chains are collapsed before return.
-        This reports the recorded link for projections; `reuse_source_chain` is the
-        verifying walk that execution binds to.
+        Only the reusable stage is scanned, and each stored manifest is parsed once.
+        A row whose link is null is an attempt that executed its own build.
         """
 
         self._require_initialized()
@@ -1773,36 +1773,72 @@ class CampaignRuntimeRepository(CampaignRepository):
                 FROM campaign_attempts t
                 JOIN campaign_actions a
                   ON a.workspace_id = t.workspace_id AND a.action_id = t.action_id
-                WHERE t.workspace_id = ? AND a.status = ? AND t.status = ?
+                WHERE t.workspace_id = ? AND a.stage_kind = ? AND a.status = ? AND t.status = ?
                   AND t.result_json IS NOT NULL
-                  AND json_extract(t.result_json, ?) IS NOT NULL
                 """,
                 (
                     _REUSE_SOURCE_JSON_PATH,
                     workspace_id,
+                    StageKind.DATA_BUILD.value,
                     ActionStatus.COMPLETED.value,
                     AttemptStatus.COMPLETED.value,
-                    _REUSE_SOURCE_JSON_PATH,
                 ),
             ).fetchall()
-        sources = {
-            str(row["attempt_id"]): str(row["source_attempt_id"])
+        return tuple(
+            (
+                str(row["attempt_id"]),
+                str(row["campaign_id"]),
+                (
+                    str(row["source_attempt_id"])
+                    if isinstance(row["source_attempt_id"], str) and row["source_attempt_id"]
+                    else None
+                ),
+            )
             for row in rows
-            if isinstance(row["source_attempt_id"], str) and row["source_attempt_id"]
+        )
+
+    def reuse_source_links(self, workspace_id: str, campaign_id: str) -> dict[str, str]:
+        """Immediate stored reuse link of each completed data build in one campaign.
+
+        This is the consuming attempt's own sealed statement. No chain is walked and
+        no source is verified, so a projection of it cannot fail on a damaged link.
+        """
+
+        return {
+            attempt_id: source
+            for attempt_id, campaign, source in self._completed_data_build_links(workspace_id)
+            if campaign == campaign_id and source is not None
         }
+
+    def resolved_reuse_links(self, workspace_id: str, campaign_id: str) -> dict[str, str]:
+        """Map each reused data build of one campaign to the attempt that executed.
+
+        Preconditions: only data-build attempts whose action and attempt are both
+        completed are considered, and a chain is kept only when it ends at such an
+        attempt that carries no reuse link of its own. A cyclic, over-long, or
+        unresolvable chain is dropped from the map rather than raised, so one damaged
+        link costs its own study its dataset record instead of failing the projection.
+        The query is workspace-scoped because a chain can leave the consuming
+        campaign; `reuse_source_chain` is the verifying walk that execution binds to.
+        """
+
+        rows = self._completed_data_build_links(workspace_id)
+        sources = {attempt_id: source for attempt_id, _campaign, source in rows if source}
+        executed = {attempt_id for attempt_id, _campaign, source in rows if source is None}
         resolved: dict[str, str] = {}
-        for row in rows:
-            attempt_id = str(row["attempt_id"])
-            if row["campaign_id"] != campaign_id or attempt_id not in sources:
+        for attempt_id, campaign, source in rows:
+            if campaign != campaign_id or source is None:
                 continue
             seen = {attempt_id}
-            source = sources[attempt_id]
-            while source in sources:
-                if source in seen or len(seen) > _REUSE_CHAIN_LIMIT:
-                    raise CampaignPersistenceError("campaign_reuse_source_invalid")
-                seen.add(source)
-                source = sources[source]
-            resolved[attempt_id] = source
+            current = source
+            while True:
+                if current in executed:
+                    resolved[attempt_id] = current
+                    break
+                if current not in sources or current in seen or len(seen) > _REUSE_CHAIN_LIMIT:
+                    break
+                seen.add(current)
+                current = sources[current]
         return resolved
 
     def completed_stage_outputs(

@@ -1796,10 +1796,12 @@ def _research_state_payload(
         if spec.ledger_project_id is not None
         else []
     )
+    reuse_links = repository.resolved_reuse_links(workspace_id, campaign_id)
     latest_data_quality = (
         latest_data_quality_for_outcome(
             dataset_versions,
             latest_outcome,
+            reuse_links,
         )
         if latest_outcome is not None
         else None
@@ -1817,7 +1819,7 @@ def _research_state_payload(
         dataset_versions=dataset_versions,
         evaluations=evaluations,
         hypothesis_family_conclusions=family_conclusions,
-        reuse_links=repository.resolved_reuse_links(workspace_id, campaign_id),
+        reuse_links=reuse_links,
     )
     decision_packet = build_decision_packet(
         objective=snapshot.campaign.objective,

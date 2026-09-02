@@ -1644,15 +1644,16 @@ class CampaignRuntimeRepository(CampaignRepository):
         )
 
     def find_reusable_completion(
-        self, workspace_id: str, result_key: str, *, exclude_action_id: str
+        self, workspace_id: str, result_key: str, *, stage: StageKind, exclude_action_id: str
     ) -> ReusableCompletion | None:
-        """Newest completed action in the workspace whose content key matches."""
+        """Newest completed action of one stage in the workspace whose content key matches."""
 
         self._require_initialized()
         with self._connection() as connection:
             row = connection.execute(
                 self._attempt_select() + """
                 WHERE a.workspace_id = ? AND a.result_key = ? AND a.action_id != ?
+                  AND a.stage_kind = ?
                   AND a.status = ? AND t.status = ? AND t.result_json IS NOT NULL
                 ORDER BY t.updated_at DESC, t.attempt_id DESC LIMIT 1
                 """,
@@ -1660,6 +1661,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                     workspace_id,
                     result_key,
                     exclude_action_id,
+                    stage.value,
                     ActionStatus.COMPLETED.value,
                     AttemptStatus.COMPLETED.value,
                 ),

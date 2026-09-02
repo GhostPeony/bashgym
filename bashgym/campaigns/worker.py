@@ -101,6 +101,7 @@ from bashgym.campaigns.remote import (
     remote_executor_config,
 )
 from bashgym.campaigns.result_reuse import (
+    REUSABLE_STAGES,
     REUSED_FROM_ACTION_KEY,
     REUSED_FROM_ATTEMPT_KEY,
 )
@@ -1754,9 +1755,12 @@ class CampaignWorker:
         )
         if attempt is None:
             return controller_result or deferred_autoresearch_status or "idle"
-        if attempt.result_key is not None:
+        if attempt.result_key is not None and attempt.stage in REUSABLE_STAGES:
             source = self.repository.find_reusable_completion(
-                attempt.workspace_id, attempt.result_key, exclude_action_id=attempt.action_id
+                attempt.workspace_id,
+                attempt.result_key,
+                stage=attempt.stage,
+                exclude_action_id=attempt.action_id,
             )
             if source is not None:
                 return self._reuse_tick(attempt, source, now=tick_at)

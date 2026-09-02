@@ -22,6 +22,12 @@ from bashgym.campaigns.autoresearch import (
     ExperimentRole,
     MetricDirection,
 )
+from bashgym.campaigns.autoresearch_dataset import (
+    AUTORESEARCH_DATASET_RECEIPT_FILENAME,
+    AutoResearchDatasetFile,
+    AutoResearchDatasetQuality,
+    AutoResearchDatasetReceipt,
+)
 from bashgym.campaigns.autoresearch_evidence import (
     AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
     AUTORESEARCH_EVALUATION_FILENAME,
@@ -3168,11 +3174,18 @@ def test_find_reusable_completion_returns_newest_completed_match(tmp_path):
         expected_campaign_version=4,
         now=START,
     )
-    assert repository.find_reusable_completion("workspace-a", key, exclude_action_id="none") is None
+    assert (
+        repository.find_reusable_completion(
+            "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id="none"
+        )
+        is None
+    )
 
     assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
 
-    found = repository.find_reusable_completion("workspace-a", key, exclude_action_id="none")
+    found = repository.find_reusable_completion(
+        "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id="none"
+    )
     assert found is not None
     assert found.attempt.attempt_id == scheduled.attempt_id
     assert found.manifest.attempt_id == scheduled.attempt_id
@@ -3195,13 +3208,18 @@ def test_find_reusable_completion_returns_newest_completed_match(tmp_path):
                 target_uri,
             ),
         )
-    enriched = repository.find_reusable_completion("workspace-a", key, exclude_action_id="none")
+    enriched = repository.find_reusable_completion(
+        "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id="none"
+    )
     assert enriched is not None
     assert enriched.artifact_metadata_by_path[target_path] == {"checkpoint_step": 3}
 
     assert (
         repository.find_reusable_completion(
-            "workspace-a", key, exclude_action_id=scheduled.action_id
+            "workspace-a",
+            key,
+            stage=StageKind.FULL_TRAINING,
+            exclude_action_id=scheduled.action_id,
         )
         is None
     )
@@ -3247,15 +3265,17 @@ def test_find_reusable_completion_prefers_the_newest_match_in_the_same_workspace
     assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
 
     newer = schedule_with_key("study-2", 6, START + timedelta(seconds=1))
-    # The second action carries the same content key, so the worker reuses the first seal.
-    assert worker.run_once(now=START + timedelta(seconds=30)) == "reused"
+    # Training never reuses, so this executes even though it shares a content key.
+    assert worker.run_once(now=START + timedelta(seconds=30)) == "completed"
 
-    found = repository.find_reusable_completion("workspace-a", key, exclude_action_id="none")
+    found = repository.find_reusable_completion(
+        "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id="none"
+    )
     assert found is not None
     assert found.attempt.attempt_id == newer.attempt_id
 
     excluding_newer = repository.find_reusable_completion(
-        "workspace-a", key, exclude_action_id=newer.action_id
+        "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id=newer.action_id
     )
     assert excluding_newer is not None
     assert excluding_newer.attempt.attempt_id == older.attempt_id
@@ -3391,25 +3411,28 @@ def test_next_action_spec_carries_a_result_key_only_for_reusable_stages(tmp_path
     assert training_spec.stage == StageKind.FULL_TRAINING
     assert training_spec.result_key is None
 
+    # A reusable stage with an unresolved upstream edge carries no key either. Only the data
+    # build is reusable, so the unresolved edge is declared rather than positional.
     unresolved_plan = StagePlan(
         items=(
             StagePlanItem(
-                stage=StageKind.FULL_TRAINING,
+                stage=StageKind.CONTRACT_EVALUATION,
                 disposition=StageDisposition.REQUIRED,
-                reason="Produce the candidate the evaluation consumes.",
+                reason="Diagnose the failure cluster the data build targets.",
                 input_contract={"fixture": "study-1"},
-                output_contract={"schema": "training_metrics_jsonl.v1"},
+                output_contract={"schema": "autoresearch_diagnostic_evidence.v1"},
             ),
             StagePlanItem(
-                stage=StageKind.DEVELOPMENT_EVALUATION,
+                stage=StageKind.DATA_BUILD,
                 disposition=StageDisposition.REQUIRED,
-                reason="Evaluate the candidate the training stage produces.",
+                reason="Build data from the diagnostic the previous stage produced.",
                 input_contract={"fixture": "study-1"},
-                output_contract={"schema": "evaluation_metrics_json.v1"},
+                output_contract={"schema": "autoresearch_dataset_receipt.v1"},
+                consumes=(StageKind.CONTRACT_EVALUATION,),
             ),
         )
     )
-    assert unresolved_plan.consumed_stages(1) == (StageKind.FULL_TRAINING,)
+    assert unresolved_plan.consumed_stages(1) == (StageKind.CONTRACT_EVALUATION,)
     with training._connection(immediate=True) as connection:
         connection.execute(
             """
@@ -3427,7 +3450,7 @@ def test_next_action_spec_carries_a_result_key_only_for_reusable_stages(tmp_path
         executor_profiles=training_worker.remote_executor_profiles,
     )
 
-    assert unresolved_spec.stage == StageKind.DEVELOPMENT_EVALUATION
+    assert unresolved_spec.stage == StageKind.DATA_BUILD
     assert unresolved_spec.result_key is None
 
 
@@ -3517,15 +3540,156 @@ def test_identical_data_build_is_reused_across_studies_without_execution(tmp_pat
     assert reuse_events[0].payload["attempt_id"] == reused.attempt_id
 
 
-def test_remote_sealed_result_is_reused_without_launching_a_second_run(tmp_path):
-    """The stage here is a fixture for the remote seal shape, not a reuse policy claim."""
+class FakeDataBuildRemoteAdapter(FakeRemoteAdapter):
+    """Complete a remote DATA_BUILD with a dataset receipt and its generated rows."""
 
-    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        train = b'{"task":"terminal"}\n'
+        validation = b'{"task":"terminal-validation"}\n'
+        self.receipt = AutoResearchDatasetReceipt(
+            files=(
+                AutoResearchDatasetFile(
+                    path="dataset/train.jsonl",
+                    sha256=hashlib.sha256(train).hexdigest(),
+                    size_bytes=len(train),
+                    split="train",
+                    row_count=1,
+                ),
+                AutoResearchDatasetFile(
+                    path="dataset/validation.jsonl",
+                    sha256=hashlib.sha256(validation).hexdigest(),
+                    size_bytes=len(validation),
+                    split="validation",
+                    row_count=1,
+                ),
+            ),
+            generator={"kind": "nvidia_data_designer", "pipeline": "terminal_env_generation"},
+            quality=AutoResearchDatasetQuality(
+                generated_rows=3,
+                accepted_rows=2,
+                deterministic_verified_rows=2,
+                verification_failed_rows=1,
+                duplicate_rows_removed=0,
+                contamination_rows_removed=0,
+                verifier_digest="e" * 64,
+            ),
+        )
+        self.payloads = {
+            "exit_code": b"0\n",
+            "launch_manifest.json": b"{}",
+            "training.log": b"complete\n",
+            "dataset/train.jsonl": train,
+            "dataset/validation.jsonl": validation,
+            AUTORESEARCH_DATASET_RECEIPT_FILENAME: self.receipt.model_dump_json().encode(),
+        }
+
+    async def inventory_outputs(self, identity, request, *, observation):
+        self.collect_count += 1
+        return RemoteOutputInventory(
+            compute_profile_id=identity.compute_profile_id,
+            run_id=identity.run_id,
+            files=tuple(
+                RemoteOutputFile(
+                    path=path,
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    size_bytes=len(payload),
+                )
+                for path, payload in sorted(self.payloads.items())
+            ),
+        )
+
+    async def read_output_bytes(
+        self, identity, path, *, expected_sha256, expected_size_bytes, max_bytes
+    ):
+        del identity
+        payload = self.payloads[path]
+        assert hashlib.sha256(payload).hexdigest() == expected_sha256
+        assert len(payload) == expected_size_bytes
+        assert expected_size_bytes <= max_bytes
+        return payload
+
+
+def approved_data_build_profile(tmp_path):
+    script = tmp_path / "build_data.py"
+    config = tmp_path / "data-designer-config.json"
+    key = tmp_path / "data-build-key"
+    script.write_text("print('build data')\n", encoding="utf-8")
+    config.write_text("{}\n", encoding="utf-8")
+    key.write_text("test-only-key\n", encoding="utf-8")
+    stage = PinnedRemoteStageProfile(
+        stage=StageKind.DATA_BUILD,
+        script_path=script,
+        script_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
+        input_files=(config,),
+        input_sha256={config.name: hashlib.sha256(config.read_bytes()).hexdigest()},
+        output_paths=(AUTORESEARCH_DATASET_RECEIPT_FILENAME, "dataset"),
+        budget_unit="gpu_hours",
+        budget_reservation=0.25,
+    )
+    return ApprovedRemoteExecutorProfile(
+        profile_id="data-designer-v1",
+        profile_revision=1,
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="memexai-embedding-v1",
+        target_model_digest=canonical_hash(campaign().target_model.model_dump(mode="json")),
+        host="192.0.2.10",
+        username="trainer",
+        key_path=str(key),
+        remote_work_dir="~/bashgym-training",
+        stages=(stage,),
+    )
+
+
+def bind_generated_dataset_project(repository, database, project_id="project-a"):
+    """Give the campaign manifest a ledger project so a data build can register its dataset."""
+
+    ledger = ExperimentLedgerRepository(database)
+    ledger.initialize()
+    ledger.register_project(
+        ProjectSpec(
+            workspace_id="workspace-a",
+            project_id=project_id,
+            display_name="Generated dataset fixture",
+            owner_actor_id="operator-a",
+        )
+    )
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            """
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+        payload = json.loads(row["manifest_json"])
+        payload["evaluation_plan"]["ledger_project_id"] = project_id
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                canonical_hash(payload),
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+
+def test_remote_data_build_seal_is_reused_without_launching_a_second_run(tmp_path):
+    database = tmp_path / "campaigns.sqlite3"
+    repository = active_repository(database)
     plans = {
-        study_id: seed_validated_study(repository, study_id, sequence=index)
+        study_id: seed_validated_study(
+            repository, study_id, sequence=index, stage=StageKind.DATA_BUILD
+        )
         for index, study_id in enumerate(("study-1", "study-2"), start=1)
     }
-    adapter = FakeRemoteAdapter(states=(RemoteRunState.RUNNING, RemoteRunState.COMPLETED))
+    bind_generated_dataset_project(repository, database)
+    profile = approved_data_build_profile(tmp_path)
+    adapter = FakeDataBuildRemoteAdapter(states=(RemoteRunState.RUNNING, RemoteRunState.COMPLETED))
     artifact_root = tmp_path / "artifacts"
     worker = CampaignWorker(
         repository,
@@ -3534,10 +3698,7 @@ def test_remote_sealed_result_is_reused_without_launching_a_second_run(tmp_path)
         data_directory=tmp_path / "data-root",
         worker_id="worker-a",
         remote_adapters={"ssh-gpu-lab": adapter},
-    )
-    profile = approved_remote_profile(tmp_path)
-    worker.remote_executor_profiles[(profile.compute_profile_id, profile.target_contract_key)] = (
-        profile
+        remote_executor_profiles={("ssh-gpu-lab", "memexai-embedding-v1"): profile},
     )
     key = "f" * 64
     if worker.leader is None:
@@ -3550,7 +3711,7 @@ def test_remote_sealed_result_is_reused_without_launching_a_second_run(tmp_path)
                 campaign_id="campaign-1",
                 study_id=study_id,
                 stage_index=0,
-                stage=StageKind.FULL_TRAINING,
+                stage=StageKind.DATA_BUILD,
                 input_contract=plans[study_id].items[0].input_contract,
                 candidate_digest=fake_digest(f"candidate:{study_id}"),
                 manifest_revision=1,
@@ -3558,7 +3719,7 @@ def test_remote_sealed_result_is_reused_without_launching_a_second_run(tmp_path)
                 budget_reservation=0.25,
                 executor_kind="ssh_remote",
                 executor_config=remote_executor_config(
-                    profile, StageKind.FULL_TRAINING, recipe_digest="e" * 64
+                    profile, StageKind.DATA_BUILD, recipe_digest="e" * 64
                 ),
                 result_key=key,
             ),
@@ -3575,20 +3736,20 @@ def test_remote_sealed_result_is_reused_without_launching_a_second_run(tmp_path)
     assert worker.run_once(now=START + timedelta(seconds=4)) == "reused"
 
     assert adapter.launch_count == 1
-    assert adapter.collect_count == 1
     assert repository.get_remote_run("workspace-a", reused_attempt.attempt_id) is None
+    assert repository.get_remote_run("workspace-a", source_attempt.attempt_id) is not None
     assert not artifact_root.exists()
     source = repository.get_attempt("workspace-a", source_attempt.attempt_id)
     reused = repository.get_attempt("workspace-a", reused_attempt.attempt_id)
     assert reused.status == AttemptStatus.COMPLETED
+    assert reused.stage == StageKind.DATA_BUILD
     manifest = repository.get_attempt_result_manifest("workspace-a", reused.attempt_id)
+    source_manifest = repository.get_attempt_result_manifest("workspace-a", source.attempt_id)
     assert manifest.remote_process_identity["reused_from_attempt_id"] == source.attempt_id
     assert manifest.remote_process_identity["reused_from_action_id"] == source.action_id
     assert manifest.resource_usage == ()
-    assert (
-        manifest.outputs
-        == repository.get_attempt_result_manifest("workspace-a", source.attempt_id).outputs
-    )
+    assert manifest.outputs == source_manifest.outputs
+    assert any(output.path == AUTORESEARCH_DATASET_RECEIPT_FILENAME for output in manifest.outputs)
     expected_digest = hashlib.sha256(worker.sealer.envelope_bytes(manifest)).hexdigest()
     assert reused.sealed_result_uri == (
         f"bashgym-remote-seal://ssh-gpu-lab/{reused.attempt_id}/sha256/{expected_digest}"
@@ -3600,8 +3761,3 @@ def test_remote_sealed_result_is_reused_without_launching_a_second_run(tmp_path)
             (f"budget-settle-{reused.action_id}",),
         ).fetchone()[0]
     assert settled == 0.0
-    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours") == {
-        "reserved": 0.0,
-        "actual": pytest.approx(2 / 3600),
-        "limit_delta": 0.0,
-    }

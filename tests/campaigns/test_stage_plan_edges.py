@@ -40,6 +40,27 @@ def test_legacy_plans_without_edges_use_the_positional_rule() -> None:
     assert plan.consumed_stages(1) == (StageKind.DATA_BUILD,)
     assert plan.consumed_stages(2) == (StageKind.FULL_TRAINING,)
     assert StagePlan(items=(_item(StageKind.DEVELOPMENT_EVALUATION),)).consumed_stages(0) == ()
+    # Non-adjacent stages do not match the implicit edge rule
+    assert (
+        StagePlan(
+            items=(
+                _item(StageKind.FULL_TRAINING),
+                _item(StageKind.CONTRACT_EVALUATION),
+                _item(StageKind.DEVELOPMENT_EVALUATION),
+            )
+        ).consumed_stages(2)
+        == ()
+    )
+    assert (
+        StagePlan(
+            items=(
+                _item(StageKind.DATA_BUILD),
+                _item(StageKind.CONTRACT_EVALUATION),
+                _item(StageKind.FULL_TRAINING),
+            )
+        ).consumed_stages(2)
+        == ()
+    )
 
 
 @pytest.mark.parametrize(
@@ -65,6 +86,11 @@ def test_legacy_plans_without_edges_use_the_positional_rule() -> None:
 def test_invalid_edges_are_rejected(items, message) -> None:
     with pytest.raises(ValueError, match=message):
         StagePlan(items=items)
+
+
+def test_item_consumes_stage_twice() -> None:
+    with pytest.raises(ValueError, match="consume a stage twice"):
+        _item(StageKind.FULL_TRAINING, consumes=(StageKind.DATA_BUILD, StageKind.DATA_BUILD))
 
 
 def test_persisted_v1_items_without_consumes_still_validate() -> None:

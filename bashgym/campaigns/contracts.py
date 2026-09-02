@@ -559,13 +559,8 @@ class StagePlan(FrozenContractModel):
         upstream = _IMPLICIT_EDGES.get(item.stage)
         if upstream is None:
             return ()
-        if item.stage == StageKind.FULL_TRAINING:
-            if index > 0 and self.items[index - 1].stage == upstream:
-                return (upstream,)
-            return ()
-        for earlier in reversed(self.items[:index]):
-            if earlier.stage == upstream:
-                return (upstream,)
+        if index > 0 and self.items[index - 1].stage == upstream:
+            return (upstream,)
         return ()
 
 

@@ -21,6 +21,7 @@ from pydantic import (
 )
 
 from bashgym._compat import UTC
+from bashgym.research.acquisition import ExperimentAcquisition, ResearchContextBundle
 
 
 def utc_now() -> datetime:
@@ -542,6 +543,8 @@ class StudyProposalSubmission(FrozenContractModel):
     required_capabilities: frozenset[Capability] = frozenset()
     stage_plan: StagePlan
     rationale: str = Field(min_length=1, max_length=4000)
+    research_context: ResearchContextBundle | None = None
+    acquisition: ExperimentAcquisition | None = None
 
 
 class StudyProposal(FrozenContractModel):
@@ -568,6 +571,8 @@ class StudyProposal(FrozenContractModel):
     stage_plan: StagePlan
     planner_actor_id: Identifier
     rationale: str = Field(min_length=1, max_length=4000)
+    research_context: ResearchContextBundle | None = None
+    acquisition: ExperimentAcquisition | None = None
     status: ProposalStatus = ProposalStatus.SUBMITTED
     creation_sequence: int = Field(ge=1)
     created_at: datetime = Field(default_factory=utc_now)

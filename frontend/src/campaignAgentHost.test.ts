@@ -16,6 +16,7 @@ import {
   type CampaignAgentHostScheduler,
   type CampaignAgentHostHeartbeatBody,
   type CampaignAgentHostArtifactQuery,
+  type CampaignAgentHostWaitQuery,
   type CampaignAgentHostAuthorizeRequest,
   type CampaignAgentHostRegistrationBody,
   type CampaignAgentHostTransport,
@@ -174,6 +175,7 @@ interface HarnessOptions {
   resolveIdentity?: (terminalId: string) => MainOwnedCampaignAgentIdentity | null
   heartbeat?: (credential: Buffer, body: CampaignAgentHostHeartbeatBody) => Promise<unknown>
   observe?: (credential: Buffer) => Promise<unknown>
+  wait?: (credential: Buffer, query: CampaignAgentHostWaitQuery) => Promise<unknown>
   artifacts?: (credential: Buffer, query: CampaignAgentHostArtifactQuery) => Promise<unknown>
   onLifecycle?: (event: CampaignAgentHostLifecycleEvent) => void
 }
@@ -208,6 +210,7 @@ function harness(identity = liveIdentity(), options: HarnessOptions = {}) {
     },
     heartbeat: options.heartbeat ?? (async () => ({})),
     observe: options.observe ?? (async () => ({})),
+    wait: options.wait ?? (async () => ({})),
     artifacts: options.artifacts ?? (async () => ({}))
   }
   const controller = new CampaignAgentHostController({
@@ -468,6 +471,7 @@ test('claim keeps the credential controller-owned and activate gates fixed actio
   const credentials: Buffer[] = []
   const heartbeatBodies: CampaignAgentHostHeartbeatBody[] = []
   const artifactQueries: CampaignAgentHostArtifactQuery[] = []
+  const waitQueries: CampaignAgentHostWaitQuery[] = []
   const { controller } = harness(liveIdentity(), {
     heartbeat: async (credential, body) => {
       credentials.push(credential)
@@ -477,6 +481,11 @@ test('claim keeps the credential controller-owned and activate gates fixed actio
     observe: async (credential) => {
       credentials.push(credential)
       return { campaign: 'bounded-observation' }
+    },
+    wait: async (credential, query) => {
+      credentials.push(credential)
+      waitQueries.push(query)
+      return { status: 'changed', nextCursor: 12 }
     },
     artifacts: async (credential, query) => {
       credentials.push(credential)
@@ -508,6 +517,10 @@ test('claim keeps the credential controller-owned and activate gates fixed actio
   assert.equal(active.actionsEnabled, true)
   assert.equal(active.state, 'active')
   assert.deepEqual(await controller.observe('terminal-1'), { campaign: 'bounded-observation' })
+  assert.deepEqual(await controller.wait('terminal-1', { afterCursor: 11, timeoutSeconds: 30 }), {
+    status: 'changed',
+    nextCursor: 12
+  })
   assert.deepEqual(
     await controller.artifacts('terminal-1', {
       afterCursor: 'a1.ABCDEFGHIJK',
@@ -515,9 +528,10 @@ test('claim keeps the credential controller-owned and activate gates fixed actio
     }),
     { artifacts: ['bounded-artifact'] }
   )
-  assert.equal(credentials.length, 3)
+  assert.equal(credentials.length, 4)
   assert.strictEqual(credentials[0], credentials[1])
   assert.strictEqual(credentials[0], credentials[2])
+  assert.strictEqual(credentials[0], credentials[3])
   assert.equal(credentials[0].toString('utf8'), TOKEN)
   assert.deepEqual(heartbeatBodies, [
     {
@@ -528,6 +542,7 @@ test('claim keeps the credential controller-owned and activate gates fixed actio
       sessionId: 'pty_session_1'
     }
   ])
+  assert.deepEqual(waitQueries, [{ afterCursor: 11, timeoutSeconds: 30 }])
   assert.deepEqual(artifactQueries, [{ afterCursor: 'a1.ABCDEFGHIJK', limit: 10 }])
   const serialized = JSON.stringify(active)
   for (const privateValue of [

@@ -8,7 +8,7 @@ from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.autoresearch import builtin_autoresearch_template_definitions
 from bashgym.campaigns.campaign_recovery import CampaignRecoveryRepository
 from bashgym.campaigns.guided_setup import GuidedSetupRepository
-from tests.api.test_campaign_routes import bearer, campaign_client, exchange
+from tests.api.test_campaign_routes import CONTROL_STOP_RULES, bearer, campaign_client, exchange
 
 INSTALLATION_ID = "ins_0123456789abcdef0123456789abcdef"
 
@@ -81,6 +81,7 @@ def _register_setup(http, repository):
         "template_id": definition.template_id,
         "installation_id": INSTALLATION_ID,
         "bindings": bindings,
+        "stop_rules": CONTROL_STOP_RULES,
     }
     return recovery, definition, body
 
@@ -106,6 +107,13 @@ def test_guided_setup_lists_doctors_validates_and_creates_from_sealed_receipt(tm
     assert "base_model_ref" not in wire
     assert "controller-owner" not in wire
     assert "private-lease-key" not in wire
+    assert selected["experiment_contract"] == {
+        "primary_metric": "control_path_score",
+        "metric_direction": "maximize",
+        "max_attempts_limit": 3,
+        "budget_limits": {"gpu_hours": 0.25, "study_count": 3.0},
+        "protected_metrics": [],
+    }
 
     with sqlite3.connect(repository.db_path) as connection:
         before_receipts = connection.execute(
@@ -114,6 +122,7 @@ def test_guided_setup_lists_doctors_validates_and_creates_from_sealed_receipt(tm
     doctor = http.post("/api/campaigns/setup/doctor", json=draft, headers=headers)
     assert doctor.status_code == 200
     assert doctor.json()["ready"] is True
+    assert doctor.json()["stop_rules"]["max_attempts"] == 2
     assert before_receipts == 0
     with sqlite3.connect(repository.db_path) as connection:
         assert (
@@ -151,6 +160,8 @@ def test_guided_setup_lists_doctors_validates_and_creates_from_sealed_receipt(tm
     assert created.status_code == 200, created.text
     assert created.json()["campaign"]["campaign_id"] == "guided-campaign-1"
     assert created.json()["setup"]["validation_receipt_id"] == validated.json()["receipt_id"]
+    assert created.json()["setup"]["stop_rules"]["max_attempts"] == 2
+    assert created.json()["setup"]["stop_rules"]["max_total_cost"] == 0.2
     restarted = http.post(
         "/api/campaigns/setup/create",
         json=create_body,

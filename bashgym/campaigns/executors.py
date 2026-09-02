@@ -31,6 +31,10 @@ from bashgym.campaigns.contracts import (
     SealedActionResult,
     utc_now,
 )
+from bashgym.campaigns.diagnostic_actions import (
+    AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+    AUTORESEARCH_DIAGNOSTIC_EVIDENCE_SCHEMA,
+)
 from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     DevelopmentDatasetContract,
@@ -530,6 +534,8 @@ class RemoteOutputSealer:
             return AUTORESEARCH_DATASET_FILE_SCHEMA
         if relative == AUTORESEARCH_EVALUATION_FILENAME:
             return AUTORESEARCH_EVALUATION_SCHEMA
+        if relative == AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME:
+            return AUTORESEARCH_DIAGNOSTIC_EVIDENCE_SCHEMA
         if relative == NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME:
             return NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
         if relative == "training_metrics.jsonl":
@@ -544,6 +550,8 @@ class RemoteOutputSealer:
             return "campaign_remote_exit_code.v1"
         if relative.startswith("final/"):
             return "huggingface_model_file.v1"
+        if relative.startswith("checkpoints/step-"):
+            return "huggingface_checkpoint_file.v1"
         return "campaign_remote_output.v1"
 
 

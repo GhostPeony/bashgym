@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { destinationFor, eventKeyFor, titleFor, useActivityStore } from './activityStore'
+import {
+  destinationFor,
+  eventKeyFor,
+  isTrackedType,
+  titleFor,
+  useActivityStore
+} from './activityStore'
 
 test('derives actionable destinations, including exact AutoResearch campaign scope', () => {
   assert.deepEqual(
@@ -25,6 +31,14 @@ test('derives actionable destinations, including exact AutoResearch campaign sco
     view: 'traces'
   })
   assert.equal(destinationFor('unknown:message', {}), undefined)
+})
+
+test('ignores removed in-memory AutoResearch event names', () => {
+  assert.equal(destinationFor('autoresearch:experiment', {}), undefined)
+  assert.equal(destinationFor('schema-research:status', {}), undefined)
+  assert.equal(isTrackedType('autoresearch:experiment'), false)
+  assert.equal(isTrackedType('schema-research:status'), false)
+  assert.equal(isTrackedType('campaign:action-failed'), true)
 })
 
 test('deduplicates a REST training acknowledgement and its WebSocket echo', () => {

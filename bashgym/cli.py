@@ -2173,9 +2173,11 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "research onboard": (
                 "Prepare model, services, bindings, and one READY campaign from a reviewed contract."
             ),
+            "research context": "Collect bounded citations for one proposed experiment.",
             "research state": (
                 "Read one campaign as a native-agent goal brief and Markdown progress view."
             ),
+            "research failures": "Compare bounded evaluator-authored failure categories.",
             "research wait": "Wait for the next campaign change or agent action.",
             "research start": "Start an explicitly prepared AutoResearch campaign.",
             "research submit-iteration": (
@@ -3391,7 +3393,7 @@ def _guided_setup_draft(args: argparse.Namespace) -> dict[str, Any]:
     supplied_workspace = draft.pop("workspace_id", args.workspace_id)
     if supplied_workspace != args.workspace_id:
         raise ValueError("guided setup draft workspace does not match --workspace-id")
-    if set(draft) != {"template_id", "installation_id", "bindings"}:
+    if set(draft) != {"template_id", "installation_id", "bindings", "stop_rules"}:
         raise ValueError("guided setup draft has unsupported fields")
     return {"workspace_id": args.workspace_id, **draft}
 
@@ -3498,13 +3500,20 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
     )
     from bashgym.campaigns.autoresearch import load_autoresearch_template_definitions
     from bashgym.campaigns.autoresearch_dataset import AUTORESEARCH_DATASET_RECEIPT_FILENAME
-    from bashgym.campaigns.autoresearch_evidence import AUTORESEARCH_EVALUATION_FILENAME
+    from bashgym.campaigns.autoresearch_evidence import (
+        AUTORESEARCH_EVALUATION_FILENAME,
+        validate_evaluator_readiness_contract,
+    )
     from bashgym.campaigns.contracts import CodeMutationKind, StageKind
+    from bashgym.campaigns.diagnostic_actions import (
+        AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+    )
     from bashgym.campaigns.installation import autoresearch_binding_plan
     from bashgym.campaigns.lineage import ApprovedSourceRepositoryProfile
     from bashgym.campaigns.remote import (
         ApprovedCodeLineageExecutionBinding,
         ApprovedRemoteExecutorProfile,
+        DiagnosticStageContract,
         PinnedRemoteStageProfile,
         RegisteredRemoteEvaluationDatasetSource,
         RegisteredRemoteModelSource,
@@ -3542,6 +3551,40 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
     if definition is None:
         raise ValueError("installed AutoResearch template was not found")
     binding = autoresearch_binding_plan(definition)
+    diagnostic_values = (
+        args.diagnostic_script,
+        args.diagnostic_contract_file,
+        args.diagnostic_budget_reservation,
+    )
+    if any(value is not None for value in diagnostic_values) and not all(
+        value is not None for value in diagnostic_values
+    ):
+        raise ValueError(
+            "diagnostic activation requires --diagnostic-script, "
+            "--diagnostic-contract-file, and --diagnostic-budget-reservation"
+        )
+    readiness_values = (
+        args.evaluator_known_good_case_id,
+        args.evaluator_known_bad_case_id,
+        args.baseline_repeat_count,
+        args.maximum_baseline_spread,
+    )
+    if any(value is not None for value in readiness_values) and not all(
+        value is not None for value in readiness_values
+    ):
+        raise ValueError("all evaluator readiness options must be supplied together")
+    evaluator_readiness_contract = (
+        validate_evaluator_readiness_contract(
+            {
+                "known_good_case_id": args.evaluator_known_good_case_id,
+                "known_bad_case_id": args.evaluator_known_bad_case_id,
+                "baseline_repeat_count": args.baseline_repeat_count,
+                "maximum_baseline_spread": args.maximum_baseline_spread,
+            }
+        )
+        if all(value is not None for value in readiness_values)
+        else None
+    )
     registered_base_model = RegisteredRemoteModelSource(
         source_id=(args.model_source_id or f"{args.executor_profile_id}-registered-base"),
         compute_profile_id=binding.compute_profile_id,
@@ -3648,6 +3691,20 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
             input_files=training_inputs,
             input_sha256=input_hashes,
             script_args=tuple(args.training_arg),
+            output_paths=(
+                (
+                    "checkpoints",
+                    "final",
+                    "training_manifest.json",
+                    "training_metrics.jsonl",
+                )
+                if stage == StageKind.FULL_TRAINING and args.intermediate_checkpoint_limit > 0
+                else (
+                    "final",
+                    "training_manifest.json",
+                    "training_metrics.jsonl",
+                )
+            ),
             capacity_policy=capacity,
             budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
             budget_reservation=reservations[stage],
@@ -3667,13 +3724,47 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         script_sha256=sha256_file(evaluator_file),
         input_files=evaluation_inputs,
         input_sha256=evaluation_input_hashes,
-        script_args=tuple(args.evaluation_arg),
+        script_args=(
+            *tuple(args.evaluation_arg),
+            *(
+                ("--checkpoint-limit", str(args.intermediate_checkpoint_limit))
+                if args.intermediate_checkpoint_limit > 0
+                else ()
+            ),
+        ),
         output_paths=(AUTORESEARCH_EVALUATION_FILENAME,),
         capacity_policy=capacity,
         budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
         budget_reservation=args.evaluation_budget_reservation,
         python_executable=args.python_executable,
     )
+    diagnostic_stage = None
+    if all(value is not None for value in diagnostic_values):
+        diagnostic_script = Path(args.diagnostic_script).expanduser().resolve()
+        diagnostic_contract_path = Path(args.diagnostic_contract_file).expanduser().resolve()
+        diagnostic_contract = DiagnosticStageContract.model_validate_json(
+            diagnostic_contract_path.read_text(encoding="utf-8")
+        )
+        diagnostic_inputs = tuple(
+            sorted(
+                {Path(value).expanduser().resolve() for value in args.diagnostic_input},
+                key=lambda path: path.name,
+            )
+        )
+        diagnostic_stage = PinnedRemoteStageProfile(
+            stage=StageKind.CONTRACT_EVALUATION,
+            script_path=diagnostic_script,
+            script_sha256=sha256_file(diagnostic_script),
+            input_files=diagnostic_inputs,
+            input_sha256={path.name: sha256_file(path) for path in diagnostic_inputs},
+            script_args=tuple(args.diagnostic_arg),
+            output_paths=(AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,),
+            capacity_policy=capacity,
+            budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
+            budget_reservation=args.diagnostic_budget_reservation,
+            python_executable=args.python_executable,
+            diagnostic_contract=diagnostic_contract,
+        )
     data_build_stage = None
     data_build_requested = bool(
         args.data_build_script
@@ -3730,7 +3821,12 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         remote_work_dir=device.work_dir,
         stages=tuple(
             stage
-            for stage in (data_build_stage, evaluation_stage, *training_stages)
+            for stage in (
+                data_build_stage,
+                diagnostic_stage,
+                evaluation_stage,
+                *training_stages,
+            )
             if stage is not None
         ),
         registered_base_model=registered_base_model,
@@ -3772,6 +3868,11 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
             metric_contract={
                 "primary_metric": binding.primary_metric,
                 "metric_direction": binding.metric_direction.value,
+                **(
+                    {"evaluator_readiness": evaluator_readiness_contract}
+                    if evaluator_readiness_contract is not None
+                    else {}
+                ),
             },
             code_digest=sha256_file(evaluator_file),
         ),
@@ -4298,6 +4399,29 @@ def cmd_research_state(args: argparse.Namespace) -> int:
     return _campaign_read_collection(args, "research-state", "research")
 
 
+def cmd_research_failures(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "research-failures", "failures")
+
+
+def cmd_research_context(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/research/context",
+        payload={
+            "workspace_id": args.workspace_id,
+            "campaign_id": args.campaign_id,
+            "proposal_id": args.proposal_id,
+            "query": args.query,
+            "categories": args.categories.split(","),
+            "limit": args.limit,
+        },
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="context")
+    )
+
+
 def cmd_research_wait(args: argparse.Namespace) -> int:
     response, error = _campaign_request(
         args,
@@ -4646,6 +4770,10 @@ def cmd_campaign_create(args: argparse.Namespace) -> int:
             "title": args.title,
             "template_id": args.template_id,
         }
+        if args.stop_rules:
+            payload["stop_rules"] = _read_campaign_json(
+                args.stop_rules, label="AutoResearch stop rules"
+            )
         path = "/campaigns/from-template"
     else:
         document = _read_campaign_json(args.manifest, label="campaign manifest")
@@ -4701,22 +4829,26 @@ def cmd_campaign_propose(args: argparse.Namespace) -> int:
     if set(proposal).intersection(prohibited):
         raise ValueError("study proposal contains server-owned fields")
     role = getattr(args, "autoresearch_role", None)
-    if role == "candidate" and not args.parent_proposal_id:
-        raise ValueError("AutoResearch candidate requires --parent-proposal")
-    if role != "candidate" and args.parent_proposal_id:
-        raise ValueError("--parent-proposal is only valid for an AutoResearch candidate")
+    if role in {"candidate", "diagnostic"} and not args.parent_proposal_id:
+        raise ValueError(f"AutoResearch {role} requires --parent-proposal")
+    if role not in {"candidate", "diagnostic"} and args.parent_proposal_id:
+        raise ValueError(
+            "--parent-proposal is only valid for an AutoResearch candidate or diagnostic"
+        )
     campaign_path = f"/campaigns/{_quoted_identifier(args.campaign_id)}"
     path = f"{campaign_path}/proposals"
     if role == "baseline":
         path = f"{campaign_path}/autoresearch/baseline"
     elif role == "candidate":
         path = f"{campaign_path}/autoresearch/candidates"
+    elif role == "diagnostic":
+        path = f"{campaign_path}/autoresearch/diagnostics"
     payload = {
         "workspace_id": args.workspace_id,
         "expected_version": args.expected_version,
         **proposal,
     }
-    if role == "candidate":
+    if role in {"candidate", "diagnostic"}:
         payload["parent_proposal_id"] = args.parent_proposal_id
     return _campaign_post(
         args,
@@ -5262,7 +5394,7 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_setup.add_argument("--budget-unit", required=True)
     campaign_setup.add_argument("--budget-limit", type=float, required=True)
     campaign_setup.add_argument("--max-attempts", type=int, required=True)
-    campaign_setup.add_argument("--minimum-improvement", type=float, default=0.0)
+    campaign_setup.add_argument("--minimum-improvement", type=float, required=True)
     campaign_setup.add_argument("--target-metric", type=float)
     campaign_setup.add_argument("--deadline")
     campaign_setup.add_argument("--retention-days-failed", type=int, default=90)
@@ -5347,7 +5479,36 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_activate.add_argument("--evaluation-input", action="append", default=[])
     campaign_activate.add_argument("--evaluation-arg", action="append", default=[])
     campaign_activate.add_argument("--evaluation-budget-reservation", type=float, required=True)
+    campaign_activate.add_argument(
+        "--intermediate-checkpoint-limit",
+        type=int,
+        choices=range(0, 9),
+        default=0,
+        help=(
+            "Retain and evaluate up to 8 intermediate checkpoints through the fixed "
+            "AutoResearch evaluator ABI; 0 disables checkpoint trajectory evidence"
+        ),
+    )
     campaign_activate.add_argument("--evaluation-name", required=True)
+    campaign_activate.add_argument(
+        "--evaluator-known-good-case-id",
+        help="Optional evaluator canary case that must pass before the baseline is accepted",
+    )
+    campaign_activate.add_argument(
+        "--evaluator-known-bad-case-id",
+        help="Optional evaluator canary case that must be rejected before the baseline is accepted",
+    )
+    campaign_activate.add_argument(
+        "--baseline-repeat-count",
+        type=int,
+        choices=range(3, 11),
+        help="Optional number of repeated baseline scores emitted by the evaluator",
+    )
+    campaign_activate.add_argument(
+        "--maximum-baseline-spread",
+        type=float,
+        help="Optional largest accepted max-minus-min spread across repeated baseline scores",
+    )
     campaign_activate.add_argument(
         "--remote-model-path",
         required=True,
@@ -5380,6 +5541,17 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_activate.add_argument("--data-build-input", action="append", default=[])
     campaign_activate.add_argument("--data-build-arg", action="append", default=[])
     campaign_activate.add_argument("--data-build-budget-reservation", type=float)
+    campaign_activate.add_argument(
+        "--diagnostic-script",
+        help="Optional pinned runner for budgeted agent-authored diagnostic actions",
+    )
+    campaign_activate.add_argument(
+        "--diagnostic-contract-file",
+        help="Typed runner limits and open measurement capability manifest",
+    )
+    campaign_activate.add_argument("--diagnostic-input", action="append", default=[])
+    campaign_activate.add_argument("--diagnostic-arg", action="append", default=[])
+    campaign_activate.add_argument("--diagnostic-budget-reservation", type=float)
     campaign_activate.add_argument("--python-executable", default="python3")
     campaign_activate.add_argument("--executor-profile", dest="executor_profile_id", required=True)
     campaign_activate.add_argument("--executor-profile-revision", type=int, default=1)
@@ -5746,6 +5918,10 @@ def build_parser() -> argparse.ArgumentParser:
     create_source.add_argument("--manifest")
     campaign_create.add_argument("--campaign", dest="campaign_id")
     campaign_create.add_argument("--title")
+    campaign_create.add_argument(
+        "--stop-rules",
+        help="Typed AutoResearch stop-rule JSON; required by AutoResearch templates",
+    )
     campaign_create.add_argument("--idempotency-key", required=True)
     campaign_create.add_argument("--correlation-id")
     campaign_create.set_defaults(func=cmd_campaign_create)
@@ -5769,13 +5945,13 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_propose.add_argument("--proposal", required=True)
     campaign_propose.add_argument(
         "--autoresearch-role",
-        choices=("baseline", "candidate"),
+        choices=("baseline", "candidate", "diagnostic"),
         help="Submit through the baseline-first AutoResearch policy boundary",
     )
     campaign_propose.add_argument(
         "--parent-proposal",
         dest="parent_proposal_id",
-        help="Current incumbent proposal ID for an AutoResearch candidate",
+        help="Reference proposal ID for an AutoResearch candidate or diagnostic",
     )
     campaign_propose.set_defaults(func=cmd_campaign_propose)
 
@@ -6030,6 +6206,30 @@ def build_parser() -> argparse.ArgumentParser:
     research_prepare.add_argument("--session-id")
     research_prepare.set_defaults(func=cmd_campaign_setup_context)
 
+    research_context = research_sub.add_parser(
+        "context",
+        help="Collect bounded paper and repository citations for one proposal",
+        parents=[json_parent, campaign_connection],
+    )
+    research_context.add_argument("--campaign", dest="campaign_id", required=True)
+    research_context.add_argument("--proposal", dest="proposal_id", required=True)
+    research_context.add_argument("--query", required=True)
+    research_context.add_argument(
+        "--categories",
+        choices=(
+            "research",
+            "github",
+            "pdf",
+            "research,github",
+            "research,pdf",
+            "github,pdf",
+            "research,github,pdf",
+        ),
+        default="research",
+    )
+    research_context.add_argument("--limit", type=int, choices=range(1, 11), default=5)
+    research_context.set_defaults(func=cmd_research_context)
+
     research_state = research_sub.add_parser(
         "state",
         help="Read the native-agent goal brief and Markdown progress view",
@@ -6037,6 +6237,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     research_state.add_argument("--campaign", dest="campaign_id", required=True)
     research_state.set_defaults(func=cmd_research_state)
+
+    research_failures = research_sub.add_parser(
+        "failures",
+        help="Compare bounded evaluator-authored failure categories",
+        parents=[json_parent, campaign_connection],
+    )
+    research_failures.add_argument("--campaign", dest="campaign_id", required=True)
+    research_failures.set_defaults(func=cmd_research_failures)
 
     research_wait = research_sub.add_parser(
         "wait",
@@ -6058,7 +6266,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     research_submit = research_sub.add_parser(
         "submit-iteration",
-        help="Submit one baseline or candidate iteration",
+        help="Submit one baseline, candidate, or diagnostic iteration",
         parents=[json_parent, campaign_connection],
     )
     add_campaign_mutation_arguments(research_submit)
@@ -6066,13 +6274,13 @@ def build_parser() -> argparse.ArgumentParser:
     research_submit.add_argument(
         "--role",
         dest="autoresearch_role",
-        choices=("baseline", "candidate"),
+        choices=("baseline", "candidate", "diagnostic"),
         required=True,
     )
     research_submit.add_argument(
         "--parent-proposal",
         dest="parent_proposal_id",
-        help="Current incumbent proposal ID; required for a candidate",
+        help="Reference proposal ID; required for a candidate or diagnostic",
     )
     research_submit.set_defaults(func=cmd_campaign_propose)
 

@@ -57,6 +57,11 @@ export interface CampaignAgentHostArtifactQuery {
   limit?: number
 }
 
+export interface CampaignAgentHostWaitQuery {
+  afterCursor: number
+  timeoutSeconds: number
+}
+
 export interface CampaignAgentHostTransport {
   register(body: CampaignAgentHostRegistrationBody): Promise<unknown>
   claim(registrationId: string): Promise<unknown>
@@ -70,6 +75,7 @@ export interface CampaignAgentHostTransport {
   ): Promise<unknown>
   heartbeat?(credential: Buffer, body: CampaignAgentHostHeartbeatBody): Promise<unknown>
   observe?(credential: Buffer): Promise<unknown>
+  wait?(credential: Buffer, query: CampaignAgentHostWaitQuery): Promise<unknown>
   artifacts?(credential: Buffer, query: CampaignAgentHostArtifactQuery): Promise<unknown>
 }
 
@@ -1232,6 +1238,29 @@ export class CampaignAgentHostController {
       'campaign_observe',
       this.options.transport.observe,
       'observe'
+    )
+  }
+
+  async wait(terminalId: string, query: CampaignAgentHostWaitQuery): Promise<unknown> {
+    if (
+      !query ||
+      typeof query !== 'object' ||
+      Object.keys(query).some((key) => key !== 'afterCursor' && key !== 'timeoutSeconds') ||
+      !Number.isSafeInteger(query.afterCursor) ||
+      query.afterCursor < 0 ||
+      !Number.isSafeInteger(query.timeoutSeconds) ||
+      query.timeoutSeconds < 1 ||
+      query.timeoutSeconds > 55
+    ) {
+      throw new Error('Campaign agent wait query is invalid')
+    }
+    return await this.fixedAction(
+      terminalId,
+      'campaign_observe',
+      this.options.transport.wait
+        ? (credential) => this.options.transport.wait!(credential, query)
+        : undefined,
+      'wait'
     )
   }
 

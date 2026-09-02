@@ -27,6 +27,27 @@ _PAPER = "FFFDF7"
 _TABLE_FILL = "F2EEF9"
 
 
+def _report_metadata(campaign: dict[str, Any], source_digest: str) -> tuple[tuple[str, Any], ...]:
+    reference = campaign.get("autoresearch_reference") or {}
+    values: list[tuple[str, Any]] = [
+        ("Campaign", campaign.get("campaign_id", "unknown")),
+        ("Status", campaign.get("status", "unknown")),
+        ("Current AutoResearch reference", reference.get("proposal_id") or "not recorded"),
+        ("Promoted campaign champion", campaign.get("champion_ref") or "not promoted"),
+    ]
+    costs = campaign.get("recorded_costs") or {}
+    if costs:
+        values.extend(
+            [
+                ("Recorded baseline cost", costs.get("baseline")),
+                ("Recorded candidate cost", costs.get("candidate")),
+                ("Recorded campaign total cost", costs.get("total")),
+            ]
+        )
+    values.append(("Evidence digest", source_digest))
+    return tuple(values)
+
+
 def _series(snapshot: dict[str, Any]) -> list[tuple[str, str, list[tuple[int, float]]]]:
     by_id = {
         item.get("attempt_id"): item for item in snapshot["attempts"] if item.get("attempt_id")
@@ -268,12 +289,7 @@ def write_campaign_docx(
         13,
         _MUTED,
     )
-    metadata = (
-        ("Campaign", snapshot["campaign"].get("campaign_id", "unknown")),
-        ("Status", snapshot["campaign"].get("status", "unknown")),
-        ("Champion", snapshot["campaign"].get("champion_ref") or "unchanged / not recorded"),
-        ("Evidence digest", source_digest),
-    )
+    metadata = _report_metadata(snapshot["campaign"], source_digest)
     for label, value in metadata:
         paragraph = document.add_paragraph()
         paragraph.paragraph_format.space_after = Pt(2)
@@ -422,12 +438,7 @@ def write_campaign_pdf(
         Paragraph("CAMPAIGN EVIDENCE REPORT", title),
         Paragraph(str(campaign.get("objective", "Experiment campaign")), subtitle),
     ]
-    for label, value in (
-        ("Campaign", campaign.get("campaign_id", "unknown")),
-        ("Status", campaign.get("status", "unknown")),
-        ("Champion", campaign.get("champion_ref") or "unchanged / not recorded"),
-        ("Evidence digest", source_digest),
-    ):
+    for label, value in _report_metadata(campaign, source_digest):
         story.append(Paragraph(f"<b>{label}:</b> {value}", body))
     story.extend(
         [

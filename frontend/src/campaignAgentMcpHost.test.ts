@@ -43,6 +43,15 @@ const artifactPage = {
   hasMore: false
 }
 
+const waitResult = {
+  schemaVersion: 'campaign_agent_wait.v1',
+  scope: { workspaceId: 'workspace-a', campaignId: 'campaign-1' },
+  status: 'changed',
+  afterCursor: 11,
+  nextCursor: 12,
+  observation
+}
+
 async function connect(host: CampaignAgentMcpHost) {
   const launch = await host.start()
   const transport = new StreamableHTTPClientTransport(new URL(launch.url), {
@@ -61,18 +70,24 @@ function hostOptions(
     generation: 'generation-1',
     scope: { workspaceId: 'workspace-a', campaignId: 'campaign-1' },
     observe: async () => observation,
+    wait: async () => waitResult,
     artifacts: async () => artifactPage,
     ...overrides
   }
 }
 
-test('serves only the two fixed read-only campaign tools over authenticated loopback MCP', async (t) => {
+test('serves fixed read-only observe, wait, and artifact tools over authenticated loopback MCP', async (t) => {
   const artifactCalls: unknown[] = []
+  const waitCalls: unknown[] = []
   const host = new CampaignAgentMcpHost({
     terminalId: 'terminal-1',
     generation: 'generation-1',
     scope: { workspaceId: 'workspace-a', campaignId: 'campaign-1' },
     observe: async () => observation,
+    wait: async (args) => {
+      waitCalls.push(args)
+      return waitResult
+    },
     artifacts: async (args) => {
       artifactCalls.push(args)
       return artifactPage
@@ -87,11 +102,17 @@ test('serves only the two fixed read-only campaign tools over authenticated loop
   assert.match(launch.headers['X-BashGym-MCP-Launch'], /^[A-Za-z0-9_-]{43}$/)
   assert.deepEqual(
     (await client.listTools()).tools.map((tool) => tool.name),
-    ['campaign_observe', 'campaign_artifacts']
+    ['campaign_observe', 'campaign_wait', 'campaign_artifacts']
   )
 
   const observed = await client.callTool({ name: 'campaign_observe', arguments: {} })
   assert.deepEqual(observed.structuredContent, observation)
+  const waited = await client.callTool({
+    name: 'campaign_wait',
+    arguments: { afterCursor: 11, timeoutSeconds: 30 }
+  })
+  assert.deepEqual(waited.structuredContent, waitResult)
+  assert.deepEqual(waitCalls, [{ afterCursor: 11, timeoutSeconds: 30 }])
   const artifacts = await client.callTool({
     name: 'campaign_artifacts',
     arguments: { afterCursor: 'a1.ABCDEFGHIJK', limit: 10 }

@@ -171,6 +171,14 @@ Always analyze the saved run:
 bashgym training analyze --run-id <run_id> --models-dir data/models --json
 ```
 
+For an AutoResearch campaign, do not label a run failed merely because one
+secondary metric regressed. Read the persisted outcome assessment alongside the
+reference decision. Execution/evidence invalidity and a predeclared protected
+metric breach are failures; an unprotected regression can be an acceptable
+tradeoff, and a discarded result with another measured gain is mixed evidence.
+Keep single-run findings descriptive until the declared seed or robustness
+replication is complete.
+
 When the run belongs to a durable AutoResearch campaign, do not infer a campaign
 decision from the training endpoint's completion status. Finish the pinned
 evaluation and register its run/attempt/artifact/evaluation lineage. A completed
@@ -215,8 +223,21 @@ protected evaluation, promote a model, or publish an artifact.
 
 Minimum evidence:
 
-- SFT/DPO/Session Distillation: metrics plus heldout behavior; terminal-facing models also need environment pass@k.
-- GRPO/RLVR: rollout pass@k, holdout gate, reward-hacking canaries, and reward/zero-std sampling diagnostics.
+- SFT/Session Distillation: metrics plus heldout behavior; terminal-facing
+  models also need environment pass@k.
+- DPO: the same heldout behavior plus a preference-integrity audit bound to the
+  exact dataset and labeling contract. Require explicit thresholds for pair
+  count, agreement, ambiguity, position-order bias, contradictory labels, and
+  heldout overlap. Do not treat schema-valid preference rows or pair count alone
+  as evidence that DPO labels are usable.
+- GRPO/RLVR: rollout pass@k, holdout gate, reward-hacking canaries, and
+  reward/zero-std sampling diagnostics. Preserve the verifier's named reward
+  components in rollout evidence. Before treating the method as ready, bind the
+  exact reward-spec digest, summarize every component distribution, check any
+  predeclared hard component bounds, and require the campaign's explicit
+  minimum canary count and maximum canary/hard-constraint violation rates.
+  A blended scalar with useful variance does not override a failed component
+  constraint or an unguarded exploit canary.
 - DPPO: rollout replay with logprobs, replay enrichment, smoke plan/bundle, then pass@k before/after comparison.
 - ECHO/RWML: diagnostic world-model metrics only; do not promote from these without heldout pass@k/safety correlation.
 - Reward model: strict reward examples plus heldout reward eval.

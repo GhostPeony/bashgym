@@ -17,6 +17,101 @@ For every direct strategy, store the exact `checkpoint_limit`, `artifact_retenti
 
 ## Method Matrix
 
+### AutoResearch Method Selection
+
+The host agent chooses the scientific method. BashGym should first expose a
+`method_selection` projection from the existing research decision packet. For
+each method, read its runner support, evidence, missing evidence, explicit
+thresholds, blocking reasons, and smallest recommended probe. A method marked
+`unsupported_by_runner` is not made executable by changing a proposal label.
+
+Do not switch methods from one aggregate score. Diagnose the learning signal:
+
+- Use SFT when the model lacks a behavior or reasoning pattern and validated
+  demonstrations cover the failing slices.
+- Use DPO when the model generates plausible alternatives but ranks them
+  incorrectly, and same-prompt chosen/rejected pairs have reliable labels.
+- Use GRPO or RLVR only when grouped rollouts have reward contrast and the
+  verifier is reliable. All-failed groups need curriculum or supervised
+  warm-start data; all-correct groups need harder tasks rather than more RL.
+- Use teacher distillation only when a validated teacher beats the student on
+  the same suite. Use session distillation only when measured recovery traces
+  show that hints or corrected continuations improve the target behavior.
+- If a critical signal such as constant output or a broken evaluator is
+  present, diagnose it before any training method.
+
+Campaign thresholds must be visible to the agent. Required categories are
+demonstration coverage and contamination for SFT; pair count, agreement, and
+ambiguity for DPO; rollout count, success band, zero-variance groups, and
+verifier errors for GRPO/RLVR; teacher gap and output acceptance for teacher
+distillation; and trace count plus recovery lift for session distillation.
+Numerical probe ranges are advisory until the campaign records its own values.
+For verifier RL, a 5%–95% success band and at most 50% zero-standard-deviation
+groups are useful initial probes, not universal launch rules.
+
+Before changing weights, read `recommended_intervention_families` in the same
+packet. It compares four intervention families without choosing for the host:
+
+- `prompt_or_context` for instruction, output-shape, or context sensitivity;
+- `retrieval_or_tool` for dynamic knowledge or missing external context;
+- `weight_update` when at least one installed training method clears its
+  evidence thresholds;
+- `serving_optimization` when the trained and served representations may differ.
+
+A `probe_recommended` status means the named fixed control can answer a cheaper
+question before training. `eligible` means the evidence permits consideration,
+not that BashGym selected or started the method. If more than one family remains
+plausible, use the smallest discriminating diagnostic and let the fixed suite
+decide rather than treating a category label as proof.
+
+For a long parent-to-child fine-tuning lineage, use a `plasticity_probe` only
+when the installed diagnostic capability can measure the initial and final
+probe metric, retention delta, cumulative training steps and tokens, and dataset
+revision count. The recipe must declare one fixed step budget, metric direction,
+seed, sample scope, maximum tolerated retention drop, and minimum acceptable
+adaptation-efficiency ratio. Repeat the exact recipe digest on at least two
+lineage checkpoints. BashGym then reports retention regression separately from
+suspected plasticity loss; it does not infer either from a terminal score, a
+loss curve, or two probes with different budgets.
+
+Separate passive evidence from active diagnostics. Fixed-suite failures,
+checkpoint trajectories, deterministic data-quality summaries, and emitted
+training metrics are read from completed work and should not trigger another
+run. When a missing measurement would change the method decision, inspect
+`research state.diagnostic_capabilities` and submit a bounded diagnostic action
+only if the installed runner can plausibly answer it. The matrix is an honest
+capability declaration, not a closed design registry: the agent may formulate a
+novel bounded probe, and an unsupported result must remain unsupported rather
+than becoming a fallback SFT, DPO, GRPO, or RLVR run.
+
+For generated data, distinguish deterministic verification and splitting from
+generation itself. Require the receipt to bind the effective generator config
+and implementation; if the provider cannot accept a generation seed, record
+that generation as unseeded and treat the recipe seed as the split seed only.
+
+Current research basis:
+
+- [On the Mechanism of Reasoning Pattern Selection in Reinforcement Learning for Language Models (2025)](https://arxiv.org/abs/2506.04695)
+  finds RLVR primarily selects existing reasoning patterns and reports that
+  high-quality SFT can improve RL optimization for weaker models.
+- [Reassessing the Role of Supervised Fine-Tuning in VLM Reasoning (2025)](https://arxiv.org/abs/2512.12690)
+  finds the SFT-versus-RL result depends on model capacity, data scale, and
+  distribution, and reports deceptive reward signals in RL experiments.
+- [Supervised Reinforcement Learning (2025)](https://arxiv.org/abs/2510.25992)
+  studies the regime where small models rarely sample correct RLVR solutions
+  while ordinary SFT overfits rigid long demonstrations.
+- [DAPO (2025)](https://arxiv.org/abs/2503.14476) uses dynamic sampling to
+  remove uninformative all-correct and all-incorrect rollout groups.
+- [Spurious Rewards (2025)](https://arxiv.org/abs/2506.10947) shows that RLVR
+  gains can be model-specific and can occur under rewards that do not measure
+  the intended behavior.
+- [LLMs Gaming Verifiers (2026)](https://arxiv.org/abs/2604.15149) demonstrates
+  verifier exploitation and motivates invariant or adversarial verifier
+  canaries before and after RLVR.
+
+The older defining papers remain useful for algorithm definitions, but they do
+not override these newer operational findings.
+
 ### SFT
 
 Use for imitation from gold traces, curated messages, or teacher outputs.

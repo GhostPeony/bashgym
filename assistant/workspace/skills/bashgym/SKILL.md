@@ -8,10 +8,17 @@ tags: [bashgym, training, evaluation, agents, artifacts]
 # BashGym
 
 BashGym runs a repeatable model-improvement loop: evaluate a starting model on
-a fixed suite, inspect failures, change one declared part of the data or
+a fixed suite, inspect behavioral errors, change one declared part of the data or
 training process, train a candidate, evaluate it against the same suite, then
 keep, discard, iterate, or report. The host agent forms hypotheses and authors
 the next intervention; BashGym executes and records the experiment.
+
+Treat regression as evidence, not automatically as a failed experiment. Before
+Start, identify the primary objective, predeclared protected gates and
+tolerances, informational metrics, evaluator-validity checks, and any required
+seed or robustness replication. Only invalid/unverifiable execution and a hard
+protected-gate breach are failures; other completed outcomes may be tradeoffs,
+mixed evidence, or no demonstrated gain.
 
 The same experiment record contains dataset and model revisions, exact configs,
 runs, metrics, evaluations, artifacts, budgets, and reports. Codex, Cursor,
@@ -33,9 +40,7 @@ project at a time; never infer a project from the most recent conversation.
 - For the general architecture boundary, read [references/architecture-overview.md](references/architecture-overview.md).
 - For evidence and promotion gates, read [references/eval-capabilities.md](references/eval-capabilities.md).
 - For a multi-iteration baseline/hypothesis loop, use the durable campaign API,
-  `bashgym campaign doctor`, and campaign ledger surfaces; do not start new
-  research on the prototype `/api/autoresearch/*` surface (hidden by default,
-  registered only when `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`).
+  `bashgym campaign doctor`, and campaign ledger surfaces.
 
 Do not treat this router as live run state. Inspect the API/CLI, run manifests, runtime processes, and current GBrain sources before stating what is active or what happened most recently.
 

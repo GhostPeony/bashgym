@@ -108,6 +108,13 @@ def test_guided_setup_cli_routes_doctor_validate_and_atomic_create(monkeypatch, 
             "compute": "compute-a",
             "evaluation": "evaluation-a",
         },
+        "stop_rules": {
+            "schema_version": "autoresearch_stop_rules.v1",
+            "max_attempts": 5,
+            "budget_unit": "gpu_hours",
+            "max_total_cost": 10.0,
+            "minimum_improvement": 0.01,
+        },
     }
     draft_path = tmp_path / "guided-setup-draft.json"
     draft_path.write_text(json.dumps(draft), encoding="utf-8")

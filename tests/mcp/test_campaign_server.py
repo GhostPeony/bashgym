@@ -129,6 +129,15 @@ class RecordingClient:
                     "next_action": "propose_candidate",
                 },
             }
+        if path.endswith("/research-failures"):
+            return {
+                "schema_version": "bashgym.research_failures.v1",
+                "campaign_id": "campaign-1",
+                "reference": None,
+                "candidate": None,
+                "comparison": [],
+                "truncated": False,
+            }
         if method == "POST":
             return {
                 "campaign": {"campaign_id": "campaign-1", "version": 3},
@@ -276,6 +285,30 @@ async def call_tool(server, name: str, arguments: dict[str, Any]) -> dict[str, A
     return await server._tool_manager.call_tool(name, arguments, convert_result=False)
 
 
+async def test_research_failures_delegates_to_the_canonical_read_route():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    result = await call_tool(server, "research_failures", {"campaign_id": "campaign-1"})
+
+    assert result["ok"] is True
+    assert result["failures"]["schema_version"] == "bashgym.research_failures.v1"
+    assert client.calls == [
+        {
+            "method": "GET",
+            "path": "/campaigns/campaign-1/research-failures",
+            "query": {"workspace_id": "workspace-a"},
+            "payload": None,
+            "headers": None,
+        }
+    ]
+
+
 async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
     runtime = McpClientRuntime()
     connected = await runtime.connect_stdio(
@@ -298,7 +331,9 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
         tools = {tool["name"]: tool for tool in connected["inventory"]["tools"]}
         assert set(tools) == {
             "research_prepare",
+            "research_context",
             "research_state",
+            "research_failures",
             "research_wait",
             "research_start",
             "research_submit_iteration",
@@ -344,7 +379,9 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
 
         assert tools["campaign_list"]["annotations"]["readOnlyHint"] is True
         assert tools["research_prepare"]["annotations"]["readOnlyHint"] is True
+        assert tools["research_context"]["annotations"]["readOnlyHint"] is True
         assert tools["research_state"]["annotations"]["readOnlyHint"] is True
+        assert tools["research_failures"]["annotations"]["readOnlyHint"] is True
         assert tools["research_wait"]["annotations"]["readOnlyHint"] is True
         assert tools["research_wait"]["inputSchema"]["properties"]["after_cursor"]["minimum"] == 0
         assert tools["research_wait"]["inputSchema"]["properties"]["timeout_seconds"] == {
@@ -697,6 +734,125 @@ async def test_research_submit_iteration_routes_explicit_baseline_without_parent
     }
 
 
+async def test_research_submit_iteration_preserves_exploratory_intervention_bundle():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    result = await call_tool(
+        server,
+        "research_submit_iteration",
+        {
+            "campaign_id": "campaign-1",
+            "expected_version": 7,
+            "role": "candidate",
+            "parent_proposal_id": "candidate-parent",
+            "proposal": {
+                "proposal_id": "candidate-exploratory",
+                "primary_variable": "training_recipe.learning_rate",
+                "intervention_mode": "exploratory",
+                "changed_variables": [
+                    "training_recipe.learning_rate",
+                    "training_recipe.seed",
+                ],
+                "hypothesis_family_id": "family-optimizer-schedule",
+            },
+        },
+    )
+
+    assert result["ok"] is True
+    assert client.calls[0]["path"] == "/campaigns/campaign-1/autoresearch/candidates"
+    assert client.calls[0]["payload"] == {
+        "workspace_id": "workspace-a",
+        "expected_version": 7,
+        "parent_proposal_id": "candidate-parent",
+        "proposal_id": "candidate-exploratory",
+        "primary_variable": "training_recipe.learning_rate",
+        "intervention_mode": "exploratory",
+        "changed_variables": [
+            "training_recipe.learning_rate",
+            "training_recipe.seed",
+        ],
+        "hypothesis_family_id": "family-optimizer-schedule",
+    }
+
+
+async def test_research_submit_iteration_routes_agent_designed_diagnostic():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    result = await call_tool(
+        server,
+        "research_submit_iteration",
+        {
+            "campaign_id": "campaign-1",
+            "expected_version": 8,
+            "role": "diagnostic",
+            "parent_proposal_id": "candidate-parent",
+            "proposal": {
+                "proposal_id": "diagnostic-loss-slope",
+                "evaluation_recipe": {
+                    "schema_version": "bashgym.autoresearch_diagnostic_recipe.v1",
+                    "probe_family": "loss_landscape",
+                },
+            },
+        },
+    )
+
+    assert result["ok"] is True
+    assert client.calls[0]["path"] == "/campaigns/campaign-1/autoresearch/diagnostics"
+    assert client.calls[0]["payload"] == {
+        "workspace_id": "workspace-a",
+        "expected_version": 8,
+        "parent_proposal_id": "candidate-parent",
+        "proposal_id": "diagnostic-loss-slope",
+        "evaluation_recipe": {
+            "schema_version": "bashgym.autoresearch_diagnostic_recipe.v1",
+            "probe_family": "loss_landscape",
+        },
+    }
+
+
+async def test_research_context_delegates_bounded_search():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    await call_tool(
+        server,
+        "research_context",
+        {
+            "campaign_id": "campaign-1",
+            "proposal_id": "proposal-1",
+            "query": "information gain",
+            "categories": ["research", "github"],
+            "limit": 4,
+        },
+    )
+    assert client.calls[0]["path"] == "/research/context"
+    assert client.calls[0]["payload"] == {
+        "workspace_id": "workspace-a",
+        "campaign_id": "campaign-1",
+        "proposal_id": "proposal-1",
+        "query": "information gain",
+        "categories": ["research", "github"],
+        "limit": 4,
+    }
+
+
 @pytest.mark.parametrize(
     "server_owned_field",
     [
@@ -867,7 +1023,18 @@ async def test_campaign_extended_tools_use_strict_paths_bodies_and_persisted_ide
     await call_tool(
         server,
         "campaign_create_from_template",
-        {"campaign_id": "campaign-2", "title": "Embedding cycle", "template_id": "embed-v1"},
+        {
+            "campaign_id": "campaign-2",
+            "title": "Embedding cycle",
+            "template_id": "embed-v1",
+            "stop_rules": {
+                "schema_version": "autoresearch_stop_rules.v1",
+                "max_attempts": 5,
+                "budget_unit": "gpu_hours",
+                "max_total_cost": 10.0,
+                "minimum_improvement": 0.01,
+            },
+        },
     )
     await call_tool(
         server,
@@ -917,6 +1084,13 @@ async def test_campaign_extended_tools_use_strict_paths_bodies_and_persisted_ide
         "campaign_id": "campaign-2",
         "title": "Embedding cycle",
         "template_id": "embed-v1",
+        "stop_rules": {
+            "schema_version": "autoresearch_stop_rules.v1",
+            "max_attempts": 5,
+            "budget_unit": "gpu_hours",
+            "max_total_cost": 10.0,
+            "minimum_improvement": 0.01,
+        },
     }
     assert force_call["path"] == "/campaigns/campaign-2/actions/action-7/force-stop"
     assert set(force_call["payload"]) == {

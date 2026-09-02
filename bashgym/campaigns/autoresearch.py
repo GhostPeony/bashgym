@@ -2,8 +2,8 @@
 
 This module deliberately does not launch training.  It turns the existing campaign
 repository into a scientific control loop: prepare an approved campaign, submit one
-controlled study at a time, record an executor-backed result, decide whether it beat
-the incumbent, and expose the next safe action.
+declared intervention at a time, record an executor-backed result, decide whether it
+beat the incumbent, and expose the next safe action.
 """
 
 from __future__ import annotations
@@ -37,13 +37,17 @@ from bashgym.campaigns.contracts import (
     Identifier,
     ProposalStatus,
     StageDisposition,
+    StageKind,
     StudyProposalSubmission,
     StudyStatus,
     TargetModelContract,
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.diagnostic_actions import AutoResearchDiagnosticRecipe
+from bashgym.campaigns.failure_observations import build_research_failure_packet
 from bashgym.campaigns.lineage import code_mutation_kind_for_variable
+from bashgym.campaigns.method_policy import AutoResearchMethodThresholds
 from bashgym.campaigns.persistence import (
     CampaignPersistenceError,
     MigrationChecksumError,
@@ -117,9 +121,25 @@ def _validate_controlled_candidate_change(
     parent: Any,
     candidate: StudyProposalSubmission,
     *,
-    declared_variable: str,
+    declared_variable: str | None = None,
+    declared_variables: tuple[str, ...] | None = None,
+    intervention_mode: InterventionMode | str = "controlled",
     code_mutation_kind: CodeMutationKind | None,
 ) -> None:
+    mode = InterventionMode(intervention_mode)
+    declarations = declared_variables or ((declared_variable,) if declared_variable else ())
+    if mode == InterventionMode.CONTROLLED:
+        if len(declarations) != 1:
+            raise AutoResearchInvariantError(
+                "autoresearch_controlled_intervention_requires_one_variable"
+            )
+    elif not 2 <= len(declarations) <= 16:
+        raise AutoResearchInvariantError(
+            "autoresearch_exploratory_intervention_variable_limit_invalid"
+        )
+    if mode == InterventionMode.EXPLORATORY and code_mutation_kind is not None:
+        raise AutoResearchInvariantError("autoresearch_exploratory_code_bundle_not_supported")
+
     parent_leaves = _scientific_leaves(parent)
     candidate_leaves = _scientific_leaves(candidate)
     all_paths = set(parent_leaves) | set(candidate_leaves)
@@ -136,12 +156,22 @@ def _validate_controlled_candidate_change(
         return
     if not changed_paths:
         raise AutoResearchInvariantError("autoresearch_candidate_declared_variable_unchanged")
-    declared = declared_variable.strip()
-    if "." in declared:
-        matches = [path for path in all_paths if ".".join(path) == declared]
-    else:
-        matches = [path for path in all_paths if path[-1] == declared]
-    if len(matches) != 1 or changed_paths != {matches[0]}:
+
+    covered: set[tuple[str, ...]] = set()
+    for declaration in declarations:
+        declared = declaration.strip()
+        if "." in declared:
+            declared_path = tuple(declared.split("."))
+            matches = {path for path in all_paths if path[: len(declared_path)] == declared_path}
+        else:
+            matches = {path for path in all_paths if path[-1] == declared}
+        changed_matches = matches & changed_paths
+        if not matches or not changed_matches:
+            raise AutoResearchInvariantError("autoresearch_candidate_declared_variable_unchanged")
+        if covered & changed_matches:
+            raise AutoResearchInvariantError("autoresearch_candidate_changed_undeclared_variable")
+        covered.update(changed_matches)
+    if covered != changed_paths:
         raise AutoResearchInvariantError("autoresearch_candidate_changed_undeclared_variable")
 
 
@@ -153,6 +183,12 @@ class MetricDirection(str, Enum):
 class ExperimentRole(str, Enum):
     BASELINE = "baseline"
     CANDIDATE = "candidate"
+    DIAGNOSTIC = "diagnostic"
+
+
+class InterventionMode(str, Enum):
+    CONTROLLED = "controlled"
+    EXPLORATORY = "exploratory"
 
 
 class ExperimentProvenance(str, Enum):
@@ -204,7 +240,7 @@ class AutoResearchStopRules(FrozenContractModel):
     budget_unit: Identifier
     max_total_cost: float = Field(gt=0)
     target_metric: float | None = None
-    minimum_improvement: float = Field(default=0.0, ge=0)
+    minimum_improvement: float = Field(ge=0)
     protected_metrics: tuple[ProtectedMetricGate, ...] = ()
     deadline: datetime | None = None
 
@@ -230,6 +266,9 @@ class AutoResearchCampaignSpec(FrozenContractModel):
     primary_metric: Identifier
     metric_direction: MetricDirection
     stop_rules: AutoResearchStopRules
+    method_thresholds: AutoResearchMethodThresholds = Field(
+        default_factory=AutoResearchMethodThresholds
+    )
     ledger_project_id: Identifier | None = None
     evaluation_suite_id: Identifier | None = None
     require_sealed_artifact: bool = True
@@ -256,6 +295,8 @@ class AutoResearchProposalControl(FrozenContractModel):
     role: ExperimentRole
     parent_proposal_id: Identifier | None = None
     changed_variables: tuple[str, ...] = ()
+    intervention_mode: InterventionMode = InterventionMode.CONTROLLED
+    hypothesis_family_id: Identifier | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
     @field_validator("changed_variables")
@@ -269,15 +310,78 @@ class AutoResearchProposalControl(FrozenContractModel):
     @model_validator(mode="after")
     def validate_lineage(self) -> AutoResearchProposalControl:
         if self.role == ExperimentRole.BASELINE:
-            if self.parent_proposal_id is not None or self.changed_variables:
+            if (
+                self.parent_proposal_id is not None
+                or self.changed_variables
+                or self.intervention_mode != InterventionMode.CONTROLLED
+                or self.hypothesis_family_id is not None
+            ):
                 raise ValueError("baseline cannot have a parent or changed variables")
-        elif self.parent_proposal_id is None or len(self.changed_variables) != 1:
-            raise ValueError("candidate requires one parent and exactly one changed variable")
+        elif self.role == ExperimentRole.DIAGNOSTIC:
+            if (
+                self.parent_proposal_id is None
+                or self.changed_variables
+                or self.intervention_mode != InterventionMode.CONTROLLED
+                or self.hypothesis_family_id is not None
+            ):
+                raise ValueError("diagnostic requires one parent and cannot change the model")
+        elif self.parent_proposal_id is None:
+            raise ValueError("candidate requires one parent")
+        elif self.intervention_mode == InterventionMode.CONTROLLED:
+            if len(self.changed_variables) != 1:
+                raise ValueError("controlled candidate requires exactly one changed variable")
+        elif not 2 <= len(self.changed_variables) <= 16:
+            raise ValueError("exploratory candidate requires 2 to 16 changed variables")
+        elif self.hypothesis_family_id is None:
+            raise ValueError("exploratory candidate requires a hypothesis family")
         return self
 
     @property
     def control_digest(self) -> str:
-        return canonical_hash(self.model_dump(mode="json", exclude={"created_at"}))
+        payload = {
+            "schema_version": self.schema_version,
+            "workspace_id": self.workspace_id,
+            "campaign_id": self.campaign_id,
+            "proposal_id": self.proposal_id,
+            "role": self.role.value,
+            "parent_proposal_id": self.parent_proposal_id,
+            "changed_variables": list(self.changed_variables),
+        }
+        if self.intervention_mode != InterventionMode.CONTROLLED:
+            payload["intervention_mode"] = self.intervention_mode.value
+        if self.hypothesis_family_id is not None:
+            payload["hypothesis_family_id"] = self.hypothesis_family_id
+        return canonical_hash(payload)
+
+
+class AutoResearchDiagnosticResult(FrozenContractModel):
+    """Durable aggregate result from a non-quality research diagnostic."""
+
+    schema_version: Literal["autoresearch_diagnostic_result.v1"] = (
+        "autoresearch_diagnostic_result.v1"
+    )
+    workspace_id: Identifier
+    campaign_id: Identifier
+    proposal_id: Identifier
+    study_id: Identifier
+    attempt_id: Identifier
+    status: Literal["completed", "unsupported"]
+    projection: dict[str, Any]
+    actual_cost: float = Field(ge=0)
+    recorded_at: datetime = Field(default_factory=utc_now)
+    replayed: bool = False
+
+    @model_validator(mode="after")
+    def validate_result(self) -> AutoResearchDiagnosticResult:
+        if not math.isfinite(self.actual_cost):
+            raise ValueError("diagnostic actual_cost must be finite")
+        if self.projection.get("schema_version") != "bashgym.research_diagnostic_result.v1":
+            raise ValueError("diagnostic projection schema is invalid")
+        return self
+
+    @property
+    def result_digest(self) -> str:
+        return canonical_hash(self.model_dump(mode="json", exclude={"replayed"}))
 
 
 class AutoResearchResult(FrozenContractModel):
@@ -388,6 +492,9 @@ class AutoResearchTemplatePolicy(FrozenContractModel):
     primary_metric: Identifier
     metric_direction: MetricDirection
     stop_rules: AutoResearchStopRules
+    method_thresholds: AutoResearchMethodThresholds = Field(
+        default_factory=AutoResearchMethodThresholds
+    )
     ledger_project_id: Identifier
     evaluation_suite_id: Identifier
     require_sealed_artifact: bool = True
@@ -436,17 +543,41 @@ class AutoResearchTemplateDefinition(FrozenContractModel):
     def definition_digest(self) -> str:
         return canonical_hash(self.model_dump(mode="json"))
 
+    def validate_campaign_stop_rules(
+        self, stop_rules: AutoResearchStopRules
+    ) -> AutoResearchStopRules:
+        """Validate one campaign's explicit limits against the approved envelope."""
+
+        if self.policy is None:
+            raise ValueError("campaign_stop_rules_not_supported")
+        if stop_rules.max_attempts > self.manifest.max_proposal_rounds:
+            raise ValueError("autoresearch_max_attempts_exceeds_template")
+        manifest_limit = self.manifest.budget_limits.get(stop_rules.budget_unit)
+        if manifest_limit is None:
+            raise ValueError("autoresearch_budget_unit_not_approved")
+        if stop_rules.max_total_cost > manifest_limit:
+            raise ValueError("autoresearch_budget_exceeds_template")
+        if stop_rules.protected_metrics != self.policy.stop_rules.protected_metrics:
+            raise ValueError("autoresearch_protected_metrics_must_match_template")
+        return stop_rules
+
     def materialize_spec(
-        self, workspace_id: str, campaign_id: str
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        *,
+        stop_rules: AutoResearchStopRules,
     ) -> AutoResearchCampaignSpec | None:
         if self.policy is None:
             return None
+        selected_stop_rules = self.validate_campaign_stop_rules(stop_rules)
         return AutoResearchCampaignSpec(
             workspace_id=workspace_id,
             campaign_id=campaign_id,
             primary_metric=self.policy.primary_metric,
             metric_direction=self.policy.metric_direction,
-            stop_rules=self.policy.stop_rules,
+            stop_rules=selected_stop_rules,
+            method_thresholds=self.policy.method_thresholds,
             ledger_project_id=self.policy.ledger_project_id,
             evaluation_suite_id=self.policy.evaluation_suite_id,
             require_sealed_artifact=self.policy.require_sealed_artifact,
@@ -591,6 +722,7 @@ def autoresearch_spec_for_template(
     *,
     workspace_id: str,
     campaign_id: str,
+    stop_rules: AutoResearchStopRules,
     definitions: Iterable[AutoResearchTemplateDefinition] | None = None,
 ) -> AutoResearchCampaignSpec | None:
     """Materialize the durable policy paired with any registered definition."""
@@ -598,7 +730,11 @@ def autoresearch_spec_for_template(
     values = tuple(definitions or builtin_autoresearch_template_definitions())
     for definition in values:
         if definition.template_id == template_id:
-            return definition.materialize_spec(workspace_id, campaign_id)
+            return definition.materialize_spec(
+                workspace_id,
+                campaign_id,
+                stop_rules=stop_rules,
+            )
     return None
 
 
@@ -656,6 +792,27 @@ _AUTORESEARCH_MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             )
             """,
             "CREATE INDEX idx_autoresearch_results_campaign ON autoresearch_results(workspace_id, campaign_id, created_at, result_id)",
+        ),
+    ),
+    (
+        2,
+        "durable_autoresearch_diagnostics",
+        (
+            """
+            CREATE TABLE autoresearch_diagnostic_results (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                proposal_id TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                result_digest TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, campaign_id, proposal_id),
+                FOREIGN KEY(workspace_id, proposal_id)
+                    REFERENCES autoresearch_proposal_controls(workspace_id, proposal_id)
+                    ON DELETE RESTRICT
+            )
+            """,
+            "CREATE INDEX idx_autoresearch_diagnostics_campaign ON autoresearch_diagnostic_results(workspace_id, campaign_id, created_at, proposal_id)",
         ),
     ),
 )
@@ -927,6 +1084,77 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             for row in rows
         )
 
+    def list_autoresearch_diagnostic_results(
+        self, workspace_id: str, campaign_id: str
+    ) -> tuple[AutoResearchDiagnosticResult, ...]:
+        self.get_autoresearch_spec(workspace_id, campaign_id)
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT result_json FROM autoresearch_diagnostic_results
+                WHERE workspace_id = ? AND campaign_id = ?
+                ORDER BY created_at, proposal_id
+                """,
+                (workspace_id, campaign_id),
+            ).fetchall()
+        return tuple(
+            AutoResearchDiagnosticResult.model_validate_json(row["result_json"]) for row in rows
+        )
+
+    def record_autoresearch_diagnostic_result(
+        self, result: AutoResearchDiagnosticResult
+    ) -> AutoResearchDiagnosticResult:
+        """Persist one authenticated aggregate diagnostic projection idempotently."""
+
+        self.get_autoresearch_spec(result.workspace_id, result.campaign_id)
+        canonical = result.model_copy(update={"replayed": False})
+        with self._connection(immediate=True) as connection:
+            control_row = connection.execute(
+                """
+                SELECT control_json FROM autoresearch_proposal_controls
+                WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+                """,
+                (result.workspace_id, result.campaign_id, result.proposal_id),
+            ).fetchone()
+            if control_row is None:
+                raise RecordNotFoundError("AutoResearch proposal control not found")
+            control = AutoResearchProposalControl.model_validate_json(control_row["control_json"])
+            if control.role != ExperimentRole.DIAGNOSTIC:
+                raise AutoResearchInvariantError("autoresearch_diagnostic_role_mismatch")
+            existing = connection.execute(
+                """
+                SELECT result_json, result_digest FROM autoresearch_diagnostic_results
+                WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+                """,
+                (result.workspace_id, result.campaign_id, result.proposal_id),
+            ).fetchone()
+            if existing is not None:
+                stored = AutoResearchDiagnosticResult.model_validate_json(existing["result_json"])
+                if (
+                    existing["result_digest"] != canonical.result_digest
+                    or stored.result_digest != canonical.result_digest
+                    or stored != canonical
+                ):
+                    raise AutoResearchConflictError("autoresearch_diagnostic_result_conflict")
+                return stored.model_copy(update={"replayed": True})
+            connection.execute(
+                """
+                INSERT INTO autoresearch_diagnostic_results(
+                    workspace_id, campaign_id, proposal_id, result_json,
+                    result_digest, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    canonical.workspace_id,
+                    canonical.campaign_id,
+                    canonical.proposal_id,
+                    canonical.model_dump_json(),
+                    canonical.result_digest,
+                    canonical.recorded_at.isoformat(),
+                ),
+            )
+        return canonical
+
     @staticmethod
     def _improvement(direction: MetricDirection, incumbent: float, candidate: float) -> float:
         return (
@@ -1139,16 +1367,42 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 ).fetchone()
                 if parent_row is None:
                     raise AutoResearchInvariantError("autoresearch_exact_parent_outcome_required")
-                incumbent = AutoResearchOutcomeRecord(
+                parent = AutoResearchOutcomeRecord(
                     result=AutoResearchResult.model_validate_json(parent_row["result_json"]),
                     decision=AutoResearchDecision.model_validate_json(parent_row["decision_json"]),
                 )
                 if (
-                    not incumbent.decision.eligible_for_best
-                    or incumbent.result.metric_value is None
+                    parent.result.provenance != ExperimentProvenance.REAL
+                    or parent.result.outcome != ExperimentOutcome.COMPLETED
+                    or parent.result.metric_value is None
+                    or parent.decision.decision
+                    not in {ResultDecision.BASELINE, ResultDecision.KEEP, ResultDecision.DISCARD}
                 ):
                     raise AutoResearchInvariantError("autoresearch_exact_parent_outcome_required")
+                reference_row = connection.execute(
+                    """
+                    SELECT result_json, decision_json FROM autoresearch_results
+                    WHERE workspace_id = ? AND campaign_id = ? AND proposal_id != ?
+                      AND json_extract(decision_json, '$.eligible_for_best') = 1
+                    ORDER BY created_at DESC, result_id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        result.workspace_id,
+                        result.campaign_id,
+                        result.proposal_id,
+                    ),
+                ).fetchone()
+                if reference_row is None:
+                    raise AutoResearchInvariantError("autoresearch_real_baseline_required")
+                incumbent = AutoResearchOutcomeRecord(
+                    result=AutoResearchResult.model_validate_json(reference_row["result_json"]),
+                    decision=AutoResearchDecision.model_validate_json(
+                        reference_row["decision_json"]
+                    ),
+                )
             else:
+                parent = None
                 incumbent = None
             previous_id = incumbent.result.proposal_id if incumbent else None
             previous_metric = incumbent.result.metric_value if incumbent else None
@@ -1350,8 +1604,17 @@ class AutoResearchCampaignCore:
         ).manifest
         controls = self.repository.list_autoresearch_proposals(workspace_id, campaign_id)
         outcomes = self.repository.list_autoresearch_outcomes(workspace_id, campaign_id)
+        diagnostics = self.repository.list_autoresearch_diagnostic_results(
+            workspace_id, campaign_id
+        )
         outcome_by_proposal = {item.result.proposal_id: item for item in outcomes}
-        pending = [item for item in controls if item.proposal_id not in outcome_by_proposal]
+        diagnostic_by_proposal = {item.proposal_id: item for item in diagnostics}
+        pending = [
+            item
+            for item in controls
+            if item.proposal_id not in outcome_by_proposal
+            and item.proposal_id not in diagnostic_by_proposal
+        ]
         controlled_ids = {item.proposal_id for item in controls}
         untracked = [
             record.proposal.proposal_id
@@ -1364,7 +1627,9 @@ class AutoResearchCampaignCore:
         baseline_verified = any(
             item.decision.decision == ResultDecision.BASELINE for item in outcomes
         )
-        budget_used = sum(item.result.actual_cost for item in outcomes)
+        budget_used = sum(item.result.actual_cost for item in outcomes) + sum(
+            item.actual_cost for item in diagnostics
+        )
         manifest_remaining = self.repository.build_evidence_snapshot(
             workspace_id, campaign_id
         ).budget_remaining[spec.stop_rules.budget_unit]
@@ -1408,7 +1673,7 @@ class AutoResearchCampaignCore:
             )
         elif spec.stop_rules.deadline is not None and current_time >= spec.stop_rules.deadline:
             next_action, reason = AutoResearchNextAction.STOP, "deadline_reached"
-        elif len(controls) >= spec.stop_rules.max_attempts:
+        elif len(outcomes) >= spec.stop_rules.max_attempts:
             next_action, reason = AutoResearchNextAction.STOP, "attempt_limit_reached"
         elif budget_remaining <= 0:
             next_action, reason = AutoResearchNextAction.STOP, "budget_exhausted"
@@ -1426,7 +1691,12 @@ class AutoResearchCampaignCore:
         else:
             next_action, reason = (
                 AutoResearchNextAction.PROPOSE_CANDIDATE,
-                "ready_for_controlled_hypothesis",
+                (
+                    "diagnostic_evidence_ready"
+                    if diagnostics
+                    and diagnostics[-1].recorded_at >= outcomes[-1].result.recorded_at
+                    else "ready_for_controlled_hypothesis"
+                ),
             )
 
         latest = outcomes[-1].decision.decision if outcomes else None
@@ -1454,6 +1724,45 @@ class AutoResearchCampaignCore:
             latest_decision=latest,
         )
 
+    def failures(self, workspace_id: str, campaign_id: str) -> dict[str, Any]:
+        """Compare evaluator-authored failure categories for the latest decision."""
+
+        spec = self.repository.get_autoresearch_spec(workspace_id, campaign_id)
+        outcomes = self.repository.list_autoresearch_outcomes(workspace_id, campaign_id)
+        reference = None
+        candidate = None
+        if outcomes:
+            latest = outcomes[-1]
+            if latest.result.role == ExperimentRole.BASELINE:
+                reference = latest
+            else:
+                candidate = latest
+                previous_id = latest.decision.previous_best_proposal_id
+                reference = next(
+                    (
+                        item
+                        for item in reversed(outcomes[:-1])
+                        if item.result.proposal_id == previous_id
+                    ),
+                    None,
+                )
+        evaluations: list[dict[str, Any]] = []
+        if spec.ledger_project_id is not None:
+            try:
+                evaluations = self.ledger.list_evaluation_results(
+                    workspace_id,
+                    spec.ledger_project_id,
+                    limit=1000,
+                )
+            except RecordNotFoundError:
+                pass
+        return build_research_failure_packet(
+            campaign_id=campaign_id,
+            reference_outcome=(reference.model_dump(mode="json") if reference else None),
+            candidate_outcome=(candidate.model_dump(mode="json") if candidate else None),
+            evaluations=evaluations,
+        )
+
     def diagnostics(
         self,
         workspace_id: str,
@@ -1465,6 +1774,8 @@ class AutoResearchCampaignCore:
         outcomes = self.repository.list_autoresearch_outcomes(workspace_id, campaign_id)
         evaluations: list[dict[str, Any]] = []
         runs: list[dict[str, Any]] = []
+        dataset_versions: list[dict[str, Any]] = []
+        training_metrics: list[dict[str, Any]] = []
         if spec.ledger_project_id is not None:
             try:
                 evaluations = self.ledger.list_evaluation_results(
@@ -1481,6 +1792,28 @@ class AutoResearchCampaignCore:
                     )
                     if run.get("campaign_id") == campaign_id
                 ]
+                dataset_versions = self.ledger.list_dataset_versions(
+                    workspace_id,
+                    spec.ledger_project_id,
+                )
+                attempt_ids = {
+                    attempt_id for outcome in outcomes for attempt_id in outcome.result.attempt_ids
+                }
+                for attempt_id in sorted(attempt_ids):
+                    for metric_name in ("train_loss", "validation_loss"):
+                        training_metrics.extend(
+                            {
+                                "attempt_id": attempt_id,
+                                "metric_name": metric_name,
+                                "step": point.step,
+                                "value": point.value,
+                            }
+                            for point in self.repository.get_metric_series(
+                                workspace_id,
+                                attempt_id,
+                                metric_name,
+                            )
+                        )
             except RecordNotFoundError:
                 # A registered campaign can precede materialization of its logical
                 # ledger binding; diagnostics remain an empty advisory projection.
@@ -1494,6 +1827,8 @@ class AutoResearchCampaignCore:
             outcomes=[item.model_dump(mode="json") for item in outcomes],
             evaluations=evaluations,
             runs=runs,
+            dataset_versions=dataset_versions,
+            training_metrics=training_metrics,
         )
 
     def _submit(
@@ -1527,22 +1862,94 @@ class AutoResearchCampaignCore:
         if control.role == ExperimentRole.BASELINE:
             if submission.prerequisite_study_ids:
                 raise AutoResearchInvariantError("autoresearch_baseline_cannot_have_prerequisite")
-        else:
-            if control.changed_variables != (submission.primary_variable.strip(),):
+        elif control.role == ExperimentRole.DIAGNOSTIC:
+            parent_outcome = next(
+                (
+                    item
+                    for item in self.repository.list_autoresearch_outcomes(
+                        submission.workspace_id,
+                        submission.campaign_id,
+                    )
+                    if item.result.proposal_id == control.parent_proposal_id
+                ),
+                None,
+            )
+            if (
+                parent_outcome is None
+                or parent_outcome.result.provenance != ExperimentProvenance.REAL
+                or parent_outcome.result.outcome != ExperimentOutcome.COMPLETED
+                or parent_outcome.decision.decision
+                not in {ResultDecision.BASELINE, ResultDecision.KEEP, ResultDecision.DISCARD}
+            ):
                 raise AutoResearchInvariantError(
-                    "autoresearch_candidate_must_change_declared_primary_variable_only"
+                    "autoresearch_diagnostic_parent_not_research_eligible"
+                )
+            if parent_outcome.result.study_id not in submission.prerequisite_study_ids:
+                raise AutoResearchInvariantError(
+                    "autoresearch_diagnostic_must_depend_on_parent_study"
+                )
+            required_sequence = tuple(
+                item.stage
+                for item in submission.stage_plan.items
+                if item.disposition == StageDisposition.REQUIRED
+            )
+            if required_sequence != (StageKind.CONTRACT_EVALUATION,):
+                raise AutoResearchInvariantError("autoresearch_diagnostic_stage_plan_invalid")
+            try:
+                AutoResearchDiagnosticRecipe.model_validate(
+                    {
+                        key: value
+                        for key, value in submission.evaluation_recipe.items()
+                        if key != "runtime"
+                    }
+                )
+            except ValueError as exc:
+                raise AutoResearchInvariantError("autoresearch_diagnostic_recipe_invalid") from exc
+        else:
+            if control.changed_variables[0] != submission.primary_variable.strip():
+                raise AutoResearchInvariantError(
+                    "autoresearch_candidate_primary_variable_must_lead_intervention"
                 )
             if not submission.controlled_variables:
                 raise AutoResearchInvariantError(
                     "autoresearch_candidate_requires_controlled_variables"
                 )
-            if control.parent_proposal_id != state.best_proposal_id:
-                raise AutoResearchInvariantError("autoresearch_candidate_parent_is_not_incumbent")
-            if state.best_study_id not in submission.prerequisite_study_ids:
+            parent_outcome = next(
+                (
+                    item
+                    for item in self.repository.list_autoresearch_outcomes(
+                        submission.workspace_id,
+                        submission.campaign_id,
+                    )
+                    if item.result.proposal_id == control.parent_proposal_id
+                ),
+                None,
+            )
+            if (
+                parent_outcome is None
+                or parent_outcome.result.provenance != ExperimentProvenance.REAL
+                or parent_outcome.result.outcome != ExperimentOutcome.COMPLETED
+                or parent_outcome.result.metric_value is None
+                or parent_outcome.decision.decision
+                not in {ResultDecision.BASELINE, ResultDecision.KEEP, ResultDecision.DISCARD}
+            ):
                 raise AutoResearchInvariantError(
-                    "autoresearch_candidate_must_depend_on_incumbent_study"
+                    "autoresearch_candidate_parent_not_research_eligible"
                 )
-            lineage_kind = code_mutation_kind_for_variable(control.changed_variables[0])
+            if parent_outcome.result.study_id not in submission.prerequisite_study_ids:
+                raise AutoResearchInvariantError(
+                    "autoresearch_candidate_must_depend_on_parent_study"
+                )
+            lineage_kinds = {
+                kind
+                for variable in control.changed_variables
+                if (kind := code_mutation_kind_for_variable(variable)) is not None
+            }
+            if len(lineage_kinds) > 1:
+                raise AutoResearchInvariantError(
+                    "autoresearch_exploratory_code_bundle_not_supported"
+                )
+            lineage_kind = next(iter(lineage_kinds), None)
             parent = self.repository.get_proposal(
                 submission.workspace_id,
                 submission.campaign_id,
@@ -1551,7 +1958,8 @@ class AutoResearchCampaignCore:
             _validate_controlled_candidate_change(
                 parent,
                 submission,
-                declared_variable=control.changed_variables[0],
+                declared_variables=control.changed_variables,
+                intervention_mode=control.intervention_mode,
                 code_mutation_kind=lineage_kind,
             )
             if lineage_kind is not None:
@@ -1655,6 +2063,58 @@ class AutoResearchCampaignCore:
         correlation_id: str,
         idempotency_key: str,
     ) -> ProposalMutation:
+        return self.submit_candidate(
+            submission,
+            parent_proposal_id=parent_proposal_id,
+            changed_variables=(changed_variable,),
+            intervention_mode=InterventionMode.CONTROLLED,
+            hypothesis_family_id=None,
+            expected_version=expected_version,
+            principal=principal,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+        )
+
+    def submit_diagnostic(
+        self,
+        submission: StudyProposalSubmission,
+        *,
+        parent_proposal_id: str,
+        expected_version: int,
+        principal: ActorPrincipal,
+        correlation_id: str,
+        idempotency_key: str,
+    ) -> ProposalMutation:
+        """Submit an agent-designed probe without changing or ranking a model."""
+
+        return self._submit(
+            submission,
+            AutoResearchProposalControl(
+                workspace_id=submission.workspace_id,
+                campaign_id=submission.campaign_id,
+                proposal_id=submission.proposal_id,
+                role=ExperimentRole.DIAGNOSTIC,
+                parent_proposal_id=parent_proposal_id,
+            ),
+            expected_version=expected_version,
+            principal=principal,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+        )
+
+    def submit_candidate(
+        self,
+        submission: StudyProposalSubmission,
+        *,
+        parent_proposal_id: str,
+        changed_variables: tuple[str, ...],
+        intervention_mode: InterventionMode = InterventionMode.CONTROLLED,
+        hypothesis_family_id: str | None = None,
+        expected_version: int,
+        principal: ActorPrincipal,
+        correlation_id: str,
+        idempotency_key: str,
+    ) -> ProposalMutation:
         return self._submit(
             submission,
             AutoResearchProposalControl(
@@ -1663,7 +2123,9 @@ class AutoResearchCampaignCore:
                 proposal_id=submission.proposal_id,
                 role=ExperimentRole.CANDIDATE,
                 parent_proposal_id=parent_proposal_id,
-                changed_variables=(changed_variable,),
+                changed_variables=changed_variables,
+                intervention_mode=intervention_mode,
+                hypothesis_family_id=hypothesis_family_id,
             ),
             expected_version=expected_version,
             principal=principal,
@@ -1841,6 +2303,7 @@ __all__ = [
     "ExperimentOutcome",
     "ExperimentProvenance",
     "ExperimentRole",
+    "InterventionMode",
     "MetricDirection",
     "ResultDecision",
     "autoresearch_spec_for_template",

@@ -188,6 +188,7 @@ const campaignAgentHostController = new CampaignAgentHostController({
       campaignBridgeClient.revokeCampaignAgentAttachment(campaignId, attachmentId, body),
     heartbeat: (credential, body) => campaignBridgeClient.heartbeatCampaignAgent(credential, body),
     observe: (credential) => campaignBridgeClient.observeCampaignAsAgent(credential),
+    wait: (credential, query) => campaignBridgeClient.waitForCampaignAsAgent(credential, query),
     artifacts: (credential, query) =>
       campaignBridgeClient.listCampaignArtifactsAsAgent(credential, query)
   },
@@ -785,6 +786,7 @@ ipcMain.handle('campaign-agent-host:launch', async (event, request: unknown) => 
       generation,
       scope: { workspaceId: intent.workspaceId, campaignId: intent.campaignId },
       observe: () => campaignAgentHostController.observe(terminalId),
+      wait: (args) => campaignAgentHostController.wait(terminalId, args),
       artifacts: (args) => campaignAgentHostController.artifacts(terminalId, args)
     })
     const mcpLaunch = await host.start()

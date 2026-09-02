@@ -187,6 +187,7 @@ class PipelineConfig:
     num_records: int = 100
     buffer_size: int = 100
     max_parallel_requests: int = 4
+    experiment_brief: str = ""
 
     # Output
     output_dir: Path = field(default_factory=lambda: Path("data/designer_output"))

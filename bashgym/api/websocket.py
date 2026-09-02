@@ -154,22 +154,6 @@ class MessageType(str, Enum):
     PIPELINE_THRESHOLD_REACHED = "pipeline:threshold_reached"
     PIPELINE_STAGE_STARTED = "pipeline:stage_started"
 
-    # AutoResearch events (hyperparameter search)
-    AUTORESEARCH_EXPERIMENT = "autoresearch:experiment"
-    AUTORESEARCH_COMPLETE = "autoresearch:complete"
-    AUTORESEARCH_FAILED = "autoresearch:failed"
-
-    # Trace Research events (data-centric autoresearch)
-    TRACE_RESEARCH_EXPERIMENT = "autoresearch:trace-experiment"
-    TRACE_RESEARCH_COMPLETE = "autoresearch:trace-research-complete"
-    TRACE_RESEARCH_FAILED = "autoresearch:trace-research-failed"
-
-    # Schema Research events (Data Designer schema evolution)
-    SCHEMA_RESEARCH_EXPERIMENT = "schema-research:experiment"
-    SCHEMA_RESEARCH_STATUS = "schema-research:status"
-    SCHEMA_RESEARCH_COMPLETE = "schema-research:complete"
-    SCHEMA_RESEARCH_FAILED = "schema-research:failed"
-
     # Cascade RL events (domain-by-domain sequential training)
     CASCADE_STAGE_STARTED = "cascade:stage-started"
     CASCADE_STAGE_COMPLETED = "cascade:stage-completed"
@@ -307,8 +291,6 @@ class ConnectionManager:
         "cascade:stage-completed",
         "cascade:stage-failed",
         "cascade:completed",
-        "schema-research:experiment",
-        "schema-research:status",
         "classify:completed",
         "cascade:mopd-completed",
         "cascade:mopd-failed",

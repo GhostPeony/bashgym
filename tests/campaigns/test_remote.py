@@ -16,9 +16,16 @@ from pydantic import ValidationError
 
 from bashgym.campaigns import remote as remote_contracts
 from bashgym.campaigns.contracts import StageKind, utc_now
+from bashgym.campaigns.diagnostic_actions import (
+    AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
+    AutoResearchDiagnosticRecipe,
+    diagnostic_recipe_digest,
+)
 from bashgym.campaigns.remote import (
     ApprovedRemoteExecutorProfile,
     CodeLineageLaunchSnapshot,
+    DiagnosticCapability,
+    DiagnosticStageContract,
     PinnedRemoteStageProfile,
     RegisteredRemoteModelSource,
     RemoteCapacityPolicy,
@@ -795,6 +802,240 @@ def test_evaluation_profile_can_have_no_static_inputs_but_training_cannot(tmp_pa
         )
 
 
+def test_diagnostic_profile_accepts_open_probe_abi_without_static_inputs(tmp_path):
+    script = tmp_path / "diagnose.py"
+    script.write_text("print('diagnose')\n", encoding="utf-8")
+    script_sha256 = hashlib.sha256(script.read_bytes()).hexdigest()
+
+    stage = PinnedRemoteStageProfile(
+        stage=StageKind.CONTRACT_EVALUATION,
+        script_path=script,
+        script_sha256=script_sha256,
+        input_files=(),
+        input_sha256={},
+        output_paths=(AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,),
+        budget_reservation=0.1,
+        diagnostic_contract=DiagnosticStageContract(
+            runner_id="generic-diagnostic-runner",
+            runner_version="1",
+            max_sample_limit=256,
+            max_measurements=8,
+        ),
+    )
+
+    assert stage.stage == StageKind.CONTRACT_EVALUATION
+    assert stage.diagnostic_contract.max_sample_limit == 256
+
+
+def test_diagnostic_capability_matrix_accepts_open_measurements_and_legacy_contracts():
+    capability = DiagnosticCapability(
+        capability_id="reward_group_health",
+        description="Summarize reward contrast and verifier failures across sampled groups.",
+        measurements=(
+            "reward_standard_deviation",
+            "verifier_error_rate",
+            "zero_std_group_fraction",
+        ),
+        evidence_sources=("aggregate_rollout_metrics",),
+    )
+    contract = DiagnosticStageContract(
+        runner_id="scientific-diagnostic-runner",
+        runner_version="1",
+        max_sample_limit=512,
+        max_measurements=8,
+        capabilities=(capability,),
+    )
+    legacy = DiagnosticStageContract.model_validate(
+        {
+            "runner_id": "legacy-diagnostic-runner",
+            "runner_version": "1",
+            "max_sample_limit": 64,
+            "max_measurements": 4,
+        }
+    )
+
+    assert contract.capabilities[0].measurements == (
+        "reward_standard_deviation",
+        "verifier_error_rate",
+        "zero_std_group_fraction",
+    )
+    assert legacy.capabilities == ()
+
+
+@pytest.mark.parametrize(
+    ("capabilities", "message"),
+    [
+        (
+            (
+                {
+                    "capability_id": "trajectory",
+                    "description": "Read checkpoint trajectory aggregates.",
+                    "measurements": ("peak_step",),
+                },
+                {
+                    "capability_id": "trajectory",
+                    "description": "Read the same trajectory a second time.",
+                    "measurements": ("peak_metric",),
+                },
+            ),
+            "capability IDs must be sorted and unique",
+        ),
+        (
+            (
+                {
+                    "capability_id": "zeta",
+                    "description": "Later capability.",
+                    "measurements": ("value",),
+                },
+                {
+                    "capability_id": "alpha",
+                    "description": "Earlier capability.",
+                    "measurements": ("value",),
+                },
+            ),
+            "capability IDs must be sorted and unique",
+        ),
+    ],
+)
+def test_diagnostic_capability_matrix_rejects_duplicate_or_noncanonical_ids(capabilities, message):
+    with pytest.raises(ValidationError, match=message):
+        DiagnosticStageContract(
+            runner_id="scientific-diagnostic-runner",
+            runner_version="1",
+            max_sample_limit=512,
+            max_measurements=8,
+            capabilities=capabilities,
+        )
+
+
+def test_diagnostic_capability_rejects_noncanonical_measurements_and_sources():
+    with pytest.raises(ValidationError, match="measurements must be sorted and unique"):
+        DiagnosticCapability(
+            capability_id="optimization_health",
+            description="Summarize bounded optimization metrics.",
+            measurements=("train_loss", "gradient_norm", "train_loss"),
+        )
+    with pytest.raises(ValidationError, match="evidence sources must be sorted and unique"):
+        DiagnosticCapability(
+            capability_id="optimization_health",
+            description="Summarize bounded optimization metrics.",
+            measurements=("gradient_norm", "train_loss"),
+            evidence_sources=("training_metrics", "checkpoint_metrics"),
+        )
+
+
+def test_diagnostic_profile_requires_fixed_abi_and_reserves_arguments(tmp_path):
+    script = tmp_path / "diagnose.py"
+    training_input = tmp_path / "training.json"
+    script.write_text("print('diagnose')\n", encoding="utf-8")
+    training_input.write_text("{}\n", encoding="utf-8")
+    script_sha256 = hashlib.sha256(script.read_bytes()).hexdigest()
+    contract = DiagnosticStageContract(
+        runner_id="generic-diagnostic-runner",
+        runner_version="1",
+        max_sample_limit=256,
+        max_measurements=8,
+    )
+
+    with pytest.raises(ValidationError, match="diagnostic stage requires its fixed ABI"):
+        PinnedRemoteStageProfile(
+            stage=StageKind.CONTRACT_EVALUATION,
+            script_path=script,
+            script_sha256=script_sha256,
+            input_files=(),
+            input_sha256={},
+            output_paths=("summary.json",),
+            budget_reservation=0.1,
+            diagnostic_contract=contract,
+        )
+    with pytest.raises(ValidationError, match="reserved diagnostic argument"):
+        PinnedRemoteStageProfile(
+            stage=StageKind.CONTRACT_EVALUATION,
+            script_path=script,
+            script_sha256=script_sha256,
+            input_files=(),
+            input_sha256={},
+            script_args=("--request=other.json",),
+            output_paths=(AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,),
+            budget_reservation=0.1,
+            diagnostic_contract=contract,
+        )
+    with pytest.raises(ValidationError, match="diagnostic contract is stage-specific"):
+        PinnedRemoteStageProfile(
+            stage=StageKind.FULL_TRAINING,
+            script_path=script,
+            script_sha256=script_sha256,
+            input_files=(training_input,),
+            input_sha256={
+                training_input.name: hashlib.sha256(training_input.read_bytes()).hexdigest()
+            },
+            budget_reservation=0.1,
+            diagnostic_contract=contract,
+        )
+
+
+def test_executor_config_binds_agent_diagnostic_without_choosing_probe_family(tmp_path):
+    key = tmp_path / "worker-key"
+    script = tmp_path / "diagnose.py"
+    key.write_text("test-only-key\n", encoding="utf-8")
+    script.write_text("print('diagnose')\n", encoding="utf-8")
+    script_sha256 = hashlib.sha256(script.read_bytes()).hexdigest()
+    stage = PinnedRemoteStageProfile(
+        stage=StageKind.CONTRACT_EVALUATION,
+        script_path=script,
+        script_sha256=script_sha256,
+        input_files=(),
+        input_sha256={},
+        output_paths=(AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,),
+        budget_reservation=0.1,
+        diagnostic_contract=DiagnosticStageContract(
+            runner_id="generic-diagnostic-runner",
+            runner_version="1",
+            max_sample_limit=256,
+            max_measurements=8,
+        ),
+    )
+    profile = ApprovedRemoteExecutorProfile(
+        profile_id="diagnostic-v1",
+        profile_revision=1,
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="research-model-v1",
+        target_model_digest="d" * 64,
+        host="192.0.2.10",
+        username="trainer",
+        key_path=str(key),
+        stages=(stage,),
+    )
+    recipe = AutoResearchDiagnosticRecipe(
+        probe_family="agent_invented_probe",
+        question="Does one safe aggregate explain the failure cluster?",
+        hypothesis="The aggregate separates the retained and failed cases.",
+        informs_methods=("sft",),
+        measurements=(
+            {
+                "name": "new_aggregate",
+                "interpretation": "observe",
+            },
+        ),
+        sample_limit=64,
+        seed=3,
+        data_scope_ids=("approved-train",),
+    )
+
+    executor = remote_executor_config(
+        profile,
+        StageKind.CONTRACT_EVALUATION,
+        recipe_digest=diagnostic_recipe_digest(recipe),
+        diagnostic_recipe=recipe,
+        approved_data_scopes=frozenset({"approved-train"}),
+    )
+
+    assert executor["diagnostic_recipe"] == recipe.model_dump(mode="json")
+    assert executor["diagnostic_contract"] == stage.diagnostic_contract.model_dump(mode="json")
+    assert executor["script_args"] == []
+    assert executor["input_files"] == []
+
+
 def test_executor_config_binds_registered_evaluation_dataset_without_local_rows(tmp_path):
     key = tmp_path / "worker-key"
     evaluator = tmp_path / "evaluate.py"
@@ -1430,6 +1671,10 @@ def test_supervisor_state_writer_uses_typed_json_instead_of_printf_placeholders(
     assert "python3 -c" in launch_command
     assert "int(sys.argv[4])" in launch_command
     assert "remote_run_state.v1.json.tmp" in launch_command
+    assert "kill -STOP $$" in launch_command
+    assert launch_command.index("remote_run_state.v1.json.tmp") < launch_command.index(
+        'kill -CONT "$pid"'
+    )
 
 
 @pytest.mark.asyncio

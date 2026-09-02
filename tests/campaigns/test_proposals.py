@@ -26,6 +26,13 @@ from bashgym.campaigns.persistence import (
 )
 from bashgym.campaigns.proposals import validate_proposal_submission
 from bashgym.campaigns.service import CampaignControllerService, CampaignService
+from bashgym.research.acquisition import (
+    CompetingHypothesis,
+    ExperimentAcquisition,
+    PredictedOutcome,
+    ResearchContextBundle,
+    ResearchContextSource,
+)
 from tests.campaigns.test_persistence import campaign, create, manifest
 
 
@@ -99,6 +106,62 @@ def proposal(
     )
 
 
+def diagnostic_proposal(proposal_id: str) -> StudyProposalSubmission:
+    return proposal(proposal_id, estimated_cost=0.05).model_copy(
+        update={
+            "primary_variable": "diagnostic.loss_landscape",
+            "controlled_variables": (),
+            "evaluation_recipe": {
+                "schema_version": "bashgym.autoresearch_diagnostic_recipe.v1",
+                "probe_family": "loss_landscape",
+                "question": "Is the retained checkpoint already beyond the useful region?",
+                "hypothesis": "Held-out loss rises after the retained checkpoint.",
+                "informs_methods": ["sft", "data_redesign"],
+                "measurements": [
+                    {
+                        "name": "heldout_loss_slope",
+                        "interpretation": "minimize",
+                        "unit": "loss_per_step",
+                    }
+                ],
+                "sample_limit": 64,
+                "seed": 17,
+                "data_scope_ids": ["memexai-approved-training"],
+                "parameters": {"checkpoint_steps": [20, 40, 80]},
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "required_capabilities": frozenset({Capability.EVAL_DEVELOPMENT}),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.CONTRACT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Measure the agent-authored diagnostic on approved data.",
+                    ),
+                )
+            ),
+        }
+    )
+
+
+def test_registered_diagnostic_accepts_agent_authored_probe_without_design_registry(repository):
+    value = diagnostic_proposal("diagnostic-open-probe")
+    campaign_value = repository.get_campaign("workspace-a", "campaign-1")
+    manifest_value = repository.get_manifest_revision(
+        "workspace-a", "campaign-1", campaign_value.manifest_revision
+    ).manifest
+
+    validation = validate_proposal_submission(
+        value,
+        manifest_value,
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert validation.valid is True
+    assert validation.reason_codes == ()
+
+
 @pytest.fixture
 def repository(tmp_path):
     value = CampaignRepository(tmp_path / "campaigns.sqlite3")
@@ -146,6 +209,74 @@ def test_invalid_proposal_is_rejected_without_creating_study(repository):
     assert result.event.event_type == "campaign:proposal-rejected"
     with sqlite3.connect(repository.db_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM campaign_studies").fetchone()[0] == 0
+
+
+def test_research_context_and_acquisition_bind_to_exact_proposal(repository):
+    base = proposal("proposal-cited")
+    research_context = ResearchContextBundle(
+        workspace_id=base.workspace_id,
+        campaign_id=base.campaign_id,
+        proposal_id=base.proposal_id,
+        query="information gain experiment design",
+        categories=("research",),
+        status="available",
+        sources=(
+            ResearchContextSource(
+                title="Model Discovery Agent",
+                url="https://arxiv.org/abs/2608.09696",
+                source_type="research",
+            ),
+        ),
+    )
+    acquisition = ExperimentAcquisition(
+        workspace_id=base.workspace_id,
+        campaign_id=base.campaign_id,
+        proposal_id=base.proposal_id,
+        selection_mode="information_gain",
+        hypotheses=(
+            CompetingHypothesis(
+                hypothesis_id="h1", statement="Optimization", prior_probability=0.5
+            ),
+            CompetingHypothesis(hypothesis_id="h2", statement="Data", prior_probability=0.5),
+        ),
+        outcomes=(
+            PredictedOutcome(outcome_id="up", label="Improves"),
+            PredictedOutcome(outcome_id="flat", label="Flat"),
+        ),
+        conditional_outcome_probabilities={
+            "h1": {"up": 0.8, "flat": 0.2},
+            "h2": {"up": 0.2, "flat": 0.8},
+        },
+        expected_cost=1.0,
+    )
+    cited = base.model_copy(
+        update={"research_context": research_context, "acquisition": acquisition}
+    )
+    valid = validate_proposal_submission(
+        cited,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+    assert valid.valid is True
+    persisted = submit(
+        CampaignService(repository),
+        cited,
+        principal(repository),
+        4,
+        "cited-proposal",
+    )
+    assert persisted.record.proposal.research_context == research_context
+    assert persisted.record.proposal.acquisition == acquisition
+
+    wrong_context = research_context.model_copy(update={"proposal_id": "proposal-other"})
+    invalid = validate_proposal_submission(
+        cited.model_copy(update={"research_context": wrong_context}),
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+    assert invalid.reason_codes == ("proposal_research_context_binding_mismatch",)
 
 
 def _live_training_proposal(proposal_id: str) -> StudyProposalSubmission:
@@ -268,6 +399,80 @@ def test_registered_data_build_recipe_is_typed_and_requires_data_capability(repo
 
     assert valid.valid is True
     assert missing_capability.reason_codes == ("proposal_data_build_capability_missing",)
+
+
+def test_autoresearch_data_design_recipe_rejects_actor_execution_material(repository):
+    value = proposal("proposal-data-design").model_copy(
+        update={
+            "dataset_recipe": {
+                "schema_version": "bashgym.autoresearch_data_design_recipe.v1",
+                "runtime": {"executor_kind": "registered_training"},
+                "hypothesis": "Target stateful debugging failures.",
+                "pipeline": "terminal_env_generation",
+                "generation_brief": "Generate stateful debugging and recovery tasks.",
+                "target_rows": 64,
+                "train_fraction": 0.8,
+                "seed": 17,
+            },
+            "training_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_training"},
+            },
+            "evaluation_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "required_capabilities": frozenset(
+                {
+                    Capability.DATA_BUILD,
+                    Capability.COMPUTE_TRAIN_WITHIN_BUDGET,
+                    Capability.EVAL_DEVELOPMENT,
+                }
+            ),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.DATA_BUILD,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Build the selected approved dataset design.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.FULL_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Train with fixed settings.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Evaluate on the fixed suite.",
+                    ),
+                )
+            ),
+        }
+    )
+
+    valid = validate_proposal_submission(
+        value,
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+    invalid = validate_proposal_submission(
+        value.model_copy(
+            update={
+                "dataset_recipe": {
+                    **value.dataset_recipe,
+                    "provider_endpoint": "http://unreviewed.invalid/v1",
+                }
+            }
+        ),
+        manifest(),
+        principal(repository),
+        existing_prerequisite_ids=frozenset(),
+    )
+
+    assert valid.valid is True
+    assert invalid.reason_codes == ("proposal_data_design_recipe_invalid",)
 
 
 def test_tmax_training_recipe_rejects_unavailable_dppo_backend(repository):

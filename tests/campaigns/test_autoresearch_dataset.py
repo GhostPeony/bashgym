@@ -1,6 +1,7 @@
 """Compact contracts for compute-resident AutoResearch datasets."""
 
 import hashlib
+import json
 from datetime import datetime
 
 import pytest
@@ -12,8 +13,10 @@ from bashgym.campaigns.autoresearch_dataset import (
     AUTORESEARCH_DATASET_RECEIPT_FILENAME,
     AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
     AutoResearchDatasetFile,
+    AutoResearchDatasetQuality,
     AutoResearchDatasetReceipt,
     build_dataset_ledger_specs,
+    project_dataset_quality_summary,
 )
 from bashgym.campaigns.contracts import ActionAttempt, AttemptStatus, StageKind, canonical_hash
 from bashgym.campaigns.executors import RemoteOutputSealer
@@ -26,6 +29,7 @@ from bashgym.campaigns.remote import (
     RemoteTrainingAdapter,
     remote_executor_config,
 )
+from bashgym.campaigns.runtime import _recipe_script_args_for_stage
 
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
@@ -49,6 +53,15 @@ def receipt() -> AutoResearchDatasetReceipt:
             ),
         ),
         generator={"kind": "nvidia_data_designer", "pipeline": "terminal_env_generation"},
+        quality=AutoResearchDatasetQuality(
+            generated_rows=12,
+            accepted_rows=10,
+            deterministic_verified_rows=11,
+            verification_failed_rows=1,
+            duplicate_rows_removed=1,
+            contamination_rows_removed=0,
+            verifier_digest="c" * 64,
+        ),
     )
 
 
@@ -60,6 +73,18 @@ def test_receipt_derives_one_stable_content_digest_and_split_summary():
     assert value.split_manifest == {
         "train": ["dataset/train.jsonl"],
         "validation": ["dataset/validation.jsonl"],
+    }
+    assert project_dataset_quality_summary(value) == {
+        "generated_rows": 12,
+        "accepted_rows": 10,
+        "rejected_rows": 2,
+        "acceptance_rate": 10 / 12,
+        "deterministic_verified_rows": 11,
+        "verification_failed_rows": 1,
+        "verification_pass_rate": 11 / 12,
+        "duplicate_rows_removed": 1,
+        "contamination_rows_removed": 0,
+        "verifier_digest": "c" * 64,
     }
     assert AUTORESEARCH_DATASET_FILE_SCHEMA == "autoresearch_dataset_file.v1"
     assert (
@@ -83,6 +108,13 @@ def test_receipt_rejects_unsafe_duplicate_or_non_dataset_files():
         )
     with pytest.raises(ValidationError, match="sorted and unique"):
         AutoResearchDatasetReceipt(files=(receipt().files[1], receipt().files[0]))
+
+
+def test_receipt_rejects_quality_counts_that_do_not_describe_retained_rows():
+    payload = receipt().model_dump(mode="python")
+    payload["quality"]["accepted_rows"] = 9
+    with pytest.raises(ValidationError, match="accepted row count"):
+        AutoResearchDatasetReceipt.model_validate(payload)
 
 
 def test_dataset_ledger_projection_is_opaque_and_attempt_bound():
@@ -115,6 +147,7 @@ def test_dataset_ledger_projection_is_opaque_and_attempt_bound():
     assert version.content_digest == receipt().content_digest
     assert version.source_uri == f"autoresearch-remote-dataset://sha256/{receipt().content_digest}"
     assert version.metadata["producer_attempt_id"] == data_attempt.attempt_id
+    assert version.metadata["data_quality"]["accepted_rows"] == 10
     assert "/home/operator" not in version.model_dump_json()
 
 
@@ -203,3 +236,24 @@ def test_registered_data_build_stage_uses_typed_recipe_arguments(tmp_path):
         "--rows",
         "64",
     ]
+
+
+def test_typed_data_design_recipe_renders_canonical_runtime_arguments():
+    arguments = _recipe_script_args_for_stage(
+        StageKind.DATA_BUILD,
+        {
+            "schema_version": "bashgym.autoresearch_data_design_recipe.v1",
+            "runtime": {"executor_kind": "registered_training"},
+            "hypothesis": "Target stateful debugging failures.",
+            "pipeline": "terminal_env_generation",
+            "generation_brief": "Generate stateful debugging and recovery tasks.",
+            "target_rows": 64,
+            "train_fraction": 0.8,
+            "seed": 17,
+        },
+    )
+
+    assert arguments[0] == "--recipe-json"
+    assert json.loads(arguments[1])["generation_brief"] == (
+        "Generate stateful debugging and recovery tasks."
+    )

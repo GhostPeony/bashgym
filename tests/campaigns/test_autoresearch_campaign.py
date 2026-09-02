@@ -10,8 +10,12 @@ from bashgym.campaigns.autoresearch import (
     AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
     AutoResearchCampaignCore,
     AutoResearchCampaignSpec,
+    AutoResearchDecision,
+    AutoResearchDiagnosticResult,
     AutoResearchInvariantError,
     AutoResearchNextAction,
+    AutoResearchOutcomeRecord,
+    AutoResearchProposalControl,
     AutoResearchRepository,
     AutoResearchResult,
     AutoResearchStopRules,
@@ -22,18 +26,23 @@ from bashgym.campaigns.autoresearch import (
     MetricDirection,
     ProtectedMetricGate,
     ResultDecision,
+    _validate_controlled_candidate_change,
     build_autoresearch_template_registry,
+    builtin_autoresearch_template_definitions,
     builtin_autoresearch_template_registry,
 )
 from bashgym.campaigns.contracts import (
     CampaignStatus,
     CampaignTrigger,
+    CodeMutationKind,
     StageDisposition,
     StageKind,
     StagePlan,
     StagePlanItem,
     StudyStatus,
+    canonical_hash,
 )
+from bashgym.campaigns.method_policy import AutoResearchMethodThresholds
 from bashgym.campaigns.service import CampaignControllerService, CampaignService
 from bashgym.ledger.contracts import (
     ArtifactSpec,
@@ -52,7 +61,7 @@ from bashgym.ledger.contracts import (
     RunStatus,
 )
 from tests.campaigns.test_persistence import campaign, create, manifest
-from tests.campaigns.test_proposals import principal, proposal
+from tests.campaigns.test_proposals import diagnostic_proposal, principal, proposal
 
 NOW = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
 
@@ -79,6 +88,35 @@ def make_spec(
         ledger_project_id="project-a" if evaluation_binding else None,
         evaluation_suite_id="suite-a" if evaluation_binding else None,
         created_at=NOW,
+    )
+
+
+def test_template_method_thresholds_materialize_into_campaign_spec():
+    definition = builtin_autoresearch_template_definitions()[0]
+    assert definition.policy is not None
+    thresholds = AutoResearchMethodThresholds(
+        min_rollout_groups=32,
+        min_rollout_success_rate=0.05,
+        max_rollout_success_rate=0.95,
+        max_zero_std_group_fraction=0.5,
+        max_verifier_error_rate=0.0,
+    )
+    definition = definition.model_copy(
+        update={"policy": definition.policy.model_copy(update={"method_thresholds": thresholds})}
+    )
+
+    spec = definition.materialize_spec(
+        "workspace-a",
+        "campaign-a",
+        stop_rules=definition.policy.stop_rules,
+    )
+
+    assert spec is not None
+    assert spec.method_thresholds == thresholds
+    legacy = make_spec().model_dump(mode="json")
+    legacy.pop("method_thresholds", None)
+    assert AutoResearchCampaignSpec.model_validate(legacy).method_thresholds == (
+        AutoResearchMethodThresholds()
     )
 
 
@@ -223,6 +261,386 @@ def result(proposal_id, study_id, attempt_id, metric, *, role, provenance="real"
         evidence_references=(f"eval-{proposal_id}",),
         recorded_at=NOW,
     )
+
+
+def _recipe_proposal(
+    proposal_id: str,
+    *,
+    learning_rate: float,
+    seed: int,
+    extra: dict[str, object] | None = None,
+):
+    training_recipe = {
+        "schema_version": "recipe.v1",
+        "learning_rate": learning_rate,
+        "seed": seed,
+        **(extra or {}),
+    }
+    return proposal(proposal_id, estimated_cost=0.1).model_copy(
+        update={"training_recipe": training_recipe}
+    )
+
+
+def _insert_authoritative_outcome(
+    repository: AutoResearchRepository,
+    outcome: AutoResearchOutcomeRecord,
+) -> None:
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO autoresearch_results(
+                workspace_id, campaign_id, result_id, proposal_id, result_json,
+                result_digest, decision_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                outcome.result.workspace_id,
+                outcome.result.campaign_id,
+                outcome.result.result_id,
+                outcome.result.proposal_id,
+                outcome.result.model_dump_json(),
+                outcome.result.result_digest,
+                outcome.decision.model_dump_json(),
+                outcome.result.recorded_at.isoformat(),
+            ),
+        )
+
+
+def _authoritative_outcome(
+    proposal_id: str,
+    study_id: str,
+    attempt_id: str,
+    metric: float,
+    *,
+    role: ExperimentRole,
+    decision: ResultDecision,
+    eligible_for_best: bool,
+    previous_best_proposal_id: str | None = None,
+    previous_best_metric: float | None = None,
+) -> AutoResearchOutcomeRecord:
+    value = result(proposal_id, study_id, attempt_id, metric, role=role)
+    improvement = metric - previous_best_metric if previous_best_metric is not None else None
+    return AutoResearchOutcomeRecord(
+        result=value,
+        decision=AutoResearchDecision(
+            proposal_id=proposal_id,
+            decision=decision,
+            reason_code=(
+                "real_baseline_verified"
+                if decision == ResultDecision.BASELINE
+                else "candidate_improved_primary_metric"
+            ),
+            eligible_for_best=eligible_for_best,
+            previous_best_proposal_id=previous_best_proposal_id,
+            previous_best_metric=previous_best_metric,
+            improvement=improvement,
+            result_digest=value.result_digest,
+            decided_at=NOW,
+        ),
+    )
+
+
+def test_exploratory_intervention_accepts_exact_declared_change_bundle():
+    parent = _recipe_proposal("parent", learning_rate=0.001, seed=17)
+    candidate = _recipe_proposal("candidate", learning_rate=0.002, seed=23)
+    control = AutoResearchProposalControl(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        proposal_id="candidate",
+        role=ExperimentRole.CANDIDATE,
+        parent_proposal_id="parent",
+        intervention_mode="exploratory",
+        changed_variables=("training_recipe.learning_rate", "training_recipe.seed"),
+        hypothesis_family_id="family-optimizer-schedule",
+    )
+
+    _validate_controlled_candidate_change(
+        parent,
+        candidate,
+        declared_variables=control.changed_variables,
+        intervention_mode=control.intervention_mode,
+        code_mutation_kind=None,
+    )
+
+    assert control.intervention_mode.value == "exploratory"
+    assert control.hypothesis_family_id == "family-optimizer-schedule"
+
+
+@pytest.mark.parametrize(
+    ("changed_variables", "candidate", "reason"),
+    (
+        (
+            ("training_recipe.learning_rate", "training_recipe.seed"),
+            _recipe_proposal(
+                "candidate-extra",
+                learning_rate=0.002,
+                seed=23,
+                extra={"temperature": 0.7},
+            ),
+            "autoresearch_candidate_changed_undeclared_variable",
+        ),
+        (
+            ("training_recipe.learning_rate", "training_recipe.temperature"),
+            _recipe_proposal("candidate-unchanged", learning_rate=0.002, seed=17),
+            "autoresearch_candidate_declared_variable_unchanged",
+        ),
+    ),
+)
+def test_exploratory_intervention_rejects_inaccurate_change_declarations(
+    changed_variables,
+    candidate,
+    reason,
+):
+    parent = _recipe_proposal("parent", learning_rate=0.001, seed=17)
+    with pytest.raises(AutoResearchInvariantError, match=reason):
+        _validate_controlled_candidate_change(
+            parent,
+            candidate,
+            declared_variables=changed_variables,
+            intervention_mode="exploratory",
+            code_mutation_kind=None,
+        )
+
+
+def test_exploratory_intervention_rejects_code_mutation_bundles():
+    parent = _recipe_proposal("parent", learning_rate=0.001, seed=17)
+    candidate = parent.model_copy(update={"proposal_id": "candidate-code"})
+    with pytest.raises(
+        AutoResearchInvariantError,
+        match="autoresearch_exploratory_code_bundle_not_supported",
+    ):
+        _validate_controlled_candidate_change(
+            parent,
+            candidate,
+            declared_variables=("trainer.optimizer", "trainer.scheduler"),
+            intervention_mode="exploratory",
+            code_mutation_kind=CodeMutationKind.TRAINER,
+        )
+
+
+def test_legacy_control_digest_is_stable_when_new_fields_use_defaults():
+    control = AutoResearchProposalControl(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        proposal_id="candidate",
+        role=ExperimentRole.CANDIDATE,
+        parent_proposal_id="parent",
+        changed_variables=("learning_rate",),
+        created_at=NOW,
+    )
+    expected = canonical_hash(
+        {
+            "schema_version": "autoresearch_proposal_control.v1",
+            "workspace_id": "workspace-a",
+            "campaign_id": "campaign-1",
+            "proposal_id": "candidate",
+            "role": "candidate",
+            "parent_proposal_id": "parent",
+            "changed_variables": ["learning_rate"],
+        }
+    )
+
+    assert control.control_digest == expected
+
+
+def test_diagnostic_result_satisfies_pending_without_consuming_candidate_attempt(tmp_path):
+    _path, repository, core = fresh_core(tmp_path, max_attempts=2, target=None)
+    activate(core)
+    baseline_submission = proposal("baseline", estimated_cost=0.1)
+    core.submit_baseline(
+        baseline_submission,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-baseline-diagnostic-test",
+        idempotency_key="submit-baseline-diagnostic-test",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline",
+            baseline_study,
+            baseline_attempt,
+            0.5,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+    diagnostic_control = AutoResearchProposalControl(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        proposal_id="diagnostic-one",
+        role=ExperimentRole.DIAGNOSTIC,
+        parent_proposal_id="baseline",
+        created_at=NOW,
+    )
+    diagnostic_submission = proposal("diagnostic-one", estimated_cost=0.05).model_copy(
+        update={"prerequisite_study_ids": (baseline_study,)}
+    )
+    CampaignService(repository).submit_proposal(
+        diagnostic_submission,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-diagnostic-one",
+        idempotency_key="submit-diagnostic-one",
+    )
+    repository.register_autoresearch_proposal(diagnostic_control)
+
+    waiting = core.state("workspace-a", "campaign-1", now=NOW)
+    assert waiting.next_action == AutoResearchNextAction.WAIT_FOR_RESULT
+    assert waiting.attempts_used == 1
+
+    stored = repository.record_autoresearch_diagnostic_result(
+        AutoResearchDiagnosticResult(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            proposal_id="diagnostic-one",
+            study_id="study-diagnostic-one",
+            attempt_id="attempt-diagnostic-one",
+            status="completed",
+            projection={
+                "schema_version": "bashgym.research_diagnostic_result.v1",
+                "probe_family": "loss_landscape",
+            },
+            actual_cost=0.05,
+            recorded_at=NOW,
+        )
+    )
+
+    state = core.state("workspace-a", "campaign-1", now=NOW)
+    assert stored.replayed is False
+    assert state.next_action == AutoResearchNextAction.PROPOSE_CANDIDATE
+    assert state.reason_code == "diagnostic_evidence_ready"
+    assert state.attempts_used == 1
+    assert state.proposals_used == 2
+    assert state.budget_used == pytest.approx(0.55)
+
+
+def test_agent_can_submit_open_diagnostic_against_verified_reference(tmp_path):
+    _path, repository, core = fresh_core(tmp_path, max_attempts=3, target=None)
+    activate(core)
+    actor = principal(repository)
+    core.submit_baseline(
+        proposal("baseline", estimated_cost=0.1),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-baseline-before-diagnostic",
+        idempotency_key="submit-baseline-before-diagnostic",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline",
+            baseline_study,
+            baseline_attempt,
+            0.5,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+    submission = diagnostic_proposal("diagnostic-open-probe").model_copy(
+        update={"prerequisite_study_ids": (baseline_study,)}
+    )
+
+    mutation = core.submit_diagnostic(
+        submission,
+        parent_proposal_id="baseline",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-diagnostic-open-probe",
+        idempotency_key="submit-diagnostic-open-probe",
+    )
+
+    assert mutation.record.validation.valid is True
+    control = repository.get_autoresearch_proposal(
+        "workspace-a", "campaign-1", "diagnostic-open-probe"
+    )
+    assert control.role == ExperimentRole.DIAGNOSTIC
+    assert control.changed_variables == ()
+    assert control.parent_proposal_id == "baseline"
+
+
+def test_candidate_can_branch_from_verified_ancestor_instead_of_current_reference(tmp_path):
+    _path, repository, core = fresh_core(tmp_path, max_attempts=4, target=None)
+    activate(core)
+    actor = principal(repository)
+
+    baseline = _recipe_proposal("baseline", learning_rate=0.001, seed=17)
+    core.submit_baseline(
+        baseline,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-baseline",
+        idempotency_key="submit-baseline",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline",
+            baseline_study,
+            baseline_attempt,
+            0.50,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+
+    incumbent = _recipe_proposal("candidate-best", learning_rate=0.002, seed=17).model_copy(
+        update={
+            "primary_variable": "training_recipe.learning_rate",
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_controlled_candidate(
+        incumbent,
+        parent_proposal_id="baseline",
+        changed_variable="training_recipe.learning_rate",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-incumbent",
+        idempotency_key="submit-incumbent",
+    )
+    incumbent_study, incumbent_attempt = select_and_finish(repository, "candidate-best")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "candidate-best",
+            incumbent_study,
+            incumbent_attempt,
+            0.70,
+            role=ExperimentRole.CANDIDATE,
+            decision=ResultDecision.KEEP,
+            eligible_for_best=True,
+            previous_best_proposal_id="baseline",
+            previous_best_metric=0.50,
+        ),
+    )
+    assert core.state("workspace-a", "campaign-1", now=NOW).best_proposal_id == ("candidate-best")
+
+    branch = _recipe_proposal("candidate-branch", learning_rate=0.001, seed=23).model_copy(
+        update={
+            "primary_variable": "training_recipe.seed",
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    mutation = core.submit_controlled_candidate(
+        branch,
+        parent_proposal_id="baseline",
+        changed_variable="training_recipe.seed",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-branch",
+        idempotency_key="submit-branch",
+    )
+
+    assert mutation.record.proposal.proposal_id == "candidate-branch"
+    control = repository.get_autoresearch_proposal("workspace-a", "campaign-1", "candidate-branch")
+    assert control.parent_proposal_id == "baseline"
 
 
 def test_protected_metric_gate_blocks_a_primary_gain_with_a_regression() -> None:

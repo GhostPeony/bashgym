@@ -204,7 +204,7 @@ export function destinationFor(
   payload: Record<string, unknown>
 ): ActivityDestination | undefined {
   const category = type.startsWith('hf-context:') ? 'hf' : type.split(':')[0]
-  if (category === 'campaign' || category === 'autoresearch') {
+  if (category === 'campaign') {
     const workspaceId =
       typeof payload.workspace_id === 'string' && PUBLIC_ID.test(payload.workspace_id)
         ? payload.workspace_id
@@ -224,7 +224,6 @@ export function destinationFor(
     cascade: { label: 'Open Router', view: 'router' },
     hf: { label: 'Open Hugging Face', view: 'huggingface' },
     designer: { label: 'Open Data Factory', view: 'factory' },
-    'schema-research': { label: 'Open Data Factory', view: 'factory' },
     pipeline: { label: 'Open Pipeline', view: 'pipeline' },
     orchestration: { label: 'Open Orchestrator', view: 'orchestrator' },
     verification: { label: 'Open Orchestrator', view: 'orchestrator' },
@@ -256,9 +255,7 @@ const TRACKED_PREFIXES = [
   'cascade',
   'hf',
   'hf-context',
-  'autoresearch',
   'integration',
-  'schema-research',
   'verification',
   'designer',
   'skill-eval',

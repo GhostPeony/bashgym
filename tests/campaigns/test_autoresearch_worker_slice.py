@@ -48,6 +48,7 @@ def test_worker_executes_restart_safe_smoke_without_unlocking_quality_search(tmp
                 max_attempts=2,
                 budget_unit="gpu_hours",
                 max_total_cost=0.1,
+                minimum_improvement=0.0,
             ),
             created_at=NOW,
         )

@@ -62,6 +62,7 @@ from bashgym.campaigns.research_diagnostics import (
 )
 from bashgym.campaigns.runtime import CampaignArtifactRecord, CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
+from bashgym.campaigns.training_seed import training_seed, training_stages_required
 from bashgym.ledger.contracts import DecisionSpec, LedgerEventSpec, stable_ledger_id
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 
@@ -2206,6 +2207,10 @@ class AutoResearchCampaignCore:
                 raise AutoResearchInvariantError(
                     "autoresearch_candidate_requires_controlled_variables"
                 )
+            if training_stages_required(submission.stage_plan) and (
+                training_seed(submission.training_recipe) is None
+            ):
+                raise AutoResearchInvariantError("autoresearch_candidate_requires_training_seed")
             parent_outcome = next(
                 (
                     item

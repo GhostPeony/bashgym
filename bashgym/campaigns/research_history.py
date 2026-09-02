@@ -23,6 +23,7 @@ from bashgym.campaigns.contracts import StudyProposal, canonical_hash
 from bashgym.campaigns.experiment_power import build_experiment_power_projection
 from bashgym.campaigns.failure_observations import build_research_failure_packet
 from bashgym.campaigns.outcome_assessment import build_outcome_assessment
+from bashgym.campaigns.training_seed import training_seed
 
 _MAX_HISTORY = 100
 _MAX_METRICS = 16
@@ -398,8 +399,8 @@ def _hypothesis_families(
             proposal = proposal_by_id.get(control.proposal_id)
             if proposal is None:
                 continue
-            seed = proposal.training_recipe.get("seed")
-            if isinstance(seed, int) and not isinstance(seed, bool) and seed not in seeds:
+            seed = training_seed(proposal.training_recipe)
+            if seed is not None and seed not in seeds:
                 seeds.append(seed)
             outcome = outcomes_by_proposal.get(control.proposal_id)
             if outcome is None:

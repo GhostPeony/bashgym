@@ -25,6 +25,7 @@ from bashgym.campaigns.method_selection import build_method_selection_packet
 from bashgym.campaigns.outcome_assessment import build_outcome_assessment
 from bashgym.campaigns.research_diagnostics import AutoResearchDiagnostics
 from bashgym.campaigns.tmax_recipe import TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA
+from bashgym.campaigns.training_seed import training_seed
 
 _MAX_SIGNALS = 5
 _MAX_CHECKPOINTS = 5
@@ -89,6 +90,8 @@ def _project_last_experiment(
         ),
         "hypothesis": proposal.hypothesis,
         "changed_variable": proposal.primary_variable,
+        "controlled_variables": list(proposal.controlled_variables),
+        "training_seed": training_seed(proposal.training_recipe),
         "expected_outcome": proposal.expected_outcome,
         "falsification_criterion": proposal.falsification_criterion,
         "stages": [item.stage.value for item in proposal.stage_plan.items],

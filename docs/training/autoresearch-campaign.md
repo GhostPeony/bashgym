@@ -161,6 +161,14 @@ A candidate must:
 - include captured Git lineage when the changed variable represents trainer,
   algorithm, environment, reward, evaluator, verifier, or other approved code.
 
+A candidate whose stage plan runs a training stage must declare an integer
+`seed` in its training recipe; submission is rejected with
+`autoresearch_candidate_requires_training_seed` otherwise. Replication studies
+of the same intervention vary only that seed, holding every other declared
+variable constant. The decision packet reports the declared value at
+`last_experiment.training_seed` and the held-constant variables at
+`last_experiment.controlled_variables`.
+
 Proposals are rejected with `proposal_credential_shaped_value` when any recipe or free-text field contains a credential-shaped string, and with `proposal_unresolved_placeholder` when a placeholder such as `REPLACE_ME` or `<ASK_USER` remains; credentials belong in the secret store and are referenced by name.
 
 Examples of useful variables are a dataset revision, sampling policy, learning

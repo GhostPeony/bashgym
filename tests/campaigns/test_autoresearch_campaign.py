@@ -1382,3 +1382,69 @@ def test_candidate_cannot_run_before_a_real_baseline(tmp_path):
             correlation_id="too-early",
             idempotency_key="too-early",
         )
+
+
+def _unseeded_verified_baseline(tmp_path):
+    _path, repository, core = fresh_core(tmp_path, max_attempts=4, target=None)
+    activate(core)
+    baseline = _recipe_proposal("baseline-seed", learning_rate=0.001, seed=17).model_copy(
+        update={"training_recipe": {"schema_version": "recipe.v1", "learning_rate": 0.001}}
+    )
+    core.submit_baseline(
+        baseline,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-baseline-seed",
+        idempotency_key="submit-baseline-seed",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline-seed")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline-seed",
+            baseline_study,
+            baseline_attempt,
+            0.5,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+    return repository, core, baseline_study
+
+
+def test_candidate_with_training_stage_requires_a_declared_seed(tmp_path) -> None:
+    repository, core, baseline_study = _unseeded_verified_baseline(tmp_path)
+    unseeded = _recipe_proposal("candidate-unseeded", learning_rate=0.002, seed=17).model_copy(
+        update={
+            "training_recipe": {"schema_version": "recipe.v1", "learning_rate": 0.002},
+            "prerequisite_study_ids": (baseline_study,),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.FULL_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Train the candidate.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Compare on the fixed suite.",
+                    ),
+                )
+            ),
+        }
+    )
+
+    with pytest.raises(AutoResearchInvariantError) as excinfo:
+        core.submit_candidate(
+            unseeded,
+            parent_proposal_id="baseline-seed",
+            changed_variables=("learning_rate",),
+            expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+            principal=principal(repository),
+            correlation_id="candidate-unseeded",
+            idempotency_key="candidate-unseeded",
+        )
+
+    assert "autoresearch_candidate_requires_training_seed" in str(excinfo.value)

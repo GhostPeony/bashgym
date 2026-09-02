@@ -464,6 +464,8 @@ def test_builds_bounded_scientific_decision_packet_from_existing_records():
         },
         "hypothesis": "Filtering unverifiable trajectories improves task completion.",
         "changed_variable": "dataset_recipe.verifier_filter",
+        "controlled_variables": ["training_recipe", "evaluation_recipe"],
+        "training_seed": None,
         "expected_outcome": "Task success rises while verifier errors do not regress.",
         "falsification_criterion": "Task success fails to improve by 0.02.",
         "stages": ["full_training", "development_evaluation"],
@@ -553,6 +555,42 @@ def test_builds_bounded_scientific_decision_packet_from_existing_records():
         "hypothesis-evidence-1",
         "hypothesis-evidence-2",
     ]
+
+
+def test_last_experiment_projects_controlled_variables_and_training_seed() -> None:
+    proposal = _proposal().model_copy(
+        update={"training_recipe": {"learning_rate": 0.0001, "seed": 23}}
+    )
+    state = AutoResearchState(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        campaign_status=CampaignStatus.ACTIVE,
+        next_action=AutoResearchNextAction.PROPOSE_CANDIDATE,
+        ready_for_next_proposal=True,
+        reason_code="ready_for_controlled_hypothesis",
+        baseline_verified=True,
+        best_proposal_id="candidate-1",
+        best_study_id="study-1",
+        best_metric=0.66,
+        attempts_used=2,
+        proposals_used=2,
+        budget_used=2.5,
+        budget_remaining=5.5,
+        latest_decision=ResultDecision.KEEP,
+    )
+    packet = build_decision_packet(
+        objective="Improve task success.",
+        spec=_spec(),
+        state=state,
+        diagnostics=_diagnostics(),
+        latest_proposal=proposal,
+    )
+
+    assert packet["last_experiment"]["controlled_variables"] == [
+        "training_recipe",
+        "evaluation_recipe",
+    ]
+    assert packet["last_experiment"]["training_seed"] == 23
 
 
 def test_sparse_packet_reports_only_known_state_without_inventing_findings():

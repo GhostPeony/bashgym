@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from math import sqrt
 from statistics import mean, stdev
-from types import MappingProxyType
 from typing import Any
 
 from bashgym.campaigns.autoresearch import (
@@ -24,6 +23,7 @@ from bashgym.campaigns.contracts import StudyProposal, canonical_hash
 from bashgym.campaigns.experiment_power import build_experiment_power_projection
 from bashgym.campaigns.failure_observations import build_research_failure_packet
 from bashgym.campaigns.outcome_assessment import build_outcome_assessment
+from bashgym.campaigns.result_reuse import NO_REUSE_LINKS, attempts_with_reuse_sources
 from bashgym.campaigns.training_seed import training_seed
 
 _MAX_HISTORY = 100
@@ -44,7 +44,6 @@ _QUALITY_FIELDS = (
     "verifier_digest",
 )
 _REPLICATION_DIMENSIONS = frozenset({"training_recipe.seed"})
-_NO_REUSE_LINKS: Mapping[str, str] = MappingProxyType({})
 
 
 def _signed_change(direction: MetricDirection, reference: float, candidate: float) -> float:
@@ -134,10 +133,7 @@ def _dataset_for_outcome(
     attempt that executed the build is searched alongside the study's own attempts.
     """
 
-    attempt_ids = tuple(outcome.result.attempt_ids)
-    attempts = frozenset(attempt_ids) | frozenset(
-        reuse_links[attempt_id] for attempt_id in attempt_ids if attempt_id in reuse_links
-    )
+    attempts = attempts_with_reuse_sources(outcome.result.attempt_ids, reuse_links)
     for version in versions:
         metadata = version.get("metadata")
         if not isinstance(metadata, Mapping):
@@ -508,7 +504,7 @@ def build_autoresearch_history(
     dataset_versions: Sequence[Mapping[str, Any]] = (),
     evaluations: Sequence[Mapping[str, Any]] = (),
     hypothesis_family_conclusions: Sequence[AutoResearchHypothesisFamilyConclusion] = (),
-    reuse_links: Mapping[str, str] = _NO_REUSE_LINKS,
+    reuse_links: Mapping[str, str] = NO_REUSE_LINKS,
     limit: int = _MAX_HISTORY,
 ) -> dict[str, Any]:
     """Join completed experiment records and project bounded scientific facts."""

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Any
 
 from bashgym.campaigns.contracts import SealedActionResult, StageKind, canonical_hash
@@ -30,6 +31,25 @@ REMOTE_IDENTITY_KEYS = frozenset(
         "profile_revision",
     }
 )
+
+
+NO_REUSE_LINKS: Mapping[str, str] = MappingProxyType({})
+
+
+def attempts_with_reuse_sources(
+    attempt_ids: Sequence[str], reuse_links: Mapping[str, str]
+) -> frozenset[str]:
+    """Widen one experiment's attempts with the attempts that executed its reused stages.
+
+    A study whose stage was reused registers no artifact identity of its own under
+    its attempt, so both projections that join on attempt identity must search the
+    producing attempt as well.
+    """
+
+    own = tuple(attempt_ids)
+    return frozenset(own) | frozenset(
+        reuse_links[attempt_id] for attempt_id in own if attempt_id in reuse_links
+    )
 
 
 def reuse_enabled(*, stage: StageKind, executor_kind: str, runtime: Mapping[str, Any]) -> bool:
@@ -77,11 +97,13 @@ def reused_from_attempt_id(manifest: SealedActionResult) -> str | None:
 
 
 __all__ = [
+    "NO_REUSE_LINKS",
     "REMOTE_IDENTITY_KEYS",
     "RESULT_KEY_SCHEMA",
     "REUSABLE_STAGES",
     "REUSED_FROM_ACTION_KEY",
     "REUSED_FROM_ATTEMPT_KEY",
+    "attempts_with_reuse_sources",
     "reuse_enabled",
     "reused_from_attempt_id",
     "stage_result_key",

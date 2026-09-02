@@ -102,6 +102,7 @@ from bashgym.campaigns.remote import (
     remote_executor_config,
 )
 from bashgym.campaigns.result_reuse import (
+    REUSABLE_STAGES,
     REUSED_FROM_ATTEMPT_KEY,
     reuse_enabled,
     reused_from_attempt_id,
@@ -268,6 +269,7 @@ class CampaignArtifactRecord(FrozenContractModel):
 _ARTIFACT_CURSOR_PREFIX = "a1."
 _REUSE_CHAIN_LIMIT = 64
 _REUSE_SOURCE_JSON_PATH = f"$.remote_process_identity.{REUSED_FROM_ATTEMPT_KEY}"
+_REUSABLE_STAGE_VALUES = tuple(sorted(stage.value for stage in REUSABLE_STAGES))
 
 
 def _encode_artifact_cursor(sequence: int) -> str:
@@ -1755,33 +1757,39 @@ class CampaignRuntimeRepository(CampaignRepository):
         chain = self.reuse_source_chain(attempt)
         return chain[-1][0] if chain else attempt
 
-    def _completed_data_build_links(
-        self, workspace_id: str
+    def _completed_reusable_stage_links(
+        self, workspace_id: str, campaign_id: str | None = None
     ) -> tuple[tuple[str, str, str | None], ...]:
-        """Read (attempt, campaign, immediate reuse link) for completed data builds.
+        """Read (attempt, campaign, immediate reuse link) for completed reusable stages.
 
-        Only the reusable stage is scanned, and each stored manifest is parsed once.
-        A row whose link is null is an attempt that executed its own build.
+        Only the stages reuse can produce are scanned, from `REUSABLE_STAGES`, and
+        each stored manifest is parsed once. A row whose link is null is an attempt
+        that executed its own stage. A campaign narrows the scan for a reader that
+        never follows a link out of its own campaign.
         """
 
         self._require_initialized()
+        stage_placeholders = ", ".join("?" for _stage in _REUSABLE_STAGE_VALUES)
+        campaign_clause = " AND a.campaign_id = ?" if campaign_id is not None else ""
         with self._connection() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT t.attempt_id, a.campaign_id,
                        json_extract(t.result_json, ?) AS source_attempt_id
                 FROM campaign_attempts t
                 JOIN campaign_actions a
                   ON a.workspace_id = t.workspace_id AND a.action_id = t.action_id
-                WHERE t.workspace_id = ? AND a.stage_kind = ? AND a.status = ? AND t.status = ?
-                  AND t.result_json IS NOT NULL
+                WHERE t.workspace_id = ? AND a.stage_kind IN ({stage_placeholders})
+                  AND a.status = ? AND t.status = ?
+                  AND t.result_json IS NOT NULL{campaign_clause}
                 """,
                 (
                     _REUSE_SOURCE_JSON_PATH,
                     workspace_id,
-                    StageKind.DATA_BUILD.value,
+                    *_REUSABLE_STAGE_VALUES,
                     ActionStatus.COMPLETED.value,
                     AttemptStatus.COMPLETED.value,
+                    *((campaign_id,) if campaign_id is not None else ()),
                 ),
             ).fetchall()
         return tuple(
@@ -1798,22 +1806,25 @@ class CampaignRuntimeRepository(CampaignRepository):
         )
 
     def reuse_source_links(self, workspace_id: str, campaign_id: str) -> dict[str, str]:
-        """Immediate stored reuse link of each completed data build in one campaign.
+        """Immediate stored reuse link of each completed reusable stage in one campaign.
 
         This is the consuming attempt's own sealed statement. No chain is walked and
-        no source is verified, so a projection of it cannot fail on a damaged link.
+        no source is verified, so a projection of it cannot fail on a damaged link,
+        and the scan is narrowed to the campaign because no link is followed.
         """
 
         return {
             attempt_id: source
-            for attempt_id, campaign, source in self._completed_data_build_links(workspace_id)
-            if campaign == campaign_id and source is not None
+            for attempt_id, _campaign, source in self._completed_reusable_stage_links(
+                workspace_id, campaign_id
+            )
+            if source is not None
         }
 
     def resolved_reuse_links(self, workspace_id: str, campaign_id: str) -> dict[str, str]:
-        """Map each reused data build of one campaign to the attempt that executed.
+        """Map each reused stage of one campaign to the attempt that executed it.
 
-        Preconditions: only data-build attempts whose action and attempt are both
+        Preconditions: only reusable-stage attempts whose action and attempt are both
         completed are considered, and a chain is kept only when it ends at such an
         attempt that carries no reuse link of its own. A cyclic, over-long, or
         unresolvable chain is dropped from the map rather than raised, so one damaged
@@ -1822,7 +1833,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         campaign; `reuse_source_chain` is the verifying walk that execution binds to.
         """
 
-        rows = self._completed_data_build_links(workspace_id)
+        rows = self._completed_reusable_stage_links(workspace_id)
         sources = {attempt_id: source for attempt_id, _campaign, source in rows if source}
         executed = {attempt_id for attempt_id, _campaign, source in rows if source is None}
         resolved: dict[str, str] = {}

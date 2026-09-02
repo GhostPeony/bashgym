@@ -4190,6 +4190,64 @@ def test_repeated_reuse_of_one_build_records_one_hop_to_the_executing_attempt(tm
     assert repository.resolved_reuse_links("workspace-a", "campaign-2") == {}
 
 
+def test_collapsed_map_follows_a_legacy_multi_hop_reuse_chain(tmp_path):
+    """Links written before write-time collapse name the matched attempt, not the producer."""
+
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    third_plan = seed_data_build_then_training_study(repository, "study-3", sequence=3)
+    third = schedule_remote_data_build(
+        repository,
+        fixture.worker,
+        fixture.profile,
+        "campaign-1",
+        "study-3",
+        third_plan,
+        START + timedelta(seconds=5),
+    )
+    assert fixture.worker.run_once(now=START + timedelta(seconds=6)) == "reused"
+    set_reuse_link(repository, third.attempt_id, fixture.consumer.attempt_id)
+
+    chain = repository.reuse_source_chain(repository.get_attempt("workspace-a", third.attempt_id))
+
+    assert [item.attempt_id for item, _manifest in chain] == [
+        fixture.consumer.attempt_id,
+        fixture.producer.attempt_id,
+    ]
+    assert repository.reuse_source_links("workspace-a", "campaign-1") == {
+        fixture.consumer.attempt_id: fixture.producer.attempt_id,
+        third.attempt_id: fixture.consumer.attempt_id,
+    }
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {
+        fixture.consumer.attempt_id: fixture.producer.attempt_id,
+        third.attempt_id: fixture.producer.attempt_id,
+    }
+
+
+def test_reuse_stops_when_the_matched_completion_carries_a_damaged_link(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    set_reuse_link(repository, fixture.consumer.attempt_id, "attempt-does-not-exist")
+    third_plan = seed_data_build_then_training_study(repository, "study-3", sequence=3)
+    third = schedule_remote_data_build(
+        repository,
+        fixture.worker,
+        fixture.profile,
+        "campaign-1",
+        "study-3",
+        third_plan,
+        START + timedelta(seconds=5),
+    )
+
+    with pytest.raises(CampaignPersistenceError, match="campaign_reuse_source_invalid"):
+        fixture.worker.run_once(now=START + timedelta(seconds=6))
+
+    assert fixture.adapter.launch_count == 1
+    assert repository.get_attempt("workspace-a", third.attempt_id).status != (
+        AttemptStatus.COMPLETED
+    )
+
+
 def test_reuse_links_drop_from_the_collapsed_map_without_failing_the_projection(tmp_path):
     fixture = reuse_remote_data_build(tmp_path)
     repository = fixture.repository

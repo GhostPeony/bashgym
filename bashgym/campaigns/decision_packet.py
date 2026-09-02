@@ -11,7 +11,6 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from types import MappingProxyType
 from typing import Any
 
 from bashgym.campaigns.autoresearch import (
@@ -25,6 +24,7 @@ from bashgym.campaigns.contracts import StudyProposal
 from bashgym.campaigns.method_selection import build_method_selection_packet
 from bashgym.campaigns.outcome_assessment import build_outcome_assessment
 from bashgym.campaigns.research_diagnostics import AutoResearchDiagnostics
+from bashgym.campaigns.result_reuse import NO_REUSE_LINKS, attempts_with_reuse_sources
 from bashgym.campaigns.tmax_recipe import TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA
 from bashgym.campaigns.training_seed import training_seed
 
@@ -48,7 +48,7 @@ _AGENT_ACTIONS = frozenset(
 def latest_data_quality_for_outcome(
     dataset_versions: Sequence[Mapping[str, Any]],
     outcome: AutoResearchOutcomeRecord | None,
-    reuse_links: Mapping[str, str] = MappingProxyType({}),
+    reuse_links: Mapping[str, str] = NO_REUSE_LINKS,
 ) -> dict[str, Any] | None:
     """Select quality metadata bound to one of the outcome's exact attempts.
 
@@ -58,10 +58,7 @@ def latest_data_quality_for_outcome(
 
     if outcome is None:
         return None
-    own_attempt_ids = tuple(outcome.result.attempt_ids)
-    attempt_ids = frozenset(own_attempt_ids) | frozenset(
-        reuse_links[attempt_id] for attempt_id in own_attempt_ids if attempt_id in reuse_links
-    )
+    attempt_ids = attempts_with_reuse_sources(outcome.result.attempt_ids, reuse_links)
     for version in reversed(dataset_versions):
         metadata = version.get("metadata")
         if not isinstance(metadata, Mapping):

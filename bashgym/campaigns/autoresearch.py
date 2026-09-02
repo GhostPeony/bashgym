@@ -1779,7 +1779,9 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 decided_at=result.recorded_at,
             )
             if stored_result is not None and stored_decision is not None:
-                if stored_decision != decision:
+                if stored_decision.model_dump(
+                    mode="json", exclude={"protected_metric_margins"}
+                ) != decision.model_dump(mode="json", exclude={"protected_metric_margins"}):
                     raise AutoResearchConflictError("autoresearch_result_conflict")
                 outcome = AutoResearchOutcomeRecord(
                     result=stored_result,

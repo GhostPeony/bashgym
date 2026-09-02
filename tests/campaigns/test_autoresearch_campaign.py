@@ -14,6 +14,7 @@ from bashgym.campaigns.autoresearch import (
     AutoResearchDiagnosticResult,
     AutoResearchHypothesisFamilyConclusion,
     AutoResearchInvariantError,
+    AutoResearchLedgerCommitContext,
     AutoResearchNextAction,
     AutoResearchOutcomeRecord,
     AutoResearchProposalControl,
@@ -73,6 +74,7 @@ def make_spec(
     max_attempts: int = 3,
     target: float | None = 0.95,
     evaluation_binding: bool = False,
+    protected_metrics: tuple[ProtectedMetricGate, ...] = (),
 ):
     return AutoResearchCampaignSpec(
         workspace_id="workspace-a",
@@ -85,6 +87,7 @@ def make_spec(
             max_total_cost=3.0,
             target_metric=target,
             minimum_improvement=0.01,
+            protected_metrics=protected_metrics,
             deadline=datetime(2099, 7, 14, 12, 0, tzinfo=UTC),
         ),
         ledger_project_id="project-a" if evaluation_binding else None,
@@ -122,7 +125,14 @@ def test_template_method_thresholds_materialize_into_campaign_spec():
     )
 
 
-def fresh_core(tmp_path, *, max_attempts=3, target=0.95, evaluation_binding=False):
+def fresh_core(
+    tmp_path,
+    *,
+    max_attempts=3,
+    target=0.95,
+    evaluation_binding=False,
+    protected_metrics: tuple[ProtectedMetricGate, ...] = (),
+):
     path = tmp_path / "campaigns.sqlite3"
     repository = AutoResearchRepository(path)
     repository.initialize()
@@ -133,6 +143,7 @@ def fresh_core(tmp_path, *, max_attempts=3, target=0.95, evaluation_binding=Fals
             max_attempts=max_attempts,
             target=target,
             evaluation_binding=evaluation_binding,
+            protected_metrics=protected_metrics,
         )
     )
     return path, repository, core
@@ -893,6 +904,158 @@ def test_protected_metric_margins_report_headroom_and_breach() -> None:
     assert AutoResearchRepository._protected_metric_failure(gates, incumbent, breached) == (
         "valid_tool_calls"
     )
+
+
+def test_legacy_decision_without_margins_replays_without_conflict(tmp_path):
+    """A decision_json row written before protected_metric_margins existed must still replay."""
+
+    _path, repository, core = fresh_core(
+        tmp_path,
+        max_attempts=4,
+        target=None,
+        evaluation_binding=True,
+        protected_metrics=(
+            ProtectedMetricGate(
+                metric_name="valid_tool_calls",
+                direction=MetricDirection.MAXIMIZE,
+                max_regression=0.02,
+            ),
+        ),
+    )
+    activate(core)
+    actor = principal(repository)
+
+    baseline = _recipe_proposal("baseline", learning_rate=0.001, seed=17)
+    core.submit_baseline(
+        baseline,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-baseline-legacy-margins",
+        idempotency_key="submit-baseline-legacy-margins",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline")
+    baseline_outcome = _authoritative_outcome(
+        "baseline",
+        baseline_study,
+        baseline_attempt,
+        0.50,
+        role=ExperimentRole.BASELINE,
+        decision=ResultDecision.BASELINE,
+        eligible_for_best=True,
+    )
+    baseline_outcome = baseline_outcome.model_copy(
+        update={
+            "result": baseline_outcome.result.model_copy(
+                update={"metrics": {"mrr_at_10": 0.50, "valid_tool_calls": 0.98}}
+            )
+        }
+    )
+    _insert_authoritative_outcome(repository, baseline_outcome)
+
+    candidate_submission = _recipe_proposal(
+        "candidate-legacy-margins", learning_rate=0.002, seed=17
+    ).model_copy(
+        update={
+            "primary_variable": "training_recipe.learning_rate",
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_controlled_candidate(
+        candidate_submission,
+        parent_proposal_id="baseline",
+        changed_variable="training_recipe.learning_rate",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-candidate-legacy-margins",
+        idempotency_key="submit-candidate-legacy-margins",
+    )
+
+    candidate_result = result(
+        "candidate-legacy-margins",
+        "study-candidate-legacy-margins",
+        "attempt-candidate-legacy-margins",
+        0.55,
+        role=ExperimentRole.CANDIDATE,
+    ).model_copy(update={"metrics": {"mrr_at_10": 0.55, "valid_tool_calls": 0.97}})
+
+    ledger = core.ledger
+    ledger.register_project(
+        ProjectSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            display_name="AutoResearch",
+            owner_actor_id="codex-agent",
+        )
+    )
+    ledger.register_experiment(
+        ExperimentSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            experiment_id="experiment-candidate-legacy-margins",
+            name="Candidate",
+            objective="Evaluate the candidate recipe.",
+        )
+    )
+    ledger.register_run(
+        RunSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            experiment_id="experiment-candidate-legacy-margins",
+            run_id="run-candidate-legacy-margins",
+            source_system="bashgym",
+            source_run_id="run-candidate-legacy-margins",
+            campaign_id="campaign-1",
+            run_kind="training",
+            task_type="retrieval",
+            training_method="lora",
+            status=RunStatus.COMPLETED,
+            context_status=ContextStatus.VERIFIED,
+            recipe_digest="d" * 64,
+            correlation_id="run-candidate-legacy-margins",
+        )
+    )
+    ledger_context = AutoResearchLedgerCommitContext(
+        project_id="project-a",
+        experiment_id="experiment-candidate-legacy-margins",
+        run_id="run-candidate-legacy-margins",
+        attempt_id="attempt-candidate-legacy-margins",
+        correlation_id="record-candidate-legacy-margins",
+    )
+
+    recorded = repository._record_autoresearch_result(
+        candidate_result, ledger_context=ledger_context
+    )
+    assert recorded.replayed is False
+    assert recorded.decision.protected_metric_margins == {"valid_tool_calls": pytest.approx(0.01)}
+
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            """
+            SELECT decision_json FROM autoresearch_results
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            ("workspace-a", "campaign-1", "candidate-legacy-margins"),
+        ).fetchone()
+        legacy_decision = json.loads(row["decision_json"])
+        del legacy_decision["protected_metric_margins"]
+        connection.execute(
+            """
+            UPDATE autoresearch_results SET decision_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            (
+                json.dumps(legacy_decision),
+                "workspace-a",
+                "campaign-1",
+                "candidate-legacy-margins",
+            ),
+        )
+
+    replayed = repository._record_autoresearch_result(
+        candidate_result, ledger_context=ledger_context
+    )
+    assert replayed.replayed is True
+    assert replayed.decision.protected_metric_margins == {}
 
 
 def test_result_write_rejects_unbounded_candidate_references_before_lineage_lookup(

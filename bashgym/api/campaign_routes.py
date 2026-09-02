@@ -40,6 +40,7 @@ from bashgym.campaigns.autoresearch import (
     load_autoresearch_template_definitions,
 )
 from bashgym.campaigns.autoresearch_loop import observe_research_wait
+from bashgym.campaigns.clone_study import CloneStudyError
 from bashgym.campaigns.contracts import (
     ActorPrincipal,
     Campaign,
@@ -194,6 +195,12 @@ class CampaignProposalCreateInput(CampaignExpectedVersionInput):
     rationale: str = Field(min_length=1, max_length=4000)
     research_context: ResearchContextBundle | None = None
     acquisition: ExperimentAcquisition | None = None
+
+
+class CampaignStudyCloneInput(ApiModel):
+    workspace_id: str = Field(min_length=1, max_length=160)
+    proposal_id: str = Field(min_length=1, max_length=160)
+    changes: dict[str, Any] = Field(default_factory=dict)
 
 
 class AutoResearchCandidateCreateInput(CampaignProposalCreateInput):
@@ -1051,6 +1058,11 @@ def _raise_api(exc: Exception) -> Never:
                 "code": "campaign_contract_invalid",
                 "message": "Campaign state failed contract validation.",
             },
+        ) from exc
+    if isinstance(exc, CloneStudyError):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": exc.code, "message": "Clone changes were rejected."},
         ) from exc
     if isinstance(exc, ValueError):
         raise HTTPException(
@@ -2392,6 +2404,38 @@ def get_campaign_study(
         return service.study(workspace_id, campaign_id, study_id, _principal(request)).model_dump(
             mode="json"
         )
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.post("/{campaign_id}/studies/{study_id}/clone")
+def clone_campaign_study(
+    campaign_id: str,
+    study_id: str,
+    body: CampaignStudyCloneInput,
+    request: Request,
+):
+    try:
+        _repository, _auth, service = _services(request)
+        projection = service.clone_study(
+            body.workspace_id,
+            campaign_id,
+            study_id,
+            proposal_id=body.proposal_id,
+            changes=body.changes,
+            principal=_principal(request),
+        )
+        submission = projection.submission.model_dump(
+            mode="json", exclude={"schema_version", "workspace_id", "campaign_id"}
+        )
+        return {
+            "source": {
+                "study_id": projection.source_study_id,
+                "proposal_id": projection.source_proposal_id,
+            },
+            "submission": submission,
+            "diff": projection.diff,
+        }
     except Exception as exc:
         _raise_api(exc)
 

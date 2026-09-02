@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from bashgym.campaigns.clone_study import clone_diff, clone_proposal_submission
 from bashgym.campaigns.contracts import (
     ActorPrincipal,
     AutonomyProfile,
@@ -173,6 +175,16 @@ def _bounded_text_preview(path: Path, *, from_tail: bool) -> tuple[str, bool]:
             else lines[:_ARTIFACT_PREVIEW_MAX_LINES]
         )
     return "\n".join(lines), truncated
+
+
+@dataclass(frozen=True)
+class CloneStudyProjection:
+    """One persisted study rendered as a resubmittable proposal plus its diff."""
+
+    source_study_id: str
+    source_proposal_id: str
+    submission: StudyProposalSubmission
+    diff: dict[str, dict[str, Any]]
 
 
 class CampaignService:
@@ -400,6 +412,31 @@ class CampaignService:
     def study(self, workspace_id: str, campaign_id: str, study_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)
         return self.repository.get_study(workspace_id, campaign_id, study_id)
+
+    def clone_study(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        study_id: str,
+        *,
+        proposal_id: str,
+        changes: Mapping[str, Any],
+        principal: ActorPrincipal,
+    ) -> CloneStudyProjection:
+        """Prefill a new submission from a persisted study without submitting it."""
+
+        self.get(workspace_id, campaign_id, principal)
+        study = self.repository.get_study(workspace_id, campaign_id, study_id)
+        record = self.repository.get_proposal(workspace_id, campaign_id, study.proposal_id)
+        submission = clone_proposal_submission(
+            record.proposal, proposal_id=proposal_id, changes=changes
+        )
+        return CloneStudyProjection(
+            source_study_id=study.study_id,
+            source_proposal_id=record.proposal.proposal_id,
+            submission=submission,
+            diff=clone_diff(record.proposal, submission),
+        )
 
     def submit_proposal(
         self,

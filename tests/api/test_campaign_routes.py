@@ -411,6 +411,7 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
         "/api/campaigns/{campaign_id}/proposals",
         "/api/campaigns/{campaign_id}/studies",
         "/api/campaigns/{campaign_id}/studies/{study_id}",
+        "/api/campaigns/{campaign_id}/studies/{study_id}/clone",
         "/api/campaigns/{campaign_id}/proposals/{proposal_id}/withdraw",
         "/api/campaigns/{campaign_id}/proposals/{proposal_id}/code-lineage/prepare",
         "/api/campaigns/{campaign_id}/proposals/{proposal_id}/code-lineage/capture",
@@ -3417,3 +3418,94 @@ def test_attempts_route_projects_bounded_public_attempts_without_executor_paths(
     assert '"executor"' not in serialized
     assert "sealed_result_uri" not in serialized
     assert "lease_owner" not in serialized
+
+
+def _study_with_accepted_proposal(http, repository, access) -> tuple[str, str]:
+    assert create_from_template(http, access).status_code == 200
+    version = 1
+    for trigger, key in (
+        (CampaignTrigger.VALIDATE, "validate-clone"),
+        (CampaignTrigger.VALIDATION_PASSED, "ready-clone"),
+        (CampaignTrigger.START, "start-clone"),
+    ):
+        transitioned = repository.transition_campaign(
+            "workspace-a",
+            "campaign-1",
+            trigger,
+            expected_version=version,
+            actor_id="campaign-controller",
+            credential_kind=CredentialKind.CONTROLLER,
+            correlation_id=key,
+            idempotency_key=key,
+        )
+        version = transitioned.campaign.version
+
+    proposal_body = study_proposal("proposal-source").model_dump(
+        mode="json", exclude={"schema_version", "workspace_id", "campaign_id"}
+    )
+    proposal_body.update({"workspace_id": "workspace-a", "expected_version": version})
+    submitted = http.post(
+        "/api/campaigns/campaign-1/proposals",
+        headers={**bearer(access), "Idempotency-Key": "submit-clone-source"},
+        json=proposal_body,
+    )
+    assert submitted.status_code == 200
+    advanced = http.post(
+        "/api/campaigns/campaign-1/advance",
+        headers={**bearer(access), "Idempotency-Key": "advance-clone-source"},
+        json={
+            "workspace_id": "workspace-a",
+            "expected_version": submitted.json()["campaign"]["version"],
+        },
+    )
+    assert advanced.status_code == 200
+    selection = repository.select_next_proposal_as_controller(
+        "workspace-a",
+        "campaign-1",
+        expected_version=advanced.json()["campaign"]["version"],
+        controller_id="campaign-controller",
+        correlation_id="select-clone-source",
+        idempotency_key="select-clone-source",
+    )
+    assert selection is not None
+    return selection.study.study_id, "proposal-source"
+
+
+def test_clone_study_returns_prefilled_submission_and_diff(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    study_id, proposal_id = _study_with_accepted_proposal(http, repository, access)
+
+    response = http.post(
+        f"/api/campaigns/campaign-1/studies/{study_id}/clone",
+        headers=bearer(access),
+        json={
+            "workspace_id": "workspace-a",
+            "proposal_id": "proposal-clone",
+            "changes": {"training_recipe": {"schema_version": "recipe.v1", "seed": 23}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == {"study_id": study_id, "proposal_id": proposal_id}
+    assert body["submission"]["proposal_id"] == "proposal-clone"
+    assert body["submission"]["training_recipe"] == {"schema_version": "recipe.v1", "seed": 23}
+    assert "workspace_id" not in body["submission"]
+    assert "campaign_id" not in body["submission"]
+    assert "schema_version" not in body["submission"]
+    assert list(body["diff"]) == ["training_recipe"]
+    with repository._connection() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM campaign_proposals").fetchone()[0] == 1
+
+    rejected = http.post(
+        f"/api/campaigns/campaign-1/studies/{study_id}/clone",
+        headers=bearer(access),
+        json={
+            "workspace_id": "workspace-a",
+            "proposal_id": "proposal-clone",
+            "changes": {"planner_actor_id": "someone"},
+        },
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["code"] == "clone_change_not_allowed"

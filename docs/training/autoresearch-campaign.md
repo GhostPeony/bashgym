@@ -197,12 +197,12 @@ dataset. Training consumes the declared dataset and starting-model binding.
 Evaluation consumes the trained output and the same pinned suite used by the
 baseline.
 
-A data build whose content key matches a data build already completed in the
-workspace is reused instead of executed again. The reusing study still records
-its own attempt and its own sealed manifest; that manifest names the producing
-attempt as `reused_from_attempt_id`, the stage settles zero actual cost, and the
-completion event carries the same field. Evaluation and training stages always
-execute.
+A data build on registered compute whose content key matches a data build
+already completed in the workspace is reused instead of executed again. The
+reusing study still records its own attempt and its own sealed manifest; that
+manifest names the producing attempt as `reused_from_attempt_id`, the stage
+settles zero actual cost, and the completion event carries the same field.
+Evaluation and training stages always execute.
 
 When a compatible trainer and evaluator are installed, activation may set
 `--intermediate-checkpoint-limit N` (maximum 8). The training stage then retains

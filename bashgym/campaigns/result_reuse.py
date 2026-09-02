@@ -33,13 +33,13 @@ REMOTE_IDENTITY_KEYS = frozenset(
 
 
 def reuse_enabled(*, stage: StageKind, executor_kind: str, runtime: Mapping[str, Any]) -> bool:
-    """Data builds and evaluations reuse by default; fake runs opt in; training never."""
+    """Data builds reuse on registered remote compute; fake runs opt in; nothing else does."""
 
     if stage not in REUSABLE_STAGES:
         return False
     if executor_kind == "fake":
         return runtime.get("memoize") is True
-    return executor_kind in {"ssh_remote", "development_evaluation"}
+    return executor_kind == "ssh_remote"
 
 
 def stage_result_key(

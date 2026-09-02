@@ -293,6 +293,36 @@ def test_public_attempt_projection_normalizes_untrusted_executor_kind():
     assert missing.executor_kind is None
 
 
+def test_public_attempt_projection_reports_the_resolved_reuse_source():
+    base = {
+        "attempt_id": "attempt-2",
+        "workspace_id": "workspace-a",
+        "campaign_id": "campaign-1",
+        "study_id": "study-2",
+        "action_id": "action-2",
+        "attempt_number": 1,
+        "claim_generation": 0,
+        "status": "completed",
+        "input_digest": "a" * 64,
+        "candidate_digest": "b" * 64,
+        "manifest_revision": 1,
+        "stage": "data_build",
+        "created_at": "2026-07-17T00:00:00Z",
+        "updated_at": "2026-07-17T00:00:00Z",
+    }
+    reused = project_public_campaign_attempt(base, reused_from_attempt_id="attempt-1")
+    ordinary = project_public_campaign_attempt(base)
+    unsafe = project_public_campaign_attempt(
+        base, reused_from_attempt_id="C:/unsafe reuse source canary"
+    )
+
+    assert set(reused.model_dump(mode="json")) == PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
+    assert reused.reused_from_attempt_id == "attempt-1"
+    assert ordinary.reused_from_attempt_id is None
+    assert unsafe.reused_from_attempt_id is None
+    assert "canary" not in json.dumps(unsafe.model_dump(mode="json"))
+
+
 def test_public_artifact_projection_drops_uri_metadata_and_runtime_extras():
     projected = project_public_campaign_artifact(
         {

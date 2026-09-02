@@ -153,6 +153,7 @@ PUBLIC_CAMPAIGN_ATTEMPT_FIELDS = frozenset(
         "input_digest",
         "candidate_digest",
         "executor_kind",
+        "reused_from_attempt_id",
         "created_at",
         "updated_at",
     }
@@ -173,6 +174,7 @@ PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES = MappingProxyType(
         "input_digest": "workspace_safe",
         "candidate_digest": "workspace_safe",
         "executor_kind": "workspace_safe",
+        "reused_from_attempt_id": "workspace_safe",
         "created_at": "workspace_safe",
         "updated_at": "workspace_safe",
     }
@@ -328,8 +330,14 @@ def project_public_campaign_event(
     )
 
 
-def project_public_campaign_attempt(attempt: Any) -> PublicCampaignAttemptV1:
-    """Project raw or untrusted attempt-shaped input without executor configuration."""
+def project_public_campaign_attempt(
+    attempt: Any, *, reused_from_attempt_id: str | None = None
+) -> PublicCampaignAttemptV1:
+    """Project raw or untrusted attempt-shaped input without executor configuration.
+
+    The reuse source is supplied by the caller that resolved it, because the attempt
+    record itself does not carry the sealed manifest that names it.
+    """
 
     raw = attempt.model_dump(mode="json") if hasattr(attempt, "model_dump") else dict(attempt)
     executor = raw.get("executor")
@@ -348,6 +356,7 @@ def project_public_campaign_attempt(attempt: Any) -> PublicCampaignAttemptV1:
         input_digest=raw["input_digest"],
         candidate_digest=raw["candidate_digest"],
         executor_kind=_safe_identifier(executor_kind),
+        reused_from_attempt_id=_safe_identifier(reused_from_attempt_id),
         created_at=raw["created_at"],
         updated_at=raw["updated_at"],
     )

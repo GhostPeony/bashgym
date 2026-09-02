@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from math import sqrt
 from statistics import mean, stdev
+from types import MappingProxyType
 from typing import Any
 
 from bashgym.campaigns.autoresearch import (
@@ -43,6 +44,7 @@ _QUALITY_FIELDS = (
     "verifier_digest",
 )
 _REPLICATION_DIMENSIONS = frozenset({"training_recipe.seed"})
+_NO_REUSE_LINKS: Mapping[str, str] = MappingProxyType({})
 
 
 def _signed_change(direction: MetricDirection, reference: float, candidate: float) -> float:
@@ -122,9 +124,20 @@ def _replication_comparison_digest(
 
 
 def _dataset_for_outcome(
-    versions: Sequence[Mapping[str, Any]], outcome: AutoResearchOutcomeRecord
+    versions: Sequence[Mapping[str, Any]],
+    outcome: AutoResearchOutcomeRecord,
+    reuse_links: Mapping[str, str],
 ) -> dict[str, Any] | None:
-    attempts = frozenset(outcome.result.attempt_ids)
+    """Match the registered dataset of this experiment, following any reuse link.
+
+    A study whose data build was reused registers no version of its own, so the
+    attempt that executed the build is searched alongside the study's own attempts.
+    """
+
+    attempt_ids = tuple(outcome.result.attempt_ids)
+    attempts = frozenset(attempt_ids) | frozenset(
+        reuse_links[attempt_id] for attempt_id in attempt_ids if attempt_id in reuse_links
+    )
     for version in versions:
         metadata = version.get("metadata")
         if not isinstance(metadata, Mapping):
@@ -199,6 +212,7 @@ def _entry(
     evaluations: Sequence[Mapping[str, Any]],
     evidence_strength: str,
     hypothesis_family: Mapping[str, Any] | None,
+    reuse_links: Mapping[str, str],
 ) -> dict[str, Any]:
     result = outcome.result
     decision = outcome.decision
@@ -341,7 +355,7 @@ def _entry(
             evaluations=evaluations,
             hypothesis_family=hypothesis_family,
         ),
-        "data": _dataset_for_outcome(dataset_versions, outcome),
+        "data": _dataset_for_outcome(dataset_versions, outcome, reuse_links),
         "attempt_ids": attempts,
         "attempt_ids_omitted": attempts_omitted,
         "evidence_references": references,
@@ -494,6 +508,7 @@ def build_autoresearch_history(
     dataset_versions: Sequence[Mapping[str, Any]] = (),
     evaluations: Sequence[Mapping[str, Any]] = (),
     hypothesis_family_conclusions: Sequence[AutoResearchHypothesisFamilyConclusion] = (),
+    reuse_links: Mapping[str, str] = _NO_REUSE_LINKS,
     limit: int = _MAX_HISTORY,
 ) -> dict[str, Any]:
     """Join completed experiment records and project bounded scientific facts."""
@@ -544,6 +559,7 @@ def build_autoresearch_history(
                     if control.hypothesis_family_id is not None
                     else None
                 ),
+                reuse_links=reuse_links,
             )
         )
     return {

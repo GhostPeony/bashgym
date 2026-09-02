@@ -128,6 +128,7 @@ def _autoresearch_history_for_export(
         dataset_versions=dataset_versions,
         evaluations=evaluations,
         hypothesis_family_conclusions=conclusions,
+        reuse_links=repository.resolved_reuse_links(campaign.workspace_id, campaign.campaign_id),
     )
     diagnostics = autoresearch.list_autoresearch_diagnostic_results(
         campaign.workspace_id, campaign.campaign_id
@@ -374,8 +375,11 @@ class CampaignService:
 
     def attempts(self, workspace_id: str, campaign_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)
+        reuse_links = self.repository.resolved_reuse_links(workspace_id, campaign_id)
         return tuple(
-            project_public_campaign_attempt(attempt)
+            project_public_campaign_attempt(
+                attempt, reused_from_attempt_id=reuse_links.get(attempt.attempt_id)
+            )
             for attempt in self.repository.list_attempts(workspace_id, campaign_id)
         )
 

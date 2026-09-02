@@ -4150,11 +4150,46 @@ def test_reuse_link_resolves_only_to_a_completed_same_stage_source(tmp_path):
         repository.reuse_source_attempt(other_stage)
 
 
+def test_resolved_reuse_links_collapse_every_hop_of_one_campaign(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    third_plan = seed_data_build_then_training_study(repository, "study-3", sequence=3)
+    third = schedule_remote_data_build(
+        repository,
+        fixture.worker,
+        fixture.profile,
+        "campaign-1",
+        "study-3",
+        third_plan,
+        START + timedelta(seconds=5),
+    )
+
+    assert fixture.worker.run_once(now=START + timedelta(seconds=6)) == "reused"
+    assert fixture.adapter.launch_count == 1
+    third_manifest = repository.get_attempt_result_manifest("workspace-a", third.attempt_id)
+    assert third_manifest.remote_process_identity["reused_from_attempt_id"] == (
+        fixture.consumer.attempt_id
+    )
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {
+        fixture.consumer.attempt_id: fixture.producer.attempt_id,
+        third.attempt_id: fixture.producer.attempt_id,
+    }
+    assert repository.resolved_reuse_links("workspace-a", "campaign-2") == {}
+
+    set_reuse_link(repository, fixture.consumer.attempt_id, third.attempt_id)
+    with pytest.raises(CampaignPersistenceError, match="campaign_reuse_source_invalid"):
+        repository.resolved_reuse_links("workspace-a", "campaign-1")
+
+
 def test_reuse_across_campaigns_binds_the_producing_campaign_dataset(tmp_path):
     fixture = reuse_remote_data_build(tmp_path, consumer_campaign_id="campaign-2")
     repository = fixture.repository
     adapter = fixture.adapter
 
+    assert repository.resolved_reuse_links("workspace-a", "campaign-2") == {
+        fixture.consumer.attempt_id: fixture.producer.attempt_id
+    }
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {}
     resident = repository.remote_resident_data_build_source(
         "workspace-a", "campaign-2", "study-2", 1
     )

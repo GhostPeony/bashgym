@@ -1371,6 +1371,7 @@ class PublicCampaignAttemptV1(FrozenContractModel):
     input_digest: HexDigest
     candidate_digest: HexDigest
     executor_kind: Identifier | None = None
+    reused_from_attempt_id: Identifier | None = None
     created_at: datetime
     updated_at: datetime
 

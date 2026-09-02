@@ -102,6 +102,7 @@ from bashgym.campaigns.remote import (
     remote_executor_config,
 )
 from bashgym.campaigns.result_reuse import (
+    REUSED_FROM_ATTEMPT_KEY,
     reuse_enabled,
     reused_from_attempt_id,
     stage_result_key,
@@ -266,6 +267,7 @@ class CampaignArtifactRecord(FrozenContractModel):
 
 _ARTIFACT_CURSOR_PREFIX = "a1."
 _REUSE_CHAIN_LIMIT = 64
+_REUSE_SOURCE_JSON_PATH = f"$.remote_process_identity.{REUSED_FROM_ATTEMPT_KEY}"
 
 
 def _encode_artifact_cursor(sequence: int) -> str:
@@ -1752,6 +1754,56 @@ class CampaignRuntimeRepository(CampaignRepository):
 
         chain = self.reuse_source_chain(attempt)
         return chain[-1][0] if chain else attempt
+
+    def resolved_reuse_links(self, workspace_id: str, campaign_id: str) -> dict[str, str]:
+        """Map each reused attempt of one campaign to the attempt that executed.
+
+        One workspace-scoped query loads every completed reuse link, because a chain
+        can leave the campaign that consumes it. Chains are collapsed before return.
+        This reports the recorded link for projections; `reuse_source_chain` is the
+        verifying walk that execution binds to.
+        """
+
+        self._require_initialized()
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT t.attempt_id, a.campaign_id,
+                       json_extract(t.result_json, ?) AS source_attempt_id
+                FROM campaign_attempts t
+                JOIN campaign_actions a
+                  ON a.workspace_id = t.workspace_id AND a.action_id = t.action_id
+                WHERE t.workspace_id = ? AND a.status = ? AND t.status = ?
+                  AND t.result_json IS NOT NULL
+                  AND json_extract(t.result_json, ?) IS NOT NULL
+                """,
+                (
+                    _REUSE_SOURCE_JSON_PATH,
+                    workspace_id,
+                    ActionStatus.COMPLETED.value,
+                    AttemptStatus.COMPLETED.value,
+                    _REUSE_SOURCE_JSON_PATH,
+                ),
+            ).fetchall()
+        sources = {
+            str(row["attempt_id"]): str(row["source_attempt_id"])
+            for row in rows
+            if isinstance(row["source_attempt_id"], str) and row["source_attempt_id"]
+        }
+        resolved: dict[str, str] = {}
+        for row in rows:
+            attempt_id = str(row["attempt_id"])
+            if row["campaign_id"] != campaign_id or attempt_id not in sources:
+                continue
+            seen = {attempt_id}
+            source = sources[attempt_id]
+            while source in sources:
+                if source in seen or len(seen) > _REUSE_CHAIN_LIMIT:
+                    raise CampaignPersistenceError("campaign_reuse_source_invalid")
+                seen.add(source)
+                source = sources[source]
+            resolved[attempt_id] = source
+        return resolved
 
     def completed_stage_outputs(
         self, workspace_id: str, campaign_id: str, study_id: str, stage: StageKind

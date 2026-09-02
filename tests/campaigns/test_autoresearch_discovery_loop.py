@@ -1098,10 +1098,12 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
     assert history["experiments"][1]["data"]["dataset_version_id"] == (
         generated_dataset_versions[0]["dataset_version_id"]
     )
-    # Known gap, fixed in the follow-up task: a study whose data build was reused registers
-    # no dataset version of its own, so the history projection reports no dataset section.
-    assert history["experiments"][2]["data"] is None
-    assert history["experiments"][3]["data"] is None
+    produced_data = history["experiments"][1]["data"]
+    reused_data = [history["experiments"][2]["data"], history["experiments"][3]["data"]]
+    assert [item["dataset_version_id"] for item in reused_data] == [
+        produced_data["dataset_version_id"]
+    ] * 2
+    assert [item["content_digest"] for item in reused_data] == [produced_data["content_digest"]] * 2
     assert "## AutoResearch experiment history" in report
     assert "### 2. candidate-learning-rate-1" in report
     assert "### 3. candidate-learning-rate-2" in report

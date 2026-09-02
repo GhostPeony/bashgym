@@ -30,8 +30,6 @@ CLONEABLE_FIELDS: tuple[str, ...] = (
 
 
 class CloneStudyError(ValueError):
-    code = "clone_study_invalid"
-
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
@@ -60,6 +58,12 @@ def clone_proposal_submission(
     )
 
 
+def _ordered(value: Any) -> Any:
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return sorted(value)
+    return value
+
+
 def clone_diff(
     source: StudyProposal, submission: StudyProposalSubmission
 ) -> dict[str, dict[str, Any]]:
@@ -68,9 +72,9 @@ def clone_diff(
     before = source.model_dump(mode="json")
     after = submission.model_dump(mode="json")
     return {
-        field: {"from": before[field], "to": after[field]}
+        field: {"from": _ordered(before[field]), "to": _ordered(after[field])}
         for field in CLONEABLE_FIELDS
-        if before[field] != after[field]
+        if getattr(source, field) != getattr(submission, field)
     }
 
 

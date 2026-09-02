@@ -7,7 +7,7 @@ from bashgym.campaigns.clone_study import (
     clone_diff,
     clone_proposal_submission,
 )
-from bashgym.campaigns.contracts import StudyProposalSubmission
+from bashgym.campaigns.contracts import Capability, StudyProposalSubmission
 from tests.campaigns.test_decision_packet import _proposal
 
 
@@ -64,3 +64,30 @@ def test_clone_must_use_a_new_proposal_id() -> None:
         clone_proposal_submission(_proposal(), proposal_id="candidate-1", changes={})
 
     assert excinfo.value.code == "clone_proposal_id_reused"
+
+
+def test_clone_with_non_empty_required_capabilities() -> None:
+    source = _proposal().model_copy(
+        update={
+            "required_capabilities": frozenset(
+                {
+                    Capability.CAMPAIGN_READ,
+                    Capability.STUDY_PROPOSE,
+                    Capability.DATA_BUILD,
+                }
+            )
+        }
+    )
+
+    submission = clone_proposal_submission(source, proposal_id="candidate-2", changes={})
+
+    assert clone_diff(source, submission) == {}
+
+    submission_with_change = clone_proposal_submission(
+        source,
+        proposal_id="candidate-3",
+        changes={"hypothesis": "new hypothesis"},
+    )
+
+    diff = clone_diff(source, submission_with_change)
+    assert set(diff.keys()) == {"hypothesis"}

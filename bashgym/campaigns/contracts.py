@@ -1252,6 +1252,7 @@ class ActionAttempt(ContractModel):
     heartbeat_at: datetime | None = None
     executor: dict[str, Any] = Field(default_factory=dict)
     sealed_result_uri: str | None = Field(default=None, max_length=4096)
+    result_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

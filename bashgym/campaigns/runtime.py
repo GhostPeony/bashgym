@@ -175,6 +175,7 @@ class ActionSpec(ContractModel):
     executor_kind: Literal["fake", "ssh_remote", "development_evaluation"] = "fake"
     executor_config: dict[str, Any] = Field(default_factory=dict)
     fake_steps: int = Field(default=8, ge=2, le=10000)
+    result_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     def model_post_init(self, __context: Any) -> None:
         if self.executor_kind == "ssh_remote" and self.stage not in {
@@ -206,7 +207,7 @@ class ActionSpec(ContractModel):
 
     @property
     def action_key(self) -> str:
-        return canonical_hash(self.model_dump(mode="json"))
+        return canonical_hash(self.model_dump(mode="json", exclude={"result_key"}))
 
 
 @dataclass(frozen=True)

@@ -45,7 +45,9 @@ _FORBIDDEN_EXECUTION_KEYS = frozenset(
         "process_group_id",
     }
 )
-_FAKE_RUNTIME_KEYS = frozenset({"executor_kind", "budget_unit", "budget_reservation", "fake_steps"})
+_FAKE_RUNTIME_KEYS = frozenset(
+    {"executor_kind", "budget_unit", "budget_reservation", "fake_steps", "memoize"}
+)
 _LIVE_RUNTIME_KEYS = frozenset({"executor_kind"})
 _REGISTERED_COMPUTE_KINDS = frozenset({"registered_compute", "registered_training", "ssh_remote"})
 

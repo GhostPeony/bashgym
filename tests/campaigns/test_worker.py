@@ -3139,3 +3139,52 @@ def test_reconcile_skips_remote_attempt_leased_by_a_live_foreign_worker(tmp_path
     ]
     assert refreshed.lease_owner == claimed.lease_owner
     assert refreshed.claim_generation == claimed.claim_generation
+
+
+def test_find_reusable_completion_returns_newest_completed_match(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    key = "d" * 64
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-1",
+            stage_index=0,
+            stage=StageKind.FULL_TRAINING,
+            input_contract=plan.items[0].input_contract,
+            candidate_digest=fake_digest("candidate:study-1"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            fake_steps=6,
+            result_key=key,
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+    assert repository.find_reusable_completion("workspace-a", key, exclude_action_id="none") is None
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+
+    found = repository.find_reusable_completion("workspace-a", key, exclude_action_id="none")
+    assert found is not None
+    assert found.attempt.attempt_id == scheduled.attempt_id
+    assert found.manifest.attempt_id == scheduled.attempt_id
+    assert set(found.artifact_metadata_by_path) == {
+        output.path for output in found.manifest.outputs
+    }
+    assert (
+        repository.find_reusable_completion(
+            "workspace-a", key, exclude_action_id=scheduled.action_id
+        )
+        is None
+    )
+    outputs = repository.completed_stage_outputs(
+        "workspace-a", "campaign-1", "study-1", StageKind.FULL_TRAINING
+    )
+    assert outputs == found.manifest.outputs

@@ -1120,6 +1120,14 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "ALTER TABLE campaign_human_mutations ADD COLUMN response_seal_key_version TEXT NOT NULL DEFAULT ''",
         ),
     ),
+    (
+        16,
+        "stage_result_reuse",
+        (
+            "ALTER TABLE campaign_actions ADD COLUMN result_key TEXT",
+            "CREATE INDEX idx_campaign_actions_result_key ON campaign_actions(workspace_id, result_key) WHERE result_key IS NOT NULL",
+        ),
+    ),
 )
 
 

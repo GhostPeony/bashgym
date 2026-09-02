@@ -24,6 +24,7 @@ from bashgym.campaigns.contracts import (
     PUBLIC_CAMPAIGN_BLOCKER_CODES,
     ActionAttempt,
     ActionStatus,
+    ArtifactOutput,
     AttemptStatus,
     BudgetEntryKind,
     BudgetLedgerEntry,
@@ -218,6 +219,13 @@ class RuntimeCompletion:
     replayed: bool = False
 
 
+@dataclass(frozen=True)
+class ReusableCompletion:
+    attempt: ActionAttempt
+    manifest: SealedActionResult
+    artifact_metadata_by_path: dict[str, dict[str, Any]]
+
+
 class RemoteRunRecord(FrozenContractModel):
     schema_version: str = "campaign_remote_run_record.v1"
     workspace_id: str
@@ -339,6 +347,7 @@ class CampaignRuntimeRepository(CampaignRepository):
             heartbeat_at=row["heartbeat_at"],
             executor=json.loads(row["executor_json"]),
             sealed_result_uri=row["sealed_result_uri"],
+            result_key=row["result_key"],
             created_at=row["attempt_created_at"],
             updated_at=row["attempt_updated_at"],
         )
@@ -348,7 +357,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         return """
             SELECT a.workspace_id, a.campaign_id, a.study_id, a.action_id,
                    a.stage_index, a.stage_kind, a.input_digest, a.candidate_digest,
-                   a.manifest_revision, a.sealed_result_uri,
+                   a.manifest_revision, a.sealed_result_uri, a.result_key,
                    t.attempt_id, t.attempt_number, t.claim_generation,
                    t.status AS attempt_status, t.lease_owner, t.lease_expires_at,
                    t.heartbeat_at, t.executor_json,
@@ -1594,6 +1603,80 @@ class CampaignRuntimeRepository(CampaignRepository):
             metadata=json.loads(row["metadata_json"]),
             created_at=row["created_at"],
         )
+
+    def find_reusable_completion(
+        self, workspace_id: str, result_key: str, *, exclude_action_id: str
+    ) -> ReusableCompletion | None:
+        """Newest completed action in the workspace whose content key matches."""
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                self._attempt_select() + """
+                WHERE a.workspace_id = ? AND a.result_key = ? AND a.action_id != ?
+                  AND a.status = ? AND t.status = ? AND t.result_json IS NOT NULL
+                ORDER BY t.updated_at DESC, t.attempt_id DESC LIMIT 1
+                """,
+                (
+                    workspace_id,
+                    result_key,
+                    exclude_action_id,
+                    ActionStatus.COMPLETED.value,
+                    AttemptStatus.COMPLETED.value,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            attempt = self._attempt_from_row(row)
+            manifest = self.get_attempt_result_manifest(workspace_id, attempt.attempt_id)
+            artifact_rows = connection.execute(
+                """
+                SELECT uri, metadata_json FROM campaign_artifacts
+                WHERE workspace_id = ? AND producer_action_id = ?
+                  AND json_extract(metadata_json, '$.attempt_id') = ?
+                """,
+                (workspace_id, attempt.action_id, attempt.attempt_id),
+            ).fetchall()
+        metadata_by_path: dict[str, dict[str, Any]] = {}
+        for output in manifest.outputs:
+            reference = _artifact_reference(str(attempt.sealed_result_uri), output.path)
+            for artifact in artifact_rows:
+                if artifact["uri"] == reference:
+                    metadata = json.loads(artifact["metadata_json"])
+                    metadata.pop("attempt_id", None)
+                    metadata_by_path[output.path] = metadata
+                    break
+            else:
+                metadata_by_path[output.path] = {}
+        return ReusableCompletion(
+            attempt=attempt, manifest=manifest, artifact_metadata_by_path=metadata_by_path
+        )
+
+    def completed_stage_outputs(
+        self, workspace_id: str, campaign_id: str, study_id: str, stage: StageKind
+    ) -> tuple[ArtifactOutput, ...] | None:
+        """Sealed outputs of the study's completed attempt for one stage, if any."""
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                self._attempt_select() + """
+                WHERE a.workspace_id = ? AND a.campaign_id = ? AND a.study_id = ?
+                  AND a.stage_kind = ? AND a.status = ? AND t.status = ?
+                ORDER BY t.attempt_number DESC LIMIT 1
+                """,
+                (
+                    workspace_id,
+                    campaign_id,
+                    study_id,
+                    stage.value,
+                    ActionStatus.COMPLETED.value,
+                    AttemptStatus.COMPLETED.value,
+                ),
+            ).fetchone()
+        if row is None:
+            return None
+        return self.get_attempt_result_manifest(workspace_id, row["attempt_id"]).outputs
 
     def get_dataset_version_spec(self, workspace_id: str, project_id: str, dataset_version_id: str):
         """Load one registered dataset as its typed immutable ledger contract."""
@@ -2895,8 +2978,9 @@ class CampaignRuntimeRepository(CampaignRepository):
                 INSERT INTO campaign_actions(
                     workspace_id, campaign_id, study_id, action_id, stage_index,
                     stage_kind, input_digest, candidate_digest, manifest_revision,
-                    action_key, reservation_json, status, version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    action_key, reservation_json, status, version, created_at, updated_at,
+                    result_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     spec.workspace_id,
@@ -2913,6 +2997,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                     ActionStatus.SCHEDULED.value,
                     _iso(scheduled_at),
                     _iso(scheduled_at),
+                    spec.result_key,
                 ),
             )
             connection.execute(

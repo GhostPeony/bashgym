@@ -1644,6 +1644,172 @@ def test_candidate_with_training_stage_requires_a_declared_seed(tmp_path) -> Non
     assert "autoresearch_candidate_requires_training_seed" in str(excinfo.value)
 
 
+def test_legacy_real_result_replays_through_the_ledger_without_conflict(tmp_path, monkeypatch):
+    """A ledger event written before failure_class existed must still replay."""
+
+    _path, repository, core = fresh_core(
+        tmp_path, max_attempts=4, target=None, evaluation_binding=True
+    )
+    activate(core)
+    actor = principal(repository)
+
+    baseline = _recipe_proposal("baseline", learning_rate=0.001, seed=17)
+    core.submit_baseline(
+        baseline,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-baseline-legacy-ledger",
+        idempotency_key="submit-baseline-legacy-ledger",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline",
+            baseline_study,
+            baseline_attempt,
+            0.50,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+
+    candidate_submission = _recipe_proposal(
+        "candidate-legacy-ledger", learning_rate=0.002, seed=17
+    ).model_copy(
+        update={
+            "primary_variable": "training_recipe.learning_rate",
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_controlled_candidate(
+        candidate_submission,
+        parent_proposal_id="baseline",
+        changed_variable="training_recipe.learning_rate",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-candidate-legacy-ledger",
+        idempotency_key="submit-candidate-legacy-ledger",
+    )
+
+    candidate_result = result(
+        "candidate-legacy-ledger",
+        "study-candidate-legacy-ledger",
+        "attempt-candidate-legacy-ledger",
+        0.55,
+        role=ExperimentRole.CANDIDATE,
+    )
+    assert candidate_result.provenance == ExperimentProvenance.REAL
+    assert candidate_result.outcome == ExperimentOutcome.COMPLETED
+
+    ledger = core.ledger
+    ledger.register_project(
+        ProjectSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            display_name="AutoResearch",
+            owner_actor_id="codex-agent",
+        )
+    )
+    ledger.register_experiment(
+        ExperimentSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            experiment_id="experiment-candidate-legacy-ledger",
+            name="Candidate",
+            objective="Evaluate the candidate recipe.",
+        )
+    )
+    ledger.register_run(
+        RunSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            experiment_id="experiment-candidate-legacy-ledger",
+            run_id="run-candidate-legacy-ledger",
+            source_system="bashgym",
+            source_run_id="run-candidate-legacy-ledger",
+            campaign_id="campaign-1",
+            run_kind="training",
+            task_type="retrieval",
+            training_method="lora",
+            status=RunStatus.COMPLETED,
+            context_status=ContextStatus.VERIFIED,
+            recipe_digest="d" * 64,
+            correlation_id="run-candidate-legacy-ledger",
+        )
+    )
+    ledger_context = AutoResearchLedgerCommitContext(
+        project_id="project-a",
+        experiment_id="experiment-candidate-legacy-ledger",
+        run_id="run-candidate-legacy-ledger",
+        attempt_id="attempt-candidate-legacy-ledger",
+        correlation_id="record-candidate-legacy-ledger",
+    )
+
+    legacy_digest = canonical_hash(
+        candidate_result.model_dump(mode="json", exclude={"recorded_at", "failure_class"})
+    )
+    monkeypatch.setattr(
+        AutoResearchResult,
+        "result_digest",
+        property(
+            lambda self: canonical_hash(
+                self.model_dump(mode="json", exclude={"recorded_at", "failure_class"})
+            )
+        ),
+    )
+    recorded = repository._record_autoresearch_result(
+        candidate_result, ledger_context=ledger_context
+    )
+    assert recorded.replayed is False
+    monkeypatch.undo()
+
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            """
+            SELECT result_json, result_digest, decision_json FROM autoresearch_results
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            ("workspace-a", "campaign-1", "candidate-legacy-ledger"),
+        ).fetchone()
+        assert row["result_digest"] == legacy_digest
+        assert json.loads(row["decision_json"])["result_digest"] == legacy_digest
+        legacy_result = json.loads(row["result_json"])
+        del legacy_result["failure_class"]
+        connection.execute(
+            """
+            UPDATE autoresearch_results SET result_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            (
+                json.dumps(legacy_result),
+                "workspace-a",
+                "campaign-1",
+                "candidate-legacy-ledger",
+            ),
+        )
+    assert _stored_ledger_result_digest(repository) == legacy_digest
+
+    replayed = repository._record_autoresearch_result(
+        candidate_result, ledger_context=ledger_context
+    )
+
+    assert replayed.replayed is True
+    assert replayed.result.failure_class is None
+    assert replayed.decision.result_digest == legacy_digest
+    assert _stored_ledger_result_digest(repository) == legacy_digest
+
+
+def _stored_ledger_result_digest(repository) -> str:
+    with repository._connection() as connection:
+        row = connection.execute("""
+            SELECT payload_json FROM ledger_events
+            WHERE event_type = 'autoresearch_outcome_recorded'
+            """).fetchone()
+    return json.loads(row["payload_json"])["result_digest"]
+
+
 def test_legacy_result_without_failure_class_replays_without_conflict(tmp_path) -> None:
     """A result_json row written before failure_class existed must still replay."""
 

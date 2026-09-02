@@ -1510,7 +1510,11 @@ class AutoResearchRepository(CampaignRuntimeRepository):
         spec: AutoResearchCampaignSpec,
         outcome: AutoResearchOutcomeRecord,
         context: AutoResearchLedgerCommitContext,
+        *,
+        result_digest: str,
     ) -> None:
+        """Mirror one outcome into the ledger under the results row's digest of record."""
+
         result = outcome.result
         decision = outcome.decision
         if spec.ledger_project_id != context.project_id:
@@ -1570,7 +1574,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 "proposal_id": result.proposal_id,
                 "study_id": result.study_id,
                 "result_id": result.result_id,
-                "result_digest": result.result_digest,
+                "result_digest": result_digest,
                 "decision": decision.decision.value,
                 "reason_code": decision.reason_code,
                 "eligible_for_best": decision.eligible_for_best,
@@ -1817,7 +1821,11 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 )
                 if ledger_context is not None:
                     self._record_outcome_ledger_in_connection(
-                        connection, spec, outcome, ledger_context
+                        connection,
+                        spec,
+                        outcome,
+                        ledger_context,
+                        result_digest=digest_of_record,
                     )
                 return outcome
             connection.execute(
@@ -1840,7 +1848,13 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             )
             outcome = AutoResearchOutcomeRecord(result=result, decision=decision)
             if ledger_context is not None:
-                self._record_outcome_ledger_in_connection(connection, spec, outcome, ledger_context)
+                self._record_outcome_ledger_in_connection(
+                    connection,
+                    spec,
+                    outcome,
+                    ledger_context,
+                    result_digest=digest_of_record,
+                )
         return outcome
 
 

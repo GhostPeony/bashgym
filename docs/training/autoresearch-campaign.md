@@ -285,9 +285,16 @@ A crash carries a `failure_class` of `infrastructure`, `permission`,
 `configuration`, or `execution`, reported as `outcome_assessment.failure_kind`.
 Only an `execution` crash counts toward `max_attempts`, because only that class
 is evidence about the intervention. An `infrastructure`, `permission`, or
-`configuration` crash leaves `attempts_used` unchanged, but its measured spend
-still counts toward the campaign budget, so a repeatedly failing environment
-exhausts the budget rather than silently consuming the experiment allowance.
+`configuration` crash leaves `attempts_used` unchanged.
+
+Its spend still counts toward the campaign budget whenever the executor reports
+measured usage; the registered SSH executor always reports wall-clock seconds,
+so a repeatedly failing remote environment does draw down `max_total_cost`. A
+terminal attempt with no measured usage now settles at zero instead of charging
+its whole reservation, so such a crash consumes neither an attempt nor budget.
+For that case the backstop is the manifest's `max_proposal_rounds` ceiling,
+which stops the campaign with `proposal_round_limit_reached` once the total
+submitted proposals reach it.
 
 A kept candidate becomes the incumbent. A discarded candidate remains in the
 history, but the prior incumbent stays unchanged. The outcome assessment names

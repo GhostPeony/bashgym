@@ -7,6 +7,7 @@ from bashgym.campaigns.contracts import (
     CANONICAL_CAMPAIGN_EVENT_TYPES,
     CampaignEvent,
     CredentialKind,
+    FailureClass,
     PublicCampaignArtifactV1,
     PublicCampaignEventSummaryV1,
     PublicCampaignEventV1,
@@ -120,6 +121,41 @@ def test_known_event_keeps_only_registered_typed_summary_fields():
     assert "operator-error-canary" not in serialized
     assert "private.json" not in serialized
     assert "candidate-map-canary" not in serialized
+
+
+def test_failed_action_summary_exposes_only_a_known_failure_class():
+    projected = project_public_campaign_event(
+        raw_event(
+            event_type="campaign:action-failed",
+            payload={
+                "action_id": "action-1",
+                "attempt_id": "attempt-1",
+                "study_id": "study-1",
+                "stage": "full_training",
+                "outcome": "failed",
+                "exit_reason": "operator-error-canary",
+                "failure_class": "infrastructure",
+            },
+        )
+    )
+
+    assert projected.summary is not None
+    assert projected.summary.failure_class == FailureClass.INFRASTRUCTURE
+    serialized = json.dumps(projected.model_dump(mode="json"), sort_keys=True)
+    assert "operator-error-canary" not in serialized
+
+    unknown = project_public_campaign_event(
+        raw_event(
+            event_type="campaign:action-failed",
+            payload={
+                "action_id": "action-1",
+                "failure_class": "private-cluster-identity",
+            },
+        )
+    )
+
+    assert unknown.summary is not None
+    assert unknown.summary.failure_class is None
 
 
 def test_allowed_field_names_reject_untrusted_values_and_non_finite_numbers():

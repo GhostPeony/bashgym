@@ -14,6 +14,7 @@ from .contracts import (
     PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES,
     PUBLIC_CAMPAIGN_BLOCKER_CODES,
     CampaignEvent,
+    FailureClass,
     PublicCampaignArtifactV1,
     PublicCampaignAttemptV1,
     PublicCampaignEventSummaryV1,
@@ -62,6 +63,7 @@ PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS = frozenset(
         "entry_id",
         "stage",
         "code",
+        "failure_class",
         "manifest_revision",
         "stage_index",
         "next_stage_index",
@@ -81,7 +83,7 @@ _IDENTITY_FIELDS = frozenset(
         "entry_id",
     }
 )
-_ENUM_FIELDS = frozenset({"stage", "code"})
+_ENUM_FIELDS = frozenset({"stage", "code", "failure_class"})
 _INTEGER_FIELDS = frozenset(
     {
         "manifest_revision",
@@ -221,7 +223,9 @@ PUBLIC_EVENT_TYPE_FIELDS = MappingProxyType(
         "campaign:action-scheduled": _fields("action_id", "attempt_id", "study_id", "stage"),
         "campaign:action-claimed": _fields("action_id", "attempt_id", "claim_generation"),
         "campaign:action-unknown": _fields("action_id", "attempt_id"),
-        "campaign:action-failed": _fields("action_id", "attempt_id", "study_id", "stage"),
+        "campaign:action-failed": _fields(
+            "action_id", "attempt_id", "study_id", "stage", "failure_class"
+        ),
         "campaign:action-cancelled": _fields("action_id", "attempt_id", "study_id", "stage"),
         "campaign:action-completed": _fields("action_id", "attempt_id", "study_id", "stage"),
         "campaign:action-force-stopped": _fields("action_id", "attempt_id", "study_id", "stage"),
@@ -248,6 +252,7 @@ if frozenset(PUBLIC_EVENT_TYPE_FIELDS) != CANONICAL_CAMPAIGN_EVENT_TYPES:
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 _STAGES = frozenset(item.value for item in StageKind)
+_FAILURE_CLASSES = frozenset(item.value for item in FailureClass)
 
 
 def _safe_identifier(value: Any) -> str | None:
@@ -273,6 +278,7 @@ def _safe_summary(
             allowed_values = {
                 "stage": _STAGES,
                 "code": PUBLIC_CAMPAIGN_BLOCKER_CODES,
+                "failure_class": _FAILURE_CLASSES,
             }[field]
             if isinstance(value, str) and value in allowed_values:
                 projected[field] = value

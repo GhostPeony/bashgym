@@ -43,6 +43,7 @@ from bashgym.campaigns.evaluation import (
     compare_development_evaluations,
     load_retrieval_evaluation_artifact,
 )
+from bashgym.campaigns.failure_classification import classify_exit_code
 from bashgym.campaigns.nemo_gym_evidence import (
     NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
     NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA,
@@ -257,6 +258,9 @@ class RemoteOutputSealer:
             outcome=outcome,
             exit_code=observation.exit_code,
             exit_reason=observation.safe_reason,
+            failure_class=(
+                classify_exit_code(observation.exit_code) if outcome == "failed" else None
+            ),
             resource_usage=(
                 ResourceUsage(
                     unit="wall_clock_seconds",
@@ -397,6 +401,9 @@ class RemoteOutputSealer:
             outcome=outcome,
             exit_code=observation.exit_code,
             exit_reason=observation.safe_reason,
+            failure_class=(
+                classify_exit_code(observation.exit_code) if outcome == "failed" else None
+            ),
             resource_usage=(
                 ResourceUsage(
                     unit="wall_clock_seconds",

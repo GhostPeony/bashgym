@@ -370,6 +370,11 @@ def build_decision_packet(
                 decision=latest_outcome.decision.decision.value,
                 reason_code=latest_outcome.decision.reason_code,
                 failure_analysis=failure_analysis,
+                failure_class=(
+                    latest_outcome.result.failure_class.value
+                    if latest_outcome.result.failure_class
+                    else None
+                ),
             )
             if latest_outcome is not None
             else None

@@ -156,3 +156,17 @@ def test_assessment_marks_contradictory_completed_evidence_inconclusive():
     assert assessment["classification"] == "inconclusive"
     assert assessment["is_failure"] is False
     assert assessment["reason_code"] == "completed_evidence_inconclusive"
+
+
+def test_crash_reports_the_recorded_failure_class() -> None:
+    assessment = build_outcome_assessment(
+        outcome="crashed",
+        provenance="real",
+        decision="crash",
+        reason_code="experiment_crashed",
+        failure_analysis=None,
+        failure_class="infrastructure",
+    )
+
+    assert assessment["classification"] == "invalid_execution"
+    assert assessment["failure_kind"] == "infrastructure"

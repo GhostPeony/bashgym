@@ -34,6 +34,7 @@ from bashgym.campaigns.contracts import (
     CodeLineageRecord,
     CodeMutationKind,
     CredentialKind,
+    FailureClass,
     FrozenContractModel,
     Identifier,
     ProposalStatus,
@@ -46,6 +47,7 @@ from bashgym.campaigns.contracts import (
     utc_now,
 )
 from bashgym.campaigns.diagnostic_actions import AutoResearchDiagnosticRecipe
+from bashgym.campaigns.failure_classification import NON_SCIENTIFIC_FAILURE_CLASSES
 from bashgym.campaigns.failure_observations import build_research_failure_packet
 from bashgym.campaigns.lineage import code_mutation_kind_for_variable
 from bashgym.campaigns.method_policy import AutoResearchMethodThresholds
@@ -449,6 +451,7 @@ class AutoResearchResult(FrozenContractModel):
     metric_name: Identifier
     metric_value: float | None = None
     metrics: dict[Identifier, float] = Field(default_factory=dict)
+    failure_class: FailureClass | None = None
     actual_cost: float = Field(ge=0)
     attempt_ids: tuple[Identifier, ...]
     evidence_references: tuple[Identifier, ...] = ()
@@ -468,6 +471,8 @@ class AutoResearchResult(FrozenContractModel):
         if self.outcome == ExperimentOutcome.COMPLETED:
             if self.metric_value is None or not math.isfinite(self.metric_value):
                 raise ValueError("completed AutoResearch result requires a finite metric")
+            if self.failure_class is not None:
+                raise ValueError("completed AutoResearch result cannot carry a failure class")
         elif self.metric_value is not None:
             raise ValueError("crashed AutoResearch result cannot claim a final metric")
         if not math.isfinite(self.actual_cost):
@@ -483,6 +488,25 @@ class AutoResearchResult(FrozenContractModel):
     @property
     def result_digest(self) -> str:
         return canonical_hash(self.model_dump(mode="json", exclude={"recorded_at"}))
+
+    def digest_matches(self, digest: str) -> bool:
+        """Accept this result's digest, or the one written before failure_class existed."""
+
+        if digest == self.result_digest:
+            return True
+        if self.failure_class is not None:
+            return False
+        return digest == canonical_hash(
+            self.model_dump(mode="json", exclude={"recorded_at", "failure_class"})
+        )
+
+
+def counts_as_experiment(result: AutoResearchResult) -> bool:
+    """A completed result or an execution crash is scientific evidence; infra faults are not."""
+
+    if result.outcome != ExperimentOutcome.CRASHED:
+        return True
+    return result.failure_class not in NON_SCIENTIFIC_FAILURE_CLASSES
 
 
 class AutoResearchDecision(FrozenContractModel):
@@ -1621,6 +1645,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             ).fetchone()
             stored_result: AutoResearchResult | None = None
             stored_decision: AutoResearchDecision | None = None
+            digest_of_record = result.result_digest
             if by_proposal is not None:
                 try:
                     stored_result = AutoResearchResult.model_validate_json(
@@ -1631,12 +1656,14 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                     )
                 except (TypeError, ValueError) as exc:
                     raise AutoResearchConflictError("autoresearch_result_conflict") from exc
+                stored_digest = by_proposal["result_digest"]
                 if (
-                    by_proposal["result_digest"] != result.result_digest
-                    or stored_result.result_digest != by_proposal["result_digest"]
+                    not result.digest_matches(stored_digest)
+                    or not stored_result.digest_matches(stored_digest)
                     or stored_result != result
                 ):
                     raise AutoResearchConflictError("autoresearch_result_conflict")
+                digest_of_record = stored_digest
             elif by_id is not None:
                 raise AutoResearchConflictError("autoresearch_result_id_conflict")
 
@@ -1775,7 +1802,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 previous_best_metric=previous_metric,
                 improvement=improvement,
                 protected_metric_margins=protected_margins,
-                result_digest=result.result_digest,
+                result_digest=digest_of_record,
                 decided_at=result.recorded_at,
             )
             if stored_result is not None and stored_decision is not None:
@@ -1939,6 +1966,7 @@ class AutoResearchCampaignCore:
         budget_used = sum(item.result.actual_cost for item in outcomes) + sum(
             item.actual_cost for item in diagnostics
         )
+        scientific_attempts = sum(1 for item in outcomes if counts_as_experiment(item.result))
         manifest_remaining = self.repository.build_evidence_snapshot(
             workspace_id, campaign_id
         ).budget_remaining[spec.stop_rules.budget_unit]
@@ -1982,7 +2010,7 @@ class AutoResearchCampaignCore:
             )
         elif spec.stop_rules.deadline is not None and current_time >= spec.stop_rules.deadline:
             next_action, reason = AutoResearchNextAction.STOP, "deadline_reached"
-        elif len(outcomes) >= spec.stop_rules.max_attempts:
+        elif scientific_attempts >= spec.stop_rules.max_attempts:
             next_action, reason = AutoResearchNextAction.STOP, "attempt_limit_reached"
         elif budget_remaining <= 0:
             next_action, reason = AutoResearchNextAction.STOP, "budget_exhausted"
@@ -2026,7 +2054,7 @@ class AutoResearchCampaignCore:
             best_proposal_id=best.result.proposal_id if best else None,
             best_study_id=best_study_id,
             best_metric=best.result.metric_value if best else None,
-            attempts_used=len(outcomes),
+            attempts_used=scientific_attempts,
             proposals_used=len(controls),
             budget_used=budget_used,
             budget_remaining=budget_remaining,

@@ -33,11 +33,13 @@ from bashgym.campaigns.autoresearch import (
     build_autoresearch_template_registry,
     builtin_autoresearch_template_definitions,
     builtin_autoresearch_template_registry,
+    counts_as_experiment,
 )
 from bashgym.campaigns.contracts import (
     CampaignStatus,
     CampaignTrigger,
     CodeMutationKind,
+    FailureClass,
     StageDisposition,
     StageKind,
     StagePlan,
@@ -1640,3 +1642,117 @@ def test_candidate_with_training_stage_requires_a_declared_seed(tmp_path) -> Non
         )
 
     assert "autoresearch_candidate_requires_training_seed" in str(excinfo.value)
+
+
+def test_legacy_result_without_failure_class_replays_without_conflict(tmp_path) -> None:
+    """A result_json row written before failure_class existed must still replay."""
+
+    repository, core, baseline_study = _unseeded_verified_baseline(tmp_path)
+    candidate = _recipe_proposal("candidate-legacy-class", learning_rate=0.002, seed=17).model_copy(
+        update={
+            "training_recipe": {"schema_version": "recipe.v1", "learning_rate": 0.002},
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_candidate(
+        candidate,
+        parent_proposal_id="baseline-seed",
+        changed_variables=("learning_rate",),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-candidate-legacy-class",
+        idempotency_key="submit-candidate-legacy-class",
+    )
+    study_id, attempt_id = select_and_finish(repository, "candidate-legacy-class", failed=True)
+    crashed = result(
+        "candidate-legacy-class", study_id, attempt_id, 0.0, role=ExperimentRole.CANDIDATE
+    ).model_copy(
+        update={
+            "outcome": ExperimentOutcome.CRASHED,
+            "metric_value": None,
+            "metrics": {},
+        }
+    )
+    recorded = repository._record_autoresearch_result(crashed)
+    assert recorded.replayed is False
+
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            """
+            SELECT result_json, decision_json FROM autoresearch_results
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            ("workspace-a", "campaign-1", "candidate-legacy-class"),
+        ).fetchone()
+        legacy_result = json.loads(row["result_json"])
+        del legacy_result["failure_class"]
+        legacy_digest = canonical_hash(
+            {key: value for key, value in legacy_result.items() if key != "recorded_at"}
+        )
+        legacy_decision = json.loads(row["decision_json"])
+        legacy_decision["result_digest"] = legacy_digest
+        connection.execute(
+            """
+            UPDATE autoresearch_results
+            SET result_json = ?, result_digest = ?, decision_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            (
+                json.dumps(legacy_result),
+                legacy_digest,
+                json.dumps(legacy_decision),
+                "workspace-a",
+                "campaign-1",
+                "candidate-legacy-class",
+            ),
+        )
+
+    replayed = repository._record_autoresearch_result(crashed)
+
+    assert replayed.replayed is True
+    assert replayed.result.failure_class is None
+
+
+def test_infrastructure_crash_spends_budget_but_not_an_attempt(tmp_path) -> None:
+    repository, core, baseline_study = _unseeded_verified_baseline(tmp_path)
+    candidate = _recipe_proposal("candidate-crash", learning_rate=0.002, seed=17).model_copy(
+        update={
+            "training_recipe": {"schema_version": "recipe.v1", "learning_rate": 0.002},
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_candidate(
+        candidate,
+        parent_proposal_id="baseline-seed",
+        changed_variables=("learning_rate",),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-candidate-crash",
+        idempotency_key="submit-candidate-crash",
+    )
+    candidate_study, candidate_attempt = select_and_finish(
+        repository, "candidate-crash", failed=True
+    )
+    before = core.state("workspace-a", "campaign-1", now=NOW)
+    crashed = result(
+        "candidate-crash", candidate_study, candidate_attempt, 0.0, role=ExperimentRole.CANDIDATE
+    ).model_copy(
+        update={
+            "outcome": ExperimentOutcome.CRASHED,
+            "metric_value": None,
+            "metrics": {},
+            "actual_cost": 0.3,
+            "failure_class": FailureClass.INFRASTRUCTURE,
+        }
+    )
+    assert counts_as_experiment(crashed) is False
+    assert (
+        counts_as_experiment(crashed.model_copy(update={"failure_class": FailureClass.EXECUTION}))
+        is True
+    )
+
+    core.record_result(crashed)
+    after = core.state("workspace-a", "campaign-1", now=NOW)
+
+    assert after.attempts_used == before.attempts_used
+    assert after.budget_used == pytest.approx(before.budget_used + 0.3)

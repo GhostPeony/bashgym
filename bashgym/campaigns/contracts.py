@@ -190,6 +190,15 @@ class BudgetEntryKind(str, Enum):
     CORRECTION = "correction"
 
 
+class FailureClass(str, Enum):
+    """Why a terminal attempt failed, from the most conservative evidence available."""
+
+    INFRASTRUCTURE = "infrastructure"
+    PERMISSION = "permission"
+    CONFIGURATION = "configuration"
+    EXECUTION = "execution"
+
+
 CANONICAL_CAMPAIGN_EVENT_TYPES = frozenset(
     {
         "campaign:created",
@@ -1256,6 +1265,7 @@ class PublicCampaignEventSummaryV1(FrozenContractModel):
     entry_id: Identifier | None = None
     stage: Identifier | None = None
     code: Identifier | None = None
+    failure_class: FailureClass | None = None
     manifest_revision: int | None = Field(default=None, ge=1)
     stage_index: int | None = Field(default=None, ge=0)
     next_stage_index: int | None = Field(default=None, ge=0)
@@ -1404,6 +1414,7 @@ class SealedActionResult(FrozenContractModel):
     outcome: Literal["completed", "failed", "cancelled", "force_stopped"]
     exit_code: int | None = None
     exit_reason: str = Field(min_length=1, max_length=2000)
+    failure_class: FailureClass | None = None
     resource_usage: tuple[ResourceUsage, ...] = ()
     log_reference: str | None = Field(default=None, max_length=4096)
     outputs: tuple[ArtifactOutput, ...]
@@ -1424,6 +1435,8 @@ class SealedActionResult(FrozenContractModel):
             raise ValueError("ended_at cannot precede started_at")
         if self.outcome == "completed" and self.exit_code not in {0, None}:
             raise ValueError("completed result cannot have a failing exit code")
+        if self.outcome == "completed" and self.failure_class is not None:
+            raise ValueError("completed result cannot carry a failure class")
         return self
 
 

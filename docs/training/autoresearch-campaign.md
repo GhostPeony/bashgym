@@ -281,6 +281,14 @@ unprotected regression is evidence of a tradeoff, not automatically a failed
 candidate. Likewise, a discarded candidate with a useful secondary gain is
 mixed evidence rather than proof that the hypothesis had no value.
 
+A crash carries a `failure_class` of `infrastructure`, `permission`,
+`configuration`, or `execution`, reported as `outcome_assessment.failure_kind`.
+Only an `execution` crash counts toward `max_attempts`, because only that class
+is evidence about the intervention. An `infrastructure`, `permission`, or
+`configuration` crash leaves `attempts_used` unchanged, but its measured spend
+still counts toward the campaign budget, so a repeatedly failing environment
+exhausts the budget rather than silently consuming the experiment allowance.
+
 A kept candidate becomes the incumbent. A discarded candidate remains in the
 history, but the prior incumbent stays unchanged. The outcome assessment names
 the result as a clear improvement, acceptable tradeoff, mixed evidence, no
@@ -626,6 +634,11 @@ quality.
 - Fake executors and smoke templates prove orchestration, persistence, and
   evidence wiring only. They cannot establish a real baseline or model-quality
   result.
+- `failure_class` is derived only from proven exit codes: 126 and 127 are
+  `configuration`, 137 and 143 are `infrastructure`, 77 is `permission`, and
+  every other code, including a missing one, is `execution`. Log-based failure
+  classification is not implemented, so a genuine infrastructure fault that
+  exits with an unrecognized code is still counted as an attempt.
 - Durable work uses `/api/campaigns/*` through the `research` tools.
 
 These boundaries are implementation facts, not restrictions on which model,

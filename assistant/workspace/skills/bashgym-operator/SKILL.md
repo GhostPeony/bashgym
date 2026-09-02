@@ -258,7 +258,10 @@ Do not make the user repeat choices that already exist in registered context.
    the user to choose `max_attempts`, `budget_unit`, `max_total_cost`, and
    `minimum_improvement`; attempts include the baseline and candidates. Never
    infer these values from a prior campaign or silently use the template
-   policy. Preserve the template's fixed primary metric, direction, and
+   policy. `attempts_used` counts scientific experiments only: an
+   infrastructure-, permission-, or configuration-class crash does not consume
+   an attempt, though its measured spend still counts against
+   `max_total_cost`. Preserve the template's fixed primary metric, direction, and
    protected gates. Preview
    it with `bashgym research onboard --contract <file> --json`. This returns the
    ordered plan without applying it.
@@ -297,7 +300,11 @@ Do not make the user repeat choices that already exist in registered context.
    evaluator, not training loss. Smoke or simulated results prove wiring only;
    they cannot establish a baseline or incumbent.
 9. Re-read `research state` and `research failures` after each result. Continue only with a specific
-   evidence-backed hypothesis. Stop on the durable stop rule or an authorized
+   evidence-backed hypothesis. On a crash, read
+   `decision_packet.outcome_assessment.failure_kind`: it names the failure
+   class, so `infrastructure`, `permission`, or `configuration` means fix the
+   environment and rerun the same experiment rather than revising the
+   hypothesis. Stop on the durable stop rule or an authorized
    pause/cancel, then request the final artifacts with `research report`.
 
 Use `bashgym campaign doctor`, the authenticated campaign API, and the durable

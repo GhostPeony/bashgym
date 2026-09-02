@@ -23,6 +23,7 @@ from bashgym.campaigns.contracts import (
     StudyStatus,
     canonical_hash,
 )
+from bashgym.campaigns.persistence import CampaignPersistenceError, RecordNotFoundError
 from bashgym.ledger.persistence import LedgerPersistenceError
 
 if TYPE_CHECKING:
@@ -323,6 +324,18 @@ class AutoResearchLoopCoordinator:
             if self.core._proposal_is_simulated(proposal.proposal)
             else ExperimentProvenance.REAL
         )
+        failure_class = None
+        for item in reversed(attempts):
+            if item.status.value not in {"failed", "cancelled", "force_stopped"}:
+                continue
+            try:
+                manifest = self.repository.get_attempt_result_manifest(
+                    item.workspace_id, item.attempt_id
+                )
+            except (RecordNotFoundError, CampaignPersistenceError):
+                break
+            failure_class = manifest.failure_class
+            break
         self.core.record_result(
             AutoResearchResult(
                 result_id=self._operation_key(
@@ -341,6 +354,7 @@ class AutoResearchLoopCoordinator:
                 outcome=ExperimentOutcome.CRASHED,
                 metric_name=spec.primary_metric,
                 metric_value=None,
+                failure_class=failure_class,
                 actual_cost=float(usage["actual"]),
                 attempt_ids=tuple(item.attempt_id for item in attempts),
                 recorded_at=max(item.updated_at for item in attempts),

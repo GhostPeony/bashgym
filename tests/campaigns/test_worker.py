@@ -33,6 +33,7 @@ from bashgym.campaigns.contracts import (
     AutonomyProfile,
     CampaignTrigger,
     CredentialKind,
+    FailureClass,
     SealedActionResult,
     StageDisposition,
     StageKind,
@@ -212,9 +213,10 @@ def schedule(repository, worker, plan, *, study_id="study-1", version=4):
 
 
 class FakeRemoteAdapter:
-    def __init__(self, *, admitted=True, states=(RemoteRunState.RUNNING,)):
+    def __init__(self, *, admitted=True, states=(RemoteRunState.RUNNING,), failed_exit_code=7):
         self.admitted = admitted
         self.states = list(states)
+        self.failed_exit_code = failed_exit_code
         self.identity = None
         self.launch_count = 0
         self.discover_count = 0
@@ -264,7 +266,7 @@ class FakeRemoteAdapter:
         state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
         exit_code = 0 if state == RemoteRunState.COMPLETED else None
         if state == RemoteRunState.FAILED:
-            exit_code = 7
+            exit_code = self.failed_exit_code
         return RemoteObservation(
             identity=identity,
             state=state,
@@ -343,7 +345,7 @@ class FakeRemoteAdapter:
     async def inventory_terminal_evidence(self, identity, *, observation):
         self.collect_count += 1
         payloads = {
-            "exit_code": b"7\n",
+            "exit_code": f"{self.failed_exit_code}\n".encode(),
             "launch_manifest.json": b"{}",
             "training.log": b"failed\n",
         }
@@ -2597,6 +2599,28 @@ def test_failed_remote_attempt_seals_evidence_and_settles_budget(tmp_path):
             "SELECT status FROM campaign_studies WHERE study_id = 'study-1'"
         ).fetchone()[0]
     assert study_status == StudyStatus.EXECUTION_FAILED.value
+
+
+def test_killed_remote_attempt_is_classified_as_infrastructure(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.FAILED,), failed_exit_code=137)
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+    )
+    scheduled = schedule_remote(repository, worker, plan, tmp_path)
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_failed"
+    manifest = repository.get_attempt_result_manifest("workspace-a", scheduled.attempt_id)
+    assert manifest.failure_class == FailureClass.INFRASTRUCTURE
+    events = repository.list_events("workspace-a", "campaign-1")
+    failed_events = [event for _, event in events if event.event_type == "campaign:action-failed"]
+    assert failed_events[-1].payload["failure_class"] == "infrastructure"
 
 
 def test_campaign_cancel_terminates_remote_group_and_settles_cancelled(tmp_path):

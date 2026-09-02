@@ -147,14 +147,14 @@ def _recipe_script_args_for_stage(
 def _settlement_actual_cost(
     *, unit: str, reservation_amount: float, manifest: SealedActionResult
 ) -> float:
-    """Convert signed measured usage into the campaign budget unit when possible."""
+    """Charge measured usage; a completed seal with none charges its reservation."""
 
     measured = tuple(item for item in manifest.resource_usage if item.confidence == "measured")
     direct = sum(item.amount for item in measured if item.unit == unit)
     if unit == "gpu_hours":
         direct += sum(item.amount / 3600 for item in measured if item.unit == "wall_clock_seconds")
     if direct <= 0 or not math.isfinite(direct):
-        return float(reservation_amount)
+        return 0.0 if manifest.outcome != "completed" else float(reservation_amount)
     return min(float(reservation_amount), direct)
 
 
@@ -3522,6 +3522,9 @@ class CampaignRuntimeRepository(CampaignRepository):
                     "stage": attempt.stage.value,
                     "outcome": manifest.outcome,
                     "exit_reason": manifest.exit_reason,
+                    "failure_class": (
+                        manifest.failure_class.value if manifest.failure_class else None
+                    ),
                 },
                 actor_id="campaign-controller",
                 credential_kind=CredentialKind.CONTROLLER,

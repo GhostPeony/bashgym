@@ -3327,3 +3327,104 @@ def test_completed_stage_outputs_filters_by_study_and_stage(tmp_path):
     )
     manifest = repository.get_attempt_result_manifest("workspace-a", first.attempt_id)
     assert outputs == manifest.outputs
+
+
+def test_next_action_spec_carries_a_result_key_only_for_reusable_stages(tmp_path):
+    def memoize_recipes(repository: CampaignRuntimeRepository) -> None:
+        runtime = {"executor_kind": "fake", "memoize": True}
+        with repository._connection(immediate=True) as connection:
+            connection.execute(
+                """
+                UPDATE campaign_proposals SET proposal_json = ?
+                WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1'
+                  AND proposal_id = 'proposal-study-1'
+                """,
+                (
+                    json.dumps(
+                        {
+                            "primary_variable": "data.mixture",
+                            "dataset_recipe": {"schema_version": "dataset.v1", "runtime": runtime},
+                            "training_recipe": {
+                                "schema_version": "training.v1",
+                                "runtime": runtime,
+                            },
+                            "evaluation_recipe": {
+                                "schema_version": "evaluation.v1",
+                                "runtime": runtime,
+                            },
+                        }
+                    ),
+                ),
+            )
+
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository, stage=StageKind.DATA_BUILD)
+    memoize_recipes(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    assert worker.run_once(now=START) == "idle"
+
+    spec = repository.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        "study-1",
+        executor_profiles=worker.remote_executor_profiles,
+    )
+
+    assert spec.stage == StageKind.DATA_BUILD
+    assert spec.result_key is not None
+    assert len(spec.result_key) == 64
+
+    training = active_repository(tmp_path / "training.sqlite3")
+    seed_validated_study(training, stage=StageKind.FULL_TRAINING)
+    memoize_recipes(training)
+    training_worker = make_worker(training, tmp_path / "training", "worker-b")
+    assert training_worker.run_once(now=START) == "idle"
+
+    training_spec = training.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        "study-1",
+        executor_profiles=training_worker.remote_executor_profiles,
+    )
+
+    assert training_spec.stage == StageKind.FULL_TRAINING
+    assert training_spec.result_key is None
+
+    unresolved_plan = StagePlan(
+        items=(
+            StagePlanItem(
+                stage=StageKind.FULL_TRAINING,
+                disposition=StageDisposition.REQUIRED,
+                reason="Produce the candidate the evaluation consumes.",
+                input_contract={"fixture": "study-1"},
+                output_contract={"schema": "training_metrics_jsonl.v1"},
+            ),
+            StagePlanItem(
+                stage=StageKind.DEVELOPMENT_EVALUATION,
+                disposition=StageDisposition.REQUIRED,
+                reason="Evaluate the candidate the training stage produces.",
+                input_contract={"fixture": "study-1"},
+                output_contract={"schema": "evaluation_metrics_json.v1"},
+            ),
+        )
+    )
+    assert unresolved_plan.consumed_stages(1) == (StageKind.FULL_TRAINING,)
+    with training._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE campaign_studies SET stage_plan_json = ?, current_stage_index = 1
+            WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1'
+              AND study_id = 'study-1'
+            """,
+            (unresolved_plan.model_dump_json(),),
+        )
+
+    unresolved_spec = training.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        "study-1",
+        executor_profiles=training_worker.remote_executor_profiles,
+    )
+
+    assert unresolved_spec.stage == StageKind.DEVELOPMENT_EVALUATION
+    assert unresolved_spec.result_key is None

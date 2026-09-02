@@ -101,6 +101,10 @@ from bashgym.campaigns.remote import (
     SealedStageArtifactSource,
     remote_executor_config,
 )
+from bashgym.campaigns.result_reuse import (
+    reuse_enabled,
+    stage_result_key,
+)
 from bashgym.campaigns.tmax_recipe import (
     TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA,
     TMaxCompositeTrainingRecipe,
@@ -708,6 +712,40 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise CampaignPersistenceError("campaign_executor_kind_not_registered")
         if budget_unit not in manifest.budget_limits:
             raise CampaignPersistenceError("campaign_budget_unit_not_approved")
+        runtime_kind = (
+            "ssh_remote"
+            if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}
+            else executor_kind
+        )
+        result_key: str | None = None
+        if reuse_enabled(stage=item.stage, executor_kind=runtime_kind, runtime=runtime):
+            upstream_outputs: list[tuple[str, str, str]] = []
+            resolvable = True
+            for consumed in plan.consumed_stages(study.current_stage_index):
+                outputs = self.completed_stage_outputs(
+                    workspace_id, campaign_id, study_id, consumed
+                )
+                if outputs is None:
+                    resolvable = False
+                    break
+                upstream_outputs.extend(
+                    (consumed.value, output.path, output.sha256) for output in outputs
+                )
+            if resolvable:
+                stage_recipe_digest = (
+                    executor_config["recipe_digest"]
+                    if "recipe_digest" in executor_config
+                    else canonical_hash({"stage_recipe": recipe, "stage": item.stage.value})
+                )
+                result_key = stage_result_key(
+                    stage=item.stage,
+                    executor_kind=runtime_kind,
+                    manifest_digest=canonical_hash(manifest.model_dump(mode="json")),
+                    stage_input=item.input_contract,
+                    recipe_digest=stage_recipe_digest,
+                    executor_config=executor_config,
+                    upstream_outputs=tuple(upstream_outputs),
+                )
         fake_steps = int(runtime.get("fake_steps", 8))
         input_contract = {
             "stage_input": item.input_contract,
@@ -750,13 +788,10 @@ class CampaignRuntimeRepository(CampaignRepository):
             manifest_revision=campaign.manifest_revision,
             budget_unit=budget_unit,
             budget_reservation=reservation,
-            executor_kind=(
-                "ssh_remote"
-                if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}
-                else executor_kind
-            ),
+            executor_kind=runtime_kind,
             executor_config=executor_config,
             fake_steps=fake_steps,
+            result_key=result_key,
         )
 
     def record_controller_blocker_under_leader(

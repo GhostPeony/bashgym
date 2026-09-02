@@ -84,6 +84,29 @@ capability declaration, not a closed design registry: the agent may formulate a
 novel bounded probe, and an unsupported result must remain unsupported rather
 than becoming a fallback SFT, DPO, GRPO, or RLVR run.
 
+The optional `bashgym-scientific-diagnostics` runner is deliberately narrower
+than the open proposal contract. It projects five pinned aggregate evidence
+types: matched fixed-budget plasticity receipts, decomposed reward-integrity
+evidence with canaries, preference-integrity counts, fixed-suite teacher/
+student comparisons with output-validation counts, and paired no-hint/hinted
+session-recovery counts. It never reads raw training or held-out examples,
+performs teacher inference, evaluates sessions, or runs a fresh generic
+optimizer. Use it when those exact aggregates answer the decision. If they do
+not, retain the hypothesis and install a runner that can measure it; do not
+reinterpret an `unsupported` result as method ineligibility or scientific
+failure.
+
+For `teacher_gap_probe`, bind the exact evaluation suite, metric direction,
+teacher and student model digests, and output-validation contract. The runner
+signs the gap so positive means the teacher is better for either metric
+direction, and derives acceptance from accepted/total outputs. For
+`recovery_trace_probe`, bind the recovery dataset and reader contract and supply
+the paired outcome table for the same cases. The runner derives the recovery
+lift and its 95% lower confidence bound; do not provide a hand-authored lift.
+Both probes inform readiness only. The installed training runner must still
+declare the method, campaign thresholds must pass, and the trained candidate
+must still clear its fixed heldout evaluation.
+
 For generated data, distinguish deterministic verification and splitting from
 generation itself. Require the receipt to bind the effective generator config
 and implementation; if the provider cannot accept a generation seed, record

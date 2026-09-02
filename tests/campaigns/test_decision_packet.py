@@ -141,6 +141,72 @@ def test_incomplete_preference_integrity_diagnostic_does_not_claim_verification(
     )
 
 
+def test_distillation_diagnostics_become_method_evidence_from_exact_contracts() -> None:
+    evidence = method_evidence_from_diagnostic_results(
+        (
+            {
+                "probe_family": "teacher_gap_probe",
+                "status": "completed",
+                "comparison_contract": {
+                    "evaluation_suite_id": "heldout-v1",
+                    "metric_direction": "maximize",
+                    "teacher_model_digest": "d" * 64,
+                    "student_model_digest": "e" * 64,
+                    "output_validation_contract_digest": "f" * 64,
+                },
+                "measurements": [
+                    {"name": "teacher_metric_gap", "value": 0.25},
+                    {"name": "teacher_output_acceptance_rate", "value": 0.9},
+                ],
+            },
+            {
+                "probe_family": "recovery_trace_probe",
+                "status": "completed",
+                "comparison_contract": {
+                    "recovery_dataset_digest": "a" * 64,
+                    "reader_contract_digest": "b" * 64,
+                    "confidence_level": 0.95,
+                },
+                "measurements": [
+                    {"name": "recovery_traces", "value": 80.0},
+                    {"name": "recovery_lift_lower_bound", "value": 0.1},
+                ],
+            },
+        )
+    )
+
+    assert evidence == {
+        "teacher_metric_gap": 0.25,
+        "teacher_output_acceptance_rate": 0.9,
+        "recovery_traces": 80.0,
+        "recovery_lift_lower_bound": 0.1,
+    }
+
+
+def test_distillation_diagnostic_with_incomplete_identity_is_not_method_evidence() -> None:
+    assert (
+        method_evidence_from_diagnostic_results(
+            (
+                {
+                    "probe_family": "teacher_gap_probe",
+                    "status": "completed",
+                    "comparison_contract": {
+                        "evaluation_suite_id": "heldout-v1",
+                        "metric_direction": "maximize",
+                        "teacher_model_digest": "d" * 64,
+                        "student_model_digest": "e" * 64,
+                    },
+                    "measurements": [
+                        {"name": "teacher_metric_gap", "value": 0.25},
+                        {"name": "teacher_output_acceptance_rate", "value": 0.9},
+                    ],
+                },
+            )
+        )
+        == {}
+    )
+
+
 def _spec() -> AutoResearchCampaignSpec:
     return AutoResearchCampaignSpec(
         workspace_id="workspace-a",

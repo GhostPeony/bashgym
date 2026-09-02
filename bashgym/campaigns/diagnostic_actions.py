@@ -223,6 +223,38 @@ class AutoResearchDiagnosticRecipe(FrozenContractModel):
             }
             if not required_measurements.issubset(names):
                 raise ValueError("preference integrity probe measurements are incomplete")
+        if self.probe_family == "teacher_gap_probe":
+            evaluation_suite_id = self.parameters.get("evaluation_suite_id")
+            metric_direction = self.parameters.get("metric_direction")
+            teacher_model_digest = self.parameters.get("teacher_model_digest")
+            student_model_digest = self.parameters.get("student_model_digest")
+            validation_digest = self.parameters.get("output_validation_contract_digest")
+            digests = (teacher_model_digest, student_model_digest, validation_digest)
+            if (
+                not isinstance(evaluation_suite_id, str)
+                or _PARAMETER_KEY.fullmatch(evaluation_suite_id) is None
+                or metric_direction not in {"maximize", "minimize"}
+                or any(
+                    not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                    for value in digests
+                )
+                or teacher_model_digest == student_model_digest
+                or set(names) != {"teacher_metric_gap", "teacher_output_acceptance_rate"}
+            ):
+                raise ValueError("teacher gap probe parameters or measurements are invalid")
+        if self.probe_family == "recovery_trace_probe":
+            recovery_digest = self.parameters.get("recovery_dataset_digest")
+            reader_digest = self.parameters.get("reader_contract_digest")
+            confidence_level = self.parameters.get("confidence_level")
+            if (
+                not isinstance(recovery_digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", recovery_digest) is None
+                or not isinstance(reader_digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", reader_digest) is None
+                or confidence_level != 0.95
+                or set(names) != {"recovery_traces", "recovery_lift_lower_bound"}
+            ):
+                raise ValueError("recovery trace probe parameters or measurements are invalid")
         return self
 
 
@@ -432,6 +464,19 @@ def validated_diagnostic_evidence(
                 or any(not 0 <= observed[name] <= 1 for name in rate_names)
             ):
                 raise ValueError("preference_integrity_measurement_out_of_range")
+        if recipe.probe_family == "teacher_gap_probe":
+            observed = {item.name: item.value for item in evidence.measurements}
+            if not 0 <= observed["teacher_output_acceptance_rate"] <= 1:
+                raise ValueError("teacher_gap_measurement_out_of_range")
+        if recipe.probe_family == "recovery_trace_probe":
+            observed = {item.name: item.value for item in evidence.measurements}
+            traces = observed["recovery_traces"]
+            if (
+                traces < 1
+                or not traces.is_integer()
+                or not -1 <= observed["recovery_lift_lower_bound"] <= 1
+            ):
+                raise ValueError("recovery_trace_measurement_out_of_range")
     return evidence
 
 
@@ -504,6 +549,26 @@ def public_diagnostic_projection(
         projection["comparison_contract"] = {
             "preference_dataset_digest": recipe.parameters["preference_dataset_digest"],
             "labeling_contract_digest": recipe.parameters["labeling_contract_digest"],
+            "sample_limit": recipe.sample_limit,
+            "seed": recipe.seed,
+        }
+    elif recipe.probe_family == "teacher_gap_probe":
+        projection["comparison_contract"] = {
+            "evaluation_suite_id": recipe.parameters["evaluation_suite_id"],
+            "metric_direction": recipe.parameters["metric_direction"],
+            "teacher_model_digest": recipe.parameters["teacher_model_digest"],
+            "student_model_digest": recipe.parameters["student_model_digest"],
+            "output_validation_contract_digest": recipe.parameters[
+                "output_validation_contract_digest"
+            ],
+            "sample_limit": recipe.sample_limit,
+            "seed": recipe.seed,
+        }
+    elif recipe.probe_family == "recovery_trace_probe":
+        projection["comparison_contract"] = {
+            "recovery_dataset_digest": recipe.parameters["recovery_dataset_digest"],
+            "reader_contract_digest": recipe.parameters["reader_contract_digest"],
+            "confidence_level": recipe.parameters["confidence_level"],
             "sample_limit": recipe.sample_limit,
             "seed": recipe.seed,
         }

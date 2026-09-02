@@ -129,6 +129,10 @@ def test_activate_autoresearch_parser_binds_an_existing_model_and_evaluator():
             "data-designer-config.json",
             "--data-build-budget-reservation",
             "0.05",
+            "--first-party-diagnostic-source-bundle",
+            "autoresearch_diagnostic_sources.json",
+            "--diagnostic-budget-reservation",
+            "0.05",
             "--executor-profile",
             "registered-training-v1",
             "--full-budget-reservation",
@@ -149,6 +153,8 @@ def test_activate_autoresearch_parser_binds_an_existing_model_and_evaluator():
     assert args.training_input == ["tmax-runner-config.json"]
     assert args.data_build_script == "build_data.py"
     assert args.data_build_budget_reservation == 0.05
+    assert args.first_party_diagnostic_source_bundle == ("autoresearch_diagnostic_sources.json")
+    assert args.diagnostic_budget_reservation == 0.05
     assert args.smoke_budget_reservation is None
 
 
@@ -365,6 +371,33 @@ def test_activate_autoresearch_plan_binds_remote_heldout_without_ssh_or_local_ro
     args.diagnostic_contract_file = None
     with pytest.raises(ValueError, match="diagnostic activation requires"):
         args.func(args)
+
+    source_bundle = tmp_path / "autoresearch_diagnostic_sources.json"
+    source_bundle.write_text(
+        json.dumps(
+            {
+                "schema_version": "bashgym.autoresearch_first_party_diagnostic_sources.v1",
+                "sources": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    args.diagnostic_script = None
+    args.diagnostic_contract_file = None
+    args.diagnostic_input = []
+    args.diagnostic_arg = []
+    args.first_party_diagnostic_source_bundle = str(source_bundle)
+
+    assert args.func(args) == 0
+    capsys.readouterr()
+    first_party_stage = captured["request"].executor_profile.stage_profile(
+        StageKind.CONTRACT_EVALUATION
+    )
+    assert first_party_stage.script_path.name == "first_party_diagnostic_runner.py"
+    assert first_party_stage.input_files == (source_bundle.resolve(),)
+    assert first_party_stage.script_args == ()
+    assert first_party_stage.diagnostic_contract.runner_id == ("bashgym-scientific-diagnostics")
 
 
 def test_canvas_action_commands_send_origin_and_runtime_metadata(monkeypatch, capsys):
@@ -1026,6 +1059,46 @@ def test_research_commands_are_thin_aliases_for_the_campaign_api(monkeypatch, ca
     json.loads(capsys.readouterr().out)
     assert client.calls[-1]["path"] == ("/campaigns/campaign%3A1/autoresearch/diagnostics")
     assert client.calls[-1]["payload"]["parent_proposal_id"] == "candidate-2"
+
+    assert (
+        main(
+            [
+                "research",
+                "conclude-family",
+                *connection,
+                "--campaign",
+                "campaign:1",
+                "--expected-version",
+                "6",
+                "--family",
+                "family-longer-training",
+                "--disposition",
+                "exhausted",
+                "--summary",
+                "Longer continuation did not improve the fixed suite.",
+                "--follow-up-family",
+                "family-data-coverage",
+                "--follow-up-hypothesis",
+                "Increase coverage of residual failure clusters.",
+                "--idempotency-key",
+                "conclude-family-1",
+            ]
+        )
+        == 0
+    )
+    json.loads(capsys.readouterr().out)
+    assert client.calls[-1]["path"] == (
+        "/campaigns/campaign%3A1/autoresearch/hypothesis-families/"
+        "family-longer-training/conclude"
+    )
+    assert client.calls[-1]["payload"] == {
+        "workspace_id": "workspace-a",
+        "expected_version": 6,
+        "disposition": "exhausted",
+        "summary": "Longer continuation did not improve the fixed suite.",
+        "follow_up_family_id": "family-data-coverage",
+        "follow_up_hypothesis": "Increase coverage of residual failure clusters.",
+    }
 
     assert (
         main(

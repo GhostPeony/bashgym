@@ -104,6 +104,31 @@ diagnostic consumes its declared reservation and a proposal round, but not a
 model-candidate attempt. It never changes the retained reference or produces a
 KEEP/DISCARD decision.
 
+The optional first-party runner covers five aggregate sources without exposing
+raw examples to the diagnostic action:
+
+- `plasticity_probe` projects a receipt from two already-completed probes that
+  used the same fixed budget, metric direction, sample scope, and seed;
+- `reward_integrity_probe` projects the existing decomposed reward and
+  adversarial-canary evidence for the exact reward specification;
+- `preference_integrity_probe` derives agreement confidence, ambiguity,
+  position-bias, label-conflict, and held-out-overlap rates from bounded counts;
+- `teacher_gap_probe` compares exact teacher and student model digests on one
+  pinned evaluation suite and derives validated-output acceptance from counts;
+- `recovery_trace_probe` compares paired no-hint and hinted outcomes for the
+  same recovery cases and derives a 95% lower confidence bound on recovery
+  lift.
+
+These are evidence adapters, not generic model runners. They do not perform
+fresh training, teacher inference, or session evaluation, and they do not
+inspect raw chosen/rejected text or recovery rows. The teacher receipt binds
+the suite, metric direction, teacher, student, and output-validation contract.
+The recovery receipt binds the dataset and reader contract and supplies paired
+outcome counts rather than an asserted lift. Missing or mismatched evidence
+returns `unsupported` or a typed validation failure. The agent can still
+propose a novel bounded diagnostic; executing it requires an
+installation-owned runner that declares and produces those measurements.
+
 Submit the diagnostic through the same proposal command:
 
 ```bash
@@ -250,6 +275,36 @@ The agent should inspect the aggregate metric, protected gates, behavioral
 error categories, checkpoint trajectory, and replication evidence before
 choosing the next intervention.
 
+#### Evaluation size, seed uncertainty, and stopping
+
+For each experiment, `research state` and the export project an
+`experiment_power` packet from the exact referenced evaluation result. An exact
+`example_count` or `sample_count` says how much evidence was observed; it does
+not, by itself, say that the evaluation was large enough. Sample-size
+sufficiency is reported only when the fixed evaluator records a predeclared
+precision target or estimated-power target in typed power evidence. Otherwise
+the status remains `not_assessed`; when no exact count is recorded, it is
+`unavailable`.
+
+Comparable candidates that differ only by declared training seed may report
+between-run sample standard deviation and standard error. Those values describe
+seed sensitivity. They are not a per-example confidence interval and do not
+make differently configured runs comparable.
+
+Repeated checkpoint or terminal evaluations are not treated as a sequential
+test. The status remains `not_predeclared` unless the evaluator records a
+predeclared plan digest, statistical method, number of looks, maximum sample
+count, and stopping reason. BashGym carries that evidence into the agent packet
+and report but does not choose a test, invent a confidence interval, or stop the
+campaign from an undeclared threshold.
+
+This boundary follows recent evidence that fine-tuning seeds can change both
+aggregate and example-level outcomes ([Bui et al., 2025](https://arxiv.org/abs/2503.07329)),
+that evaluation estimators must match the metric and comparison design
+([Mitra, 2026](https://arxiv.org/abs/2603.28769)), and that valid adaptive
+evaluation requires an explicit sequential design rather than repeated peeking
+([Arviv et al., 2026](https://arxiv.org/abs/2607.08522)).
+
 ### 7. Continue or report
 
 The loop stops when a configured deadline, attempt limit, proposal limit, cost
@@ -275,6 +330,23 @@ descriptive between-run statistics, not a confidence interval or proof that the
 intervention generalizes. Diagnostics and factual summaries can guide the agent
 toward what to inspect next, but they cannot change the fixed evaluation result,
 override KEEP or DISCARD, or submit another experiment.
+
+After every candidate in a hypothesis family has a result, the agent may record
+an evidence-bound family conclusion as `supported`, `exhausted`, or
+`inconclusive`. This lifecycle is separate from each candidate's KEEP or DISCARD
+decision. A conclusion may name a new follow-up family and hypothesis, but it
+does not submit the next experiment or restrict what the agent may propose.
+Concluded families reject additional candidates so a restarted agent cannot
+silently append work to a closed line of inquiry; the agent remains free to open
+any newly named family.
+
+Use `research conclude-family` (or the equivalent
+`research_conclude_hypothesis_family` agent tool) with the current campaign
+version, family ID, disposition, and concise evidence summary. Supply both a
+follow-up family ID and follow-up hypothesis when carrying a new idea across
+agent restarts. The conclusion advances the campaign event cursor, so
+`research wait` observes it without polling conversational history. Reports
+show evidence status and lifecycle status independently.
 
 ## Use the agent platform directly
 
@@ -344,6 +416,21 @@ descriptors. These fields describe executable measurements; they do not select
 a hypothesis or method. Omitting the complete group leaves active diagnostics
 unavailable while preserving all passive diagnostics derived from stored
 campaign evidence.
+
+For BashGym's aggregate runner, create a canonical
+`autoresearch_diagnostic_sources.json` bundle and use the shorter activation
+form:
+
+```text
+--first-party-diagnostic-source-bundle autoresearch_diagnostic_sources.json
+--diagnostic-budget-reservation <cost>
+```
+
+The bundle contains only typed aggregate receipts and content identities. It
+must not contain prompts, responses, preference rows, filesystem paths,
+credentials, or model files. Activation pins the runner and capability
+contract; the agent still authors each question, hypothesis, sample bound,
+seed, and requested measurements in the diagnostic proposal.
 
 Keep target addresses, credentials, and local paths in this operator-owned
 contract and its referenced inputs. They do not belong in a campaign proposal

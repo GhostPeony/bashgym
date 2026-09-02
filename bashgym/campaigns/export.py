@@ -443,6 +443,60 @@ def _markdown(snapshot: dict[str, Any], source_digest: str) -> str:
                 lines.append(
                     "- Evidence: " + ", ".join(f"`{reference}`" for reference in references)
                 )
+        powered_experiments = [item for item in experiments if item.get("experiment_power")]
+        if powered_experiments:
+            lines.extend(["", "## Experiment power", ""])
+            for item in powered_experiments:
+                power = item["experiment_power"]
+                evaluation = power.get("evaluation") or {}
+                seed = power.get("seed_uncertainty") or {}
+                sequential = power.get("sequential_stopping") or {}
+                lines.extend(
+                    [
+                        f"### {item.get('proposal_id', 'unknown')}",
+                        "",
+                        f"- Evaluation sample count: `{_number(evaluation.get('sample_count'))}`",
+                        (
+                            "- Sample-size sufficiency: "
+                            f"`{(evaluation.get('sufficiency') or {}).get('status', 'not_assessed')}`"
+                        ),
+                        f"- Seed evidence: `{seed.get('status') or 'not_grouped'}`",
+                        (
+                            "- Sequential stopping: "
+                            f"`{sequential.get('status') or 'not_predeclared'}`"
+                        ),
+                    ]
+                )
+                uncertainty = evaluation.get("uncertainty") or {}
+                if uncertainty.get("interval_lower") is not None:
+                    lines.append(
+                        "- Evaluator-authored interval: "
+                        f"{_number(uncertainty.get('interval_lower'))} to "
+                        f"{_number(uncertainty.get('interval_upper'))} "
+                        f"(`{uncertainty.get('method') or 'unknown'}`, "
+                        f"confidence={_number(uncertainty.get('confidence_level'))})."
+                    )
+                for limitation in power.get("limitations") or []:
+                    lines.append(f"- Limitation: {limitation}")
+    hypothesis_families = history.get("hypothesis_families") or []
+    if hypothesis_families:
+        lines.extend(["", "## Hypothesis families", ""])
+        for family in hypothesis_families:
+            lifecycle = family.get("lifecycle") or {}
+            conclusion = lifecycle.get("conclusion") or {}
+            follow_up = lifecycle.get("follow_up") or {}
+            lines.append(
+                f"- `{family.get('hypothesis_family_id', 'unknown')}`: evidence "
+                f"`{family.get('status', 'unknown')}`; lifecycle "
+                f"`{lifecycle.get('status', 'open')}`."
+            )
+            if conclusion.get("summary"):
+                lines.append(f"  - Conclusion: {conclusion['summary']}")
+            if follow_up.get("hypothesis_family_id"):
+                lines.append(
+                    f"  - Follow-up `{follow_up['hypothesis_family_id']}`: "
+                    f"{follow_up.get('hypothesis') or 'Not recorded.'}"
+                )
     diagnostic_results = history.get("diagnostic_results") or []
     if diagnostic_results:
         lines.extend(["", "## Research diagnostics", ""])

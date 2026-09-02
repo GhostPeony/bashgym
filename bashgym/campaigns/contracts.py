@@ -210,6 +210,7 @@ CANONICAL_CAMPAIGN_EVENT_TYPES = frozenset(
         "campaign:proposal-rejected",
         "campaign:proposal-withdrawn",
         "campaign:proposal-accepted",
+        "campaign:autoresearch-family-concluded",
         "campaign:advance-requested",
         "campaign:manifest-revised",
         "campaign:source-approved",

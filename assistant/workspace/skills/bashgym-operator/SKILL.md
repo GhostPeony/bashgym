@@ -56,6 +56,14 @@ or the user asks for them. Use plain technical language; do not invent slogans.
    be used directly without scheduling another action. If the active request is
    outside the matrix, it may still be scientifically valid, but the runner
    must return `unsupported`; never rewrite it into a supported probe silently.
+   When the runner identity is `bashgym-scientific-diagnostics`, it consumes
+   pinned aggregate receipts only: matched fixed-budget plasticity probes,
+   existing reward-integrity canaries, preference-integrity counts, exact
+   teacher/student suite comparisons, or paired no-hint/hinted recovery counts.
+   It does not run a generic training probe, teacher inference, or session
+   evaluation, and it does not inspect raw examples. Missing aggregate evidence
+   is `unsupported`. Use an installation-owned runner for a novel executable
+   measurement while keeping the agent's hypothesis and design in the proposal.
    For repeated fine-tuning lineages, do not call an endpoint regression
    plasticity loss. A `plasticity_probe` is interpretable only when the runner
    exposes all required measurements and executes the same recipe digest, seed,
@@ -82,6 +90,15 @@ or the user asks for them. Use plain technical language; do not invent slogans.
    not enough. Missing campaign thresholds keeps DPO `diagnostic_needed`; a
    measured breach suggests a labeling or data-revision experiment, not an
    automatic switch to another training method.
+   Before teacher distillation, bind `teacher_gap_probe` to one exact evaluation
+   suite, metric direction, teacher and student model digests, and output-
+   validation contract. A positive signed gap and acceptable output rate make
+   the method eligible only when campaign thresholds and an installed teacher-
+   distillation runner also agree. Before session distillation, bind
+   `recovery_trace_probe` to the exact recovery dataset and reader contract;
+   require paired outcomes for the same cases and use the derived lower
+   confidence bound rather than an asserted recovery lift. Either diagnostic is
+   readiness evidence, not the post-training heldout decision.
 6. Let BashGym schedule and run the registered stages. Use `research wait` with
    its durable cursor, then refresh `research state` when progress or an agent
    action is reported.
@@ -201,6 +218,20 @@ Use the existing campaign ledger as the durable training-session record. Use `ge
      Read the family mean, sample standard deviation, standard error, and range
      as descriptive evidence; do not claim replication from one run or from
      multiple checkpoints of the same run.
+   - Read `experiment_power` before making a robustness claim. An observed
+     evaluation count is not proof of adequate power. Accept `sufficient` or a
+     sequential-stopping result only when the fixed evaluator supplied the
+     typed predeclared criterion. Between-seed standard error is between-run
+     evidence, not a per-example confidence interval. If the packet says
+     `not_assessed` or `not_predeclared`, propose the missing evidence rather
+     than inventing a universal threshold.
+   - Once every candidate in a `hypothesis_family_id` has a result, explicitly
+     conclude that family as `supported`, `exhausted`, or `inconclusive` with
+     `bashgym research conclude-family` or
+     `research_conclude_hypothesis_family`. This is separate from KEEP/DISCARD.
+     Record a new follow-up family ID and hypothesis when useful, but do not
+     treat the conclusion as a generated plan: the agent may still open any new
+     family justified by the evidence.
 4. Monitor at a cadence appropriate to the run. Record milestones and anomalies, not every metric point.
 5. Evaluate with the declared suite, compare against the pinned baseline and gates, and distinguish smoke/runtime evidence from model-quality evidence.
 6. Export Markdown, charts, DOCX, and PDF only after the required full run and evaluation complete. Preserve report/export IDs and hashes.

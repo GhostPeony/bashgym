@@ -69,6 +69,7 @@ ManifestRevisionNumber = Annotated[int, Field(ge=1)]
 Priority = Annotated[int, Field(ge=0, le=100)]
 ExportFormat = Literal["markdown", "json", "csv", "png", "docx", "pdf"]
 ResearchRole = Literal["baseline", "candidate", "diagnostic"]
+ResearchFamilyDisposition = Literal["supported", "exhausted", "inconclusive"]
 ResearchCategory = Literal["research", "github", "pdf"]
 ResearchLimit = Annotated[int, Field(ge=1, le=10)]
 HexDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -561,6 +562,38 @@ def build_server(
             f"autoresearch-{role}",
             campaign_id,
             f"/campaigns/{campaign_id}/autoresearch/{suffix}",
+            body,
+        )
+
+    @server.tool(structured_output=True, annotations=state_change)
+    async def research_conclude_hypothesis_family(
+        campaign_id: CampaignId,
+        expected_version: ExpectedVersion,
+        hypothesis_family_id: ProposalId,
+        disposition: ResearchFamilyDisposition,
+        summary: Annotated[str, Field(min_length=1, max_length=2000)],
+        follow_up_family_id: ProposalId | None = None,
+        follow_up_hypothesis: Annotated[str, Field(min_length=1, max_length=4000)] | None = None,
+    ) -> dict[str, Any]:
+        """Conclude a completed hypothesis family and optionally record the next idea."""
+
+        if (follow_up_family_id is None) != (follow_up_hypothesis is None):
+            return _invalid_request("Follow-up family and hypothesis must be provided together.")
+        body: dict[str, Any] = {
+            "expected_version": expected_version,
+            "disposition": disposition,
+            "summary": summary,
+        }
+        if follow_up_family_id is not None:
+            body["follow_up_family_id"] = follow_up_family_id
+            body["follow_up_hypothesis"] = follow_up_hypothesis
+        return await mutate(
+            "autoresearch-family-conclude",
+            campaign_id,
+            (
+                f"/campaigns/{campaign_id}/autoresearch/hypothesis-families/"
+                f"{hypothesis_family_id}/conclude"
+            ),
             body,
         )
 

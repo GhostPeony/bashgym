@@ -783,3 +783,170 @@ def test_preference_integrity_evidence_rejects_impossible_rates() -> None:
             expected_runner_id="generic-diagnostic-runner",
             expected_runner_version="1",
         )
+
+
+def test_teacher_gap_probe_projects_exact_comparison_contract() -> None:
+    recipe = _recipe(
+        probe_family="teacher_gap_probe",
+        informs_methods=("teacher_distillation",),
+        measurements=(
+            DiagnosticMeasurementRequest(
+                name="teacher_metric_gap", interpretation="maximize", unit="accuracy"
+            ),
+            DiagnosticMeasurementRequest(
+                name="teacher_output_acceptance_rate",
+                interpretation="maximize",
+                unit="fraction",
+            ),
+        ),
+        parameters={
+            "evaluation_suite_id": "heldout-v1",
+            "metric_direction": "maximize",
+            "teacher_model_digest": "d" * 64,
+            "student_model_digest": "e" * 64,
+            "output_validation_contract_digest": "f" * 64,
+        },
+    )
+    evidence = AutoResearchDiagnosticEvidence.model_validate(
+        _evidence(
+            recipe,
+            measurements=(
+                {
+                    "name": "teacher_metric_gap",
+                    "value": 0.25,
+                    "sample_count": 64,
+                    "unit": "accuracy",
+                },
+                {
+                    "name": "teacher_output_acceptance_rate",
+                    "value": 0.9,
+                    "sample_count": 80,
+                    "unit": "fraction",
+                },
+            ),
+        )
+    )
+
+    projected = public_diagnostic_projection(recipe, evidence)
+
+    assert projected["comparison_contract"] == {
+        "evaluation_suite_id": "heldout-v1",
+        "metric_direction": "maximize",
+        "teacher_model_digest": "d" * 64,
+        "student_model_digest": "e" * 64,
+        "output_validation_contract_digest": "f" * 64,
+        "sample_limit": 96,
+        "seed": 17,
+    }
+
+
+def test_teacher_gap_probe_rejects_missing_model_identity() -> None:
+    with pytest.raises(ValidationError, match="teacher gap probe"):
+        _recipe(
+            probe_family="teacher_gap_probe",
+            measurements=(
+                DiagnosticMeasurementRequest(name="teacher_metric_gap", interpretation="maximize"),
+                DiagnosticMeasurementRequest(
+                    name="teacher_output_acceptance_rate", interpretation="maximize"
+                ),
+            ),
+            parameters={
+                "evaluation_suite_id": "heldout-v1",
+                "metric_direction": "maximize",
+            },
+        )
+
+
+def test_recovery_trace_probe_projects_paired_comparison_contract() -> None:
+    recipe = _recipe(
+        probe_family="recovery_trace_probe",
+        informs_methods=("session_distillation",),
+        measurements=(
+            DiagnosticMeasurementRequest(
+                name="recovery_traces", interpretation="maximize", unit="traces"
+            ),
+            DiagnosticMeasurementRequest(
+                name="recovery_lift_lower_bound",
+                interpretation="maximize",
+                unit="fraction",
+            ),
+        ),
+        parameters={
+            "recovery_dataset_digest": "a" * 64,
+            "reader_contract_digest": "b" * 64,
+            "confidence_level": 0.95,
+        },
+    )
+    evidence = AutoResearchDiagnosticEvidence.model_validate(
+        _evidence(
+            recipe,
+            measurements=(
+                {
+                    "name": "recovery_traces",
+                    "value": 80,
+                    "sample_count": 80,
+                    "unit": "traces",
+                },
+                {
+                    "name": "recovery_lift_lower_bound",
+                    "value": 0.1,
+                    "sample_count": 100,
+                    "unit": "fraction",
+                },
+            ),
+        )
+    )
+
+    projected = public_diagnostic_projection(recipe, evidence)
+
+    assert projected["comparison_contract"] == {
+        "recovery_dataset_digest": "a" * 64,
+        "reader_contract_digest": "b" * 64,
+        "confidence_level": 0.95,
+        "sample_limit": 96,
+        "seed": 17,
+    }
+
+
+def test_recovery_trace_evidence_rejects_fractional_trace_count() -> None:
+    recipe = _recipe(
+        probe_family="recovery_trace_probe",
+        informs_methods=("session_distillation",),
+        measurements=(
+            DiagnosticMeasurementRequest(name="recovery_traces", interpretation="maximize"),
+            DiagnosticMeasurementRequest(
+                name="recovery_lift_lower_bound", interpretation="maximize"
+            ),
+        ),
+        parameters={
+            "recovery_dataset_digest": "a" * 64,
+            "reader_contract_digest": "b" * 64,
+            "confidence_level": 0.95,
+        },
+    )
+
+    with pytest.raises(ValueError, match="recovery_trace_measurement_out_of_range"):
+        validated_diagnostic_evidence(
+            _evidence(
+                recipe,
+                measurements=(
+                    {"name": "recovery_traces", "value": 1.5, "sample_count": 2},
+                    {
+                        "name": "recovery_lift_lower_bound",
+                        "value": 0.1,
+                        "sample_count": 2,
+                    },
+                ),
+            ),
+            recipe=recipe,
+            expected_identity={
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-a",
+                "proposal_id": "diagnostic-a",
+                "study_id": "study-a",
+                "action_id": "action-a",
+                "attempt_id": "attempt-a",
+            },
+            expected_runner_id="generic-diagnostic-runner",
+            expected_runner_version="1",
+        )

@@ -13,7 +13,7 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic import ValidationError as PydanticValidationError
 from typing_extensions import Never
 
@@ -26,11 +26,13 @@ from bashgym.campaigns.autoresearch import (
     AutoResearchBudgetError,
     AutoResearchCampaignCore,
     AutoResearchConflictError,
+    AutoResearchHypothesisFamilyConclusion,
     AutoResearchInvariantError,
     AutoResearchRepository,
     AutoResearchResult,
     AutoResearchStopRules,
     AutoResearchTemplateDefinition,
+    HypothesisFamilyDisposition,
     InterventionMode,
     autoresearch_spec_for_template,
     build_autoresearch_template_registry,
@@ -208,6 +210,26 @@ class AutoResearchCandidateCreateInput(CampaignProposalCreateInput):
 
 class AutoResearchDiagnosticCreateInput(CampaignProposalCreateInput):
     parent_proposal_id: str = Field(min_length=1, max_length=160)
+
+
+class AutoResearchHypothesisFamilyConclusionInput(ApiModel):
+    workspace_id: str = Field(min_length=1, max_length=160)
+    expected_version: int = Field(ge=1)
+    disposition: HypothesisFamilyDisposition
+    summary: str = Field(min_length=1, max_length=2000)
+    follow_up_family_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$",
+    )
+    follow_up_hypothesis: str | None = Field(default=None, min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_follow_up(self) -> AutoResearchHypothesisFamilyConclusionInput:
+        if (self.follow_up_family_id is None) != (self.follow_up_hypothesis is None):
+            raise ValueError("follow-up family and hypothesis must be provided together")
+        return self
 
 
 class AutoResearchResultInput(ApiModel):
@@ -1737,6 +1759,9 @@ def _research_state_payload(
     diagnostic_results = core.repository.list_autoresearch_diagnostic_results(
         workspace_id, campaign_id
     )
+    family_conclusions = core.repository.list_hypothesis_family_conclusions(
+        workspace_id, campaign_id
+    )
     control_by_proposal = {item.proposal_id: item for item in controls}
     latest_outcome = outcomes[-1] if outcomes else None
     latest_control = (
@@ -1762,6 +1787,15 @@ def _research_state_payload(
         if spec.ledger_project_id is not None
         else []
     )
+    evaluations = (
+        core.ledger.list_evaluation_results(
+            workspace_id,
+            spec.ledger_project_id,
+            limit=1000,
+        )
+        if spec.ledger_project_id is not None
+        else []
+    )
     latest_data_quality = (
         latest_data_quality_for_outcome(
             dataset_versions,
@@ -1781,6 +1815,8 @@ def _research_state_payload(
         controls=controls,
         outcomes=outcomes,
         dataset_versions=dataset_versions,
+        evaluations=evaluations,
+        hypothesis_family_conclusions=family_conclusions,
     )
     decision_packet = build_decision_packet(
         objective=snapshot.campaign.objective,
@@ -1993,6 +2029,12 @@ def get_autoresearch_campaign(
                 item.model_dump(mode="json")
                 for item in core.repository.list_code_lineages(workspace_id, campaign_id)
             ],
+            "hypothesis_family_conclusions": [
+                item.model_dump(mode="json")
+                for item in core.repository.list_hypothesis_family_conclusions(
+                    workspace_id, campaign_id
+                )
+            ],
         }
     except Exception as exc:
         _raise_api(exc)
@@ -2158,6 +2200,40 @@ def submit_autoresearch_diagnostic(
             idempotency_key=idempotency_key,
         )
         return _proposal_mutation_payload(mutation)
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.post(
+    "/{campaign_id}/autoresearch/hypothesis-families/{hypothesis_family_id}/conclude"
+)
+def conclude_autoresearch_hypothesis_family(
+    campaign_id: str,
+    hypothesis_family_id: str,
+    body: AutoResearchHypothesisFamilyConclusionInput,
+    request: Request,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", max_length=160),
+    correlation_id: str = Header(
+        default="campaign-rest-autoresearch-family-conclude",
+        alias="X-Correlation-ID",
+        max_length=160,
+    ),
+) -> AutoResearchHypothesisFamilyConclusion:
+    try:
+        repository, _auth, _service = _services(request)
+        return _autoresearch_core(repository).conclude_hypothesis_family(
+            body.workspace_id,
+            campaign_id,
+            hypothesis_family_id,
+            disposition=body.disposition,
+            summary=body.summary,
+            follow_up_family_id=body.follow_up_family_id,
+            follow_up_hypothesis=body.follow_up_hypothesis,
+            expected_version=body.expected_version,
+            principal=_principal(request),
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+        )
     except Exception as exc:
         _raise_api(exc)
 

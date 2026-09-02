@@ -10,6 +10,7 @@ from typing import Any
 
 from bashgym.campaigns.autoresearch import (
     AutoResearchCampaignSpec,
+    AutoResearchHypothesisFamilyConclusion,
     AutoResearchOutcomeRecord,
     AutoResearchProposalControl,
     ExperimentOutcome,
@@ -19,6 +20,7 @@ from bashgym.campaigns.autoresearch import (
     ResultDecision,
 )
 from bashgym.campaigns.contracts import StudyProposal, canonical_hash
+from bashgym.campaigns.experiment_power import build_experiment_power_projection
 from bashgym.campaigns.failure_observations import build_research_failure_packet
 from bashgym.campaigns.outcome_assessment import build_outcome_assessment
 
@@ -195,6 +197,7 @@ def _entry(
     dataset_versions: Sequence[Mapping[str, Any]],
     evaluations: Sequence[Mapping[str, Any]],
     evidence_strength: str,
+    hypothesis_family: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     result = outcome.result
     decision = outcome.decision
@@ -332,6 +335,11 @@ def _entry(
             failure_analysis=failure_analysis,
             evidence_strength=evidence_strength,
         ),
+        "experiment_power": build_experiment_power_projection(
+            outcome=outcome.model_dump(mode="json"),
+            evaluations=evaluations,
+            hypothesis_family=hypothesis_family,
+        ),
         "data": _dataset_for_outcome(dataset_versions, outcome),
         "attempt_ids": attempts,
         "attempt_ids_omitted": attempts_omitted,
@@ -346,12 +354,14 @@ def _hypothesis_families(
     proposals: Sequence[StudyProposal],
     controls: Sequence[AutoResearchProposalControl],
     outcomes_by_proposal: Mapping[str, AutoResearchOutcomeRecord],
+    conclusions: Sequence[AutoResearchHypothesisFamilyConclusion],
 ) -> list[dict[str, Any]]:
     proposal_by_id = {item.proposal_id: item for item in proposals}
     grouped: dict[str, list[AutoResearchProposalControl]] = {}
     for control in controls:
         if control.hypothesis_family_id is not None:
             grouped.setdefault(control.hypothesis_family_id, []).append(control)
+    conclusion_by_family = {item.hypothesis_family_id: item for item in conclusions}
 
     ordered_families = sorted(
         grouped.items(),
@@ -422,6 +432,7 @@ def _hypothesis_families(
             and len(set(completed_seeds)) >= 2
         )
         deviation = stdev(metrics) if len(metrics) >= 2 else None
+        conclusion = conclusion_by_family.get(family_id)
         summaries.append(
             {
                 "hypothesis_family_id": family_id,
@@ -446,6 +457,27 @@ def _hypothesis_families(
                         "between_run_sample_standard_deviation" if deviation is not None else None
                     ),
                 },
+                "lifecycle": {
+                    "status": conclusion.disposition.value if conclusion is not None else "open",
+                    "conclusion": (
+                        {
+                            "summary": conclusion.summary,
+                            "proposal_ids": list(conclusion.proposal_ids),
+                            "result_ids": list(conclusion.result_ids),
+                            "aggregate_version": conclusion.aggregate_version,
+                        }
+                        if conclusion is not None
+                        else None
+                    ),
+                    "follow_up": (
+                        {
+                            "hypothesis_family_id": conclusion.follow_up_family_id,
+                            "hypothesis": conclusion.follow_up_hypothesis,
+                        }
+                        if conclusion is not None and conclusion.follow_up_family_id is not None
+                        else None
+                    ),
+                },
             }
         )
     return summaries
@@ -460,6 +492,7 @@ def build_autoresearch_history(
     outcomes: Sequence[AutoResearchOutcomeRecord],
     dataset_versions: Sequence[Mapping[str, Any]] = (),
     evaluations: Sequence[Mapping[str, Any]] = (),
+    hypothesis_family_conclusions: Sequence[AutoResearchHypothesisFamilyConclusion] = (),
     limit: int = _MAX_HISTORY,
 ) -> dict[str, Any]:
     """Join completed experiment records and project bounded scientific facts."""
@@ -475,12 +508,14 @@ def build_autoresearch_history(
         proposals=proposals,
         controls=controls,
         outcomes_by_proposal=outcomes_by_proposal,
+        conclusions=hypothesis_family_conclusions,
     )
     replicated_families = {
         item["hypothesis_family_id"]
         for item in hypothesis_families
         if item["status"] == "replicated"
     }
+    hypothesis_family_by_id = {item["hypothesis_family_id"]: item for item in hypothesis_families}
     selected = ordered[-limit:]
     experiments = []
     for outcome in selected:
@@ -502,6 +537,11 @@ def build_autoresearch_history(
                     "replicated"
                     if control.hypothesis_family_id in replicated_families
                     else "single_observation"
+                ),
+                hypothesis_family=(
+                    hypothesis_family_by_id.get(control.hypothesis_family_id)
+                    if control.hypothesis_family_id is not None
+                    else None
                 ),
             )
         )

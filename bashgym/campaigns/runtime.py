@@ -265,6 +265,7 @@ class CampaignArtifactRecord(FrozenContractModel):
 
 
 _ARTIFACT_CURSOR_PREFIX = "a1."
+_REUSE_CHAIN_LIMIT = 64
 
 
 def _encode_artifact_cursor(sequence: int) -> str:
@@ -1693,6 +1694,46 @@ class CampaignRuntimeRepository(CampaignRepository):
             attempt=attempt, manifest=manifest, artifact_metadata_by_path=metadata_by_path
         )
 
+    def _reuse_link_attempt(self, attempt: ActionAttempt) -> ActionAttempt | None:
+        """Return the completed attempt one reuse link away, or None when not reused."""
+
+        try:
+            manifest = self.get_attempt_result_manifest(attempt.workspace_id, attempt.attempt_id)
+        except (RecordNotFoundError, CampaignPersistenceError):
+            return None
+        source_id = reused_from_attempt_id(manifest)
+        if source_id is None or source_id == attempt.attempt_id:
+            return None
+        try:
+            source = self.get_attempt(attempt.workspace_id, source_id)
+        except RecordNotFoundError as exc:
+            raise CampaignPersistenceError("campaign_reuse_source_invalid") from exc
+        if source.status != AttemptStatus.COMPLETED or source.stage != attempt.stage:
+            raise CampaignPersistenceError("campaign_reuse_source_invalid")
+        return source
+
+    def reuse_source_chain(self, attempt: ActionAttempt) -> tuple[ActionAttempt, ...]:
+        """Follow reuse links hop by hop, newest first, until an attempt that executed."""
+
+        chain: list[ActionAttempt] = []
+        seen = {attempt.attempt_id}
+        current = attempt
+        while True:
+            source = self._reuse_link_attempt(current)
+            if source is None:
+                return tuple(chain)
+            if source.attempt_id in seen or len(chain) >= _REUSE_CHAIN_LIMIT:
+                raise CampaignPersistenceError("campaign_reuse_source_invalid")
+            seen.add(source.attempt_id)
+            chain.append(source)
+            current = source
+
+    def reuse_source_attempt(self, attempt: ActionAttempt) -> ActionAttempt:
+        """Resolve a reused attempt to the attempt whose execution produced its bytes."""
+
+        chain = self.reuse_source_chain(attempt)
+        return chain[-1] if chain else attempt
+
     def completed_stage_outputs(
         self, workspace_id: str, campaign_id: str, study_id: str, stage: StageKind
     ) -> tuple[ArtifactOutput, ...] | None:
@@ -1797,23 +1838,12 @@ class CampaignRuntimeRepository(CampaignRepository):
         )
         return inputs
 
-    def remote_resident_data_build_source(
-        self,
-        workspace_id: str,
-        campaign_id: str,
-        study_id: str,
-        training_stage_index: int,
-    ) -> RemoteResidentDatasetSource:
-        """Resolve the immediately preceding remote DATA_BUILD without copying rows."""
+    def completed_data_build_attempt(
+        self, workspace_id: str, campaign_id: str, study_id: str, stage_index: int
+    ) -> ActionAttempt:
+        """Return the study's own completed remote data build at one plan stage index."""
 
-        from bashgym.campaigns.autoresearch_dataset import (
-            AUTORESEARCH_DATASET_FILE_SCHEMA,
-            AUTORESEARCH_DATASET_RECEIPT_FILENAME,
-            AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
-            AutoResearchDatasetReceipt,
-        )
-
-        if training_stage_index < 1:
+        if stage_index < 0:
             raise CampaignPersistenceError("campaign_training_dataset_missing")
         self._require_initialized()
         with self._connection() as connection:
@@ -1828,17 +1858,49 @@ class CampaignRuntimeRepository(CampaignRepository):
                     workspace_id,
                     campaign_id,
                     study_id,
-                    training_stage_index - 1,
+                    stage_index,
                     StageKind.DATA_BUILD.value,
                     ActionStatus.COMPLETED.value,
                     AttemptStatus.COMPLETED.value,
                 ),
             ).fetchone()
-            if row is None or not str(row["sealed_result_uri"] or "").startswith(
-                "bashgym-remote-seal://"
-            ):
-                raise CampaignPersistenceError("campaign_training_dataset_missing")
-            attempt = self._attempt_from_row(row)
+        if row is None or not str(row["sealed_result_uri"] or "").startswith(
+            "bashgym-remote-seal://"
+        ):
+            raise CampaignPersistenceError("campaign_training_dataset_missing")
+        return self._attempt_from_row(row)
+
+    def remote_resident_data_build_source(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        study_id: str,
+        training_stage_index: int,
+    ) -> RemoteResidentDatasetSource:
+        """Resolve the immediately preceding remote DATA_BUILD without copying rows.
+
+        The consuming study's own completed data build binds the plan edge; when that
+        attempt reused a content-identical result, every physical fact is read from the
+        producing attempt named by its sealed manifest.
+        """
+
+        from bashgym.campaigns.autoresearch_dataset import (
+            AUTORESEARCH_DATASET_FILE_SCHEMA,
+            AUTORESEARCH_DATASET_RECEIPT_FILENAME,
+            AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
+            AutoResearchDatasetReceipt,
+        )
+
+        if training_stage_index < 1:
+            raise CampaignPersistenceError("campaign_training_dataset_missing")
+        attempt = self.completed_data_build_attempt(
+            workspace_id, campaign_id, study_id, training_stage_index - 1
+        )
+        source = self.reuse_source_attempt(attempt)
+        if not str(source.sealed_result_uri or "").startswith("bashgym-remote-seal://"):
+            raise CampaignPersistenceError("campaign_training_dataset_invalid")
+        self._require_initialized()
+        with self._connection() as connection:
             artifact_rows = connection.execute(
                 """
                 SELECT * FROM campaign_artifacts
@@ -1849,11 +1911,11 @@ class CampaignRuntimeRepository(CampaignRepository):
                 """,
                 (
                     workspace_id,
-                    campaign_id,
-                    attempt.action_id,
+                    source.campaign_id,
+                    source.action_id,
                     AUTORESEARCH_DATASET_FILE_SCHEMA,
                     AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
-                    attempt.attempt_id,
+                    source.attempt_id,
                 ),
             ).fetchall()
         receipt_rows = [
@@ -1882,9 +1944,9 @@ class CampaignRuntimeRepository(CampaignRepository):
         if (
             receipt_row["uri"]
             != _artifact_reference(
-                str(row["sealed_result_uri"]), AUTORESEARCH_DATASET_RECEIPT_FILENAME
+                str(source.sealed_result_uri), AUTORESEARCH_DATASET_RECEIPT_FILENAME
             )
-            or receipt_metadata.get("attempt_id") != attempt.attempt_id
+            or receipt_metadata.get("attempt_id") != source.attempt_id
             or receipt_metadata.get("content_digest") != receipt.content_digest
         ):
             raise CampaignPersistenceError("campaign_training_dataset_invalid")
@@ -1901,8 +1963,8 @@ class CampaignRuntimeRepository(CampaignRepository):
             or version.content_digest != receipt.content_digest
             or version.source_uri
             != f"autoresearch-remote-dataset://sha256/{receipt.content_digest}"
-            or version.metadata.get("producer_action_id") != attempt.action_id
-            or version.metadata.get("producer_attempt_id") != attempt.attempt_id
+            or version.metadata.get("producer_action_id") != source.action_id
+            or version.metadata.get("producer_attempt_id") != source.attempt_id
         ):
             raise CampaignPersistenceError("campaign_training_dataset_invalid")
         expected_receipt_files = {
@@ -1917,8 +1979,8 @@ class CampaignRuntimeRepository(CampaignRepository):
             if (
                 not relative_path
                 or artifact["uri"]
-                != _artifact_reference(str(row["sealed_result_uri"]), output_path)
-                or metadata.get("attempt_id") != attempt.attempt_id
+                != _artifact_reference(str(source.sealed_result_uri), output_path)
+                or metadata.get("attempt_id") != source.attempt_id
                 or metadata.get("dataset_version_id") != dataset_version_id
                 or metadata.get("content_digest") != receipt.content_digest
             ):
@@ -1933,14 +1995,14 @@ class CampaignRuntimeRepository(CampaignRepository):
             )
         if actual_artifact_files != expected_receipt_files:
             raise CampaignPersistenceError("campaign_training_dataset_invalid")
-        remote_run = self.get_remote_run(workspace_id, attempt.attempt_id)
-        if remote_run is None or remote_run.identity.run_id != attempt.attempt_id:
+        remote_run = self.get_remote_run(workspace_id, source.attempt_id)
+        if remote_run is None or remote_run.identity.run_id != source.attempt_id:
             raise CampaignPersistenceError("campaign_training_dataset_invalid")
         return RemoteResidentDatasetSource(
-            campaign_id=campaign_id,
-            study_id=study_id,
-            action_id=attempt.action_id,
-            attempt_id=attempt.attempt_id,
+            campaign_id=source.campaign_id,
+            study_id=source.study_id,
+            action_id=source.action_id,
+            attempt_id=source.attempt_id,
             stage_index=training_stage_index - 1,
             compute_profile_id=remote_run.identity.compute_profile_id,
             remote_dataset_path=f"{remote_run.identity.remote_run_directory}/dataset",

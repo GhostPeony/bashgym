@@ -66,6 +66,7 @@ from bashgym.campaigns.remote import (
     RemoteRunState,
     RemoteStreamChunk,
 )
+from bashgym.campaigns.result_reuse import reused_from_attempt_id
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.worker import CampaignWorker
@@ -457,15 +458,6 @@ class _CredentialFreeRemoteAdapter:
         return True
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The second candidate changes only the learning rate, so its remote data build now "
-        "reuses the first study's sealed result. Remote-resident readers still resolve the "
-        "dataset through the consuming attempt instead of the producing one. Remove this "
-        "marker once remote-resident resolution follows reused_from_attempt_id."
-    ),
-)
 def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute(tmp_path):
     database = tmp_path / "campaigns.sqlite3"
     repository = AutoResearchRepository(database)
@@ -867,14 +859,23 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
     assert worker.run_once(now=NOW + timedelta(seconds=9)) == "reused"
     second_data_build = repository.list_attempts("workspace-a", "campaign-1")[-1]
     assert second_data_build.stage == StageKind.DATA_BUILD
+    assert second_data_build.attempt_id != first_data_build.attempt_id
+    reused_manifest = repository.get_attempt_result_manifest(
+        "workspace-a", second_data_build.attempt_id
+    )
+    assert reused_from_attempt_id(reused_manifest) == first_data_build.attempt_id
     assert worker.run_once(now=NOW + timedelta(seconds=10)) == "completed"
     second_training = repository.list_attempts("workspace-a", "campaign-1")[-1]
     assert second_training.stage == StageKind.FULL_TRAINING
     assert (
         second_training.executor["remote_resident_dataset"]["attempt_id"]
-        == second_data_build.attempt_id
+        == first_data_build.attempt_id
     )
     second_training_request = adapter.launch_requests[-1]
+    assert second_training_request.remote_resident_dataset is not None
+    assert second_training_request.remote_resident_dataset.remote_dataset_path.endswith(
+        f"/{first_data_build.attempt_id}/dataset"
+    )
     assert second_training_request.registered_base_model is None
     assert second_training_request.remote_resident_model is not None
     assert second_training_request.remote_resident_model.attempt_id == first_training.attempt_id
@@ -928,13 +929,23 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
         correlation_id="submit-candidate-three",
         idempotency_key="submit-candidate-three",
     )
-    assert worker.run_once(now=NOW + timedelta(seconds=14)) == "completed"
+    assert worker.run_once(now=NOW + timedelta(seconds=14)) == "reused"
     third_data_build = repository.list_attempts("workspace-a", "campaign-1")[-1]
     assert third_data_build.stage == StageKind.DATA_BUILD
+    assert (
+        reused_from_attempt_id(
+            repository.get_attempt_result_manifest("workspace-a", third_data_build.attempt_id)
+        )
+        == second_data_build.attempt_id
+    )
     assert worker.run_once(now=NOW + timedelta(seconds=15)) == "completed"
     third_training = repository.list_attempts("workspace-a", "campaign-1")[-1]
     assert third_training.stage == StageKind.FULL_TRAINING
     third_training_request = adapter.launch_requests[-1]
+    assert third_training_request.remote_resident_dataset is not None
+    assert third_training_request.remote_resident_dataset.attempt_id == (
+        first_data_build.attempt_id
+    )
     assert third_training_request.registered_base_model is None
     assert third_training_request.remote_resident_model is not None
     assert third_training_request.remote_resident_model.attempt_id == second_training.attempt_id
@@ -966,7 +977,20 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
     assert outcomes[-1].decision.improvement == pytest.approx(0.02)
     assert submitted_baseline.record.proposal.planner_actor_id == actor.actor_id
     assert candidate_one_submission.record.proposal.planner_actor_id == actor.actor_id
-    assert len(adapter.launch_requests) == len(adapter.collected_run_ids) == 10
+    assert len(adapter.launch_requests) == len(adapter.collected_run_ids) == 8
+    data_build_attempt_ids = {
+        item.attempt_id
+        for item in repository.list_attempts("workspace-a", "campaign-1")
+        if item.stage == StageKind.DATA_BUILD
+    }
+    assert data_build_attempt_ids == {
+        first_data_build.attempt_id,
+        second_data_build.attempt_id,
+        third_data_build.attempt_id,
+    }
+    assert data_build_attempt_ids & {item.run_id for item in adapter.launch_requests} == {
+        first_data_build.attempt_id
+    }
     assert adapter.evaluation_metrics == []
     assert not artifact_root.exists()
 
@@ -975,7 +999,11 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
         for item in core.ledger.list_dataset_versions("workspace-a", "project-a")
         if item["metadata"].get("source_kind") == "remote_data_build"
     ]
-    assert len(generated_dataset_versions) == 3
+    assert len(generated_dataset_versions) == 1
+    assert {
+        item.executor["remote_resident_dataset"]["dataset_version_id"]
+        for item in (first_training, second_training, third_training)
+    } == {generated_dataset_versions[0]["dataset_version_id"]}
     assert all(
         item["metadata"]["data_quality"]["acceptance_rate"] == 2 / 3
         for item in generated_dataset_versions
@@ -1067,7 +1095,14 @@ def test_start_to_branched_candidate_decisions_stops_and_exports_without_compute
     assert branch_history["performance"]["primary"]["reference_value"] == 0.70
     assert branch_history["performance"]["primary"]["improvement"] == pytest.approx(0.02)
     assert history["experiments"][1]["data"]["quality"]["acceptance_rate"] == 2 / 3
-    assert history["experiments"][2]["data"]["quality"]["acceptance_rate"] == 2 / 3
+    assert history["experiments"][1]["data"]["dataset_version_id"] == (
+        generated_dataset_versions[0]["dataset_version_id"]
+    )
+    # Studies whose data build was reused register no dataset version of their own, so the
+    # history projection reports no dataset section for them. Following the reuse link in
+    # that projection is not part of remote-resident resolution.
+    assert history["experiments"][2]["data"] is None
+    assert history["experiments"][3]["data"] is None
     assert "## AutoResearch experiment history" in report
     assert "### 2. candidate-learning-rate-1" in report
     assert "### 3. candidate-learning-rate-2" in report

@@ -565,6 +565,37 @@ class CampaignWorker:
         )
         return "action_scheduled"
 
+    def _verify_sealed_data_build(
+        self,
+        data_attempt: ActionAttempt,
+        data_manifest: SealedActionResult,
+        *,
+        compute_profile_id: str,
+    ) -> None:
+        """Bind one data build's remote seal reference to its own sealed identity."""
+
+        envelope = self.sealer.envelope_bytes(data_manifest)
+        prefix = f"bashgym-remote-seal://{compute_profile_id}/{data_attempt.attempt_id}/sha256/"
+        if (
+            not data_attempt.sealed_result_uri
+            or not data_attempt.sealed_result_uri.startswith(prefix)
+            or hashlib.sha256(envelope).hexdigest()
+            != data_attempt.sealed_result_uri.removeprefix(prefix)
+        ):
+            raise ValueError("remote dataset seal mismatch")
+        self.sealer.verify_envelope_bytes(
+            envelope,
+            expected_workspace_id=data_attempt.workspace_id,
+            expected_campaign_id=data_attempt.campaign_id,
+            expected_study_id=data_attempt.study_id,
+            expected_action_id=data_attempt.action_id,
+            expected_attempt_id=data_attempt.attempt_id,
+            expected_manifest_revision=data_attempt.manifest_revision,
+            expected_candidate_digest=data_attempt.candidate_digest,
+            expected_input_digest=data_attempt.input_digest,
+            expected_claim_generation=data_attempt.claim_generation,
+        )
+
     def _remote_request(self, attempt: ActionAttempt) -> RemoteLaunchRequest:
         executor = attempt.executor
         required = {
@@ -683,42 +714,44 @@ class CampaignWorker:
                     attempt.study_id,
                     remote_resident_dataset.stage_index + 1,
                 )
-                data_attempt = self.repository.get_attempt(
+                data_attempt = self.repository.completed_data_build_attempt(
                     attempt.workspace_id,
-                    remote_resident_dataset.attempt_id,
+                    attempt.campaign_id,
+                    attempt.study_id,
+                    remote_resident_dataset.stage_index,
                 )
                 data_manifest = self.repository.get_attempt_result_manifest(
                     attempt.workspace_id,
                     data_attempt.attempt_id,
-                )
-                data_envelope = self.sealer.envelope_bytes(data_manifest)
-                data_prefix = (
-                    f"bashgym-remote-seal://{remote_resident_dataset.compute_profile_id}/"
-                    f"{data_attempt.attempt_id}/sha256/"
                 )
                 if (
                     actual_dataset_source != remote_resident_dataset
                     or data_attempt.status.value != "completed"
                     or data_attempt.stage.value != "data_build"
                     or data_attempt.candidate_digest != attempt.candidate_digest
-                    or not data_attempt.sealed_result_uri
-                    or not data_attempt.sealed_result_uri.startswith(data_prefix)
-                    or hashlib.sha256(data_envelope).hexdigest()
-                    != data_attempt.sealed_result_uri.removeprefix(data_prefix)
                 ):
                     raise ValueError("remote dataset source mismatch")
-                self.sealer.verify_envelope_bytes(
-                    data_envelope,
-                    expected_workspace_id=data_attempt.workspace_id,
-                    expected_campaign_id=data_attempt.campaign_id,
-                    expected_study_id=data_attempt.study_id,
-                    expected_action_id=data_attempt.action_id,
-                    expected_attempt_id=data_attempt.attempt_id,
-                    expected_manifest_revision=data_attempt.manifest_revision,
-                    expected_candidate_digest=data_attempt.candidate_digest,
-                    expected_input_digest=data_attempt.input_digest,
-                    expected_claim_generation=data_attempt.claim_generation,
+                self._verify_sealed_data_build(
+                    data_attempt,
+                    data_manifest,
+                    compute_profile_id=remote_resident_dataset.compute_profile_id,
                 )
+                reuse_chain = self.repository.reuse_source_chain(data_attempt)
+                source_attempt = reuse_chain[-1] if reuse_chain else data_attempt
+                if (
+                    source_attempt.attempt_id != remote_resident_dataset.attempt_id
+                    or source_attempt.action_id != remote_resident_dataset.action_id
+                ):
+                    raise ValueError("remote dataset source mismatch")
+                for reused_attempt in reuse_chain:
+                    self._verify_sealed_data_build(
+                        reused_attempt,
+                        self.repository.get_attempt_result_manifest(
+                            attempt.workspace_id,
+                            reused_attempt.attempt_id,
+                        ),
+                        compute_profile_id=remote_resident_dataset.compute_profile_id,
+                    )
                 sealed_files = {
                     (output.path, output.sha256, output.size_bytes)
                     for output in data_manifest.outputs

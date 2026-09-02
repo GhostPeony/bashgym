@@ -298,7 +298,12 @@ Do not make the user repeat choices that already exist in registered context.
 8. Evaluate every candidate on the pinned suite and ingest the exact run,
    attempt, artifact, and evaluation lineage. The primary metric comes from the
    evaluator, not training loss. Smoke or simulated results prove wiring only;
-   they cannot establish a baseline or incumbent.
+   they cannot establish a baseline or incumbent. When an attempt or completion
+   event carries `reused_from_attempt_id`, that stage was not executed again:
+   a data build matched the content key of one already completed in the
+   workspace, so the attempt costs zero and its bytes are the producing
+   attempt's. Read it as the same result, not as new evidence of determinism.
+   Evaluation and training stages always execute.
 9. Re-read `research state` and `research failures` after each result. Continue only with a specific
    evidence-backed hypothesis. On a crash, read
    `decision_packet.outcome_assessment.failure_kind`: it names the failure

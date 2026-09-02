@@ -197,6 +197,13 @@ dataset. Training consumes the declared dataset and starting-model binding.
 Evaluation consumes the trained output and the same pinned suite used by the
 baseline.
 
+A data build whose content key matches a data build already completed in the
+workspace is reused instead of executed again. The reusing study still records
+its own attempt and its own sealed manifest; that manifest names the producing
+attempt as `reused_from_attempt_id`, the stage settles zero actual cost, and the
+completion event carries the same field. Evaluation and training stages always
+execute.
+
 When a compatible trainer and evaluator are installed, activation may set
 `--intermediate-checkpoint-limit N` (maximum 8). The training stage then retains
 the newest `N` checkpoint directories and the fixed evaluator scores each one
@@ -592,6 +599,12 @@ adjacent stages:
   opaque references rather than copying every dataset row or model file to the
   API process.
 
+A reused stage points at the source bytes rather than copying them. Before a
+consumer binds remote-resident data, it resolves the reuse link to the attempt
+that executed the build, so training and evaluation read that attempt's dataset
+path, digest, and registered dataset version. A link may chain across several
+reusing studies; every hop resolves to the one attempt that produced the bytes.
+
 The worker verifies stage manifests and the evaluation projector checks the
 sealed result before recording a real metric. If an execution target cannot
 preserve resident outputs, its adapter must provide an equivalent verified
@@ -643,6 +656,8 @@ quality.
 - Fake executors and smoke templates prove orchestration, persistence, and
   evidence wiring only. They cannot establish a real baseline or model-quality
   result.
+- Result reuse matches completed results only. A running execution is never
+  shared between studies, and training reuse is not implemented.
 - `failure_class` is derived only from proven exit codes: 126 and 127 are
   `configuration`, 137 and 143 are `infrastructure`, 77 is `permission`, and
   every other code, including a missing one, is `execution`. Log-based failure

@@ -1236,6 +1236,20 @@ def test_credential_shaped_values_and_placeholders_are_rejected(repository) -> N
     assert "proposal_unresolved_placeholder" in validation.reason_codes
 
 
+def test_deeply_nested_recipe_is_reported_unscannable(repository) -> None:
+    nested: dict = {"schema_version": "recipe.v1"}
+    for _ in range(40):
+        nested = {"schema_version": "recipe.v1", "child": nested}
+
+    deep = proposal("proposal-deep-recipe").model_copy(update={"training_recipe": nested})
+
+    validation = validate_proposal_submission(
+        deep, manifest(), principal(repository), existing_prerequisite_ids=frozenset()
+    )
+
+    assert "proposal_content_unscannable" in validation.reason_codes
+
+
 def test_clean_proposal_has_no_scan_reasons(repository) -> None:
     validation = validate_proposal_submission(
         proposal("proposal-clean"),

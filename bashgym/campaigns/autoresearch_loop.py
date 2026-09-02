@@ -20,6 +20,7 @@ from bashgym.campaigns.contracts import (
     TERMINAL_CAMPAIGN_STATES,
     CampaignStatus,
     CredentialKind,
+    FailureClass,
     StudyStatus,
     canonical_hash,
 )
@@ -324,8 +325,8 @@ class AutoResearchLoopCoordinator:
             if self.core._proposal_is_simulated(proposal.proposal)
             else ExperimentProvenance.REAL
         )
-        failure_class = None
-        for item in reversed(attempts):
+        terminal_failure_classes: list[FailureClass | None] = []
+        for item in attempts:
             if item.status.value not in {"failed", "cancelled", "force_stopped"}:
                 continue
             try:
@@ -333,9 +334,15 @@ class AutoResearchLoopCoordinator:
                     item.workspace_id, item.attempt_id
                 )
             except (RecordNotFoundError, CampaignPersistenceError):
-                break
-            failure_class = manifest.failure_class
-            break
+                continue
+            terminal_failure_classes.append(manifest.failure_class)
+
+        if any(cls is None or cls == FailureClass.EXECUTION for cls in terminal_failure_classes):
+            failure_class = FailureClass.EXECUTION
+        elif terminal_failure_classes:
+            failure_class = terminal_failure_classes[-1]
+        else:
+            failure_class = None
         self.core.record_result(
             AutoResearchResult(
                 result_id=self._operation_key(

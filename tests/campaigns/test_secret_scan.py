@@ -37,6 +37,26 @@ def test_scan_ignores_ordinary_prose_numbers_and_short_tokens() -> None:
     )
 
 
+def test_scan_ignores_hyphenated_identifiers_that_embed_prefixes() -> None:
+    for value in (
+        "Improve task-completion-rate-on-long-horizon tasks",
+        "artifact-disk-snapshot-2026-09-01-abcdefgh",
+        "task-success-eval-run-2026-09-01-abc",
+        "mask-tokens-during-training-for-stability",
+    ):
+        assert scan_values(value) == ()
+
+
+def test_scan_still_catches_anchored_credentials() -> None:
+    for value in (
+        "key=sk-" + "a" * 24,
+        "token: hf_" + "b" * 32,
+        "AKIA" + "C" * 16,
+    ):
+        findings = scan_values(value)
+        assert [item.kind for item in findings] == ["credential"]
+
+
 def test_scan_reports_one_unscannable_finding_when_depth_is_exceeded() -> None:
     nested: dict = {"leaf": "plain"}
     for _ in range(40):

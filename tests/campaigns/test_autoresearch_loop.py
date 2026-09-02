@@ -560,6 +560,60 @@ def test_recorded_crash_carries_the_sealed_failure_class(tmp_path):
     assert core.state("workspace-a", "campaign-1", now=NOW).attempts_used == 0
 
 
+def test_crash_counts_as_execution_when_any_terminal_attempt_was_execution(tmp_path):
+    """An execution failure followed by a retry killed by infrastructure still counts."""
+
+    from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
+
+    repository, core, first_attempt = _active_proposal(tmp_path)
+    _terminalize(repository, first_attempt, AttemptStatus.FAILED)
+    _write_terminal_manifest(repository, first_attempt, FailureClass.EXECUTION)
+    AutoResearchLoopCoordinator(repository, _RejectingProjector(), core).tick(
+        now=NOW + timedelta(seconds=2)
+    )
+    retry = repository.list_study_attempts("workspace-a", "campaign-1", first_attempt.study_id)[-1]
+    _terminalize(repository, retry, AttemptStatus.FAILED)
+    _write_terminal_manifest(repository, retry, FailureClass.INFRASTRUCTURE)
+
+    assert core.state("workspace-a", "campaign-1", now=NOW).attempts_used == 0
+
+    crashed = AutoResearchLoopCoordinator(repository, _RejectingProjector(), core).tick(
+        now=NOW + timedelta(seconds=3)
+    )
+
+    outcomes = repository.list_autoresearch_outcomes("workspace-a", "campaign-1")
+    assert crashed.status == "crash_recorded"
+    assert outcomes[0].result.failure_class == FailureClass.EXECUTION
+    assert core.state("workspace-a", "campaign-1", now=NOW).attempts_used == 1
+
+
+def test_crash_without_an_execution_terminal_attempt_uses_the_last_terminal_class(tmp_path):
+    """Neither terminal attempt was execution, so the last terminal class is recorded."""
+
+    from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
+
+    repository, core, first_attempt = _active_proposal(tmp_path)
+    _terminalize(repository, first_attempt, AttemptStatus.FAILED)
+    _write_terminal_manifest(repository, first_attempt, FailureClass.INFRASTRUCTURE)
+    AutoResearchLoopCoordinator(repository, _RejectingProjector(), core).tick(
+        now=NOW + timedelta(seconds=2)
+    )
+    retry = repository.list_study_attempts("workspace-a", "campaign-1", first_attempt.study_id)[-1]
+    _terminalize(repository, retry, AttemptStatus.FAILED)
+    _write_terminal_manifest(repository, retry, FailureClass.CONFIGURATION)
+
+    assert core.state("workspace-a", "campaign-1", now=NOW).attempts_used == 0
+
+    crashed = AutoResearchLoopCoordinator(repository, _RejectingProjector(), core).tick(
+        now=NOW + timedelta(seconds=3)
+    )
+
+    outcomes = repository.list_autoresearch_outcomes("workspace-a", "campaign-1")
+    assert crashed.status == "crash_recorded"
+    assert outcomes[0].result.failure_class == FailureClass.CONFIGURATION
+    assert core.state("workspace-a", "campaign-1", now=NOW).attempts_used == 0
+
+
 def test_unknown_attempt_is_left_for_remote_reconciliation(tmp_path):
     from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
 

@@ -163,9 +163,11 @@ A candidate must:
 
 A candidate whose stage plan runs a training stage must declare an integer
 `seed` in its training recipe; submission is rejected with
-`autoresearch_candidate_requires_training_seed` otherwise. Replication studies
-of the same intervention vary only that seed, holding every other declared
-variable constant. The decision packet reports the declared value at
+`autoresearch_candidate_requires_training_seed` otherwise. A recipe schema
+default such as the TMax recipe's `seed=42` does not satisfy this rule; the
+seed must appear in the submitted recipe. Replication studies of the same
+intervention vary only that seed, holding every other declared variable
+constant. The decision packet reports the declared value at
 `last_experiment.training_seed` and the held-constant variables at
 `last_experiment.controlled_variables`.
 
@@ -290,7 +292,7 @@ is evidence about the intervention. An `infrastructure`, `permission`, or
 Its spend still counts toward the campaign budget whenever the executor reports
 measured usage; the registered SSH executor always reports wall-clock seconds,
 so a repeatedly failing remote environment does draw down `max_total_cost`. A
-terminal attempt with no measured usage now settles at zero instead of charging
+terminal attempt with no measured usage settles at zero instead of charging
 its whole reservation, so such a crash consumes neither an attempt nor budget.
 For that case the backstop is the manifest's `max_proposal_rounds` ceiling,
 which stops the campaign with `proposal_round_limit_reached` once the total

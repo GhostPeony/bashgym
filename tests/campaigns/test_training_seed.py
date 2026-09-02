@@ -21,6 +21,16 @@ def test_training_seed_accepts_only_non_bool_integers_in_range() -> None:
     assert training_seed({"schema_version": "recipe.v1", "seed": TRAINING_SEED_MAX + 1}) is None
 
 
+def test_schema_default_seed_is_not_a_declared_seed() -> None:
+    recipe = {
+        "schema_version": "bashgym.tmax_composite_training_recipe.v1",
+        "algorithm": "grpo",
+    }
+
+    assert training_seed(recipe) is None
+    assert training_seed({**recipe, "seed": 42}) == 42
+
+
 def _plan(*stages: StageKind, disposition=StageDisposition.REQUIRED) -> StagePlan:
     return StagePlan(
         items=tuple(

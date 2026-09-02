@@ -5,7 +5,18 @@ from datetime import datetime
 import pytest
 
 from bashgym._compat import UTC
-from bashgym.campaigns.contracts import FailureClass, ResourceUsage, SealedActionResult
+from bashgym.campaigns.autoresearch import (
+    AutoResearchResult,
+    ExperimentOutcome,
+    ExperimentProvenance,
+    ExperimentRole,
+)
+from bashgym.campaigns.contracts import (
+    ArtifactOutput,
+    FailureClass,
+    ResourceUsage,
+    SealedActionResult,
+)
 from bashgym.campaigns.failure_classification import classify_exit_code
 from bashgym.campaigns.runtime import _settlement_actual_cost
 
@@ -86,3 +97,62 @@ def test_completed_manifest_without_measured_usage_keeps_the_reservation() -> No
         _settlement_actual_cost(unit="gpu_hours", reservation_amount=0.25, manifest=manifest)
         == 0.25
     )
+
+
+def test_completed_sealed_manifest_cannot_carry_a_failure_class() -> None:
+    manifest = SealedActionResult.model_construct(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        study_id="study-1",
+        action_id="action-1",
+        attempt_id="attempt-1",
+        manifest_revision=1,
+        candidate_digest="a" * 64,
+        input_digest="b" * 64,
+        claim_generation=1,
+        executor_id="campaign-fake-executor",
+        executor_version="1",
+        compute_profile_id="fake-local",
+        remote_process_identity={},
+        started_at=NOW,
+        ended_at=NOW,
+        outcome="completed",
+        exit_code=None,
+        exit_reason="test",
+        failure_class=FailureClass.EXECUTION,
+        resource_usage=(),
+        log_reference=None,
+        outputs=(
+            ArtifactOutput(
+                path="training.log",
+                sha256="c" * 64,
+                size_bytes=7,
+                schema_name="bashgym.training_log.v1",
+            ),
+        ),
+    )
+    payload = manifest.model_dump(mode="json")
+
+    with pytest.raises(ValueError, match="cannot carry a failure class"):
+        SealedActionResult.model_validate(payload)
+
+
+def test_completed_autoresearch_result_cannot_carry_a_failure_class() -> None:
+    with pytest.raises(ValueError, match="cannot carry a failure class"):
+        AutoResearchResult(
+            result_id="result-x",
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            proposal_id="proposal-x",
+            study_id="study-1",
+            role=ExperimentRole.BASELINE,
+            provenance=ExperimentProvenance.REAL,
+            outcome=ExperimentOutcome.COMPLETED,
+            metric_name="mrr_at_10",
+            metric_value=0.5,
+            metrics={"mrr_at_10": 0.5},
+            failure_class=FailureClass.EXECUTION,
+            actual_cost=0.5,
+            attempt_ids=("attempt-1",),
+            recorded_at=NOW,
+        )

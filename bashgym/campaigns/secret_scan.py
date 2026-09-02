@@ -9,12 +9,12 @@ from typing import Any, Literal
 
 _CREDENTIAL = re.compile(
     r"(?:"
-    r"gh[pousr]_[A-Za-z0-9]{30,}"
-    r"|github_pat_[A-Za-z0-9_]{30,}"
-    r"|hf_[A-Za-z0-9]{30,}"
-    r"|sk-(?:(?:proj|live|test)-)?[A-Za-z0-9_-]{20,}"
-    r"|xox[abprs]-[A-Za-z0-9-]{10,}"
-    r"|AKIA[0-9A-Z]{16}"
+    r"\bgh[pousr]_[A-Za-z0-9]{30,}"
+    r"|\bgithub_pat_[A-Za-z0-9_]{30,}"
+    r"|\bhf_[A-Za-z0-9]{30,}"
+    r"|\bsk-(?:(?:proj|live|test)-)?[A-Za-z0-9_-]{20,}"
+    r"|\bxox[abprs]-[A-Za-z0-9-]{10,}"
+    r"|\bAKIA[0-9A-Z]{16}"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
     r"|\bBearer [A-Za-z0-9_.~+/=-]{20,}"
     r")"

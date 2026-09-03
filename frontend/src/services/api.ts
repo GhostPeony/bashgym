@@ -668,7 +668,7 @@ export interface ActiveWorkSummaryV1 {
   controlled_variable_summary: string[]
   progress_fraction: number | null
   eta_seconds: number | null
-  executor_type: 'fake' | 'ssh_remote' | 'development_evaluation' | null
+  executor_type: string | null
   process_identity: OpaqueProcessIdentityV1 | null
 }
 

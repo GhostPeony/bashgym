@@ -233,6 +233,27 @@ test('snapshot validator rejects budget units outside the canonical Identifier c
   )
 })
 
+test('snapshot validator accepts any registered executor kind in active work', () => {
+  const base = controlRoomSnapshot()
+  const withExecutor = (executor_type: string) =>
+    controlRoomSnapshot({
+      active_work: { ...base.active_work!, executor_type }
+    })
+
+  assert.equal(
+    validateCampaignSnapshot(
+      withExecutor('plugin_executor'),
+      base.workspace_id,
+      base.campaign_id
+    )?.active_work?.executor_type,
+    'plugin_executor'
+  )
+  assert.equal(
+    validateCampaignSnapshot(withExecutor('../plugin'), base.workspace_id, base.campaign_id),
+    null
+  )
+})
+
 test('snapshot validator does not invent a launch-ready materializability implication', () => {
   const base = controlRoomSnapshot()
   const snapshot = controlRoomSnapshot({

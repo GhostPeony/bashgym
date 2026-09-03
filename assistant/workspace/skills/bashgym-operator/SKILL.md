@@ -297,18 +297,22 @@ Do not make the user repeat choices that already exist in registered context.
    remain ledger-native.
    To build a candidate proposal from a prior study instead of writing one
    from scratch, clone it: run `research clone-study --campaign <id> --study
-<id> --proposal-id <new-id> --set
-training_recipe='{"schema_version":"recipe.v1","seed":23}' --output
+<id> --proposal-id <new-id> --set training_recipe='{"seed":23}' --output
 proposal.json`; review the printed diff and edit `proposal.json` so
    `primary_variable` and `controlled_variables` declare the changed path and
    the variables held constant; then submit with `research submit-iteration
 --proposal proposal.json --role candidate --parent-proposal <source
 proposal>`, where `<source proposal>` is the cloned study's original
    proposal ID (`source.proposal_id` in the clone response). Clone submits
-   nothing, and a replication clone changes only the seed. The MCP equivalent
-   is `research_clone_study(campaign_id, study_id, proposal_id, changes)`,
-   which returns the same `source`, `submission`, and `diff` fields; call
-   `research_submit_iteration` to submit the reviewed candidate.
+   nothing. A `--set`/`--changes` value for `dataset_recipe`,
+   `training_recipe`, or `evaluation_recipe` merges at the top level into the
+   source recipe (a `null` value removes that key), so a seed-only
+   replication clone changes only `seed`; every other cloneable field is
+   replaced outright, and the printed diff always shows the field's full
+   before/after recipe. The MCP equivalent is `research_clone_study(campaign_id,
+study_id, proposal_id, changes)`, which returns the same `source`,
+   `submission`, and `diff` fields; call `research_submit_iteration` to
+   submit the reviewed candidate.
 8. Evaluate every candidate on the pinned suite and ingest the exact run,
    attempt, artifact, and evaluation lineage. The primary metric comes from the
    evaluator, not training loss. Smoke or simulated results prove wiring only;

@@ -197,7 +197,7 @@ bashgym research clone-study \
   --workspace-id <workspace> --credential-ref <credential-ref> \
   --campaign <campaign-id> --study <study-id> \
   --proposal-id <new-proposal-id> \
-  --set training_recipe='{"schema_version":"recipe.v1","seed":23}' \
+  --set training_recipe='{"seed":23}' \
   --output proposal.json --json
 ```
 
@@ -205,10 +205,17 @@ Override one field with `--set KEY=JSON` (repeatable) or several at once with
 `--changes <file>`, and write the resulting proposal to `--output` in the
 shape `research submit-iteration --proposal` expects. The command prints the
 source study and proposal, the prefilled submission, and a diff of exactly
-which fields changed, each reported as `{"from": ..., "to": ...}`. A
-replication clone that only overrides the training recipe's `seed` reports a
-single changed `training_recipe` entry, holding every other declared variable
-constant, per the seed rule above.
+which fields changed, each reported as `{"from": ..., "to": ...}`.
+
+Recipe fields (`dataset_recipe`, `training_recipe`, `evaluation_recipe`) merge
+at the top level: a `--set training_recipe='{"seed":23}'` change updates only
+`seed` and keeps every other key already in the source study's recipe; a key
+whose change value is `null` is removed instead of kept. Every other cloneable
+field is replaced outright by the value given. The printed diff always shows
+the field's full before-and-after recipe, not just the keys that moved, so a
+seed-only replication clone reports one changed `training_recipe` entry whose
+`to` value is the source recipe with only `seed` different, per the seed rule
+above.
 
 Review that diff, then edit `proposal.json` so `primary_variable` and
 `controlled_variables` declare the changed path and the variables held

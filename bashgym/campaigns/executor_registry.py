@@ -31,6 +31,10 @@ class ExecutorRegistry:
         self._frozen = False
 
     def register(self, adapter: ExecutorAdapter) -> None:
+        if isinstance(adapter, type) or not isinstance(adapter, ExecutorAdapter):
+            raise TypeError(
+                f"executor adapter for kind {getattr(adapter, 'kind', '?')!r} does not implement ExecutorAdapter"
+            )
         if self._frozen:
             raise RuntimeError("executor registry is frozen")
         if adapter.kind in self._adapters:
@@ -58,8 +62,13 @@ def discover_entry_points(group: str = ENTRY_POINT_GROUP) -> tuple[ExecutorAdapt
 
     adapters: list[ExecutorAdapter] = []
     for entry_point in metadata.entry_points(group=group):
-        factory = entry_point.load()
-        adapter = factory() if callable(factory) else factory
+        loaded = entry_point.load()
+        if isinstance(loaded, ExecutorAdapter) and not isinstance(loaded, type):
+            adapter = loaded
+        elif callable(loaded):
+            adapter = loaded()
+        else:
+            adapter = loaded
         if not isinstance(adapter, ExecutorAdapter):
             raise TypeError(f"entry point {entry_point.name} is not an ExecutorAdapter")
         adapters.append(adapter)

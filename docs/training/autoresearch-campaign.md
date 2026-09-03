@@ -734,9 +734,11 @@ quality.
 
 - The host agent proposes hypotheses and candidate changes. There is no
   repository-resident scientific proposer.
-- The durable campaign path currently resolves registered stages through its
-  SSH execution adapter. It does not yet provide a generic in-process campaign
-  adapter or a generic hosted-compute campaign adapter.
+- Executor kinds are registered adapters: `fake`, `ssh_remote`, and
+  `development_evaluation` register in code, and a third-party package can
+  register more through the `bashgym.campaign_executors` entry-point group.
+  A recipe naming an unregistered kind is rejected at materialization. No
+  container or hosted-compute adapter ships in this repository yet.
 - Direct training endpoints and `gym/trainer.py` are separate execution paths;
   a direct run does not automatically become an AutoResearch iteration.
 - The primary keep/discard decision uses the pinned evaluation suite, primary

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
 import shutil
@@ -41,7 +40,6 @@ from bashgym.campaigns.campaign_recovery import (
 from bashgym.campaigns.contracts import (
     AUTORESEARCH_EVALUATION_SCHEMA,
     ActionAttempt,
-    ArtifactOutput,
     AttemptStatus,
     CampaignStatus,
     CampaignTrigger,
@@ -69,6 +67,7 @@ from bashgym.campaigns.evaluation import (
 from bashgym.campaigns.executor_adapters import default_registry
 from bashgym.campaigns.executor_registry import ExecutorAdapter, ExecutorRegistry
 from bashgym.campaigns.executors import (
+    UNREGISTERED_EXECUTOR_KIND_CODE,
     DevelopmentEvaluationConfig,
     DevelopmentEvaluationExecutor,
     FakeExecutionRequest,
@@ -120,9 +119,6 @@ if TYPE_CHECKING:
     from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
 
 logger = logging.getLogger(__name__)
-
-UNREGISTERED_EXECUTOR_KIND_CODE = "campaign_executor_kind_not_registered"
-UNREGISTERED_EXECUTOR_SCHEMA = "campaign_unregistered_executor.v1"
 
 
 class SimulatedWorkerCrashError(RuntimeError):
@@ -412,9 +408,8 @@ class CampaignWorker:
             try:
                 adapter: ExecutorAdapter | None = self._adapter_for(attempt)
             except UnregisteredExecutorKindError:
-                # Only the adapter-driven work is skipped. Lease expiry needs no
-                # adapter, so the branch below still moves an expired attempt to
-                # UNKNOWN instead of leaving it uncertain forever.
+                # Only the adapter-driven work is skipped; the lease-expiry
+                # branch below needs no adapter and still runs.
                 logger.warning(
                     "%s: skipping attempt %s with executor kind %s",
                     UNREGISTERED_EXECUTOR_KIND_CODE,
@@ -455,53 +450,11 @@ class CampaignWorker:
                 return "unknown"
         return None
 
-    def _settle_unregistered_attempt(self, attempt: ActionAttempt, *, now: datetime) -> str:
-        """Fail a claimed attempt this worker cannot execute, releasing its claim."""
+    def _settle_controller_state(
+        self, attempt: ActionAttempt, manifest: SealedActionResult, *, now: datetime
+    ) -> None:
+        """Commit authenticated controller state as this attempt's terminal seal."""
 
-        kind = str(attempt.executor.get("kind", ""))
-        logger.warning(
-            "%s: settling attempt %s with executor kind %s",
-            UNREGISTERED_EXECUTOR_KIND_CODE,
-            attempt.attempt_id,
-            kind,
-        )
-        detail = json.dumps(
-            {
-                "schema_version": UNREGISTERED_EXECUTOR_SCHEMA,
-                "attempt_id": attempt.attempt_id,
-                "executor_kind": kind,
-                "reason": UNREGISTERED_EXECUTOR_KIND_CODE,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        manifest = SealedActionResult(
-            workspace_id=attempt.workspace_id,
-            campaign_id=attempt.campaign_id,
-            study_id=attempt.study_id,
-            action_id=attempt.action_id,
-            attempt_id=attempt.attempt_id,
-            manifest_revision=attempt.manifest_revision,
-            candidate_digest=attempt.candidate_digest,
-            input_digest=attempt.input_digest,
-            claim_generation=attempt.claim_generation,
-            executor_id="campaign-controller",
-            executor_version="1",
-            compute_profile_id=str(attempt.executor.get("compute_profile_id") or "unassigned"),
-            remote_process_identity={"kind": "unexecuted"},
-            started_at=now,
-            ended_at=now,
-            outcome="failed",
-            exit_reason=UNREGISTERED_EXECUTOR_KIND_CODE,
-            outputs=(
-                ArtifactOutput(
-                    path="executor_unavailable.json",
-                    sha256=hashlib.sha256(detail).hexdigest(),
-                    size_bytes=len(detail),
-                    schema_name=UNREGISTERED_EXECUTOR_SCHEMA,
-                ),
-            ),
-        )
         envelope = self.sealer.envelope_bytes(manifest)
         verified = self.sealer.verify_envelope_bytes(
             envelope,
@@ -525,6 +478,18 @@ class CampaignWorker:
             worker_id=self.worker_id,
             now=now,
         )
+
+    def _settle_unregistered_attempt(self, attempt: ActionAttempt, *, now: datetime) -> str:
+        """Fail a claimed attempt this worker cannot execute, releasing its claim."""
+
+        logger.warning(
+            "%s: settling attempt %s with executor kind %s",
+            UNREGISTERED_EXECUTOR_KIND_CODE,
+            attempt.attempt_id,
+            attempt.executor.get("kind"),
+        )
+        manifest = self.remote_output_sealer.unregistered_executor_manifest(attempt)
+        self._settle_controller_state(attempt, manifest, now=now)
         return "blocked"
 
     def _repair_allowed(self, attempt: ActionAttempt) -> bool:
@@ -1483,29 +1448,7 @@ class CampaignWorker:
                     manifest = self.remote_output_sealer.unlaunched_cancelled_manifest(
                         attempt, compute_profile_id=request.compute_profile_id
                     )
-                    envelope = self.sealer.envelope_bytes(manifest)
-                    verified = self.sealer.verify_envelope_bytes(
-                        envelope,
-                        expected_workspace_id=attempt.workspace_id,
-                        expected_campaign_id=attempt.campaign_id,
-                        expected_study_id=attempt.study_id,
-                        expected_action_id=attempt.action_id,
-                        expected_attempt_id=attempt.attempt_id,
-                        expected_manifest_revision=attempt.manifest_revision,
-                        expected_candidate_digest=attempt.candidate_digest,
-                        expected_input_digest=attempt.input_digest,
-                        expected_claim_generation=attempt.claim_generation,
-                    )
-                    sealed_reference = (
-                        f"bashgym-controller-state://{attempt.attempt_id}/sha256/"
-                        f"{hashlib.sha256(envelope).hexdigest()}"
-                    )
-                    self.repository.settle_terminal_from_seal(
-                        verified,
-                        sealed_reference,
-                        worker_id=self.worker_id,
-                        now=now,
-                    )
+                    self._settle_controller_state(attempt, manifest, now=now)
                     return "remote_cancelled"
                 capacity_config = attempt.executor.get("capacity_policy", {})
                 capacity = await adapter.capacity_preflight(

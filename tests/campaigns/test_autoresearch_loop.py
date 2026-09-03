@@ -501,6 +501,14 @@ def test_second_definitive_failure_records_one_durable_crash(tmp_path):
     assert restarted.effect_performed is False
 
 
+def _store_manifest(repository, attempt, manifest: SealedActionResult) -> None:
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaign_attempts SET result_json = ? WHERE attempt_id = ?",
+            (json.dumps(manifest.model_dump(mode="json")), attempt.attempt_id),
+        )
+
+
 def _write_terminal_manifest(repository, attempt, failure_class: FailureClass) -> None:
     manifest = SealedActionResult(
         workspace_id=attempt.workspace_id,
@@ -531,11 +539,32 @@ def _write_terminal_manifest(repository, attempt, failure_class: FailureClass) -
             ),
         ),
     )
-    with repository._connection(immediate=True) as connection:
-        connection.execute(
-            "UPDATE campaign_attempts SET result_json = ? WHERE attempt_id = ?",
-            (json.dumps(manifest.model_dump(mode="json")), attempt.attempt_id),
-        )
+    _store_manifest(repository, attempt, manifest)
+
+
+def test_an_unregistered_executor_settlement_is_classified_as_configuration(tmp_path):
+    from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
+    from bashgym.campaigns.executors import RemoteOutputSealer
+
+    repository, core, first_attempt = _active_proposal(tmp_path)
+    _terminalize(repository, first_attempt, AttemptStatus.FAILED)
+    AutoResearchLoopCoordinator(repository, _RejectingProjector(), core).tick(
+        now=NOW + timedelta(seconds=2)
+    )
+    retry = repository.list_study_attempts("workspace-a", "campaign-1", first_attempt.study_id)[-1]
+    _terminalize(repository, retry, AttemptStatus.FAILED)
+    sealer = RemoteOutputSealer(tmp_path / "artifacts", ArtifactSealer(b"w" * 32, key_version="v1"))
+    claimed = retry.model_copy(update={"claim_generation": max(1, retry.claim_generation)})
+    _store_manifest(repository, retry, sealer.unregistered_executor_manifest(claimed))
+
+    crashed = AutoResearchLoopCoordinator(repository, _RejectingProjector(), core).tick(
+        now=NOW + timedelta(seconds=3)
+    )
+
+    outcomes = repository.list_autoresearch_outcomes("workspace-a", "campaign-1")
+    assert crashed.status == "crash_recorded"
+    assert outcomes[0].result.failure_class == FailureClass.CONFIGURATION
+    assert core.state("workspace-a", "campaign-1", now=NOW).attempts_used == 0
 
 
 def test_recorded_crash_carries_the_sealed_failure_class(tmp_path):

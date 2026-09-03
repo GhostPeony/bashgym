@@ -4859,8 +4859,65 @@ def test_run_once_settles_a_claimed_attempt_whose_executor_kind_is_unregistered(
     assert len(failures) == 1
     assert failures[0].payload["attempt_id"] == scheduled.attempt_id
     assert failures[0].payload["exit_reason"] == "campaign_executor_kind_not_registered"
+    assert failures[0].payload["failure_class"] == FailureClass.CONFIGURATION.value
+    manifest = repository.get_attempt_result_manifest("workspace-a", scheduled.attempt_id)
+    assert manifest.failure_class == FailureClass.CONFIGURATION
+    assert manifest.compute_profile_id == "unassigned"
     assert repository.list_unfinished_attempts() == []
     assert worker.run_once(now=START + timedelta(seconds=2)) == "idle"
+
+
+def test_settlement_survives_an_executor_config_with_an_invalid_compute_profile(tmp_path):
+    class RecordingAdapter:
+        kind = "recording"
+        allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        reuses_completed_results = False
+
+        def tick(self, worker, attempt, *, now):
+            return worker._fake_tick(attempt, now=now)
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return True
+
+    scheduling_registry = registry_with(RecordingAdapter())
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec.model_validate(
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "study_id": "study-1",
+                "stage_index": 0,
+                "stage": StageKind.FULL_TRAINING,
+                "input_contract": plan.items[0].input_contract,
+                "candidate_digest": fake_digest("candidate:study-1"),
+                "manifest_revision": 1,
+                "budget_unit": "gpu_hours",
+                "budget_reservation": 0.25,
+                "executor_kind": "recording",
+                "executor_config": {"compute_profile_id": "vendor gpu profile"},
+            },
+            context={"executor_registry": scheduling_registry},
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "blocked"
+
+    assert repository.get_attempt("workspace-a", scheduled.attempt_id).status == (
+        AttemptStatus.FAILED
+    )
+    assert repository.get_campaign("workspace-a", "campaign-1").active_action_id is None
+    manifest = repository.get_attempt_result_manifest("workspace-a", scheduled.attempt_id)
+    assert manifest.compute_profile_id == "unassigned"
 
 
 def test_reconcile_marks_an_expired_unregistered_kind_attempt_unknown(tmp_path):

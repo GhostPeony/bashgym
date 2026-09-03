@@ -803,6 +803,37 @@ def build_server(
         return {"ok": True, "study": study}
 
     @server.tool(structured_output=True, annotations=read_only)
+    async def research_clone_study(
+        campaign_id: CampaignId,
+        study_id: StudyId,
+        proposal_id: ProposalId,
+        changes: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Prefill a new proposal from a persisted study; nothing is submitted."""
+
+        result = await request(
+            "POST",
+            f"/campaigns/{campaign_id}/studies/{study_id}/clone",
+            payload={
+                "workspace_id": workspace_id,
+                "proposal_id": proposal_id,
+                "changes": dict(changes or {}),
+            },
+        )
+        if not result["ok"]:
+            return result
+        try:
+            data = _mapping(result["data"])
+            return {
+                "ok": True,
+                "source": _bounded_value(_mapping(data["source"])),
+                "submission": _bounded_value(_mapping(data["submission"])),
+                "diff": _bounded_value(_mapping(data.get("diff", {}))),
+            }
+        except (KeyError, ValueError):
+            return _invalid_response()
+
+    @server.tool(structured_output=True, annotations=read_only)
     async def campaign_attempts(
         campaign_id: CampaignId,
         limit: ListLimit = 50,

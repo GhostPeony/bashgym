@@ -4562,6 +4562,42 @@ def rewrite_executor_kind(repository, attempt_id: str, kind: str) -> None:
         )
 
 
+def test_next_action_spec_rejects_an_unregistered_recipe_executor(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository)
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE campaign_proposals SET proposal_json = ?
+            WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1'
+              AND proposal_id = 'proposal-study-1'
+            """,
+            (
+                json.dumps(
+                    {
+                        "primary_variable": "data.mixture",
+                        "dataset_recipe": {"schema_version": "dataset.v1"},
+                        "training_recipe": {
+                            "schema_version": "training.v1",
+                            "runtime": {"executor_kind": "mystery"},
+                        },
+                        "evaluation_recipe": {"schema_version": "evaluation.v1"},
+                    }
+                ),
+            ),
+        )
+    worker = make_worker(repository, tmp_path, "worker-a")
+    assert worker.run_once(now=START) == "idle"
+
+    with pytest.raises(CampaignPersistenceError, match="campaign_executor_kind_not_registered"):
+        repository.next_action_spec(
+            "workspace-a",
+            "campaign-1",
+            "study-1",
+            executor_profiles=worker.remote_executor_profiles,
+        )
+
+
 def registry_with(*adapters):
     """Build a frozen registry from the built-in adapters plus the given extras."""
 
@@ -4581,6 +4617,7 @@ def test_worker_dispatches_through_the_executor_registry(tmp_path):
     class RecordingAdapter:
         kind = "recording"
         allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        reuses_completed_results = False
 
         def tick(self, worker, attempt, *, now):
             ticked.append(attempt.attempt_id)
@@ -4667,6 +4704,7 @@ def test_reconcile_leaves_an_expired_attempt_of_a_non_repairable_kind_untouched(
     class InertAdapter:
         kind = "inert"
         allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        reuses_completed_results = False
 
         def tick(self, worker, attempt, *, now):
             return "inert_running"
@@ -4742,6 +4780,7 @@ def test_run_once_fails_closed_on_an_unregistered_executor_kind(tmp_path):
     class RecordingAdapter:
         kind = "recording"
         allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        reuses_completed_results = False
 
         def tick(self, worker, attempt, *, now):
             return worker._fake_tick(attempt, now=now)

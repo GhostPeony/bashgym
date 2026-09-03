@@ -1,6 +1,7 @@
 """Content-only result keys and the reuse policy."""
 
 from bashgym.campaigns.contracts import CampaignManifest, StageKind
+from bashgym.campaigns.executor_registry import ExecutorRegistry
 from bashgym.campaigns.result_reuse import (
     manifest_content_digest,
     reuse_enabled,
@@ -74,6 +75,72 @@ def test_reuse_policy_excludes_training_and_opt_in_fake() -> None:
     assert not reuse_enabled(stage=StageKind.DATA_BUILD, executor_kind="fake", runtime={})
     assert reuse_enabled(
         stage=StageKind.DATA_BUILD, executor_kind="fake", runtime={"memoize": True}
+    )
+
+
+class _PluginAdapter:
+    """Third-party adapter double whose reuse capability is declared, not inferred."""
+
+    def __init__(self, kind: str, *, reuses: bool) -> None:
+        self.kind = kind
+        self.reuses_completed_results = reuses
+        self.allowed_stages = frozenset({StageKind.DATA_BUILD})
+
+    def tick(self, worker, attempt, *, now):
+        return "plugin_ticked"
+
+    def reconcile(self, worker, attempt, *, now):
+        return None
+
+    def repair_allowed(self):
+        return True
+
+
+def _plugin_registry() -> ExecutorRegistry:
+    registry = ExecutorRegistry()
+    registry.register(_PluginAdapter("plugin_remote", reuses=True))
+    registry.register(_PluginAdapter("plugin_local", reuses=False))
+    registry.freeze()
+    return registry
+
+
+def test_reuse_policy_reads_the_declared_capability_of_any_registered_kind() -> None:
+    registry = _plugin_registry()
+
+    assert reuse_enabled(
+        stage=StageKind.DATA_BUILD,
+        executor_kind="plugin_remote",
+        runtime={},
+        registry=registry,
+    )
+    assert not reuse_enabled(
+        stage=StageKind.DATA_BUILD,
+        executor_kind="plugin_local",
+        runtime={},
+        registry=registry,
+    )
+    assert reuse_enabled(
+        stage=StageKind.DATA_BUILD,
+        executor_kind="plugin_local",
+        runtime={"memoize": True},
+        registry=registry,
+    )
+    assert not reuse_enabled(
+        stage=StageKind.FULL_TRAINING,
+        executor_kind="plugin_remote",
+        runtime={},
+        registry=registry,
+    )
+
+
+def test_reuse_policy_refuses_an_unregistered_kind() -> None:
+    registry = _plugin_registry()
+
+    assert not reuse_enabled(
+        stage=StageKind.DATA_BUILD,
+        executor_kind="mystery",
+        runtime={"memoize": True},
+        registry=registry,
     )
 
 

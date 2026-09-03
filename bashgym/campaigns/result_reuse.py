@@ -12,6 +12,8 @@ from bashgym.campaigns.contracts import (
     StageKind,
     canonical_hash,
 )
+from bashgym.campaigns.executor_adapters import default_registry
+from bashgym.campaigns.executor_registry import ExecutorRegistry
 
 RESULT_KEY_SCHEMA = "campaign_result_key.v1"
 REUSED_FROM_ATTEMPT_KEY = "reused_from_attempt_id"
@@ -70,14 +72,27 @@ def manifest_content_digest(manifest: CampaignManifest) -> str:
     return canonical_hash({field: payload[field] for field in MANIFEST_CONTENT_FIELDS})
 
 
-def reuse_enabled(*, stage: StageKind, executor_kind: str, runtime: Mapping[str, Any]) -> bool:
-    """Data builds reuse on registered remote compute; fake runs opt in; nothing else does."""
+def reuse_enabled(
+    *,
+    stage: StageKind,
+    executor_kind: str,
+    runtime: Mapping[str, Any],
+    registry: ExecutorRegistry | None = None,
+) -> bool:
+    """Reuse a reusable stage when its registered adapter declares it or the recipe opts in.
+
+    The policy names no executor: an unregistered kind, or a kind the registry does not
+    allow on this stage, never reuses.
+    """
 
     if stage not in REUSABLE_STAGES:
         return False
-    if executor_kind == "fake":
-        return runtime.get("memoize") is True
-    return executor_kind == "ssh_remote"
+    resolved = registry if registry is not None else default_registry()
+    if not resolved.is_registered(executor_kind):
+        return False
+    if stage not in resolved.allowed_stages(executor_kind):
+        return False
+    return resolved.get(executor_kind).reuses_completed_results or runtime.get("memoize") is True
 
 
 def stage_result_key(

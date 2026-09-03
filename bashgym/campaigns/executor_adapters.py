@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 from datetime import datetime
 from typing import Any
 
@@ -26,6 +27,7 @@ class FakeExecutorAdapter:
 
     kind = "fake"
     allowed_stages = _ALL_STAGES
+    reuses_completed_results = False
 
     def tick(self, worker: Any, attempt: ActionAttempt, *, now: datetime) -> str:
         return worker._fake_tick(attempt, now=now)
@@ -42,6 +44,7 @@ class SshRemoteExecutorAdapter:
 
     kind = "ssh_remote"
     allowed_stages = _REMOTE_STAGES
+    reuses_completed_results = True
 
     def tick(self, worker: Any, attempt: ActionAttempt, *, now: datetime) -> str:
         return asyncio.run(worker._remote_tick(attempt, now=now))
@@ -58,6 +61,7 @@ class DevelopmentEvaluationExecutorAdapter:
 
     kind = "development_evaluation"
     allowed_stages = frozenset({StageKind.DEVELOPMENT_EVALUATION})
+    reuses_completed_results = False
 
     def tick(self, worker: Any, attempt: ActionAttempt, *, now: datetime) -> str:
         return worker._development_evaluation_tick(attempt, now=now)
@@ -82,9 +86,17 @@ def build_default_registry() -> ExecutorRegistry:
     return registry
 
 
+@functools.lru_cache(maxsize=1)
+def default_registry() -> ExecutorRegistry:
+    """Return the process-wide registry of built-in and installed executor kinds."""
+
+    return build_default_registry()
+
+
 __all__ = [
     "DevelopmentEvaluationExecutorAdapter",
     "FakeExecutorAdapter",
     "SshRemoteExecutorAdapter",
     "build_default_registry",
+    "default_registry",
 ]

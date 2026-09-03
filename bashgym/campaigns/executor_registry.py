@@ -15,12 +15,15 @@ ENTRY_POINT_GROUP = "bashgym.campaign_executors"
 class ExecutorAdapter(Protocol):
     kind: str
     allowed_stages: frozenset[StageKind]
+    reuses_completed_results: bool
 
     def tick(self, worker: Any, attempt: ActionAttempt, *, now: datetime) -> str: ...
 
     def reconcile(self, worker: Any, attempt: ActionAttempt, *, now: datetime) -> str | None: ...
 
-    def repair_allowed(self) -> bool: ...
+    def repair_allowed(self) -> bool:
+        """Gate recovery repair, local-seal completion in reconcile, and expiry ownership."""
+        ...
 
 
 class ExecutorRegistry:

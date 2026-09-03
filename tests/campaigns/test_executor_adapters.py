@@ -38,6 +38,7 @@ def test_fake_adapter_accepts_every_stage_and_allows_repair() -> None:
     assert adapter.allowed_stages == frozenset(StageKind)
     assert len(adapter.allowed_stages) == 9
     assert adapter.repair_allowed() is True
+    assert adapter.reuses_completed_results is False
 
 
 def test_ssh_remote_adapter_is_restricted_to_compute_stages_and_forbids_repair() -> None:
@@ -47,6 +48,7 @@ def test_ssh_remote_adapter_is_restricted_to_compute_stages_and_forbids_repair()
     assert adapter.allowed_stages == REMOTE_STAGES
     assert StageKind.PROMOTION not in adapter.allowed_stages
     assert adapter.repair_allowed() is False
+    assert adapter.reuses_completed_results is True
 
 
 def test_development_evaluation_adapter_is_restricted_to_its_stage_and_allows_repair() -> None:
@@ -55,6 +57,7 @@ def test_development_evaluation_adapter_is_restricted_to_its_stage_and_allows_re
     assert adapter.kind == "development_evaluation"
     assert adapter.allowed_stages == frozenset({StageKind.DEVELOPMENT_EVALUATION})
     assert adapter.repair_allowed() is True
+    assert adapter.reuses_completed_results is False
 
 
 def test_registry_reports_the_stages_each_adapter_declares() -> None:

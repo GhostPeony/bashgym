@@ -11,6 +11,7 @@ from bashgym.campaigns.executor_registry import ExecutorRegistry, discover_entry
 class _Adapter:
     kind = "unit_test_executor"
     allowed_stages = frozenset({StageKind.DATA_BUILD})
+    reuses_completed_results = False
 
     def tick(self, worker, attempt, *, now):
         return "unit_ticked"
@@ -71,6 +72,26 @@ def test_register_rejects_non_adapters() -> None:
 
     with pytest.raises(TypeError, match="does not implement ExecutorAdapter"):
         registry.register(_Adapter)  # type: ignore
+
+
+def test_register_rejects_an_adapter_without_a_declared_reuse_capability() -> None:
+    class _Incomplete:
+        kind = "incomplete_executor"
+        allowed_stages = frozenset({StageKind.DATA_BUILD})
+
+        def tick(self, worker, attempt, *, now):
+            return "ticked"
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return True
+
+    registry = ExecutorRegistry()
+
+    with pytest.raises(TypeError, match="does not implement ExecutorAdapter"):
+        registry.register(_Incomplete())  # type: ignore[arg-type]
 
 
 def test_freeze_preserves_and_protects_existing() -> None:

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from bashgym.campaigns.contracts import StudyProposal, StudyProposalSubmission
+from bashgym.research.acquisition import ExperimentAcquisition
 
 CLONEABLE_FIELDS: tuple[str, ...] = (
     "hypothesis",
@@ -24,11 +25,11 @@ CLONEABLE_FIELDS: tuple[str, ...] = (
     "required_capabilities",
     "stage_plan",
     "rationale",
-    "research_context",
     "acquisition",
 )
 
 _RECIPE_FIELDS = frozenset({"dataset_recipe", "training_recipe", "evaluation_recipe"})
+_SET_FIELDS = frozenset({"required_capabilities"})
 
 
 class CloneStudyError(ValueError):
@@ -46,8 +47,11 @@ def clone_proposal_submission(
     """Copy the scientific fields of one proposal and apply bounded changes.
 
     A change to `dataset_recipe`, `training_recipe`, or `evaluation_recipe` merges
-    shallowly into the stored recipe and drops any key whose change value is
-    `None`; every other cloneable field is replaced outright.
+    shallowly into the stored recipe and removes only the keys the change itself
+    names with a `None` value; every other cloneable field is replaced outright.
+    `research_context` is not cloneable because its `retrieval_digest` covers the
+    proposal id it was collected for, so the clone leaves it unset. `acquisition`
+    carries no digest and is rebound to the new proposal id.
     """
 
     if proposal_id == source.proposal_id:
@@ -56,14 +60,22 @@ def clone_proposal_submission(
     if disallowed:
         raise CloneStudyError("clone_change_not_allowed")
     payload: dict[str, Any] = {field: getattr(source, field) for field in CLONEABLE_FIELDS}
+    acquisition = payload["acquisition"]
+    if isinstance(acquisition, ExperimentAcquisition):
+        payload["acquisition"] = acquisition.model_copy(update={"proposal_id": proposal_id})
     for field, value in changes.items():
         if field not in _RECIPE_FIELDS:
             payload[field] = value
             continue
         if not isinstance(value, Mapping):
             raise CloneStudyError("clone_change_not_allowed")
-        merged = {**payload[field], **value}
-        payload[field] = {key: item for key, item in merged.items() if item is not None}
+        merged = dict(payload[field])
+        for key, item in value.items():
+            if item is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = item
+        payload[field] = merged
     return StudyProposalSubmission(
         proposal_id=proposal_id,
         workspace_id=source.workspace_id,
@@ -72,9 +84,17 @@ def clone_proposal_submission(
     )
 
 
-def _ordered(value: Any) -> Any:
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+def _ordered(field: str, value: Any) -> Any:
+    if field in _SET_FIELDS and isinstance(value, list):
         return sorted(value)
+    return value
+
+
+def _rebound(value: Any, proposal_id: str) -> Any:
+    """Neutralize the clone's mechanical acquisition rebind before comparison."""
+
+    if isinstance(value, ExperimentAcquisition) and value.proposal_id != proposal_id:
+        return value.model_copy(update={"proposal_id": proposal_id})
     return value
 
 
@@ -86,9 +106,12 @@ def clone_diff(
     before = source.model_dump(mode="json")
     after = submission.model_dump(mode="json")
     return {
-        field: {"from": _ordered(before[field]), "to": _ordered(after[field])}
+        field: {
+            "from": _ordered(field, before[field]),
+            "to": _ordered(field, after[field]),
+        }
         for field in CLONEABLE_FIELDS
-        if getattr(source, field) != getattr(submission, field)
+        if _rebound(getattr(source, field), submission.proposal_id) != getattr(submission, field)
     }
 
 

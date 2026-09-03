@@ -50,7 +50,7 @@ class ExecutorRegistry:
     def get(self, kind: str) -> ExecutorAdapter:
         return self._adapters[kind]
 
-    def is_registered(self, kind: str) -> bool:
+    def is_registered(self, kind: object) -> bool:
         return kind in self._adapters
 
     def kinds(self) -> tuple[str, ...]:

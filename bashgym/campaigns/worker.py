@@ -64,6 +64,7 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
+from bashgym.campaigns.executor_adapters import default_registry
 from bashgym.campaigns.executor_registry import ExecutorAdapter, ExecutorRegistry
 from bashgym.campaigns.executors import (
     DevelopmentEvaluationConfig,
@@ -110,7 +111,6 @@ from bashgym.campaigns.result_reuse import (
 from bashgym.campaigns.runtime import (
     CampaignRuntimeRepository,
     ReusableCompletion,
-    _default_registry,
 )
 from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 
@@ -174,7 +174,7 @@ class CampaignWorker:
         self.action_ttl = action_ttl
         self._leader: LeaseRecord | None = None
         self._stop_requested = False
-        self.executor_registry = executor_registry or _default_registry()
+        self.executor_registry = executor_registry or default_registry()
         self.executor = FakeExecutor(self.artifact_root, sealer)
         self.remote_output_sealer = RemoteOutputSealer(self.artifact_root, sealer)
         self.development_evaluation_executor = DevelopmentEvaluationExecutor(

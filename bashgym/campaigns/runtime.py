@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
@@ -58,7 +59,7 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
-from bashgym.campaigns.executor_adapters import default_registry as _default_registry
+from bashgym.campaigns.executor_adapters import default_registry
 from bashgym.campaigns.lineage import (
     canonical_model_manifest_digest,
     code_mutation_kind_for_variable,
@@ -119,6 +120,11 @@ if TYPE_CHECKING:
     from bashgym.ledger.contracts import DatasetSpec, DatasetVersionSpec
 
 
+RECIPE_KIND_ALIASES: Mapping[str, str] = MappingProxyType(
+    {"registered_compute": "ssh_remote", "registered_training": "ssh_remote"}
+)
+
+
 class ActionClaimConflictError(CampaignPersistenceError):
     code = "campaign_action_claim_conflict"
 
@@ -170,9 +176,6 @@ def _settlement_actual_cost(
     return min(float(reservation_amount), direct)
 
 
-RECIPE_KIND_ALIASES = {"registered_compute": "ssh_remote", "registered_training": "ssh_remote"}
-
-
 class ActionSpec(ContractModel):
     """Immutable logical stage input scheduled under the global leader fence."""
 
@@ -194,7 +197,7 @@ class ActionSpec(ContractModel):
 
     def model_post_init(self, __context: Any) -> None:
         registry = __context.get("executor_registry") if isinstance(__context, dict) else None
-        registry = registry or _default_registry()
+        registry = registry or default_registry()
         if not registry.is_registered(self.executor_kind):
             raise ValueError("campaign_executor_kind_not_registered")
         if self.stage not in registry.allowed_stages(self.executor_kind):
@@ -560,7 +563,7 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise CampaignPersistenceError("campaign_recipe_runtime_invalid")
         executor_kind = runtime.get("executor_kind", "fake")
         runtime_kind = RECIPE_KIND_ALIASES.get(executor_kind, executor_kind)
-        registry = _default_registry()
+        registry = default_registry()
         if not registry.is_registered(runtime_kind):
             raise CampaignPersistenceError("campaign_executor_kind_not_registered")
         if item.stage not in registry.allowed_stages(runtime_kind):
@@ -716,7 +719,7 @@ class CampaignRuntimeRepository(CampaignRepository):
             )
             reservation = float(runtime.get("budget_reservation", 0.01))
         else:
-            raise CampaignPersistenceError("campaign_executor_kind_not_registered")
+            raise CampaignPersistenceError("campaign_executor_kind_not_materializable")
         if budget_unit not in manifest.budget_limits:
             raise CampaignPersistenceError("campaign_budget_unit_not_approved")
         result_key: str | None = None

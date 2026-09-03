@@ -4562,9 +4562,15 @@ def rewrite_executor_kind(repository, attempt_id: str, kind: str) -> None:
         )
 
 
-def test_next_action_spec_rejects_an_unregistered_recipe_executor(tmp_path):
-    repository = active_repository(tmp_path / "campaigns.sqlite3")
-    seed_validated_study(repository)
+def write_recipe_runtimes(repository, **runtimes):
+    """Replace the seeded proposal with one whose named recipes carry the given runtimes."""
+
+    recipes = {
+        f"{name}_recipe": {"schema_version": f"{name}.v1"}
+        for name in ("dataset", "training", "evaluation")
+    }
+    for name, runtime in runtimes.items():
+        recipes[f"{name}_recipe"]["runtime"] = runtime
     with repository._connection(immediate=True) as connection:
         connection.execute(
             """
@@ -4572,30 +4578,49 @@ def test_next_action_spec_rejects_an_unregistered_recipe_executor(tmp_path):
             WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1'
               AND proposal_id = 'proposal-study-1'
             """,
-            (
-                json.dumps(
-                    {
-                        "primary_variable": "data.mixture",
-                        "dataset_recipe": {"schema_version": "dataset.v1"},
-                        "training_recipe": {
-                            "schema_version": "training.v1",
-                            "runtime": {"executor_kind": "mystery"},
-                        },
-                        "evaluation_recipe": {"schema_version": "evaluation.v1"},
-                    }
-                ),
-            ),
+            (json.dumps({"primary_variable": "data.mixture", **recipes}),),
         )
-    worker = make_worker(repository, tmp_path, "worker-a")
-    assert worker.run_once(now=START) == "idle"
 
-    with pytest.raises(CampaignPersistenceError, match="campaign_executor_kind_not_registered"):
+
+def materialization_error(repository, tmp_path, worker_id="worker-a"):
+    """Return the persistence error code raised while materializing the seeded study."""
+
+    worker = make_worker(repository, tmp_path, worker_id)
+    assert worker.run_once(now=START) == "idle"
+    with pytest.raises(CampaignPersistenceError) as raised:
         repository.next_action_spec(
             "workspace-a",
             "campaign-1",
             "study-1",
             executor_profiles=worker.remote_executor_profiles,
         )
+    return str(raised.value)
+
+
+def test_next_action_spec_rejects_an_unregistered_recipe_executor(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository)
+    write_recipe_runtimes(repository, training={"executor_kind": "mystery"})
+
+    assert materialization_error(repository, tmp_path) == ("campaign_executor_kind_not_registered")
+
+
+def test_next_action_spec_rejects_a_registered_kind_it_cannot_materialize(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository, stage=StageKind.DEVELOPMENT_EVALUATION)
+    write_recipe_runtimes(repository, evaluation={"executor_kind": "development_evaluation"})
+
+    assert materialization_error(repository, tmp_path) == (
+        "campaign_executor_kind_not_materializable"
+    )
+
+
+def test_next_action_spec_rejects_a_registered_kind_on_an_unregistered_stage(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository, stage=StageKind.PROMOTION)
+    write_recipe_runtimes(repository, evaluation={"executor_kind": "registered_compute"})
+
+    assert materialization_error(repository, tmp_path) == "campaign_remote_stage_not_allowed"
 
 
 def registry_with(*adapters):

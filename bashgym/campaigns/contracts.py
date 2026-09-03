@@ -269,6 +269,7 @@ PUBLIC_CAMPAIGN_BLOCKER_CODES = frozenset(
         "campaign_remote_target_model_mismatch",
         "campaign_remote_profile_material_invalid",
         "campaign_executor_kind_not_registered",
+        "campaign_executor_kind_not_materializable",
         "campaign_budget_unit_not_approved",
     }
 )

@@ -64,8 +64,7 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
-from bashgym.campaigns.executor_adapters import build_default_registry
-from bashgym.campaigns.executor_registry import ExecutorRegistry
+from bashgym.campaigns.executor_registry import ExecutorAdapter, ExecutorRegistry
 from bashgym.campaigns.executors import (
     DevelopmentEvaluationConfig,
     DevelopmentEvaluationExecutor,
@@ -108,7 +107,11 @@ from bashgym.campaigns.result_reuse import (
     REUSED_FROM_ACTION_KEY,
     REUSED_FROM_ATTEMPT_KEY,
 )
-from bashgym.campaigns.runtime import CampaignRuntimeRepository, ReusableCompletion
+from bashgym.campaigns.runtime import (
+    CampaignRuntimeRepository,
+    ReusableCompletion,
+    _default_registry,
+)
 from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 
 if TYPE_CHECKING:
@@ -116,9 +119,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+UNREGISTERED_EXECUTOR_KIND_CODE = "campaign_executor_kind_not_registered"
+
 
 class SimulatedWorkerCrashError(RuntimeError):
     """Test-only fault boundary after external side effect and before DB commit."""
+
+
+class UnregisteredExecutorKindError(RuntimeError):
+    """Raised when an attempt names an executor kind absent from this registry."""
 
 
 def scheduler_lease_key(data_directory: Path) -> str:
@@ -165,7 +174,7 @@ class CampaignWorker:
         self.action_ttl = action_ttl
         self._leader: LeaseRecord | None = None
         self._stop_requested = False
-        self.executor_registry = executor_registry or build_default_registry()
+        self.executor_registry = executor_registry or _default_registry()
         self.executor = FakeExecutor(self.artifact_root, sealer)
         self.remote_output_sealer = RemoteOutputSealer(self.artifact_root, sealer)
         self.development_evaluation_executor = DevelopmentEvaluationExecutor(
@@ -362,6 +371,15 @@ class CampaignWorker:
             now=now,
         )
 
+    def _adapter_for(self, attempt: ActionAttempt) -> ExecutorAdapter:
+        """Resolve the registered adapter for one attempt, or fail with its public code."""
+
+        kind = str(attempt.executor.get("kind", "fake"))
+        try:
+            return self.executor_registry.get(kind)
+        except KeyError as exc:
+            raise UnregisteredExecutorKindError(UNREGISTERED_EXECUTOR_KIND_CODE) from exc
+
     def _reconcile_remote(self, attempt: ActionAttempt, *, now: datetime) -> str | None:
         """Adopt an unowned remote attempt, then advance its registered remote run."""
 
@@ -388,7 +406,16 @@ class CampaignWorker:
         """Register sealed results before marking expired uncertain work."""
 
         for attempt in self.repository.list_unfinished_attempts():
-            adapter = self.executor_registry.get(str(attempt.executor.get("kind", "fake")))
+            try:
+                adapter = self._adapter_for(attempt)
+            except UnregisteredExecutorKindError:
+                logger.warning(
+                    "%s: skipping attempt %s with executor kind %s",
+                    UNREGISTERED_EXECUTOR_KIND_CODE,
+                    attempt.attempt_id,
+                    attempt.executor.get("kind"),
+                )
+                continue
             short_circuit = adapter.reconcile(self, attempt, now=now)
             if short_circuit is not None:
                 return short_circuit
@@ -424,8 +451,18 @@ class CampaignWorker:
     def _repair_allowed(self, attempt: ActionAttempt) -> bool:
         """Report whether the attempt's registered executor supports local repair."""
 
-        kind = str(attempt.executor.get("kind", "fake"))
-        return self.executor_registry.get(kind).repair_allowed()
+        return self._adapter_for(attempt).repair_allowed()
+
+    def _settle_unregistered_kind(self, claim: RecoveryWorkClaim, *, now: datetime) -> str:
+        """Block a recovery claim whose attempt names an executor kind this worker lacks."""
+
+        self.recovery.settle(
+            claim,
+            status="blocked",
+            outcome_code=UNREGISTERED_EXECUTOR_KIND_CODE,
+            now=now,
+        )
+        return "recovery_blocked"
 
     def _repair_recovery(self, claim: RecoveryWorkClaim, *, now: datetime) -> str:
         """Reconcile only one exact existing sealed local attempt, or block safely."""
@@ -450,13 +487,18 @@ class CampaignWorker:
                 )
                 return "recovery_repaired"
         else:
-            candidates = tuple(
-                value
-                for value in self.repository.list_attempts(claim.workspace_id, claim.campaign_id)
-                if value.status in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}
-                and self._repair_allowed(value)
-                and self.sealed_path(value).is_dir()
-            )
+            try:
+                candidates = tuple(
+                    value
+                    for value in self.repository.list_attempts(
+                        claim.workspace_id, claim.campaign_id
+                    )
+                    if value.status in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}
+                    and self._repair_allowed(value)
+                    and self.sealed_path(value).is_dir()
+                )
+            except UnregisteredExecutorKindError:
+                return self._settle_unregistered_kind(claim, now=now)
             if len(candidates) != 1:
                 self.recovery.settle(
                     claim, status="blocked", outcome_code="needs_operator", now=now
@@ -466,7 +508,11 @@ class CampaignWorker:
             claim = self.recovery.set_repair_target(claim, attempt.attempt_id)
 
         sealed_path = self.sealed_path(attempt)
-        if not sealed_path.is_dir() or not self._repair_allowed(attempt):
+        try:
+            repairable = self._repair_allowed(attempt)
+        except UnregisteredExecutorKindError:
+            return self._settle_unregistered_kind(claim, now=now)
+        if not sealed_path.is_dir() or not repairable:
             self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
             return "recovery_blocked"
         try:
@@ -1916,13 +1962,9 @@ class CampaignWorker:
             resolved = self._resolve_reusable_completion(attempt)
             if resolved is not None:
                 return self._reuse_tick(attempt, *resolved, now=tick_at)
-        kind = str(attempt.executor.get("kind", "fake"))
-        try:
-            adapter = self.executor_registry.get(kind)
-        except KeyError as exc:
-            raise RuntimeError("campaign_executor_kind_not_registered") from exc
-        if kind == "fake":
-            return self._fake_tick(attempt, now=tick_at, crash_after_seal=crash_after_seal)
+        adapter = self._adapter_for(attempt)
+        if crash_after_seal:
+            return self._fake_tick(attempt, now=tick_at, crash_after_seal=True)
         return adapter.tick(self, attempt, now=tick_at)
 
     def run_forever(

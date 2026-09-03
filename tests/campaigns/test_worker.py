@@ -60,6 +60,13 @@ from bashgym.campaigns.diagnostic_actions import (
     diagnostic_recipe_digest,
 )
 from bashgym.campaigns.evaluation import load_retrieval_evaluation_artifact
+from bashgym.campaigns.executor_adapters import (
+    DevelopmentEvaluationExecutorAdapter,
+    FakeExecutorAdapter,
+    SshRemoteExecutorAdapter,
+    build_default_registry,
+)
+from bashgym.campaigns.executor_registry import ExecutorRegistry
 from bashgym.campaigns.executors import FakeExecutionRequest, RemoteOutputSealer, fake_digest
 from bashgym.campaigns.human_oversight import HumanOversightRepository
 from bashgym.campaigns.lineage import canonical_model_manifest_digest
@@ -4539,17 +4546,44 @@ def test_reuse_across_campaigns_binds_the_producing_campaign_dataset(tmp_path):
     assert repository.get_remote_run("workspace-a", fixture.consumer.attempt_id) is None
 
 
+def rewrite_executor_kind(repository, attempt_id: str, kind: str) -> None:
+    """Store an executor kind that the local worker registry does not contain."""
+
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            "SELECT executor_json FROM campaign_attempts WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchone()
+        executor = json.loads(row[0])
+        executor["kind"] = kind
+        connection.execute(
+            "UPDATE campaign_attempts SET executor_json=? WHERE attempt_id=?",
+            (json.dumps(executor), attempt_id),
+        )
+
+
+def registry_with(*adapters):
+    """Build a frozen registry from the built-in adapters plus the given extras."""
+
+    defaults = build_default_registry()
+    registry = ExecutorRegistry()
+    for kind in defaults.kinds():
+        registry.register(defaults.get(kind))
+    for adapter in adapters:
+        registry.register(adapter)
+    registry.freeze()
+    return registry
+
+
 def test_worker_dispatches_through_the_executor_registry(tmp_path):
-    from bashgym.campaigns.executor_adapters import build_default_registry
-    from bashgym.campaigns.executor_registry import ExecutorRegistry
+    ticked = []
 
     class RecordingAdapter:
         kind = "recording"
         allowed_stages = frozenset({StageKind.FULL_TRAINING})
-        ticks = 0
 
         def tick(self, worker, attempt, *, now):
-            RecordingAdapter.ticks += 1
+            ticked.append(attempt.attempt_id)
             return worker._fake_tick(attempt, now=now)
 
         def reconcile(self, worker, attempt, *, now):
@@ -4558,12 +4592,7 @@ def test_worker_dispatches_through_the_executor_registry(tmp_path):
         def repair_allowed(self):
             return True
 
-    registry = ExecutorRegistry()
-    for kind in build_default_registry().kinds():
-        registry.register(build_default_registry().get(kind))
-    registry.register(RecordingAdapter())
-    registry.freeze()
-
+    registry = registry_with(RecordingAdapter())
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository)
     worker = CampaignWorker(
@@ -4589,7 +4618,6 @@ def test_worker_dispatches_through_the_executor_registry(tmp_path):
                 "budget_unit": "gpu_hours",
                 "budget_reservation": 0.25,
                 "executor_kind": "recording",
-                "fake_steps": 6,
             },
             context={"executor_registry": registry},
         ),
@@ -4599,10 +4627,98 @@ def test_worker_dispatches_through_the_executor_registry(tmp_path):
     )
 
     assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
-    assert RecordingAdapter.ticks == 1
+    assert ticked == [scheduled.attempt_id]
     assert repository.get_attempt("workspace-a", scheduled.attempt_id).status == (
         AttemptStatus.COMPLETED
     )
+
+
+def test_fake_attempts_dispatch_through_the_fake_executor_adapter(tmp_path):
+    ticked = []
+
+    class RecordingFakeAdapter(FakeExecutorAdapter):
+        def tick(self, worker, attempt, *, now):
+            ticked.append(attempt.attempt_id)
+            return super().tick(worker, attempt, now=now)
+
+    registry = ExecutorRegistry()
+    registry.register(RecordingFakeAdapter())
+    registry.register(SshRemoteExecutorAdapter())
+    registry.register(DevelopmentEvaluationExecutorAdapter())
+    registry.freeze()
+
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        executor_registry=registry,
+    )
+    scheduled = schedule(repository, worker, plan)
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    assert ticked == [scheduled.attempt_id]
+
+
+def test_reconcile_leaves_an_expired_attempt_of_a_non_repairable_kind_untouched(tmp_path):
+    class InertAdapter:
+        kind = "inert"
+        allowed_stages = frozenset({StageKind.FULL_TRAINING})
+
+        def tick(self, worker, attempt, *, now):
+            return "inert_running"
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return False
+
+    registry = registry_with(InertAdapter())
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        executor_registry=registry,
+    )
+    assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec.model_validate(
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "study_id": "study-1",
+                "stage_index": 0,
+                "stage": StageKind.FULL_TRAINING,
+                "input_contract": plan.items[0].input_contract,
+                "candidate_digest": fake_digest("candidate:study-1"),
+                "manifest_revision": 1,
+                "budget_unit": "gpu_hours",
+                "budget_reservation": 0.25,
+                "executor_kind": "inert",
+            },
+            context={"executor_registry": registry},
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "inert_running"
+    claimed = repository.get_attempt("workspace-a", scheduled.attempt_id)
+    assert claimed.status == AttemptStatus.RUNNING
+    assert claimed.lease_expires_at is not None
+    assert claimed.lease_expires_at <= START + timedelta(minutes=5)
+
+    assert worker.reconcile_once(now=START + timedelta(minutes=5)) is None
+
+    assert repository.get_attempt("workspace-a", scheduled.attempt_id) == claimed
 
 
 def test_unknown_executor_kind_is_rejected_at_spec_validation():
@@ -4623,9 +4739,6 @@ def test_unknown_executor_kind_is_rejected_at_spec_validation():
 
 
 def test_run_once_fails_closed_on_an_unregistered_executor_kind(tmp_path):
-    from bashgym.campaigns.executor_adapters import build_default_registry
-    from bashgym.campaigns.executor_registry import ExecutorRegistry
-
     class RecordingAdapter:
         kind = "recording"
         allowed_stages = frozenset({StageKind.FULL_TRAINING})
@@ -4639,13 +4752,7 @@ def test_run_once_fails_closed_on_an_unregistered_executor_kind(tmp_path):
         def repair_allowed(self):
             return True
 
-    defaults = build_default_registry()
-    scheduling_registry = ExecutorRegistry()
-    for kind in defaults.kinds():
-        scheduling_registry.register(defaults.get(kind))
-    scheduling_registry.register(RecordingAdapter())
-    scheduling_registry.freeze()
-
+    scheduling_registry = registry_with(RecordingAdapter())
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository)
     worker = make_worker(repository, tmp_path, "worker-a")
@@ -4674,3 +4781,25 @@ def test_run_once_fails_closed_on_an_unregistered_executor_kind(tmp_path):
 
     with pytest.raises(RuntimeError, match="campaign_executor_kind_not_registered"):
         worker.run_once(now=START + timedelta(seconds=1))
+
+
+def test_reconcile_skips_and_warns_for_an_unregistered_executor_kind(tmp_path, caplog):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    schedule(repository, worker, plan)
+    with pytest.raises(SimulatedWorkerCrashError):
+        worker.run_once(now=START, crash_after_seal=True)
+    unfinished = repository.list_unfinished_attempts()
+    assert len(unfinished) == 1
+    stranded = unfinished[0]
+    rewrite_executor_kind(repository, stranded.attempt_id, "vendor_gpu")
+
+    with caplog.at_level(logging.WARNING, logger="bashgym.campaigns.worker"):
+        assert worker.reconcile_once(now=START + timedelta(minutes=5)) is None
+
+    assert "campaign_executor_kind_not_registered" in caplog.text
+    assert stranded.attempt_id in caplog.text
+    assert "vendor_gpu" in caplog.text
+    after = repository.get_attempt("workspace-a", stranded.attempt_id)
+    assert after.status == AttemptStatus.RUNNING

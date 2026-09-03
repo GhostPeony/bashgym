@@ -521,10 +521,25 @@ class StagePlanItem(FrozenContractModel):
         return value
 
 
+# Version one binds stage data by strict index-1 adjacency: full training reads the data
+# build immediately before it, development evaluation reads the full training immediately
+# before it. An explicit edge on those two stages is declarative and must agree with what
+# the runtime binds; other stages may declare edges freely because nothing binds them yet.
 _IMPLICIT_EDGES: dict[StageKind, StageKind] = {
     StageKind.FULL_TRAINING: StageKind.DATA_BUILD,
     StageKind.DEVELOPMENT_EVALUATION: StageKind.FULL_TRAINING,
 }
+
+
+def _bound_edge(items: tuple[StagePlanItem, ...], index: int) -> tuple[StageKind, ...] | None:
+    """Edge the runtime binds for one item, or None when no binding rule applies."""
+
+    upstream = _IMPLICIT_EDGES.get(items[index].stage)
+    if upstream is None:
+        return None
+    if index > 0 and items[index - 1].stage == upstream:
+        return (upstream,)
+    return ()
 
 
 class StagePlan(FrozenContractModel):
@@ -548,6 +563,12 @@ class StagePlan(FrozenContractModel):
                     raise ValueError("stage plan consumes an unknown stage")
                 if position[consumed] > index:
                     raise ValueError("stage plan consumes a later stage")
+            bound = _bound_edge(value, index)
+            if item.consumes and bound is not None and item.consumes != bound:
+                raise ValueError(
+                    "stage plan edge does not match the bound stage: "
+                    f"{item.stage.value} binds {tuple(stage.value for stage in bound)}"
+                )
         return value
 
     def consumed_stages(self, index: int) -> tuple[StageKind, ...]:
@@ -556,12 +577,8 @@ class StagePlan(FrozenContractModel):
         item = self.items[index]
         if item.consumes:
             return item.consumes
-        upstream = _IMPLICIT_EDGES.get(item.stage)
-        if upstream is None:
-            return ()
-        if index > 0 and self.items[index - 1].stage == upstream:
-            return (upstream,)
-        return ()
+        bound = _bound_edge(self.items, index)
+        return bound if bound is not None else ()
 
 
 class StudyProposalSubmission(FrozenContractModel):
@@ -1247,7 +1264,7 @@ class ActionAttempt(ContractModel):
     candidate_digest: HexDigest
     manifest_revision: int = Field(ge=1)
     stage: StageKind
-    stage_index: int = Field(default=0, ge=0)
+    stage_index: int = Field(ge=0)
     lease_owner: Identifier | None = None
     lease_expires_at: datetime | None = None
     heartbeat_at: datetime | None = None

@@ -131,6 +131,7 @@ def test_dataset_ledger_projection_is_opaque_and_attempt_bound():
         candidate_digest=canonical_hash("candidate-a"),
         manifest_revision=1,
         stage=StageKind.DATA_BUILD,
+        stage_index=0,
         sealed_result_uri="bashgym-remote-seal://compute/attempt-data-build-1/sha256/" + "d" * 64,
         created_at=NOW,
         updated_at=NOW,

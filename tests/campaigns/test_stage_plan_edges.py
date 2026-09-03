@@ -104,3 +104,59 @@ def test_persisted_v1_items_without_consumes_still_validate() -> None:
     )
 
     assert item.consumes == ()
+
+
+def test_bound_stages_reject_an_edge_that_differs_from_adjacency() -> None:
+    """Version one binds data by adjacency, so a declared edge may not disagree."""
+
+    with pytest.raises(ValueError, match="stage plan edge does not match the bound stage"):
+        StagePlan(
+            items=(
+                _item(StageKind.DATA_BUILD),
+                _item(StageKind.CONTRACT_EVALUATION),
+                _item(StageKind.FULL_TRAINING, consumes=(StageKind.DATA_BUILD,)),
+            )
+        )
+    with pytest.raises(ValueError, match="stage plan edge does not match the bound stage"):
+        StagePlan(
+            items=(
+                _item(StageKind.DATA_BUILD),
+                _item(StageKind.FULL_TRAINING),
+                _item(StageKind.DEVELOPMENT_EVALUATION, consumes=(StageKind.DATA_BUILD,)),
+            )
+        )
+    with pytest.raises(ValueError, match="stage plan edge does not match the bound stage"):
+        StagePlan(
+            items=(
+                _item(StageKind.FULL_TRAINING),
+                _item(StageKind.CONTRACT_EVALUATION),
+                _item(StageKind.DEVELOPMENT_EVALUATION, consumes=(StageKind.FULL_TRAINING,)),
+            )
+        )
+
+
+def test_bound_stages_accept_the_edge_the_runtime_binds() -> None:
+    plan = StagePlan(
+        items=(
+            _item(StageKind.DATA_BUILD),
+            _item(StageKind.FULL_TRAINING, consumes=(StageKind.DATA_BUILD,)),
+            _item(StageKind.DEVELOPMENT_EVALUATION, consumes=(StageKind.FULL_TRAINING,)),
+        )
+    )
+
+    assert plan.consumed_stages(1) == (StageKind.DATA_BUILD,)
+    assert plan.consumed_stages(2) == (StageKind.FULL_TRAINING,)
+
+
+def test_unbound_stages_may_declare_edges_freely() -> None:
+    """Only the two stages the runtime binds are constrained to adjacency."""
+
+    plan = StagePlan(
+        items=(
+            _item(StageKind.DATA_BUILD),
+            _item(StageKind.SMOKE_TRAINING, consumes=(StageKind.DATA_BUILD,)),
+            _item(StageKind.CONTRACT_EVALUATION, consumes=(StageKind.DATA_BUILD,)),
+        )
+    )
+
+    assert plan.consumed_stages(2) == (StageKind.DATA_BUILD,)

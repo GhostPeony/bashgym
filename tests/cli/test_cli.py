@@ -4626,3 +4626,171 @@ def test_research_clone_study_posts_changes_and_writes_the_submission(
         "proposal_id": "proposal-clone",
         "hypothesis": "h",
     }
+
+
+def test_research_clone_study_rejects_a_set_value_without_equals(monkeypatch, capsys):
+    class FakeCampaignClient:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append({"method": method, "path": path, "query": query, "payload": payload})
+            return {}
+
+    client = FakeCampaignClient()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+
+    exit_code = main(
+        [
+            "research",
+            "clone-study",
+            "--workspace-id",
+            "workspace-a",
+            "--credential-ref",
+            "BASHGYM_CAMPAIGN_CODEX_REFRESH",
+            "--json",
+            "--campaign",
+            "campaign-1",
+            "--study",
+            "study:2",
+            "--proposal-id",
+            "proposal-clone",
+            "--set",
+            "not-valid-format",
+        ]
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_cli_invalid"
+    assert client.calls == []
+
+
+def test_research_clone_study_rejects_a_set_value_with_invalid_json(monkeypatch, capsys):
+    class FakeCampaignClient:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append({"method": method, "path": path, "query": query, "payload": payload})
+            return {}
+
+    client = FakeCampaignClient()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+
+    exit_code = main(
+        [
+            "research",
+            "clone-study",
+            "--workspace-id",
+            "workspace-a",
+            "--credential-ref",
+            "BASHGYM_CAMPAIGN_CODEX_REFRESH",
+            "--json",
+            "--campaign",
+            "campaign-1",
+            "--study",
+            "study:2",
+            "--proposal-id",
+            "proposal-clone",
+            "--set",
+            "training_recipe=not-json",
+        ]
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_cli_invalid"
+    assert client.calls == []
+
+
+def test_research_clone_study_rejects_a_changes_file_that_is_not_a_json_object(
+    monkeypatch, capsys, tmp_path
+):
+    class FakeCampaignClient:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append({"method": method, "path": path, "query": query, "payload": payload})
+            return {}
+
+    client = FakeCampaignClient()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+    changes_path = tmp_path / "changes.json"
+    changes_path.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
+
+    exit_code = main(
+        [
+            "research",
+            "clone-study",
+            "--workspace-id",
+            "workspace-a",
+            "--credential-ref",
+            "BASHGYM_CAMPAIGN_CODEX_REFRESH",
+            "--json",
+            "--campaign",
+            "campaign-1",
+            "--study",
+            "study:2",
+            "--proposal-id",
+            "proposal-clone",
+            "--changes",
+            str(changes_path),
+        ]
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_cli_invalid"
+    assert client.calls == []
+
+
+def test_research_clone_study_reports_an_error_when_the_output_directory_is_missing(
+    monkeypatch, capsys, tmp_path
+):
+    class FakeCampaignClient:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append({"method": method, "path": path, "query": query, "payload": payload})
+            return {
+                "source": {"study_id": "study:2", "proposal_id": "proposal-source"},
+                "submission": {"proposal_id": "proposal-clone", "hypothesis": "h"},
+                "diff": {},
+            }
+
+    client = FakeCampaignClient()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+    output = tmp_path / "missing" / "proposal.json"
+
+    exit_code = main(
+        [
+            "research",
+            "clone-study",
+            "--workspace-id",
+            "workspace-a",
+            "--credential-ref",
+            "BASHGYM_CAMPAIGN_CODEX_REFRESH",
+            "--json",
+            "--campaign",
+            "campaign-1",
+            "--study",
+            "study:2",
+            "--proposal-id",
+            "proposal-clone",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "campaign_cli_invalid"
+    assert client.calls[-1]["method"] == "POST"
+    assert not output.exists()

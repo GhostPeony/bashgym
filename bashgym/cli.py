@@ -4653,10 +4653,15 @@ def cmd_research_clone_study(args: argparse.Namespace) -> int:
     if error is not None:
         return error
     if args.output and isinstance(response, dict) and isinstance(response.get("submission"), dict):
-        Path(args.output).write_text(
-            json.dumps(response["submission"], indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        try:
+            Path(args.output).write_text(
+                json.dumps(response["submission"], indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            return _campaign_error(
+                args, ValueError(f"could not write the clone submission to {args.output}: {exc}")
+            )
     return _emit_campaign_result(args, response, collection="clone")
 
 

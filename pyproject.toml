@@ -88,6 +88,10 @@ bashgym = "bashgym.cli:main"
 [project.entry-points."data_designer.plugins"]
 bashgym-gold-trace = "bashgym.factory.dd_plugin.plugin:gold_trace_plugin"
 
+# Campaign executor adapters. A third-party package registers one adapter per
+# executor kind; the campaign worker loads the group at construction.
+[project.entry-points."bashgym.campaign_executors"]
+
 [project.urls]
 Homepage = "https://github.com/GhostPeony/bashgym"
 Documentation = "https://github.com/GhostPeony/bashgym#readme"

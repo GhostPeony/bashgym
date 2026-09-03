@@ -149,6 +149,16 @@ These are code boundaries, not roadmap labels:
   evidence; they are not interchangeable with an executed campaign training
   stage.
 
+### Executor adapters
+
+Each stage runs through an executor adapter keyed by executor kind. Built-in
+kinds register in code; a third-party package can register additional kinds
+through the `bashgym.campaign_executors` entry-point group, one adapter per
+executor kind. An adapter implements `kind`, `allowed_stages`,
+`reuses_completed_results`, `tick`, `reconcile`, and `repair_allowed`. An
+executor kind that is not registered is rejected at spec validation and at
+materialization; there is no unregistered fallback.
+
 ## Architecture cleanup priorities
 
 The code currently has duplicate execution and evaluation paths. The shortest

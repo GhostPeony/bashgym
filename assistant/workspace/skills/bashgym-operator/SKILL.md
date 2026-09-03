@@ -337,8 +337,12 @@ proposal.json --role candidate --parent-proposal <parent-proposal-id>`, where
    determinism. Evaluation and training stages always execute. Each stage
    recipe names an executor kind, and only a registered kind runs: an
    unregistered kind fails closed at materialization instead of falling back
-   to a default. `available_executors` in the evidence snapshot lists the
-   kinds this process can run.
+   to a default. A recipe may name only `fake`, `registered_compute`,
+   `registered_training`, or `ssh_remote`. A third-party kind registered
+   through the `bashgym.campaign_executors` entry-point group is dispatched by
+   the worker once an action names it, but recipe-level acceptance of such a
+   kind is a follow-up. `available_executors` in the evidence snapshot lists
+   the executor kinds registered in the serving process.
 9. Re-read `research state` and `research failures` after each result. Continue only with a specific
    evidence-backed hypothesis. On a crash, read
    `decision_packet.outcome_assessment.failure_kind`: it names the failure

@@ -159,6 +159,20 @@ executor kind. An adapter implements `kind`, `allowed_stages`,
 executor kind that is not registered is rejected at spec validation and at
 materialization; there is no unregistered fallback.
 
+Entry-point registration wires worker dispatch. The worker runs a third-party
+kind once an action names it, and it fails an attempt whose kind it cannot
+resolve with `campaign_executor_kind_not_registered` rather than leaving that
+attempt claimed. Recipe-level acceptance of third-party kinds is a follow-up:
+proposal validation and `next_action_spec` materialization still admit only
+built-in kinds, so today a recipe may name `fake`, `registered_compute`,
+`registered_training`, or `ssh_remote`.
+
+Each process builds the registry once, on first use. An entry point that fails
+to import, whose factory raises, or that does not implement the adapter
+protocol is skipped with a warning naming the entry point and the error. Its
+kind stays unregistered and fails closed wherever an action or a recipe names
+it, and campaign reads in that process keep working.
+
 ## Architecture cleanup priorities
 
 The code currently has duplicate execution and evaluation paths. The shortest

@@ -737,8 +737,13 @@ quality.
 - Executor kinds are registered adapters: `fake`, `ssh_remote`, and
   `development_evaluation` register in code, and a third-party package can
   register more through the `bashgym.campaign_executors` entry-point group.
-  A recipe naming an unregistered kind is rejected at materialization. No
-  container or hosted-compute adapter ships in this repository yet.
+  Entry-point registration wires worker dispatch: the worker runs a
+  third-party kind once an action names it. Recipe-level acceptance of such a
+  kind is a follow-up, so a recipe may name only `fake`, `registered_compute`,
+  `registered_training`, or `ssh_remote`. Any other kind is rejected at
+  proposal validation, and a registered kind with no materialization branch is
+  rejected at materialization. No container or hosted-compute adapter ships in
+  this repository yet.
 - Direct training endpoints and `gym/trainer.py` are separate execution paths;
   a direct run does not automatically become an AutoResearch iteration.
 - The primary keep/discard decision uses the pinned evaluation suite, primary

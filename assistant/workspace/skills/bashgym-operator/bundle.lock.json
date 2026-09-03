@@ -1,7 +1,7 @@
 {
   "schema_version": "bashgym.operator-bundle-lock.v2",
   "files": {
-    "SKILL.md": "46e742e909e8bb2c6f02cf60d382831ed55f577abd8958c466f98b5ee8ca45a8",
+    "SKILL.md": "e5a328bf2e2695e50bd1271545deb02074f7b2971fec1d31478113ca0172491b",
     "references/operator-contract.md": "7f29f077b3fb12c18b771e80686d477e7cab2d496ceaf24445cb507169775cab",
     "scripts/operator_context.py": "e3ed9f81532711e7d98ca96ff2da89f5ec43a06726696bc8856be88737af9b3e",
     "scripts/curate_activity.py": "4c6bc70990af8ba7671c2e6da4ec2601fe0c615cef959092e69b2d4ac5d52752",

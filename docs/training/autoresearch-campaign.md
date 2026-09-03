@@ -184,6 +184,52 @@ KEEP or DISCARD. When the exact training parent is a different branch, the
 history also reports the parent delta. A discarded but valid candidate may
 remain useful as a branch parent; it does not become the retained reference.
 
+#### Clone a prior study
+
+`research clone-study` prefills a new proposal from a persisted study instead
+of writing one from scratch. It copies the source proposal's scientific
+fields (hypothesis, recipes, stage plan, declared variables, and the rest),
+applies the given overrides, and reports exactly what changed. It does not
+submit anything.
+
+```bash
+bashgym research clone-study \
+  --workspace-id <workspace> --credential-ref <credential-ref> \
+  --campaign <campaign-id> --study <study-id> \
+  --proposal-id <new-proposal-id> \
+  --set training_recipe='{"schema_version":"recipe.v1","seed":23}' \
+  --output proposal.json --json
+```
+
+Override one field with `--set KEY=JSON` (repeatable) or several at once with
+`--changes <file>`, and write the resulting proposal to `--output` in the
+shape `research submit-iteration --proposal` expects. The command prints the
+source study and proposal, the prefilled submission, and a diff of exactly
+which fields changed, each reported as `{"from": ..., "to": ...}`. A
+replication clone that only overrides the training recipe's `seed` reports a
+single changed `training_recipe` entry, holding every other declared variable
+constant, per the seed rule above.
+
+Review that diff, then edit `proposal.json` so `primary_variable` and
+`controlled_variables` declare the changed path and the variables held
+constant, per the candidate requirements above. Submit the reviewed proposal
+with:
+
+```bash
+bashgym research submit-iteration \
+  --workspace-id <workspace> --credential-ref <credential-ref> \
+  --campaign <campaign-id> --expected-version <version> \
+  --proposal proposal.json --role candidate \
+  --parent-proposal <source-proposal-id> \
+  --idempotency-key <key> --json
+```
+
+where `<source-proposal-id>` is the cloned study's original proposal ID,
+reported as `source.proposal_id` in the clone response. The MCP tool
+`research_clone_study(campaign_id, study_id, proposal_id, changes)` returns
+the same `source`, `submission`, and `diff` fields and also submits nothing;
+call `research_submit_iteration` to submit the reviewed candidate.
+
 ### 5. Run the candidate stages
 
 A candidate stage plan can be:

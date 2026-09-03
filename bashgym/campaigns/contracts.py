@@ -511,7 +511,17 @@ class StagePlanItem(FrozenContractModel):
     reason: str = Field(min_length=1, max_length=2000)
     input_contract: dict[str, Any] = Field(default_factory=dict)
     output_contract: dict[str, Any] = Field(default_factory=dict)
-    consumes: tuple[StageKind, ...] = ()
+    consumes: tuple[StageKind, ...] = Field(
+        default=(),
+        description=(
+            "Stages this item reads output from. An empty tuple means unspecified, not"
+            " 'consumes nothing': the runtime still binds full training to the data build"
+            " immediately before it and development evaluation to the full training"
+            " immediately before it, so an omitted or empty edge resolves to that"
+            " adjacency. A declared edge on either of those two stages must name exactly"
+            " the stage the runtime binds."
+        ),
+    )
 
     @field_validator("consumes")
     @classmethod

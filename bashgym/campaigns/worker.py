@@ -1719,12 +1719,14 @@ class CampaignWorker:
 
     def _verify_reuse_source(
         self, source_attempt: ActionAttempt, source_manifest: SealedActionResult
-    ) -> None:
-        """Authenticate one stored producer seal under its own identity before reuse.
+    ) -> SealedActionResult:
+        """Bind one stored producer row to its sealed bytes and return the bound manifest.
 
-        Reuse re-signs a producer's content under the consuming identity, so every
-        manifest the resolution read is verified first: a row is never trusted for
-        having been stored.
+        Reuse re-signs a producer's content under the consuming identity, so the row
+        the resolution read is never trusted for having been stored. A remote seal
+        binds through the digest inside its seal reference; a local seal binds through
+        the signed envelope on disk, and the manifest that envelope carries is what the
+        caller must build from.
         """
 
         source_uri = str(source_attempt.sealed_result_uri or "")
@@ -1734,20 +1736,13 @@ class CampaignWorker:
                 source_manifest,
                 compute_profile_id=source_manifest.compute_profile_id,
             )
-            return
-        self.sealer.verify_envelope_bytes(
-            self.sealer.envelope_bytes(source_manifest),
-            expected_workspace_id=source_attempt.workspace_id,
-            expected_campaign_id=source_attempt.campaign_id,
-            expected_study_id=source_attempt.study_id,
-            expected_action_id=source_attempt.action_id,
-            expected_attempt_id=source_attempt.attempt_id,
-            expected_manifest_revision=source_attempt.manifest_revision,
-            expected_candidate_digest=source_attempt.candidate_digest,
-            expected_input_digest=source_attempt.input_digest,
-            expected_claim_generation=source_attempt.claim_generation,
-        )
-        self._verify(source_attempt, Path(source_uri))
+            return source_manifest
+        sealed_manifest = self._verify(source_attempt, Path(source_uri))
+        if sealed_manifest != source_manifest:
+            raise ArtifactSealError(
+                f"{ArtifactSealError.code}: stored result does not match the sealed manifest"
+            )
+        return sealed_manifest
 
     def _reuse_tick(
         self,
@@ -1764,10 +1759,14 @@ class CampaignWorker:
         of one content key cannot grow a chain.
         """
 
-        self._verify_reuse_source(source.attempt, source.manifest)
-        for hop_attempt, hop_manifest in chain:
-            self._verify_reuse_source(hop_attempt, hop_manifest)
-        producer, producer_manifest = chain[-1] if chain else (source.attempt, source.manifest)
+        verified_source = self._verify_reuse_source(source.attempt, source.manifest)
+        verified_chain = tuple(
+            (hop_attempt, self._verify_reuse_source(hop_attempt, hop_manifest))
+            for hop_attempt, hop_manifest in chain
+        )
+        producer, producer_manifest = (
+            verified_chain[-1] if verified_chain else (source.attempt, verified_source)
+        )
         provenance = {
             "kind": "reused",
             REUSED_FROM_ATTEMPT_KEY: producer.attempt_id,

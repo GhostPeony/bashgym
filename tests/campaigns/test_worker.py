@@ -12,7 +12,7 @@ import pytest
 
 from bashgym._compat import UTC
 from bashgym.campaigns import remote as remote_contracts
-from bashgym.campaigns.artifacts import SEAL_FILENAME, ArtifactSealer
+from bashgym.campaigns.artifacts import SEAL_FILENAME, ArtifactSealer, ArtifactSealError
 from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.autoresearch import (
     AutoResearchCampaignCore,
@@ -3472,7 +3472,9 @@ def test_next_action_spec_carries_a_result_key_only_for_reusable_stages(tmp_path
     assert unresolved_spec.result_key is None
 
 
-def test_identical_data_build_is_reused_across_studies_without_execution(tmp_path):
+def seed_memoized_fake_data_builds(tmp_path):
+    """One repository and worker whose two data-build studies share a content key."""
+
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plans = {
         study_id: seed_validated_study(
@@ -3481,34 +3483,84 @@ def test_identical_data_build_is_reused_across_studies_without_execution(tmp_pat
         for index, study_id in enumerate(("study-1", "study-2"), start=1)
     }
     worker = make_worker(repository, tmp_path, "worker-a")
-    key = "e" * 64
     if worker.leader is None:
         assert worker.run_once(now=START) == "idle"
+    return repository, worker, plans
 
-    def schedule_with_key(study_id, now):
-        return repository.schedule_action_under_leader(
-            ActionSpec(
-                workspace_id="workspace-a",
-                campaign_id="campaign-1",
-                study_id=study_id,
-                stage_index=0,
-                stage=StageKind.DATA_BUILD,
-                input_contract=plans[study_id].items[0].input_contract,
-                candidate_digest=fake_digest(f"candidate:{study_id}"),
-                manifest_revision=1,
-                budget_unit="gpu_hours",
-                budget_reservation=0.25,
-                fake_steps=6,
-                result_key=key,
-            ),
-            worker.leader,
-            expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
-            now=now,
-        )
 
-    schedule_with_key("study-1", START)
+def schedule_fake_data_build(repository, worker, study_id, plan, now, *, result_key):
+    """Schedule one locally sealed fake data build under an explicit content key."""
+
+    return repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id=study_id,
+            stage_index=0,
+            stage=StageKind.DATA_BUILD,
+            input_contract=plan.items[0].input_contract,
+            candidate_digest=fake_digest(f"candidate:{study_id}"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            fake_steps=6,
+            result_key=result_key,
+        ),
+        worker.leader,
+        expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        now=now,
+    )
+
+
+def test_local_reuse_rejects_a_tampered_producer_manifest(tmp_path):
+    """A locally sealed producer row is bound to its sealed bytes before re-signing."""
+
+    repository, worker, plans = seed_memoized_fake_data_builds(tmp_path)
+    key = "e" * 64
+    producer = schedule_fake_data_build(
+        repository, worker, "study-1", plans["study-1"], START, result_key=key
+    )
     assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
-    schedule_with_key("study-2", START + timedelta(seconds=2))
+
+    def tamper(payload):
+        payload["executor_id"] = "tampered-executor"
+        payload["outputs"][0]["schema_name"] = "tampered_schema.v1"
+
+    rewrite_result_manifest(repository, producer.attempt_id, tamper)
+    consumer = schedule_fake_data_build(
+        repository,
+        worker,
+        "study-2",
+        plans["study-2"],
+        START + timedelta(seconds=2),
+        result_key=key,
+    )
+
+    with pytest.raises(ArtifactSealError, match="campaign_artifact_seal_invalid"):
+        worker.run_once(now=START + timedelta(seconds=3))
+
+    assert worker.executor.execution_count == 1
+    reused = repository.get_attempt("workspace-a", consumer.attempt_id)
+    assert reused.status != AttemptStatus.COMPLETED
+    assert reused.sealed_result_uri is None
+    with pytest.raises(RecordNotFoundError):
+        repository.get_attempt_result_manifest("workspace-a", consumer.attempt_id)
+
+
+def test_identical_data_build_is_reused_across_studies_without_execution(tmp_path):
+    repository, worker, plans = seed_memoized_fake_data_builds(tmp_path)
+    key = "e" * 64
+
+    schedule_fake_data_build(repository, worker, "study-1", plans["study-1"], START, result_key=key)
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    schedule_fake_data_build(
+        repository,
+        worker,
+        "study-2",
+        plans["study-2"],
+        START + timedelta(seconds=2),
+        result_key=key,
+    )
 
     assert worker.run_once(now=START + timedelta(seconds=3)) == "reused"
 

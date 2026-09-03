@@ -173,6 +173,19 @@ def test_register_rejects_a_kind_that_is_not_an_identifier() -> None:
     assert registry.kinds() == ()
 
 
+def test_register_rejects_a_kind_that_only_validates_after_normalization() -> None:
+    class _Padded(_Adapter):
+        kind = "fake "
+
+    registry = ExecutorRegistry()
+    registry.register(FakeExecutorAdapter())
+
+    with pytest.raises(ValueError, match="not a valid identifier"):
+        registry.register(_Padded())
+    assert registry.kinds() == ("fake",)
+    assert registry.is_registered("fake ") is False
+
+
 def test_register_accepts_the_three_built_in_adapter_kinds() -> None:
     registry = ExecutorRegistry()
 

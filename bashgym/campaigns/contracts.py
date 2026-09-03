@@ -16,6 +16,8 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    TypeAdapter,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -44,6 +46,24 @@ GitObjectId = Annotated[
     str,
     StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"),
 ]
+
+
+_IDENTIFIER_ADAPTER: TypeAdapter[str] = TypeAdapter(Identifier)
+
+
+def validated_identifier(value: object) -> str | None:
+    """Return the value when it is already an Identifier, otherwise None.
+
+    ``Identifier`` strips surrounding whitespace, so a value that only becomes
+    valid after normalization is reported as invalid rather than silently
+    renamed.
+    """
+
+    try:
+        validated = _IDENTIFIER_ADAPTER.validate_python(value)
+    except ValidationError:
+        return None
+    return validated if validated == value else None
 
 
 class ContractModel(BaseModel):

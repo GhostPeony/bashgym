@@ -7,14 +7,11 @@ import logging
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from pydantic import TypeAdapter, ValidationError
-
-from bashgym.campaigns.contracts import ActionAttempt, Identifier, StageKind
+from bashgym.campaigns.contracts import ActionAttempt, StageKind, validated_identifier
 
 logger = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP = "bashgym.campaign_executors"
-_IDENTIFIER = TypeAdapter(Identifier)
 
 
 @runtime_checkable
@@ -44,10 +41,8 @@ class ExecutorRegistry:
             raise TypeError(
                 f"executor adapter for kind {getattr(adapter, 'kind', '?')!r} does not implement ExecutorAdapter"
             )
-        try:
-            _IDENTIFIER.validate_python(adapter.kind)
-        except ValidationError as exc:
-            raise ValueError(f"executor kind is not a valid identifier: {adapter.kind!r}") from exc
+        if validated_identifier(adapter.kind) is None:
+            raise ValueError(f"executor kind is not a valid identifier: {adapter.kind!r}")
         if self._frozen:
             raise RuntimeError("executor registry is frozen")
         if adapter.kind in self._adapters:
@@ -83,21 +78,40 @@ def discover_entry_points(group: str = ENTRY_POINT_GROUP) -> tuple[ExecutorAdapt
     adapters: list[ExecutorAdapter] = []
     for entry_point in metadata.entry_points(group=group):
         try:
-            adapter = _adapter_from_entry_point(entry_point)
+            adapters.append(_adapter_from_entry_point(entry_point))
         except Exception as exc:  # noqa: BLE001 - one plugin cannot break discovery
-            logger.warning(
-                "campaign executor entry point %s (%s) was skipped: %s: %s",
-                getattr(entry_point, "name", "?"),
-                getattr(entry_point, "value", "?"),
-                type(exc).__name__,
-                exc,
-            )
-            continue
-        adapters.append(adapter)
+            _warn_skipped_entry_point(entry_point, exc)
     return tuple(adapters)
 
 
-def _adapter_from_entry_point(entry_point: Any) -> ExecutorAdapter:
+def register_entry_points(registry: ExecutorRegistry, group: str = ENTRY_POINT_GROUP) -> None:
+    """Add every loadable third-party adapter to an unfrozen registry.
+
+    Loading and registration are skipped under the same warning, so an invalid
+    kind, a kind another adapter already holds, and an adapter that does not
+    implement the protocol leave the rest of the registry intact.
+    """
+
+    for entry_point in metadata.entry_points(group=group):
+        try:
+            registry.register(_adapter_from_entry_point(entry_point))
+        except Exception as exc:  # noqa: BLE001 - one plugin cannot break discovery
+            _warn_skipped_entry_point(entry_point, exc)
+
+
+def _warn_skipped_entry_point(entry_point: Any, exc: Exception) -> None:
+    """Report one unusable entry point by name, value, and failure."""
+
+    logger.warning(
+        "campaign executor entry point %s (%s) was skipped: %s: %s",
+        getattr(entry_point, "name", "?"),
+        getattr(entry_point, "value", "?"),
+        type(exc).__name__,
+        exc,
+    )
+
+
+def _adapter_from_entry_point(entry_point: metadata.EntryPoint) -> ExecutorAdapter:
     """Resolve one entry point to an adapter instance, or raise for the caller."""
 
     loaded = entry_point.load()
@@ -112,4 +126,10 @@ def _adapter_from_entry_point(entry_point: Any) -> ExecutorAdapter:
     return adapter
 
 
-__all__ = ["ENTRY_POINT_GROUP", "ExecutorAdapter", "ExecutorRegistry", "discover_entry_points"]
+__all__ = [
+    "ENTRY_POINT_GROUP",
+    "ExecutorAdapter",
+    "ExecutorRegistry",
+    "discover_entry_points",
+    "register_entry_points",
+]

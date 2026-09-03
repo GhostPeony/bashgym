@@ -168,10 +168,12 @@ built-in kinds, so today a recipe may name `fake`, `registered_compute`,
 `registered_training`, or `ssh_remote`.
 
 Each process builds the registry once, on first use. An entry point that fails
-to import, whose factory raises, or that does not implement the adapter
-protocol is skipped with a warning naming the entry point and the error. Its
-kind stays unregistered and fails closed wherever an action or a recipe names
-it, and campaign reads in that process keep working.
+to import, whose factory raises, that does not implement the adapter protocol,
+or whose kind is not an identifier or is already registered, is skipped with a
+warning naming the entry point and the error. Its kind stays unregistered and
+fails closed wherever an action or a recipe names it, and campaign reads in
+that process keep working. A built-in adapter that fails to register is a
+repository defect and raises instead.
 
 ## Architecture cleanup priorities
 

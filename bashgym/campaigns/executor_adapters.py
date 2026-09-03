@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from bashgym.campaigns.contracts import ActionAttempt, StageKind
-from bashgym.campaigns.executor_registry import ExecutorRegistry, discover_entry_points
+from bashgym.campaigns.executor_registry import ExecutorRegistry, register_entry_points
 
 _ALL_STAGES = frozenset(StageKind)
 _REMOTE_STAGES = frozenset(
@@ -74,14 +74,18 @@ class DevelopmentEvaluationExecutorAdapter:
 
 
 def build_default_registry() -> ExecutorRegistry:
-    """Register the built-in adapters plus discovered entry points, then freeze."""
+    """Register the built-in adapters plus discovered entry points, then freeze.
+
+    A built-in that fails to register is a repository defect and raises. A
+    third-party entry point that fails to load or to register is skipped, so one
+    unusable plugin cannot stop this process from reading campaigns.
+    """
 
     registry = ExecutorRegistry()
     registry.register(FakeExecutorAdapter())
     registry.register(SshRemoteExecutorAdapter())
     registry.register(DevelopmentEvaluationExecutorAdapter())
-    for adapter in discover_entry_points():
-        registry.register(adapter)
+    register_entry_points(registry)
     registry.freeze()
     return registry
 

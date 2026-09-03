@@ -61,6 +61,29 @@ test('Activity projector explicitly picks approved public primitives', () => {
   })
 })
 
+test('Activity projector accepts the executor-kind-not-materializable blocker code', () => {
+  const fields = toCampaignActivityFields(
+    event({
+      schema_version: 'public_campaign_event_summary.v1',
+      action_id: 'action-1',
+      stage: 'full_training',
+      code: 'campaign_executor_kind_not_materializable',
+      stage_index: 2
+    })
+  )
+
+  assert.deepEqual(fields, {
+    event_id: 'event-1',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-1',
+    aggregate_version: 3,
+    action_id: 'action-1',
+    stage: 'full_training',
+    code: 'campaign_executor_kind_not_materializable',
+    stage_index: 2
+  })
+})
+
 test('Activity projector carries the reuse source and the failure class', () => {
   const completed = toCampaignActivityFields(
     event({

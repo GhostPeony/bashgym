@@ -6,7 +6,12 @@ from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any
 
-from bashgym.campaigns.contracts import SealedActionResult, StageKind, canonical_hash
+from bashgym.campaigns.contracts import (
+    CampaignManifest,
+    SealedActionResult,
+    StageKind,
+    canonical_hash,
+)
 
 RESULT_KEY_SCHEMA = "campaign_result_key.v1"
 REUSED_FROM_ATTEMPT_KEY = "reused_from_attempt_id"
@@ -17,6 +22,12 @@ REUSED_FROM_ACTION_KEY = "reused_from_action_id"
 # producing campaign, study, action, attempt, and candidate digest. Reused evidence would carry
 # the source's identity and fail those readers, so evaluations never reuse.
 REUSABLE_STAGES = frozenset({StageKind.DATA_BUILD})
+# A stage launch reads the manifest only for the compute profile it must run on and the
+# data scopes a recipe may touch. Budget limits, the evaluation plan, promotion gates,
+# retention, proposal rounds, protected references, and the publication flags never reach
+# a stage script, so two campaigns that differ only there produce byte-identical content
+# and share one result key.
+MANIFEST_CONTENT_FIELDS: tuple[str, ...] = ("approved_data_scopes", "compute_profile_id")
 REMOTE_IDENTITY_KEYS = frozenset(
     {
         "remote_resident_model",
@@ -52,6 +63,13 @@ def attempts_with_reuse_sources(
     )
 
 
+def manifest_content_digest(manifest: CampaignManifest) -> str:
+    """Digest the manifest fields a stage launch reads, excluding every other section."""
+
+    payload = manifest.model_dump(mode="json")
+    return canonical_hash({field: payload[field] for field in MANIFEST_CONTENT_FIELDS})
+
+
 def reuse_enabled(*, stage: StageKind, executor_kind: str, runtime: Mapping[str, Any]) -> bool:
     """Data builds reuse on registered remote compute; fake runs opt in; nothing else does."""
 
@@ -66,7 +84,7 @@ def stage_result_key(
     *,
     stage: StageKind,
     executor_kind: str,
-    manifest_digest: str,
+    manifest_content_digest: str,
     stage_input: Mapping[str, Any],
     recipe_digest: str,
     executor_config: Mapping[str, Any],
@@ -82,7 +100,7 @@ def stage_result_key(
             "schema_version": RESULT_KEY_SCHEMA,
             "stage": stage.value,
             "executor_kind": executor_kind,
-            "manifest_digest": manifest_digest,
+            "manifest_content_digest": manifest_content_digest,
             "stage_input": dict(stage_input),
             "recipe_digest": recipe_digest,
             "executor_content": executor_content,
@@ -97,6 +115,7 @@ def reused_from_attempt_id(manifest: SealedActionResult) -> str | None:
 
 
 __all__ = [
+    "MANIFEST_CONTENT_FIELDS",
     "NO_REUSE_LINKS",
     "REMOTE_IDENTITY_KEYS",
     "RESULT_KEY_SCHEMA",
@@ -104,6 +123,7 @@ __all__ = [
     "REUSED_FROM_ACTION_KEY",
     "REUSED_FROM_ATTEMPT_KEY",
     "attempts_with_reuse_sources",
+    "manifest_content_digest",
     "reuse_enabled",
     "reused_from_attempt_id",
     "stage_result_key",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import shutil
 import time
@@ -110,6 +111,8 @@ from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 
 if TYPE_CHECKING:
     from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
+
+logger = logging.getLogger(__name__)
 
 
 class SimulatedWorkerCrashError(RuntimeError):
@@ -1682,8 +1685,77 @@ class CampaignWorker:
         )
         return "completed"
 
+    def _resolve_reusable_completion(
+        self, attempt: ActionAttempt
+    ) -> tuple[ReusableCompletion, tuple[tuple[ActionAttempt, SealedActionResult], ...]] | None:
+        """Match one content-identical completion, treating a damaged row as a miss.
+
+        A reuse link written by another study can be unresolvable: its source row was
+        removed, its action later failed, or the chain is cyclic. That is a cache miss,
+        not a reason to fail the claimed action, so the worker reports the damaged
+        attempt and executes the stage for real. Integrity of a resolved source is a
+        separate question, decided by `_verify_reuse_source`, and it fails closed.
+        """
+
+        source = None
+        try:
+            source = self.repository.find_reusable_completion(
+                attempt.workspace_id,
+                attempt.result_key or "",
+                stage=attempt.stage,
+                exclude_action_id=attempt.action_id,
+            )
+            if source is None:
+                return None
+            return source, self.repository.reuse_source_chain(source.attempt)
+        except (CampaignPersistenceError, RecordNotFoundError) as exc:
+            logger.warning(
+                "campaign reuse skipped for attempt %s: matched attempt %s is unresolvable: %s",
+                attempt.attempt_id,
+                source.attempt.attempt_id if source is not None else "none",
+                exc,
+            )
+            return None
+
+    def _verify_reuse_source(
+        self, source_attempt: ActionAttempt, source_manifest: SealedActionResult
+    ) -> None:
+        """Authenticate one stored producer seal under its own identity before reuse.
+
+        Reuse re-signs a producer's content under the consuming identity, so every
+        manifest the resolution read is verified first: a row is never trusted for
+        having been stored.
+        """
+
+        source_uri = str(source_attempt.sealed_result_uri or "")
+        if source_uri.startswith("bashgym-remote-seal://"):
+            self._verify_sealed_data_build(
+                source_attempt,
+                source_manifest,
+                compute_profile_id=source_manifest.compute_profile_id,
+            )
+            return
+        self.sealer.verify_envelope_bytes(
+            self.sealer.envelope_bytes(source_manifest),
+            expected_workspace_id=source_attempt.workspace_id,
+            expected_campaign_id=source_attempt.campaign_id,
+            expected_study_id=source_attempt.study_id,
+            expected_action_id=source_attempt.action_id,
+            expected_attempt_id=source_attempt.attempt_id,
+            expected_manifest_revision=source_attempt.manifest_revision,
+            expected_candidate_digest=source_attempt.candidate_digest,
+            expected_input_digest=source_attempt.input_digest,
+            expected_claim_generation=source_attempt.claim_generation,
+        )
+        self._verify(source_attempt, Path(source_uri))
+
     def _reuse_tick(
-        self, attempt: ActionAttempt, source: ReusableCompletion, *, now: datetime
+        self,
+        attempt: ActionAttempt,
+        source: ReusableCompletion,
+        chain: tuple[tuple[ActionAttempt, SealedActionResult], ...],
+        *,
+        now: datetime,
     ) -> str:
         """Complete the claimed attempt from a content-identical sealed result.
 
@@ -1692,12 +1764,15 @@ class CampaignWorker:
         of one content key cannot grow a chain.
         """
 
-        chain = self.repository.reuse_source_chain(source.attempt)
+        self._verify_reuse_source(source.attempt, source.manifest)
+        for hop_attempt, hop_manifest in chain:
+            self._verify_reuse_source(hop_attempt, hop_manifest)
         producer, producer_manifest = chain[-1] if chain else (source.attempt, source.manifest)
         provenance = {
-            **producer_manifest.remote_process_identity,
+            "kind": "reused",
             REUSED_FROM_ATTEMPT_KEY: producer.attempt_id,
             REUSED_FROM_ACTION_KEY: producer.action_id,
+            "compute_profile_id": producer_manifest.compute_profile_id,
         }
         derived = producer_manifest.model_copy(
             update={
@@ -1711,6 +1786,7 @@ class CampaignWorker:
                 "input_digest": attempt.input_digest,
                 "claim_generation": attempt.claim_generation,
                 "remote_process_identity": provenance,
+                "log_reference": None,
                 "started_at": now,
                 "ended_at": now,
                 "exit_reason": f"reused sealed result from {producer.attempt_id}",
@@ -1794,14 +1870,9 @@ class CampaignWorker:
         if attempt is None:
             return controller_result or deferred_autoresearch_status or "idle"
         if attempt.result_key is not None and attempt.stage in REUSABLE_STAGES:
-            source = self.repository.find_reusable_completion(
-                attempt.workspace_id,
-                attempt.result_key,
-                stage=attempt.stage,
-                exclude_action_id=attempt.action_id,
-            )
-            if source is not None:
-                return self._reuse_tick(attempt, source, now=tick_at)
+            resolved = self._resolve_reusable_completion(attempt)
+            if resolved is not None:
+                return self._reuse_tick(attempt, *resolved, now=tick_at)
         if attempt.executor.get("kind") == "ssh_remote":
             return asyncio.run(self._remote_tick(attempt, now=tick_at))
         if attempt.executor.get("kind") == "development_evaluation":

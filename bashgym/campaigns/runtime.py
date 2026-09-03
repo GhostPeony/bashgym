@@ -104,6 +104,7 @@ from bashgym.campaigns.remote import (
 from bashgym.campaigns.result_reuse import (
     REUSABLE_STAGES,
     REUSED_FROM_ATTEMPT_KEY,
+    manifest_content_digest,
     reuse_enabled,
     reused_from_attempt_id,
     stage_result_key,
@@ -226,7 +227,6 @@ class RuntimeCompletion:
     campaign_version: int
     event: CampaignEvent
     replayed: bool = False
-    reused_from_attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -750,7 +750,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 result_key = stage_result_key(
                     stage=item.stage,
                     executor_kind=runtime_kind,
-                    manifest_digest=canonical_hash(manifest.model_dump(mode="json")),
+                    manifest_content_digest=manifest_content_digest(manifest),
                     stage_input=item.input_contract,
                     recipe_digest=stage_recipe_digest,
                     executor_config=executor_config,
@@ -1652,7 +1652,12 @@ class CampaignRuntimeRepository(CampaignRepository):
     def find_reusable_completion(
         self, workspace_id: str, result_key: str, *, stage: StageKind, exclude_action_id: str
     ) -> ReusableCompletion | None:
-        """Newest completed action of one stage in the workspace whose content key matches."""
+        """Completed action of one stage in the workspace whose content key matches.
+
+        Attempts that executed their own stage are preferred over attempts that
+        themselves reused a result, so the common case resolves without walking a
+        reuse link at all; the newest row breaks the remaining tie.
+        """
 
         self._require_initialized()
         with self._connection() as connection:
@@ -1661,7 +1666,8 @@ class CampaignRuntimeRepository(CampaignRepository):
                 WHERE a.workspace_id = ? AND a.result_key = ? AND a.action_id != ?
                   AND a.stage_kind = ?
                   AND a.status = ? AND t.status = ? AND t.result_json IS NOT NULL
-                ORDER BY t.updated_at DESC, t.attempt_id DESC LIMIT 1
+                ORDER BY json_extract(t.result_json, ?) IS NOT NULL,
+                         t.updated_at DESC, t.attempt_id DESC LIMIT 1
                 """,
                 (
                     workspace_id,
@@ -1670,6 +1676,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                     stage.value,
                     ActionStatus.COMPLETED.value,
                     AttemptStatus.COMPLETED.value,
+                    _REUSE_SOURCE_JSON_PATH,
                 ),
             ).fetchone()
             if row is None:
@@ -4009,7 +4016,6 @@ class CampaignRuntimeRepository(CampaignRepository):
                     int(campaign_row["version"]),
                     self._event_from_row(event_row),
                     replayed=True,
-                    reused_from_attempt_id=reused_from_attempt_id(manifest),
                 )
             if attempt.status not in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}:
                 raise ActionClaimConflictError(ActionClaimConflictError.code)
@@ -4257,7 +4263,6 @@ class CampaignRuntimeRepository(CampaignRepository):
             self._attempt_from_row(completed),
             campaign.version + 1,
             event,
-            reused_from_attempt_id=reused_from_attempt_id(manifest),
         )
 
 

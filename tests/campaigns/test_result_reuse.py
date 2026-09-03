@@ -1,7 +1,11 @@
 """Content-only result keys and the reuse policy."""
 
-from bashgym.campaigns.contracts import StageKind
-from bashgym.campaigns.result_reuse import reuse_enabled, stage_result_key
+from bashgym.campaigns.contracts import CampaignManifest, StageKind
+from bashgym.campaigns.result_reuse import (
+    manifest_content_digest,
+    reuse_enabled,
+    stage_result_key,
+)
 from bashgym.campaigns.runtime import ActionSpec
 
 
@@ -9,7 +13,7 @@ def _key(**overrides):
     base = dict(
         stage=StageKind.DATA_BUILD,
         executor_kind="ssh_remote",
-        manifest_digest="m" * 64,
+        manifest_content_digest="m" * 64,
         stage_input={"rows": 1000},
         recipe_digest="r" * 64,
         executor_config={
@@ -46,7 +50,7 @@ def test_identity_bearing_executor_fields_do_not_change_the_key() -> None:
 def test_content_fields_change_the_key() -> None:
     assert _key() != _key(recipe_digest="x" * 64)
     assert _key() != _key(stage_input={"rows": 2000})
-    assert _key() != _key(manifest_digest="n" * 64)
+    assert _key() != _key(manifest_content_digest="n" * 64)
     assert _key() != _key(
         upstream_outputs=(("full_training", "final/adapter.safetensors", "a" * 64),)
     )
@@ -92,3 +96,42 @@ def test_result_key_does_not_change_action_key() -> None:
 
     assert plain.action_key == keyed.action_key
     assert plain.input_digest == keyed.input_digest
+
+
+def _manifest(**overrides) -> CampaignManifest:
+    base = dict(
+        approved_data_scopes=("memexai-approved-training",),
+        compute_profile_id="ssh-gpu-lab",
+        budget_limits={"gpu_hours": 12.0},
+        evaluation_plan={"development_query_set": "dev-18-v1"},
+        promotion_gates={"mrr_at_10_delta_min": 0.0},
+    )
+    base.update(overrides)
+    return CampaignManifest(**base)
+
+
+def test_manifest_projection_covers_only_what_a_stage_launch_reads() -> None:
+    """Budgets, evaluation plan, gates, and retention never reach a stage script."""
+
+    assert manifest_content_digest(_manifest()) == manifest_content_digest(
+        _manifest(
+            budget_limits={"gpu_hours": 400.0, "study_count": 9.0},
+            evaluation_plan={"development_query_set": "dev-99-v9"},
+            promotion_gates={"mrr_at_10_delta_min": 0.5},
+            protected_artifact_refs=("frozen-test-36-v1",),
+            max_proposal_rounds=9,
+            retention_days_failed=7,
+            allow_hf_publication=True,
+            allow_external_handoff=True,
+            allow_memexai_handoff=True,
+        )
+    )
+
+
+def test_manifest_projection_covers_the_scope_and_compute_boundary() -> None:
+    assert manifest_content_digest(_manifest()) != manifest_content_digest(
+        _manifest(approved_data_scopes=("desktop-local",))
+    )
+    assert manifest_content_digest(_manifest()) != manifest_content_digest(
+        _manifest(compute_profile_id="ssh-gpu-other")
+    )

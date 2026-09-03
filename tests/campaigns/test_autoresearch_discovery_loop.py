@@ -81,9 +81,9 @@ from bashgym.ledger.contracts import (
     EvaluationSuiteSpec,
     ProjectSpec,
 )
+from tests.campaigns.reuse_helpers import set_reuse_link
 from tests.campaigns.test_persistence import campaign, manifest
 from tests.campaigns.test_proposals import principal, proposal
-from tests.campaigns.test_worker import set_reuse_link
 
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 

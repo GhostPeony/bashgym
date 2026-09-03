@@ -1060,7 +1060,7 @@ class ActiveWorkSummaryV1(FrozenContractModel):
     controlled_variable_summary: tuple[str, ...] = Field(max_length=64)
     progress_fraction: float | None = Field(ge=0, le=1)
     eta_seconds: float | None = Field(ge=0)
-    executor_type: str | None
+    executor_type: Identifier | None
     process_identity: OpaqueProcessIdentityV1 | None
 
 

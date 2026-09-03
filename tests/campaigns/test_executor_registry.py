@@ -1,10 +1,16 @@
 """Executor registry behavior."""
 
+import logging
 from datetime import datetime, timezone
 
 import pytest
 
 from bashgym.campaigns.contracts import StageKind
+from bashgym.campaigns.executor_adapters import (
+    DevelopmentEvaluationExecutorAdapter,
+    FakeExecutorAdapter,
+    SshRemoteExecutorAdapter,
+)
 from bashgym.campaigns.executor_registry import ExecutorRegistry, discover_entry_points
 
 
@@ -148,5 +154,81 @@ def test_discover_entry_points_entry_point_variants(monkeypatch) -> None:
 
     monkeypatch.setattr(metadata, "entry_points", lambda **kwargs: (entry_point_non_adapter,))
 
-    with pytest.raises(TypeError, match="is not an ExecutorAdapter"):
-        discover_entry_points()
+    assert discover_entry_points() == ()
+
+
+def test_register_rejects_a_kind_that_is_not_an_identifier() -> None:
+    class _SpacedKind(_Adapter):
+        kind = "vendor gpu"
+
+    class _EmptyKind(_Adapter):
+        kind = ""
+
+    registry = ExecutorRegistry()
+
+    with pytest.raises(ValueError, match="vendor gpu"):
+        registry.register(_SpacedKind())
+    with pytest.raises(ValueError, match="executor kind"):
+        registry.register(_EmptyKind())
+    assert registry.kinds() == ()
+
+
+def test_register_accepts_the_three_built_in_adapter_kinds() -> None:
+    registry = ExecutorRegistry()
+
+    for adapter in (
+        FakeExecutorAdapter(),
+        SshRemoteExecutorAdapter(),
+        DevelopmentEvaluationExecutorAdapter(),
+    ):
+        registry.register(adapter)
+
+    assert registry.kinds() == ("development_evaluation", "fake", "ssh_remote")
+
+
+def test_discover_entry_points_skips_a_failing_entry_point(monkeypatch, caplog) -> None:
+    import importlib.metadata as metadata
+    from unittest.mock import Mock
+
+    class _NonAdapter:
+        pass
+
+    def _failing_factory():
+        raise RuntimeError("factory exploded")
+
+    broken_load = Mock()
+    broken_load.name = "broken_load"
+    broken_load.value = "vendor.broken:adapter"
+    broken_load.load = Mock(side_effect=ImportError("no module named vendor.broken"))
+
+    broken_factory = Mock()
+    broken_factory.name = "broken_factory"
+    broken_factory.value = "vendor.factory:build"
+    broken_factory.load = Mock(return_value=_failing_factory)
+
+    non_adapter = Mock()
+    non_adapter.name = "non_adapter"
+    non_adapter.value = "vendor.plain:Thing"
+    non_adapter.load = Mock(return_value=_NonAdapter())
+
+    healthy = Mock()
+    healthy.name = "healthy"
+    healthy.value = "vendor.good:Adapter"
+    healthy.load = Mock(return_value=_Adapter)
+
+    monkeypatch.setattr(
+        metadata,
+        "entry_points",
+        lambda **kwargs: (broken_load, broken_factory, non_adapter, healthy),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="bashgym.campaigns.executor_registry"):
+        adapters = discover_entry_points()
+
+    assert tuple(adapter.kind for adapter in adapters) == ("unit_test_executor",)
+    assert "broken_load" in caplog.text
+    assert "vendor.broken:adapter" in caplog.text
+    assert "no module named vendor.broken" in caplog.text
+    assert "broken_factory" in caplog.text
+    assert "factory exploded" in caplog.text
+    assert "non_adapter" in caplog.text

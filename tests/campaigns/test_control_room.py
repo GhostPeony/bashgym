@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 
 from bashgym._compat import UTC
 from bashgym.campaigns import control_room as control_room_module
@@ -890,6 +891,24 @@ def test_active_work_summary_carries_any_registered_executor_kind() -> None:
     )
 
     assert summary.executor_type == "plugin_remote"
+
+
+def test_active_work_summary_rejects_an_executor_kind_that_is_not_an_identifier() -> None:
+    with pytest.raises(ValidationError):
+        ActiveWorkSummaryV1(
+            study_id="study-1",
+            proposal_id="proposal-1",
+            action_id="action-1",
+            attempt_id="attempt-1",
+            stage=StageKind.DATA_BUILD,
+            hypothesis_summary=None,
+            primary_variable_summary=None,
+            controlled_variable_summary=(),
+            progress_fraction=None,
+            eta_seconds=None,
+            executor_type="vendor gpu",
+            process_identity=None,
+        )
 
 
 def test_candidate_projection_never_copies_unproven_outcome_references(repository):

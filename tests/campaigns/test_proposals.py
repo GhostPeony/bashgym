@@ -19,6 +19,7 @@ from bashgym.campaigns.contracts import (
     StudyProposalSubmission,
     StudyStatus,
 )
+from bashgym.campaigns.executor_adapters import build_default_registry
 from bashgym.campaigns.persistence import (
     CampaignRepository,
     IdempotencyConflictError,
@@ -1208,6 +1209,7 @@ def test_evidence_snapshot_is_bounded_and_excludes_rows_and_uris(repository, tmp
     assert snapshot.artifact_references[0].artifact_id == "artifact-safe"
     assert snapshot.nemo_gym_evidence_references[0].artifact_id == "artifact-nemo"
     assert snapshot.nemo_gym_evidence_references[0].rollout_count == 2
+    assert snapshot.available_executors == build_default_registry().kinds()
     assert "NEVER_SURFACE_THIS" not in serialized
     assert "model.bin" not in serialized
     assert "uri" not in serialized.casefold()

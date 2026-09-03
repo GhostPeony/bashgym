@@ -13,6 +13,7 @@ from bashgym.campaigns import control_room as control_room_module
 from bashgym.campaigns import transitions as campaign_transitions
 from bashgym.campaigns.autoresearch import AutoResearchRepository
 from bashgym.campaigns.contracts import (
+    ActiveWorkSummaryV1,
     ActorPrincipal,
     AutonomyProfile,
     CampaignControlRoomStateV1,
@@ -870,6 +871,25 @@ def test_valid_running_stage_plan_projects_active_work_without_invariant_failure
     assert snapshot.active_work.controlled_variable_summary == proposal.controlled_variables
     assert snapshot.active_work.progress_fraction is None
     assert snapshot.active_work.eta_seconds is None
+
+
+def test_active_work_summary_carries_any_registered_executor_kind() -> None:
+    summary = ActiveWorkSummaryV1(
+        study_id="study-1",
+        proposal_id="proposal-1",
+        action_id="action-1",
+        attempt_id="attempt-1",
+        stage=StageKind.DATA_BUILD,
+        hypothesis_summary=None,
+        primary_variable_summary=None,
+        controlled_variable_summary=(),
+        progress_fraction=None,
+        eta_seconds=None,
+        executor_type="plugin_remote",
+        process_identity=None,
+    )
+
+    assert summary.executor_type == "plugin_remote"
 
 
 def test_candidate_projection_never_copies_unproven_outcome_references(repository):

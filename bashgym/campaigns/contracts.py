@@ -1059,7 +1059,7 @@ class ActiveWorkSummaryV1(FrozenContractModel):
     controlled_variable_summary: tuple[str, ...] = Field(max_length=64)
     progress_fraction: float | None = Field(ge=0, le=1)
     eta_seconds: float | None = Field(ge=0)
-    executor_type: Literal["fake", "ssh_remote", "development_evaluation"] | None
+    executor_type: str | None
     process_identity: OpaqueProcessIdentityV1 | None
 
 

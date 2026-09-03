@@ -22,6 +22,7 @@ from bashgym.campaigns.diagnostic_actions import (
     AUTORESEARCH_DIAGNOSTIC_RECIPE_SCHEMA,
     AutoResearchDiagnosticRecipe,
 )
+from bashgym.campaigns.runtime import RECIPE_KIND_ALIASES
 from bashgym.campaigns.secret_scan import scan_values
 from bashgym.campaigns.tmax_recipe import (
     TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA,
@@ -49,7 +50,7 @@ _FAKE_RUNTIME_KEYS = frozenset(
     {"executor_kind", "budget_unit", "budget_reservation", "fake_steps", "memoize"}
 )
 _LIVE_RUNTIME_KEYS = frozenset({"executor_kind"})
-_REGISTERED_COMPUTE_KINDS = frozenset({"registered_compute", "registered_training", "ssh_remote"})
+_REGISTERED_COMPUTE_KINDS = frozenset(RECIPE_KIND_ALIASES) | frozenset(RECIPE_KIND_ALIASES.values())
 
 
 def _recipe_has_schema_version(recipe: Mapping[str, Any]) -> bool:

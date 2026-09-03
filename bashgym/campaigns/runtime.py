@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import functools
 import hashlib
 import json
 import math
@@ -59,8 +58,7 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
-from bashgym.campaigns.executor_adapters import build_default_registry
-from bashgym.campaigns.executor_registry import ExecutorRegistry
+from bashgym.campaigns.executor_adapters import default_registry as _default_registry
 from bashgym.campaigns.lineage import (
     canonical_model_manifest_digest,
     code_mutation_kind_for_variable,
@@ -172,11 +170,7 @@ def _settlement_actual_cost(
     return min(float(reservation_amount), direct)
 
 
-@functools.lru_cache(maxsize=1)
-def _default_registry() -> ExecutorRegistry:
-    """Build the process-wide registry of built-in and installed executor kinds."""
-
-    return build_default_registry()
+RECIPE_KIND_ALIASES = {"registered_compute": "ssh_remote", "registered_training": "ssh_remote"}
 
 
 class ActionSpec(ContractModel):
@@ -565,16 +559,14 @@ class CampaignRuntimeRepository(CampaignRepository):
         if not isinstance(runtime, dict):
             raise CampaignPersistenceError("campaign_recipe_runtime_invalid")
         executor_kind = runtime.get("executor_kind", "fake")
+        runtime_kind = RECIPE_KIND_ALIASES.get(executor_kind, executor_kind)
+        registry = _default_registry()
+        if not registry.is_registered(runtime_kind):
+            raise CampaignPersistenceError("campaign_executor_kind_not_registered")
+        if item.stage not in registry.allowed_stages(runtime_kind):
+            raise CampaignPersistenceError("campaign_remote_stage_not_allowed")
         executor_config: dict[str, Any] = {}
-        if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}:
-            if item.stage not in {
-                StageKind.DATA_BUILD,
-                StageKind.CONTRACT_EVALUATION,
-                StageKind.SMOKE_TRAINING,
-                StageKind.FULL_TRAINING,
-                StageKind.DEVELOPMENT_EVALUATION,
-            }:
-                raise CampaignPersistenceError("campaign_remote_stage_not_allowed")
+        if runtime_kind == "ssh_remote":
             profile_key = (
                 manifest.compute_profile_id,
                 campaign.target_model.target_contract_key,
@@ -711,7 +703,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 raise CampaignPersistenceError("campaign_remote_profile_material_invalid") from exc
             budget_unit = configured_stage.budget_unit
             reservation = configured_stage.budget_reservation
-        elif executor_kind == "fake":
+        elif runtime_kind == "fake":
             budget_unit = str(
                 runtime.get(
                     "budget_unit",
@@ -727,13 +719,13 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise CampaignPersistenceError("campaign_executor_kind_not_registered")
         if budget_unit not in manifest.budget_limits:
             raise CampaignPersistenceError("campaign_budget_unit_not_approved")
-        runtime_kind = (
-            "ssh_remote"
-            if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}
-            else executor_kind
-        )
         result_key: str | None = None
-        if reuse_enabled(stage=item.stage, executor_kind=runtime_kind, runtime=runtime):
+        if reuse_enabled(
+            stage=item.stage,
+            executor_kind=runtime_kind,
+            runtime=runtime,
+            registry=registry,
+        ):
             upstream_outputs: list[tuple[str, str, str]] = []
             resolvable = True
             for consumed in plan.consumed_stages(study.current_stage_index):

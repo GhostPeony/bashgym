@@ -45,6 +45,7 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.executor_adapters import default_registry
 from bashgym.campaigns.persistence import RecordNotFoundError
 from bashgym.campaigns.transitions import (
     allowed_triggers,
@@ -1227,7 +1228,7 @@ def build_control_room_snapshot(
         if attempt:
             executor = json.loads(attempt["executor_json"])
             candidate_executor = executor.get("kind", executor.get("executor_kind"))
-            if candidate_executor in {"fake", "ssh_remote", "development_evaluation"}:
+            if default_registry().is_registered(candidate_executor):
                 executor_type = candidate_executor
         process_identity = None
         if durable.remote_runs:

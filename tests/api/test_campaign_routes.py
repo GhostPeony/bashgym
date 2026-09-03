@@ -23,12 +23,18 @@ from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.autoresearch import (
     AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
     AutoResearchCampaignSpec,
+    AutoResearchDecision,
     AutoResearchHypothesisFamilyConclusion,
     AutoResearchRepository,
+    AutoResearchResult,
     AutoResearchStopRules,
     AutoResearchTemplateDefinition,
+    ExperimentOutcome,
+    ExperimentProvenance,
+    ExperimentRole,
     HypothesisFamilyDisposition,
     MetricDirection,
+    ResultDecision,
 )
 from bashgym.campaigns.contracts import (
     AutonomyProfile,
@@ -37,6 +43,8 @@ from bashgym.campaigns.contracts import (
     CodeLineageState,
     CodeMutationKind,
     CredentialKind,
+    StageKind,
+    StudyStatus,
     canonical_hash,
 )
 from bashgym.campaigns.diagnostic_actions import AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME
@@ -75,6 +83,8 @@ from tests.campaigns.test_autoresearch_readiness import (
     register_scientific_bindings,
     registered_profile,
 )
+from tests.campaigns.test_clone_study import acquisition as bound_acquisition
+from tests.campaigns.test_clone_study import research_context as bound_research_context
 from tests.campaigns.test_lineage import initialized_repository, source_profile
 from tests.campaigns.test_persistence import campaign, manifest, persist_legacy_v1_manifest
 from tests.campaigns.test_proposals import proposal as study_proposal
@@ -3420,7 +3430,7 @@ def test_attempts_route_projects_bounded_public_attempts_without_executor_paths(
     assert "lease_owner" not in serialized
 
 
-def _study_with_accepted_proposal(http, repository, access) -> tuple[str, str]:
+def _study_with_accepted_proposal(http, repository, access, *, autoresearch=False):
     assert create_from_template(http, access).status_code == 200
     version = 1
     for trigger, key in (
@@ -3440,16 +3450,31 @@ def _study_with_accepted_proposal(http, repository, access) -> tuple[str, str]:
         )
         version = transitioned.campaign.version
 
+    if autoresearch:
+        register_autoresearch_spec(repository)
     proposal_body = study_proposal("proposal-source").model_dump(
         mode="json", exclude={"schema_version", "workspace_id", "campaign_id"}
     )
     proposal_body.update({"workspace_id": "workspace-a", "expected_version": version})
+    if autoresearch:
+        proposal_body.update(
+            {
+                "research_context": bound_research_context("proposal-source").model_dump(
+                    mode="json"
+                ),
+                "acquisition": bound_acquisition("proposal-source").model_dump(mode="json"),
+            }
+        )
     submitted = http.post(
-        "/api/campaigns/campaign-1/proposals",
+        (
+            "/api/campaigns/campaign-1/autoresearch/baseline"
+            if autoresearch
+            else "/api/campaigns/campaign-1/proposals"
+        ),
         headers={**bearer(access), "Idempotency-Key": "submit-clone-source"},
         json=proposal_body,
     )
-    assert submitted.status_code == 200
+    assert submitted.status_code == 200, submitted.json()
     advanced = http.post(
         "/api/campaigns/campaign-1/advance",
         headers={**bearer(access), "Idempotency-Key": "advance-clone-source"},
@@ -3471,10 +3496,19 @@ def _study_with_accepted_proposal(http, repository, access) -> tuple[str, str]:
     return selection.study.study_id, "proposal-source"
 
 
+def _campaign_write_counters(repository) -> dict[str, int]:
+    with repository._connection() as connection:
+        return {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("campaign_proposals", "campaign_events", "campaign_mutations")
+        } | {"version": repository.get_campaign("workspace-a", "campaign-1").version}
+
+
 def test_clone_study_returns_prefilled_submission_and_diff(tmp_path):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     study_id, proposal_id = _study_with_accepted_proposal(http, repository, access)
+    before = _campaign_write_counters(repository)
 
     response = http.post(
         f"/api/campaigns/campaign-1/studies/{study_id}/clone",
@@ -3495,8 +3529,7 @@ def test_clone_study_returns_prefilled_submission_and_diff(tmp_path):
     assert "campaign_id" not in body["submission"]
     assert "schema_version" not in body["submission"]
     assert list(body["diff"]) == ["training_recipe"]
-    with repository._connection() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM campaign_proposals").fetchone()[0] == 1
+    assert _campaign_write_counters(repository) == before
 
     rejected = http.post(
         f"/api/campaigns/campaign-1/studies/{study_id}/clone",
@@ -3509,3 +3542,196 @@ def test_clone_study_returns_prefilled_submission_and_diff(tmp_path):
     )
     assert rejected.status_code == 422
     assert rejected.json()["detail"]["code"] == "clone_change_not_allowed"
+    assert _campaign_write_counters(repository) == before
+
+
+def test_clone_study_rejects_an_unknown_study_and_a_foreign_workspace(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    study_id, _proposal_id = _study_with_accepted_proposal(http, repository, access)
+
+    unknown = http.post(
+        "/api/campaigns/campaign-1/studies/study-missing/clone",
+        headers=bearer(access),
+        json={
+            "workspace_id": "workspace-a",
+            "proposal_id": "proposal-clone",
+            "changes": {},
+        },
+    )
+    assert unknown.status_code == 404
+
+    foreign = http.post(
+        f"/api/campaigns/campaign-1/studies/{study_id}/clone",
+        headers=bearer(access),
+        json={
+            "workspace_id": "workspace-b",
+            "proposal_id": "proposal-clone",
+            "changes": {},
+        },
+    )
+    assert foreign.status_code == 403
+    assert foreign.json()["detail"]["code"] == "campaign_scope_denied"
+    assert "proposal-clone" not in json.dumps(foreign.json())
+
+
+def _baseline_outcome_for(repository, study_id: str, proposal_id: str) -> None:
+    """Give an AutoResearch campaign one authoritative, research-eligible parent."""
+
+    autoresearch = AutoResearchRepository(repository.db_path)
+    autoresearch.initialize()
+    recorded_at = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
+    action_id = f"action-{proposal_id}"
+    attempt_id = f"attempt-{proposal_id}"
+    study = repository.get_study("workspace-a", "campaign-1", study_id)
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_actions(
+                workspace_id, campaign_id, study_id, action_id, stage_index,
+                stage_kind, input_digest, status, version, created_at, updated_at,
+                candidate_digest, manifest_revision, reservation_json
+            ) VALUES (?, ?, ?, ?, 0, ?, ?, 'completed', 1, ?, ?, ?, 1, '{}')
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                study_id,
+                action_id,
+                StageKind.DEVELOPMENT_EVALUATION.value,
+                "b" * 64,
+                recorded_at.isoformat(),
+                recorded_at.isoformat(),
+                study.candidate_digest,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_attempts(
+                workspace_id, action_id, attempt_id, attempt_number,
+                claim_generation, status, executor_json, result_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, 1, 1, 'completed', ?, '{}', ?, ?)
+            """,
+            (
+                "workspace-a",
+                action_id,
+                attempt_id,
+                json.dumps({"executor_kind": "local_process"}),
+                recorded_at.isoformat(),
+                recorded_at.isoformat(),
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE campaign_studies SET status = ?, current_stage_index = 1,
+                version = version + 1, updated_at = ?
+            WHERE workspace_id = ? AND study_id = ?
+            """,
+            (StudyStatus.COMPLETED.value, recorded_at.isoformat(), "workspace-a", study_id),
+        )
+        connection.execute(
+            """
+            UPDATE campaigns SET active_study_id = NULL, active_action_id = NULL,
+                version = version + 1, updated_at = ?
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (recorded_at.isoformat(), "workspace-a", "campaign-1"),
+        )
+    outcome = AutoResearchResult(
+        result_id=f"result-{proposal_id}",
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        proposal_id=proposal_id,
+        study_id=study_id,
+        role=ExperimentRole.BASELINE,
+        provenance=ExperimentProvenance.REAL,
+        outcome=ExperimentOutcome.COMPLETED,
+        metric_name="mrr_at_10",
+        metric_value=0.5,
+        metrics={"mrr_at_10": 0.5},
+        actual_cost=0.5,
+        attempt_ids=(attempt_id,),
+        evidence_references=(f"eval-{proposal_id}",),
+        recorded_at=recorded_at,
+    )
+    decision = AutoResearchDecision(
+        proposal_id=proposal_id,
+        decision=ResultDecision.BASELINE,
+        reason_code="real_baseline_verified",
+        eligible_for_best=True,
+        result_digest=outcome.result_digest,
+        decided_at=recorded_at,
+    )
+    with autoresearch._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO autoresearch_results(
+                workspace_id, campaign_id, result_id, proposal_id, result_json,
+                result_digest, decision_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                outcome.result_id,
+                proposal_id,
+                outcome.model_dump_json(),
+                outcome.result_digest,
+                decision.model_dump_json(),
+                recorded_at.isoformat(),
+            ),
+        )
+
+
+def test_cloned_submission_is_accepted_by_the_candidate_route(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    study_id, proposal_id = _study_with_accepted_proposal(
+        http, repository, access, autoresearch=True
+    )
+    _baseline_outcome_for(repository, study_id, proposal_id)
+
+    cloned = http.post(
+        f"/api/campaigns/campaign-1/studies/{study_id}/clone",
+        headers=bearer(access),
+        json={
+            "workspace_id": "workspace-a",
+            "proposal_id": "proposal-replication",
+            "changes": {
+                "training_recipe": {"seed": 23},
+                "primary_variable": "training_recipe.seed",
+                "prerequisite_study_ids": [study_id],
+            },
+        },
+    )
+    assert cloned.status_code == 200, cloned.json()
+    body = cloned.json()
+    assert body["source"] == {"study_id": study_id, "proposal_id": proposal_id}
+    assert list(body["diff"]) == [
+        "primary_variable",
+        "prerequisite_study_ids",
+        "training_recipe",
+    ]
+    assert body["submission"]["research_context"] is None
+    assert body["submission"]["acquisition"]["proposal_id"] == "proposal-replication"
+
+    submitted = http.post(
+        "/api/campaigns/campaign-1/autoresearch/candidates",
+        headers={**bearer(access), "Idempotency-Key": "submit-cloned-candidate"},
+        json={
+            **body["submission"],
+            "workspace_id": "workspace-a",
+            "expected_version": repository.get_campaign("workspace-a", "campaign-1").version,
+            "parent_proposal_id": body["source"]["proposal_id"],
+            "changed_variables": ["training_recipe.seed"],
+        },
+    )
+
+    assert submitted.status_code == 200, submitted.json()
+    record = submitted.json()["record"]
+    assert record["proposal"]["proposal_id"] == "proposal-replication"
+    assert record["validation"]["valid"] is True
+    assert record["proposal"]["training_recipe"] == {"schema_version": "recipe.v1", "seed": 23}
+    with repository._connection() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM campaign_proposals").fetchone()[0] == 2

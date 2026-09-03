@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -40,6 +41,7 @@ from bashgym.campaigns.campaign_recovery import (
 from bashgym.campaigns.contracts import (
     AUTORESEARCH_EVALUATION_SCHEMA,
     ActionAttempt,
+    ArtifactOutput,
     AttemptStatus,
     CampaignStatus,
     CampaignTrigger,
@@ -120,6 +122,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 UNREGISTERED_EXECUTOR_KIND_CODE = "campaign_executor_kind_not_registered"
+UNREGISTERED_EXECUTOR_SCHEMA = "campaign_unregistered_executor.v1"
 
 
 class SimulatedWorkerCrashError(RuntimeError):
@@ -407,38 +410,42 @@ class CampaignWorker:
 
         for attempt in self.repository.list_unfinished_attempts():
             try:
-                adapter = self._adapter_for(attempt)
+                adapter: ExecutorAdapter | None = self._adapter_for(attempt)
             except UnregisteredExecutorKindError:
+                # Only the adapter-driven work is skipped. Lease expiry needs no
+                # adapter, so the branch below still moves an expired attempt to
+                # UNKNOWN instead of leaving it uncertain forever.
                 logger.warning(
                     "%s: skipping attempt %s with executor kind %s",
                     UNREGISTERED_EXECUTOR_KIND_CODE,
                     attempt.attempt_id,
                     attempt.executor.get("kind"),
                 )
-                continue
-            short_circuit = adapter.reconcile(self, attempt, now=now)
-            if short_circuit is not None:
-                return short_circuit
-            if not adapter.repair_allowed():
-                continue
-            sealed_path = self.sealed_path(attempt)
-            if sealed_path.is_dir():
-                manifest = self._verify(attempt, sealed_path)
-                self._ingest_sealed_metrics(attempt, sealed_path, now=now)
-                if attempt.executor.get("kind") == "development_evaluation":
-                    self._persist_development_evaluation_evidence(
-                        attempt,
+                adapter = None
+            if adapter is not None:
+                short_circuit = adapter.reconcile(self, attempt, now=now)
+                if short_circuit is not None:
+                    return short_circuit
+                if not adapter.repair_allowed():
+                    continue
+                sealed_path = self.sealed_path(attempt)
+                if sealed_path.is_dir():
+                    manifest = self._verify(attempt, sealed_path)
+                    self._ingest_sealed_metrics(attempt, sealed_path, now=now)
+                    if attempt.executor.get("kind") == "development_evaluation":
+                        self._persist_development_evaluation_evidence(
+                            attempt,
+                            sealed_path,
+                            now=now,
+                        )
+                    self.repository.complete_from_seal(
+                        manifest,
                         sealed_path,
+                        worker_id=self.worker_id,
+                        reconcile=True,
                         now=now,
                     )
-                self.repository.complete_from_seal(
-                    manifest,
-                    sealed_path,
-                    worker_id=self.worker_id,
-                    reconcile=True,
-                    now=now,
-                )
-                return "reconciled"
+                    return "reconciled"
             if (
                 attempt.status == AttemptStatus.RUNNING
                 and attempt.lease_expires_at is not None
@@ -447,6 +454,78 @@ class CampaignWorker:
                 self.repository.mark_expired_unknown(attempt, now=now)
                 return "unknown"
         return None
+
+    def _settle_unregistered_attempt(self, attempt: ActionAttempt, *, now: datetime) -> str:
+        """Fail a claimed attempt this worker cannot execute, releasing its claim."""
+
+        kind = str(attempt.executor.get("kind", ""))
+        logger.warning(
+            "%s: settling attempt %s with executor kind %s",
+            UNREGISTERED_EXECUTOR_KIND_CODE,
+            attempt.attempt_id,
+            kind,
+        )
+        detail = json.dumps(
+            {
+                "schema_version": UNREGISTERED_EXECUTOR_SCHEMA,
+                "attempt_id": attempt.attempt_id,
+                "executor_kind": kind,
+                "reason": UNREGISTERED_EXECUTOR_KIND_CODE,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        manifest = SealedActionResult(
+            workspace_id=attempt.workspace_id,
+            campaign_id=attempt.campaign_id,
+            study_id=attempt.study_id,
+            action_id=attempt.action_id,
+            attempt_id=attempt.attempt_id,
+            manifest_revision=attempt.manifest_revision,
+            candidate_digest=attempt.candidate_digest,
+            input_digest=attempt.input_digest,
+            claim_generation=attempt.claim_generation,
+            executor_id="campaign-controller",
+            executor_version="1",
+            compute_profile_id=str(attempt.executor.get("compute_profile_id") or "unassigned"),
+            remote_process_identity={"kind": "unexecuted"},
+            started_at=now,
+            ended_at=now,
+            outcome="failed",
+            exit_reason=UNREGISTERED_EXECUTOR_KIND_CODE,
+            outputs=(
+                ArtifactOutput(
+                    path="executor_unavailable.json",
+                    sha256=hashlib.sha256(detail).hexdigest(),
+                    size_bytes=len(detail),
+                    schema_name=UNREGISTERED_EXECUTOR_SCHEMA,
+                ),
+            ),
+        )
+        envelope = self.sealer.envelope_bytes(manifest)
+        verified = self.sealer.verify_envelope_bytes(
+            envelope,
+            expected_workspace_id=attempt.workspace_id,
+            expected_campaign_id=attempt.campaign_id,
+            expected_study_id=attempt.study_id,
+            expected_action_id=attempt.action_id,
+            expected_attempt_id=attempt.attempt_id,
+            expected_manifest_revision=attempt.manifest_revision,
+            expected_candidate_digest=attempt.candidate_digest,
+            expected_input_digest=attempt.input_digest,
+            expected_claim_generation=attempt.claim_generation,
+        )
+        sealed_reference = (
+            f"bashgym-controller-state://{attempt.attempt_id}/sha256/"
+            f"{hashlib.sha256(envelope).hexdigest()}"
+        )
+        self.repository.settle_terminal_from_seal(
+            verified,
+            sealed_reference,
+            worker_id=self.worker_id,
+            now=now,
+        )
+        return "blocked"
 
     def _repair_allowed(self, attempt: ActionAttempt) -> bool:
         """Report whether the attempt's registered executor supports local repair."""
@@ -1962,8 +2041,13 @@ class CampaignWorker:
             resolved = self._resolve_reusable_completion(attempt)
             if resolved is not None:
                 return self._reuse_tick(attempt, *resolved, now=tick_at)
-        adapter = self._adapter_for(attempt)
+        try:
+            adapter = self._adapter_for(attempt)
+        except UnregisteredExecutorKindError:
+            return self._settle_unregistered_attempt(attempt, now=tick_at)
         if crash_after_seal:
+            if adapter.kind != "fake":
+                raise ValueError("crash_after_seal is only supported by the fake executor")
             return self._fake_tick(attempt, now=tick_at, crash_after_seal=True)
         return adapter.tick(self, attempt, now=tick_at)
 

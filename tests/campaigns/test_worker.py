@@ -4801,7 +4801,7 @@ def test_unknown_executor_kind_is_rejected_at_spec_validation():
         )
 
 
-def test_run_once_fails_closed_on_an_unregistered_executor_kind(tmp_path):
+def test_run_once_settles_a_claimed_attempt_whose_executor_kind_is_unregistered(tmp_path):
     class RecordingAdapter:
         kind = "recording"
         allowed_stages = frozenset({StageKind.FULL_TRAINING})
@@ -4821,7 +4821,7 @@ def test_run_once_fails_closed_on_an_unregistered_executor_kind(tmp_path):
     plan = seed_validated_study(repository)
     worker = make_worker(repository, tmp_path, "worker-a")
     assert worker.run_once(now=START) == "idle"
-    repository.schedule_action_under_leader(
+    scheduled = repository.schedule_action_under_leader(
         ActionSpec.model_validate(
             {
                 "workspace_id": "workspace-a",
@@ -4842,9 +4842,41 @@ def test_run_once_fails_closed_on_an_unregistered_executor_kind(tmp_path):
         expected_campaign_version=4,
         now=START,
     )
+    assert repository.get_campaign("workspace-a", "campaign-1").active_action_id == (
+        scheduled.action_id
+    )
 
-    with pytest.raises(RuntimeError, match="campaign_executor_kind_not_registered"):
-        worker.run_once(now=START + timedelta(seconds=1))
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "blocked"
+
+    settled = repository.get_attempt("workspace-a", scheduled.attempt_id)
+    assert settled.status == AttemptStatus.FAILED
+    assert repository.get_campaign("workspace-a", "campaign-1").active_action_id is None
+    failures = [
+        event
+        for _, event in repository.list_events("workspace-a", "campaign-1")
+        if event.event_type == "campaign:action-failed"
+    ]
+    assert len(failures) == 1
+    assert failures[0].payload["attempt_id"] == scheduled.attempt_id
+    assert failures[0].payload["exit_reason"] == "campaign_executor_kind_not_registered"
+    assert repository.list_unfinished_attempts() == []
+    assert worker.run_once(now=START + timedelta(seconds=2)) == "idle"
+
+
+def test_reconcile_marks_an_expired_unregistered_kind_attempt_unknown(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    schedule(repository, worker, plan)
+    with pytest.raises(SimulatedWorkerCrashError):
+        worker.run_once(now=START, crash_after_seal=True)
+    stranded = repository.list_unfinished_attempts()[0]
+    rewrite_executor_kind(repository, stranded.attempt_id, "vendor_gpu")
+
+    assert worker.reconcile_once(now=START + timedelta(minutes=5)) == "unknown"
+
+    after = repository.get_attempt("workspace-a", stranded.attempt_id)
+    assert after.status == AttemptStatus.UNKNOWN
 
 
 def test_reconcile_skips_and_warns_for_an_unregistered_executor_kind(tmp_path, caplog):
@@ -4860,7 +4892,7 @@ def test_reconcile_skips_and_warns_for_an_unregistered_executor_kind(tmp_path, c
     rewrite_executor_kind(repository, stranded.attempt_id, "vendor_gpu")
 
     with caplog.at_level(logging.WARNING, logger="bashgym.campaigns.worker"):
-        assert worker.reconcile_once(now=START + timedelta(minutes=5)) is None
+        assert worker.reconcile_once(now=START + timedelta(seconds=1)) is None
 
     assert "campaign_executor_kind_not_registered" in caplog.text
     assert stranded.attempt_id in caplog.text

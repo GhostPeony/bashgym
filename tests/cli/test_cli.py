@@ -37,6 +37,7 @@ def test_manifest_json_is_agent_readable(capsys):
     assert "research wait" in payload["commands"]
     assert "research start" in payload["commands"]
     assert "research submit-iteration" in payload["commands"]
+    assert "research clone-study" in payload["commands"]
     assert "research report" in payload["commands"]
     assert "campaign study status" in payload["commands"]
     assert "campaign attempts" in payload["commands"]
@@ -4568,3 +4569,60 @@ def test_service_status_does_not_create_a_missing_campaign_database(
     assert payload["ready"] is False
     assert payload["worker"]["controller"]["state"] == "offline"
     assert not config.database_path.exists()
+
+
+def test_research_clone_study_posts_changes_and_writes_the_submission(
+    monkeypatch, capsys, tmp_path
+):
+    class FakeCampaignClient:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append({"method": method, "path": path, "query": query, "payload": payload})
+            return {
+                "source": {"study_id": "study:2", "proposal_id": "proposal-source"},
+                "submission": {"proposal_id": "proposal-clone", "hypothesis": "h"},
+                "diff": {"training_recipe": {"from": {}, "to": {"seed": 23}}},
+            }
+
+    client = FakeCampaignClient()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+    output = tmp_path / "proposal.json"
+
+    exit_code = main(
+        [
+            "research",
+            "clone-study",
+            "--workspace-id",
+            "workspace-a",
+            "--credential-ref",
+            "BASHGYM_CAMPAIGN_CODEX_REFRESH",
+            "--json",
+            "--campaign",
+            "campaign-1",
+            "--study",
+            "study:2",
+            "--proposal-id",
+            "proposal-clone",
+            "--set",
+            'training_recipe={"schema_version": "recipe.v1", "seed": 23}',
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 0
+    assert client.calls[-1]["method"] == "POST"
+    assert client.calls[-1]["path"] == "/campaigns/campaign-1/studies/study%3A2/clone"
+    assert client.calls[-1]["payload"] == {
+        "workspace_id": "workspace-a",
+        "proposal_id": "proposal-clone",
+        "changes": {"training_recipe": {"schema_version": "recipe.v1", "seed": 23}},
+    }
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["diff"] == {"training_recipe": {"from": {}, "to": {"seed": 23}}}
+    assert json.loads(output.read_text(encoding="utf-8")) == {
+        "proposal_id": "proposal-clone",
+        "hypothesis": "h",
+    }

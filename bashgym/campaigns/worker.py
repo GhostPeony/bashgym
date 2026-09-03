@@ -64,6 +64,8 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
+from bashgym.campaigns.executor_adapters import build_default_registry
+from bashgym.campaigns.executor_registry import ExecutorRegistry
 from bashgym.campaigns.executors import (
     DevelopmentEvaluationConfig,
     DevelopmentEvaluationExecutor,
@@ -152,6 +154,7 @@ class CampaignWorker:
         source_repository_profiles: Mapping[str, ApprovedSourceRepositoryProfile] | None = None,
         lineage_manager: GitHypothesisLineageManager | None = None,
         autoresearch_loop: AutoResearchLoopCoordinator | None = None,
+        executor_registry: ExecutorRegistry | None = None,
     ):
         self.repository = repository
         self.artifact_root = artifact_root.resolve()
@@ -162,6 +165,7 @@ class CampaignWorker:
         self.action_ttl = action_ttl
         self._leader: LeaseRecord | None = None
         self._stop_requested = False
+        self.executor_registry = executor_registry or build_default_registry()
         self.executor = FakeExecutor(self.artifact_root, sealer)
         self.remote_output_sealer = RemoteOutputSealer(self.artifact_root, sealer)
         self.development_evaluation_executor = DevelopmentEvaluationExecutor(
@@ -358,29 +362,38 @@ class CampaignWorker:
             now=now,
         )
 
+    def _reconcile_remote(self, attempt: ActionAttempt, *, now: datetime) -> str | None:
+        """Adopt an unowned remote attempt, then advance its registered remote run."""
+
+        if (
+            attempt.lease_owner != self.worker_id
+            or attempt.lease_expires_at is None
+            or attempt.lease_expires_at <= now
+        ):
+            try:
+                attempt = self.repository.adopt_remote_attempt(
+                    attempt,
+                    self._leader,
+                    ttl=self.action_ttl,
+                    now=now,
+                )
+            except LeaseBusyError:
+                # Another live worker still holds this attempt's lease.
+                # Leave it for the owner (or for adoption after expiry)
+                # instead of failing the whole reconcile pass.
+                return None
+        return asyncio.run(self._remote_tick(attempt, now=now))
+
     def reconcile_once(self, *, now: datetime) -> str | None:
         """Register sealed results before marking expired uncertain work."""
 
         for attempt in self.repository.list_unfinished_attempts():
-            if attempt.executor.get("kind") == "ssh_remote":
-                if (
-                    attempt.lease_owner != self.worker_id
-                    or attempt.lease_expires_at is None
-                    or attempt.lease_expires_at <= now
-                ):
-                    try:
-                        attempt = self.repository.adopt_remote_attempt(
-                            attempt,
-                            self._leader,
-                            ttl=self.action_ttl,
-                            now=now,
-                        )
-                    except LeaseBusyError:
-                        # Another live worker still holds this attempt's lease.
-                        # Leave it for the owner (or for adoption after expiry)
-                        # instead of failing the whole reconcile pass.
-                        continue
-                return asyncio.run(self._remote_tick(attempt, now=now))
+            adapter = self.executor_registry.get(str(attempt.executor.get("kind", "fake")))
+            short_circuit = adapter.reconcile(self, attempt, now=now)
+            if short_circuit is not None:
+                return short_circuit
+            if not adapter.repair_allowed():
+                continue
             sealed_path = self.sealed_path(attempt)
             if sealed_path.is_dir():
                 manifest = self._verify(attempt, sealed_path)
@@ -407,6 +420,12 @@ class CampaignWorker:
                 self.repository.mark_expired_unknown(attempt, now=now)
                 return "unknown"
         return None
+
+    def _repair_allowed(self, attempt: ActionAttempt) -> bool:
+        """Report whether the attempt's registered executor supports local repair."""
+
+        kind = str(attempt.executor.get("kind", "fake"))
+        return self.executor_registry.get(kind).repair_allowed()
 
     def _repair_recovery(self, claim: RecoveryWorkClaim, *, now: datetime) -> str:
         """Reconcile only one exact existing sealed local attempt, or block safely."""
@@ -435,7 +454,7 @@ class CampaignWorker:
                 value
                 for value in self.repository.list_attempts(claim.workspace_id, claim.campaign_id)
                 if value.status in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}
-                and value.executor.get("kind") != "ssh_remote"
+                and self._repair_allowed(value)
                 and self.sealed_path(value).is_dir()
             )
             if len(candidates) != 1:
@@ -447,7 +466,7 @@ class CampaignWorker:
             claim = self.recovery.set_repair_target(claim, attempt.attempt_id)
 
         sealed_path = self.sealed_path(attempt)
-        if not sealed_path.is_dir() or attempt.executor.get("kind") == "ssh_remote":
+        if not sealed_path.is_dir() or not self._repair_allowed(attempt):
             self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
             return "recovery_blocked"
         try:
@@ -1823,6 +1842,31 @@ class CampaignWorker:
         )
         return "reused"
 
+    def _fake_tick(
+        self, attempt: ActionAttempt, *, now: datetime, crash_after_seal: bool = False
+    ) -> str:
+        request = FakeExecutionRequest(
+            workspace_id=attempt.workspace_id,
+            campaign_id=attempt.campaign_id,
+            study_id=attempt.study_id,
+            action_id=attempt.action_id,
+            attempt_id=attempt.attempt_id,
+            manifest_revision=attempt.manifest_revision,
+            candidate_digest=attempt.candidate_digest,
+            input_digest=attempt.input_digest,
+            claim_generation=attempt.claim_generation,
+            steps=int(attempt.executor.get("steps", 8)),
+        )
+        sealed_path, _manifest = self.executor.execute(request)
+        if crash_after_seal:
+            raise SimulatedWorkerCrashError(
+                "simulated crash after seal and before completion commit"
+            )
+        verified = self._verify(attempt, sealed_path)
+        self._ingest_sealed_metrics(attempt, sealed_path, now=now)
+        self.repository.complete_from_seal(verified, sealed_path, worker_id=self.worker_id, now=now)
+        return "completed"
+
     def run_once(
         self,
         *,
@@ -1872,36 +1916,14 @@ class CampaignWorker:
             resolved = self._resolve_reusable_completion(attempt)
             if resolved is not None:
                 return self._reuse_tick(attempt, *resolved, now=tick_at)
-        if attempt.executor.get("kind") == "ssh_remote":
-            return asyncio.run(self._remote_tick(attempt, now=tick_at))
-        if attempt.executor.get("kind") == "development_evaluation":
-            return self._development_evaluation_tick(attempt, now=tick_at)
-        request = FakeExecutionRequest(
-            workspace_id=attempt.workspace_id,
-            campaign_id=attempt.campaign_id,
-            study_id=attempt.study_id,
-            action_id=attempt.action_id,
-            attempt_id=attempt.attempt_id,
-            manifest_revision=attempt.manifest_revision,
-            candidate_digest=attempt.candidate_digest,
-            input_digest=attempt.input_digest,
-            claim_generation=attempt.claim_generation,
-            steps=int(attempt.executor.get("steps", 8)),
-        )
-        sealed_path, _manifest = self.executor.execute(request)
-        if crash_after_seal:
-            raise SimulatedWorkerCrashError(
-                "simulated crash after seal and before completion commit"
-            )
-        verified = self._verify(attempt, sealed_path)
-        self._ingest_sealed_metrics(attempt, sealed_path, now=tick_at)
-        self.repository.complete_from_seal(
-            verified,
-            sealed_path,
-            worker_id=self.worker_id,
-            now=tick_at,
-        )
-        return "completed"
+        kind = str(attempt.executor.get("kind", "fake"))
+        try:
+            adapter = self.executor_registry.get(kind)
+        except KeyError as exc:
+            raise RuntimeError("campaign_executor_kind_not_registered") from exc
+        if kind == "fake":
+            return self._fake_tick(attempt, now=tick_at, crash_after_seal=crash_after_seal)
+        return adapter.tick(self, attempt, now=tick_at)
 
     def run_forever(
         self,

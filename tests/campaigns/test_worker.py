@@ -4537,3 +4537,140 @@ def test_reuse_across_campaigns_binds_the_producing_campaign_dataset(tmp_path):
     assert request.remote_resident_dataset.campaign_id == "campaign-1"
     assert adapter.launch_count == 2
     assert repository.get_remote_run("workspace-a", fixture.consumer.attempt_id) is None
+
+
+def test_worker_dispatches_through_the_executor_registry(tmp_path):
+    from bashgym.campaigns.executor_adapters import build_default_registry
+    from bashgym.campaigns.executor_registry import ExecutorRegistry
+
+    class RecordingAdapter:
+        kind = "recording"
+        allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        ticks = 0
+
+        def tick(self, worker, attempt, *, now):
+            RecordingAdapter.ticks += 1
+            return worker._fake_tick(attempt, now=now)
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return True
+
+    registry = ExecutorRegistry()
+    for kind in build_default_registry().kinds():
+        registry.register(build_default_registry().get(kind))
+    registry.register(RecordingAdapter())
+    registry.freeze()
+
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        executor_registry=registry,
+    )
+    assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec.model_validate(
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "study_id": "study-1",
+                "stage_index": 0,
+                "stage": StageKind.FULL_TRAINING,
+                "input_contract": plan.items[0].input_contract,
+                "candidate_digest": fake_digest("candidate:study-1"),
+                "manifest_revision": 1,
+                "budget_unit": "gpu_hours",
+                "budget_reservation": 0.25,
+                "executor_kind": "recording",
+                "fake_steps": 6,
+            },
+            context={"executor_registry": registry},
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    assert RecordingAdapter.ticks == 1
+    assert repository.get_attempt("workspace-a", scheduled.attempt_id).status == (
+        AttemptStatus.COMPLETED
+    )
+
+
+def test_unknown_executor_kind_is_rejected_at_spec_validation():
+    with pytest.raises(ValueError, match="campaign_executor_kind_not_registered"):
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-1",
+            stage_index=0,
+            stage=StageKind.FULL_TRAINING,
+            input_contract={},
+            candidate_digest=fake_digest("candidate"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            executor_kind="not-a-kind",
+        )
+
+
+def test_run_once_fails_closed_on_an_unregistered_executor_kind(tmp_path):
+    from bashgym.campaigns.executor_adapters import build_default_registry
+    from bashgym.campaigns.executor_registry import ExecutorRegistry
+
+    class RecordingAdapter:
+        kind = "recording"
+        allowed_stages = frozenset({StageKind.FULL_TRAINING})
+
+        def tick(self, worker, attempt, *, now):
+            return worker._fake_tick(attempt, now=now)
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return True
+
+    defaults = build_default_registry()
+    scheduling_registry = ExecutorRegistry()
+    for kind in defaults.kinds():
+        scheduling_registry.register(defaults.get(kind))
+    scheduling_registry.register(RecordingAdapter())
+    scheduling_registry.freeze()
+
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    assert worker.run_once(now=START) == "idle"
+    repository.schedule_action_under_leader(
+        ActionSpec.model_validate(
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "study_id": "study-1",
+                "stage_index": 0,
+                "stage": StageKind.FULL_TRAINING,
+                "input_contract": plan.items[0].input_contract,
+                "candidate_digest": fake_digest("candidate:study-1"),
+                "manifest_revision": 1,
+                "budget_unit": "gpu_hours",
+                "budget_reservation": 0.25,
+                "executor_kind": "recording",
+            },
+            context={"executor_registry": scheduling_registry},
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+
+    with pytest.raises(RuntimeError, match="campaign_executor_kind_not_registered"):
+        worker.run_once(now=START + timedelta(seconds=1))

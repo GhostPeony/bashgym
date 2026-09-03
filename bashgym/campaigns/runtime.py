@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import functools
 import hashlib
 import json
 import math
@@ -12,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
@@ -58,6 +59,8 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
+from bashgym.campaigns.executor_adapters import build_default_registry
+from bashgym.campaigns.executor_registry import ExecutorRegistry
 from bashgym.campaigns.lineage import (
     canonical_model_manifest_digest,
     code_mutation_kind_for_variable,
@@ -169,6 +172,13 @@ def _settlement_actual_cost(
     return min(float(reservation_amount), direct)
 
 
+@functools.lru_cache(maxsize=1)
+def _default_registry() -> ExecutorRegistry:
+    """Build the process-wide registry of built-in and installed executor kinds."""
+
+    return build_default_registry()
+
+
 class ActionSpec(ContractModel):
     """Immutable logical stage input scheduled under the global leader fence."""
 
@@ -183,25 +193,20 @@ class ActionSpec(ContractModel):
     manifest_revision: int = Field(ge=1)
     budget_unit: str
     budget_reservation: float = Field(gt=0)
-    executor_kind: Literal["fake", "ssh_remote", "development_evaluation"] = "fake"
+    executor_kind: str = "fake"
     executor_config: dict[str, Any] = Field(default_factory=dict)
     fake_steps: int = Field(default=8, ge=2, le=10000)
     result_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     def model_post_init(self, __context: Any) -> None:
-        if self.executor_kind == "ssh_remote" and self.stage not in {
-            StageKind.DATA_BUILD,
-            StageKind.CONTRACT_EVALUATION,
-            StageKind.SMOKE_TRAINING,
-            StageKind.FULL_TRAINING,
-            StageKind.DEVELOPMENT_EVALUATION,
-        }:
-            raise ValueError("remote executor is restricted to approved compute stages")
-        if (
-            self.executor_kind == "development_evaluation"
-            and self.stage != StageKind.DEVELOPMENT_EVALUATION
-        ):
-            raise ValueError("development evaluation executor is restricted to its approved stage")
+        registry = __context.get("executor_registry") if isinstance(__context, dict) else None
+        registry = registry or _default_registry()
+        if not registry.is_registered(self.executor_kind):
+            raise ValueError("campaign_executor_kind_not_registered")
+        if self.stage not in registry.allowed_stages(self.executor_kind):
+            raise ValueError(
+                f"executor {self.executor_kind} is restricted to its registered stages"
+            )
 
     @property
     def input_digest(self) -> str:

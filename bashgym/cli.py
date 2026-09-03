@@ -6419,9 +6419,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="set_changes",
         action="append",
         metavar="KEY=JSON",
-        help="Override one cloneable field; repeatable",
+        help="Override one cloneable field; repeatable; overrides --changes on the same key",
     )
-    research_clone.add_argument("--changes", dest="changes_path", help="JSON file of changes")
+    research_clone.add_argument(
+        "--changes",
+        dest="changes_path",
+        help="JSON file of changes; a --set value for the same key overrides it",
+    )
     research_clone.add_argument(
         "--output", help="Write the prefilled submission here for research submit-iteration"
     )

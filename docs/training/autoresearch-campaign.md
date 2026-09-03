@@ -192,50 +192,76 @@ fields (hypothesis, recipes, stage plan, declared variables, and the rest),
 applies the given overrides, and reports exactly what changed. It does not
 submit anything.
 
+The parent rule above still applies to a cloned candidate, so the workable
+sequence clones the study of the proposal that will be its parent: the current
+reference, or another completed real proposal you mean to branch from. The
+clone must then declare the changed path and depend on the parent's study,
+both of which the clone command can set:
+
 ```bash
 bashgym research clone-study \
   --workspace-id <workspace> --credential-ref <credential-ref> \
-  --campaign <campaign-id> --study <study-id> \
+  --campaign <campaign-id> --study <parent-study-id> \
   --proposal-id <new-proposal-id> \
   --set training_recipe='{"seed":23}' \
+  --set primary_variable='"training_recipe.seed"' \
+  --set prerequisite_study_ids='["<parent-study-id>"]' \
   --output proposal.json --json
 ```
 
 Override one field with `--set KEY=JSON` (repeatable) or several at once with
-`--changes <file>`, and write the resulting proposal to `--output` in the
-shape `research submit-iteration --proposal` expects. The command prints the
-source study and proposal, the prefilled submission, and a diff of exactly
-which fields changed, each reported as `{"from": ..., "to": ...}`.
+`--changes <file>`; when both name the same key, `--set` wins. The command
+writes the resulting proposal to `--output` in the shape
+`research submit-iteration --proposal` expects, and prints the source study
+and proposal, the prefilled submission, and a diff of exactly which fields
+changed, each reported as `{"from": ..., "to": ...}`.
 
 Recipe fields (`dataset_recipe`, `training_recipe`, `evaluation_recipe`) merge
 at the top level: a `--set training_recipe='{"seed":23}'` change updates only
-`seed` and keeps every other key already in the source study's recipe; a key
-whose change value is `null` is removed instead of kept. Every other cloneable
-field is replaced outright by the value given. The printed diff always shows
-the field's full before-and-after recipe, not just the keys that moved, so a
-seed-only replication clone reports one changed `training_recipe` entry whose
-`to` value is the source recipe with only `seed` different, per the seed rule
-above.
+`seed` and keeps every other key already in the source study's recipe. Only a
+key the change itself names with a `null` value is removed; a `null` already
+stored in the source recipe survives. Every other cloneable field is replaced
+outright by the value given. The printed diff always shows the field's full
+before-and-after recipe, not just the keys that moved. The clone above reports
+three changed fields: `training_recipe`, plus the `primary_variable` and
+`prerequisite_study_ids` declarations. The source's `controlled_variables`
+carry over unchanged; add `--set controlled_variables=...` when the source
+holds the new primary variable constant, because a candidate whose primary
+variable also appears there is rejected with
+`proposal_primary_variable_is_controlled`.
 
-Review that diff, then edit `proposal.json` so `primary_variable` and
-`controlled_variables` declare the changed path and the variables held
-constant, per the candidate requirements above. Submit the reviewed proposal
-with:
+`research_context` is not cloneable. Its `retrieval_digest` covers the
+proposal ID the sources were collected for, so it cannot be rebound to a new
+proposal and the clone leaves it unset. When the candidate needs its own
+citations, collect them for the new proposal ID with
+`research context --proposal <new-proposal-id> --query <query>` and add the
+returned bundle to `proposal.json` before submitting. `acquisition` carries no
+such digest and is rebound to the new proposal ID, which the diff does not
+report as a change because nothing about the beliefs changed.
+
+Review the diff, then submit the reviewed proposal with:
 
 ```bash
 bashgym research submit-iteration \
   --workspace-id <workspace> --credential-ref <credential-ref> \
   --campaign <campaign-id> --expected-version <version> \
   --proposal proposal.json --role candidate \
-  --parent-proposal <source-proposal-id> \
+  --parent-proposal <parent-proposal-id> \
   --idempotency-key <key> --json
 ```
 
-where `<source-proposal-id>` is the cloned study's original proposal ID,
-reported as `source.proposal_id` in the clone response. The MCP tool
-`research_clone_study(campaign_id, study_id, proposal_id, changes)` returns
-the same `source`, `submission`, and `diff` fields and also submits nothing;
-call `research_submit_iteration` to submit the reviewed candidate.
+where `<parent-proposal-id>` is the proposal that owns `<parent-study-id>`,
+reported as `source.proposal_id` when the clone source is the parent itself.
+Submission is rejected with `autoresearch_candidate_parent_not_research_eligible`
+when that proposal has no completed real outcome, and with
+`autoresearch_candidate_must_depend_on_parent_study` when its study is missing
+from `prerequisite_study_ids`. The printed diff is relative to the clone
+source; the confound check that accepts or rejects the candidate is relative
+to `--parent-proposal`, so the two agree only when the source is the parent.
+
+The MCP tool `research_clone_study(campaign_id, study_id, proposal_id, changes)`
+returns the same `source`, `submission`, and `diff` fields and also submits
+nothing; call `research_submit_iteration` to submit the reviewed candidate.
 
 ### 5. Run the candidate stages
 

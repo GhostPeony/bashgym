@@ -4628,6 +4628,58 @@ def test_research_clone_study_posts_changes_and_writes_the_submission(
     }
 
 
+def test_research_clone_study_set_overrides_changes_on_a_key_collision(
+    monkeypatch, capsys, tmp_path
+):
+    class FakeCampaignClient:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append({"method": method, "path": path, "query": query, "payload": payload})
+            return {
+                "source": {"study_id": "study-2", "proposal_id": "proposal-source"},
+                "submission": {"proposal_id": "proposal-clone"},
+                "diff": {},
+            }
+
+    client = FakeCampaignClient()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+    changes = tmp_path / "changes.json"
+    changes.write_text(
+        json.dumps({"training_recipe": {"seed": 7}, "priority": 10}), encoding="utf-8"
+    )
+
+    exit_code = main(
+        [
+            "research",
+            "clone-study",
+            "--workspace-id",
+            "workspace-a",
+            "--credential-ref",
+            "BASHGYM_CAMPAIGN_CODEX_REFRESH",
+            "--json",
+            "--campaign",
+            "campaign-1",
+            "--study",
+            "study-2",
+            "--proposal-id",
+            "proposal-clone",
+            "--changes",
+            str(changes),
+            "--set",
+            'training_recipe={"seed": 23}',
+        ]
+    )
+
+    assert exit_code == 0
+    assert client.calls[-1]["payload"]["changes"] == {
+        "training_recipe": {"seed": 23},
+        "priority": 10,
+    }
+    capsys.readouterr()
+
+
 def test_research_clone_study_rejects_a_set_value_without_equals(monkeypatch, capsys):
     class FakeCampaignClient:
         def __init__(self):

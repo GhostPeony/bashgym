@@ -3724,7 +3724,6 @@ def test_cloned_submission_is_accepted_by_the_candidate_route(tmp_path):
             "workspace_id": "workspace-a",
             "expected_version": repository.get_campaign("workspace-a", "campaign-1").version,
             "parent_proposal_id": body["source"]["proposal_id"],
-            "changed_variables": ["training_recipe.seed"],
         },
     )
 

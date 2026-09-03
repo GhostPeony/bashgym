@@ -296,23 +296,36 @@ Do not make the user repeat choices that already exist in registered context.
    and finish with `campaign proposal lineage-capture`. Scalar recipe changes
    remain ledger-native.
    To build a candidate proposal from a prior study instead of writing one
-   from scratch, clone it: run `research clone-study --campaign <id> --study
-<id> --proposal-id <new-id> --set training_recipe='{"seed":23}' --output
-proposal.json`; review the printed diff and edit `proposal.json` so
-   `primary_variable` and `controlled_variables` declare the changed path and
-   the variables held constant; then submit with `research submit-iteration
---proposal proposal.json --role candidate --parent-proposal <source
-proposal>`, where `<source proposal>` is the cloned study's original
-   proposal ID (`source.proposal_id` in the clone response). Clone submits
-   nothing. A `--set`/`--changes` value for `dataset_recipe`,
+   from scratch, clone the study of the proposal that will be its parent: run
+   `research clone-study --campaign <id> --study <parent-study-id>
+--proposal-id <new-id> --set training_recipe='{"seed":23}' --set
+primary_variable='"training_recipe.seed"' --set
+prerequisite_study_ids='["<parent-study-id>"]' --output proposal.json`; review
+   the printed diff; then submit with `research submit-iteration --proposal
+proposal.json --role candidate --parent-proposal <parent-proposal-id>`, where
+   `<parent-proposal-id>` owns `<parent-study-id>` and is `source.proposal_id`
+   in the clone response when the clone source is the parent itself. The
+   candidate is rejected with
+   `autoresearch_candidate_parent_not_research_eligible` when the parent has no
+   completed real outcome and with
+   `autoresearch_candidate_must_depend_on_parent_study` when the parent's study
+   is absent from `prerequisite_study_ids`; the clone never adds it for you.
+   Clone submits nothing. A `--set`/`--changes` value for `dataset_recipe`,
    `training_recipe`, or `evaluation_recipe` merges at the top level into the
-   source recipe (a `null` value removes that key), so a seed-only
-   replication clone changes only `seed`; every other cloneable field is
-   replaced outright, and the printed diff always shows the field's full
-   before/after recipe. The MCP equivalent is `research_clone_study(campaign_id,
-study_id, proposal_id, changes)`, which returns the same `source`,
-   `submission`, and `diff` fields; call `research_submit_iteration` to
-   submit the reviewed candidate.
+   source recipe (only a key the change names with `null` is removed; a stored
+   `null` survives), so a seed-only replication clone changes only `seed`;
+   every other cloneable field is replaced outright, `--set` wins over
+   `--changes` on the same key, and the printed diff always shows the field's
+   full before/after recipe. `research_context` is not cloneable because its
+   `retrieval_digest` covers the source proposal ID; the clone leaves it unset,
+   so run `research context` for the new proposal ID when the candidate needs
+   citations. `acquisition` is rebound to the new proposal ID and is not
+   reported as a change. The diff is relative to the clone source while the
+   confound check is relative to `--parent-proposal`, so they agree only when
+   the source is the parent. The MCP equivalent is
+   `research_clone_study(campaign_id, study_id, proposal_id, changes)`, which
+   returns the same `source`, `submission`, and `diff` fields; call
+   `research_submit_iteration` to submit the reviewed candidate.
 8. Evaluate every candidate on the pinned suite and ingest the exact run,
    attempt, artifact, and evaluation lineage. The primary metric comes from the
    evaluator, not training loss. Smoke or simulated results prove wiring only;

@@ -197,6 +197,14 @@ dataset. Training consumes the declared dataset and starting-model binding.
 Evaluation consumes the trained output and the same pinned suite used by the
 baseline.
 
+A stage plan item may declare the stages it consumes. In version one those edges
+are declarative: the runtime binds stage data by strict adjacency, so full
+training reads the data build immediately before it and development evaluation
+reads the full training immediately before it. A plan whose declared edge for
+either of those two stages disagrees with that adjacency is rejected when the
+plan is validated. Other stages may declare edges freely; nothing binds data
+from them yet.
+
 A data build on registered compute whose content key matches a data build
 already completed in the workspace is reused instead of executed again. The
 reusing study still records its own attempt and its own sealed manifest; that
@@ -602,8 +610,11 @@ adjacent stages:
 A reused stage points at the source bytes rather than copying them. Before a
 consumer binds remote-resident data, it resolves the reuse link to the attempt
 that executed the build, so training and evaluation read that attempt's dataset
-path, digest, and registered dataset version. A link may chain across several
-reusing studies; every hop resolves to the one attempt that produced the bytes.
+path, digest, and registered dataset version. The worker records one hop: a
+reusing study's link always names the attempt that executed, so repeated reuse
+of one result cannot grow a chain. Multi-hop links stored before that rule are
+still tolerated on read, and every hop resolves to the one attempt that produced
+the bytes.
 
 The worker verifies stage manifests and the evaluation projector checks the
 sealed result before recording a real metric. If an execution target cannot

@@ -241,11 +241,8 @@ test('snapshot validator accepts any registered executor kind in active work', (
     })
 
   assert.equal(
-    validateCampaignSnapshot(
-      withExecutor('plugin_executor'),
-      base.workspace_id,
-      base.campaign_id
-    )?.active_work?.executor_type,
+    validateCampaignSnapshot(withExecutor('plugin_executor'), base.workspace_id, base.campaign_id)
+      ?.active_work?.executor_type,
     'plugin_executor'
   )
   assert.equal(

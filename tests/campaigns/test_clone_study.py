@@ -66,6 +66,62 @@ def test_clone_must_use_a_new_proposal_id() -> None:
     assert excinfo.value.code == "clone_proposal_id_reused"
 
 
+def test_recipe_change_merges_shallowly_and_keeps_other_keys() -> None:
+    source = _proposal().model_copy(
+        update={
+            "training_recipe": {
+                "learning_rate": 0.0001,
+                "seed": 7,
+                "max_steps": 500,
+            }
+        }
+    )
+
+    submission = clone_proposal_submission(
+        source, proposal_id="candidate-2", changes={"training_recipe": {"seed": 23}}
+    )
+
+    assert submission.training_recipe == {
+        "learning_rate": 0.0001,
+        "seed": 23,
+        "max_steps": 500,
+    }
+    assert clone_diff(source, submission) == {
+        "training_recipe": {
+            "from": {"learning_rate": 0.0001, "seed": 7, "max_steps": 500},
+            "to": {"learning_rate": 0.0001, "seed": 23, "max_steps": 500},
+        }
+    }
+
+
+def test_recipe_change_with_a_none_value_removes_the_key() -> None:
+    source = _proposal().model_copy(
+        update={"training_recipe": {"learning_rate": 0.0001, "seed": 7}}
+    )
+
+    submission = clone_proposal_submission(
+        source, proposal_id="candidate-2", changes={"training_recipe": {"seed": None}}
+    )
+
+    assert submission.training_recipe == {"learning_rate": 0.0001}
+    assert clone_diff(source, submission) == {
+        "training_recipe": {
+            "from": {"learning_rate": 0.0001, "seed": 7},
+            "to": {"learning_rate": 0.0001},
+        }
+    }
+
+
+@pytest.mark.parametrize("field", ["dataset_recipe", "training_recipe", "evaluation_recipe"])
+def test_a_non_mapping_recipe_change_is_rejected(field) -> None:
+    with pytest.raises(CloneStudyError) as excinfo:
+        clone_proposal_submission(
+            _proposal(), proposal_id="candidate-2", changes={field: ["not", "a", "mapping"]}
+        )
+
+    assert excinfo.value.code == "clone_change_not_allowed"
+
+
 def test_clone_with_non_empty_required_capabilities() -> None:
     source = _proposal().model_copy(
         update={

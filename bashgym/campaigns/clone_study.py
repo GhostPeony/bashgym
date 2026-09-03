@@ -28,6 +28,8 @@ CLONEABLE_FIELDS: tuple[str, ...] = (
     "acquisition",
 )
 
+_RECIPE_FIELDS = frozenset({"dataset_recipe", "training_recipe", "evaluation_recipe"})
+
 
 class CloneStudyError(ValueError):
     def __init__(self, code: str) -> None:
@@ -41,7 +43,12 @@ def clone_proposal_submission(
     proposal_id: str,
     changes: Mapping[str, Any],
 ) -> StudyProposalSubmission:
-    """Copy the scientific fields of one proposal and apply bounded changes."""
+    """Copy the scientific fields of one proposal and apply bounded changes.
+
+    A change to `dataset_recipe`, `training_recipe`, or `evaluation_recipe` merges
+    shallowly into the stored recipe and drops any key whose change value is
+    `None`; every other cloneable field is replaced outright.
+    """
 
     if proposal_id == source.proposal_id:
         raise CloneStudyError("clone_proposal_id_reused")
@@ -49,7 +56,14 @@ def clone_proposal_submission(
     if disallowed:
         raise CloneStudyError("clone_change_not_allowed")
     payload: dict[str, Any] = {field: getattr(source, field) for field in CLONEABLE_FIELDS}
-    payload.update(changes)
+    for field, value in changes.items():
+        if field not in _RECIPE_FIELDS:
+            payload[field] = value
+            continue
+        if not isinstance(value, Mapping):
+            raise CloneStudyError("clone_change_not_allowed")
+        merged = {**payload[field], **value}
+        payload[field] = {key: item for key, item in merged.items() if item is not None}
     return StudyProposalSubmission(
         proposal_id=proposal_id,
         workspace_id=source.workspace_id,

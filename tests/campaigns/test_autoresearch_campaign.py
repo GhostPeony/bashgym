@@ -14,6 +14,7 @@ from bashgym.campaigns.autoresearch import (
     AutoResearchDiagnosticResult,
     AutoResearchHypothesisFamilyConclusion,
     AutoResearchInvariantError,
+    AutoResearchLedgerCommitContext,
     AutoResearchNextAction,
     AutoResearchOutcomeRecord,
     AutoResearchProposalControl,
@@ -32,11 +33,13 @@ from bashgym.campaigns.autoresearch import (
     build_autoresearch_template_registry,
     builtin_autoresearch_template_definitions,
     builtin_autoresearch_template_registry,
+    counts_as_experiment,
 )
 from bashgym.campaigns.contracts import (
     CampaignStatus,
     CampaignTrigger,
     CodeMutationKind,
+    FailureClass,
     StageDisposition,
     StageKind,
     StagePlan,
@@ -73,6 +76,7 @@ def make_spec(
     max_attempts: int = 3,
     target: float | None = 0.95,
     evaluation_binding: bool = False,
+    protected_metrics: tuple[ProtectedMetricGate, ...] = (),
 ):
     return AutoResearchCampaignSpec(
         workspace_id="workspace-a",
@@ -85,6 +89,7 @@ def make_spec(
             max_total_cost=3.0,
             target_metric=target,
             minimum_improvement=0.01,
+            protected_metrics=protected_metrics,
             deadline=datetime(2099, 7, 14, 12, 0, tzinfo=UTC),
         ),
         ledger_project_id="project-a" if evaluation_binding else None,
@@ -122,7 +127,14 @@ def test_template_method_thresholds_materialize_into_campaign_spec():
     )
 
 
-def fresh_core(tmp_path, *, max_attempts=3, target=0.95, evaluation_binding=False):
+def fresh_core(
+    tmp_path,
+    *,
+    max_attempts=3,
+    target=0.95,
+    evaluation_binding=False,
+    protected_metrics: tuple[ProtectedMetricGate, ...] = (),
+):
     path = tmp_path / "campaigns.sqlite3"
     repository = AutoResearchRepository(path)
     repository.initialize()
@@ -133,6 +145,7 @@ def fresh_core(tmp_path, *, max_attempts=3, target=0.95, evaluation_binding=Fals
             max_attempts=max_attempts,
             target=target,
             evaluation_binding=evaluation_binding,
+            protected_metrics=protected_metrics,
         )
     )
     return path, repository, core
@@ -866,6 +879,187 @@ def test_protected_metric_gate_blocks_a_primary_gain_with_a_regression() -> None
     assert AutoResearchRepository._protected_metric_failure(gates, incumbent, acceptable) is None
 
 
+def test_protected_metric_margins_report_headroom_and_breach() -> None:
+    incumbent = result(
+        "baseline", "study-baseline", "attempt-baseline", 0.50, role=ExperimentRole.BASELINE
+    ).model_copy(update={"metrics": {"mrr_at_10": 0.50, "valid_tool_calls": 0.98}})
+    candidate = result(
+        "candidate", "study-candidate", "attempt-candidate", 0.55, role=ExperimentRole.CANDIDATE
+    ).model_copy(update={"metrics": {"mrr_at_10": 0.55, "valid_tool_calls": 0.97}})
+    gates = (
+        ProtectedMetricGate(
+            metric_name="valid_tool_calls",
+            direction=MetricDirection.MAXIMIZE,
+            max_regression=0.02,
+        ),
+    )
+
+    margins = AutoResearchRepository._protected_metric_margins(gates, incumbent, candidate)
+
+    assert margins == {"valid_tool_calls": pytest.approx(0.01)}
+    breached = candidate.model_copy(
+        update={"metrics": {"mrr_at_10": 0.55, "valid_tool_calls": 0.90}}
+    )
+    assert AutoResearchRepository._protected_metric_margins(gates, incumbent, breached) == {
+        "valid_tool_calls": pytest.approx(-0.06)
+    }
+    assert AutoResearchRepository._protected_metric_failure(gates, incumbent, breached) == (
+        "valid_tool_calls"
+    )
+
+
+def test_legacy_decision_without_margins_replays_without_conflict(tmp_path):
+    """A decision_json row written before protected_metric_margins existed must still replay."""
+
+    _path, repository, core = fresh_core(
+        tmp_path,
+        max_attempts=4,
+        target=None,
+        evaluation_binding=True,
+        protected_metrics=(
+            ProtectedMetricGate(
+                metric_name="valid_tool_calls",
+                direction=MetricDirection.MAXIMIZE,
+                max_regression=0.02,
+            ),
+        ),
+    )
+    activate(core)
+    actor = principal(repository)
+
+    baseline = _recipe_proposal("baseline", learning_rate=0.001, seed=17)
+    core.submit_baseline(
+        baseline,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-baseline-legacy-margins",
+        idempotency_key="submit-baseline-legacy-margins",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline")
+    baseline_outcome = _authoritative_outcome(
+        "baseline",
+        baseline_study,
+        baseline_attempt,
+        0.50,
+        role=ExperimentRole.BASELINE,
+        decision=ResultDecision.BASELINE,
+        eligible_for_best=True,
+    )
+    baseline_outcome = baseline_outcome.model_copy(
+        update={
+            "result": baseline_outcome.result.model_copy(
+                update={"metrics": {"mrr_at_10": 0.50, "valid_tool_calls": 0.98}}
+            )
+        }
+    )
+    _insert_authoritative_outcome(repository, baseline_outcome)
+
+    candidate_submission = _recipe_proposal(
+        "candidate-legacy-margins", learning_rate=0.002, seed=17
+    ).model_copy(
+        update={
+            "primary_variable": "training_recipe.learning_rate",
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_controlled_candidate(
+        candidate_submission,
+        parent_proposal_id="baseline",
+        changed_variable="training_recipe.learning_rate",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-candidate-legacy-margins",
+        idempotency_key="submit-candidate-legacy-margins",
+    )
+
+    candidate_result = result(
+        "candidate-legacy-margins",
+        "study-candidate-legacy-margins",
+        "attempt-candidate-legacy-margins",
+        0.55,
+        role=ExperimentRole.CANDIDATE,
+    ).model_copy(update={"metrics": {"mrr_at_10": 0.55, "valid_tool_calls": 0.97}})
+
+    ledger = core.ledger
+    ledger.register_project(
+        ProjectSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            display_name="AutoResearch",
+            owner_actor_id="codex-agent",
+        )
+    )
+    ledger.register_experiment(
+        ExperimentSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            experiment_id="experiment-candidate-legacy-margins",
+            name="Candidate",
+            objective="Evaluate the candidate recipe.",
+        )
+    )
+    ledger.register_run(
+        RunSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            experiment_id="experiment-candidate-legacy-margins",
+            run_id="run-candidate-legacy-margins",
+            source_system="bashgym",
+            source_run_id="run-candidate-legacy-margins",
+            campaign_id="campaign-1",
+            run_kind="training",
+            task_type="retrieval",
+            training_method="lora",
+            status=RunStatus.COMPLETED,
+            context_status=ContextStatus.VERIFIED,
+            recipe_digest="d" * 64,
+            correlation_id="run-candidate-legacy-margins",
+        )
+    )
+    ledger_context = AutoResearchLedgerCommitContext(
+        project_id="project-a",
+        experiment_id="experiment-candidate-legacy-margins",
+        run_id="run-candidate-legacy-margins",
+        attempt_id="attempt-candidate-legacy-margins",
+        correlation_id="record-candidate-legacy-margins",
+    )
+
+    recorded = repository._record_autoresearch_result(
+        candidate_result, ledger_context=ledger_context
+    )
+    assert recorded.replayed is False
+    assert recorded.decision.protected_metric_margins == {"valid_tool_calls": pytest.approx(0.01)}
+
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            """
+            SELECT decision_json FROM autoresearch_results
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            ("workspace-a", "campaign-1", "candidate-legacy-margins"),
+        ).fetchone()
+        legacy_decision = json.loads(row["decision_json"])
+        del legacy_decision["protected_metric_margins"]
+        connection.execute(
+            """
+            UPDATE autoresearch_results SET decision_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            (
+                json.dumps(legacy_decision),
+                "workspace-a",
+                "campaign-1",
+                "candidate-legacy-margins",
+            ),
+        )
+
+    replayed = repository._record_autoresearch_result(
+        candidate_result, ledger_context=ledger_context
+    )
+    assert replayed.replayed is True
+    assert replayed.decision.protected_metric_margins == {}
+
+
 def test_result_write_rejects_unbounded_candidate_references_before_lineage_lookup(
     tmp_path,
 ):
@@ -1382,3 +1576,349 @@ def test_candidate_cannot_run_before_a_real_baseline(tmp_path):
             correlation_id="too-early",
             idempotency_key="too-early",
         )
+
+
+def _unseeded_verified_baseline(tmp_path):
+    _path, repository, core = fresh_core(tmp_path, max_attempts=4, target=None)
+    activate(core)
+    baseline = _recipe_proposal("baseline-seed", learning_rate=0.001, seed=17).model_copy(
+        update={"training_recipe": {"schema_version": "recipe.v1", "learning_rate": 0.001}}
+    )
+    core.submit_baseline(
+        baseline,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-baseline-seed",
+        idempotency_key="submit-baseline-seed",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline-seed")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline-seed",
+            baseline_study,
+            baseline_attempt,
+            0.5,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+    return repository, core, baseline_study
+
+
+def test_candidate_with_training_stage_requires_a_declared_seed(tmp_path) -> None:
+    repository, core, baseline_study = _unseeded_verified_baseline(tmp_path)
+    unseeded = _recipe_proposal("candidate-unseeded", learning_rate=0.002, seed=17).model_copy(
+        update={
+            "training_recipe": {"schema_version": "recipe.v1", "learning_rate": 0.002},
+            "prerequisite_study_ids": (baseline_study,),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.FULL_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Train the candidate.",
+                    ),
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Compare on the fixed suite.",
+                    ),
+                )
+            ),
+        }
+    )
+
+    with pytest.raises(AutoResearchInvariantError) as excinfo:
+        core.submit_candidate(
+            unseeded,
+            parent_proposal_id="baseline-seed",
+            changed_variables=("learning_rate",),
+            expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+            principal=principal(repository),
+            correlation_id="candidate-unseeded",
+            idempotency_key="candidate-unseeded",
+        )
+
+    assert "autoresearch_candidate_requires_training_seed" in str(excinfo.value)
+
+
+def test_legacy_real_result_replays_through_the_ledger_without_conflict(tmp_path, monkeypatch):
+    """A ledger event written before failure_class existed must still replay."""
+
+    _path, repository, core = fresh_core(
+        tmp_path, max_attempts=4, target=None, evaluation_binding=True
+    )
+    activate(core)
+    actor = principal(repository)
+
+    baseline = _recipe_proposal("baseline", learning_rate=0.001, seed=17)
+    core.submit_baseline(
+        baseline,
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-baseline-legacy-ledger",
+        idempotency_key="submit-baseline-legacy-ledger",
+    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline")
+    _insert_authoritative_outcome(
+        repository,
+        _authoritative_outcome(
+            "baseline",
+            baseline_study,
+            baseline_attempt,
+            0.50,
+            role=ExperimentRole.BASELINE,
+            decision=ResultDecision.BASELINE,
+            eligible_for_best=True,
+        ),
+    )
+
+    candidate_submission = _recipe_proposal(
+        "candidate-legacy-ledger", learning_rate=0.002, seed=17
+    ).model_copy(
+        update={
+            "primary_variable": "training_recipe.learning_rate",
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_controlled_candidate(
+        candidate_submission,
+        parent_proposal_id="baseline",
+        changed_variable="training_recipe.learning_rate",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="submit-candidate-legacy-ledger",
+        idempotency_key="submit-candidate-legacy-ledger",
+    )
+
+    candidate_result = result(
+        "candidate-legacy-ledger",
+        "study-candidate-legacy-ledger",
+        "attempt-candidate-legacy-ledger",
+        0.55,
+        role=ExperimentRole.CANDIDATE,
+    )
+    assert candidate_result.provenance == ExperimentProvenance.REAL
+    assert candidate_result.outcome == ExperimentOutcome.COMPLETED
+
+    ledger = core.ledger
+    ledger.register_project(
+        ProjectSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            display_name="AutoResearch",
+            owner_actor_id="codex-agent",
+        )
+    )
+    ledger.register_experiment(
+        ExperimentSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            experiment_id="experiment-candidate-legacy-ledger",
+            name="Candidate",
+            objective="Evaluate the candidate recipe.",
+        )
+    )
+    ledger.register_run(
+        RunSpec(
+            workspace_id="workspace-a",
+            project_id="project-a",
+            experiment_id="experiment-candidate-legacy-ledger",
+            run_id="run-candidate-legacy-ledger",
+            source_system="bashgym",
+            source_run_id="run-candidate-legacy-ledger",
+            campaign_id="campaign-1",
+            run_kind="training",
+            task_type="retrieval",
+            training_method="lora",
+            status=RunStatus.COMPLETED,
+            context_status=ContextStatus.VERIFIED,
+            recipe_digest="d" * 64,
+            correlation_id="run-candidate-legacy-ledger",
+        )
+    )
+    ledger_context = AutoResearchLedgerCommitContext(
+        project_id="project-a",
+        experiment_id="experiment-candidate-legacy-ledger",
+        run_id="run-candidate-legacy-ledger",
+        attempt_id="attempt-candidate-legacy-ledger",
+        correlation_id="record-candidate-legacy-ledger",
+    )
+
+    legacy_digest = canonical_hash(
+        candidate_result.model_dump(mode="json", exclude={"recorded_at", "failure_class"})
+    )
+    monkeypatch.setattr(
+        AutoResearchResult,
+        "result_digest",
+        property(
+            lambda self: canonical_hash(
+                self.model_dump(mode="json", exclude={"recorded_at", "failure_class"})
+            )
+        ),
+    )
+    recorded = repository._record_autoresearch_result(
+        candidate_result, ledger_context=ledger_context
+    )
+    assert recorded.replayed is False
+    monkeypatch.undo()
+
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            """
+            SELECT result_json, result_digest, decision_json FROM autoresearch_results
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            ("workspace-a", "campaign-1", "candidate-legacy-ledger"),
+        ).fetchone()
+        assert row["result_digest"] == legacy_digest
+        assert json.loads(row["decision_json"])["result_digest"] == legacy_digest
+        legacy_result = json.loads(row["result_json"])
+        del legacy_result["failure_class"]
+        connection.execute(
+            """
+            UPDATE autoresearch_results SET result_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            (
+                json.dumps(legacy_result),
+                "workspace-a",
+                "campaign-1",
+                "candidate-legacy-ledger",
+            ),
+        )
+    assert _stored_ledger_result_digest(repository) == legacy_digest
+
+    replayed = repository._record_autoresearch_result(
+        candidate_result, ledger_context=ledger_context
+    )
+
+    assert replayed.replayed is True
+    assert replayed.result.failure_class is None
+    assert replayed.decision.result_digest == legacy_digest
+    assert _stored_ledger_result_digest(repository) == legacy_digest
+
+
+def _stored_ledger_result_digest(repository) -> str:
+    with repository._connection() as connection:
+        row = connection.execute("""
+            SELECT payload_json FROM ledger_events
+            WHERE event_type = 'autoresearch_outcome_recorded'
+            """).fetchone()
+    return json.loads(row["payload_json"])["result_digest"]
+
+
+def test_legacy_result_without_failure_class_replays_without_conflict(tmp_path) -> None:
+    """A result_json row written before failure_class existed must still replay."""
+
+    repository, core, baseline_study = _unseeded_verified_baseline(tmp_path)
+    candidate = _recipe_proposal("candidate-legacy-class", learning_rate=0.002, seed=17).model_copy(
+        update={
+            "training_recipe": {"schema_version": "recipe.v1", "learning_rate": 0.002},
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_candidate(
+        candidate,
+        parent_proposal_id="baseline-seed",
+        changed_variables=("learning_rate",),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-candidate-legacy-class",
+        idempotency_key="submit-candidate-legacy-class",
+    )
+    study_id, attempt_id = select_and_finish(repository, "candidate-legacy-class", failed=True)
+    crashed = result(
+        "candidate-legacy-class", study_id, attempt_id, 0.0, role=ExperimentRole.CANDIDATE
+    ).model_copy(
+        update={
+            "outcome": ExperimentOutcome.CRASHED,
+            "metric_value": None,
+            "metrics": {},
+        }
+    )
+    recorded = repository._record_autoresearch_result(crashed)
+    assert recorded.replayed is False
+
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            """
+            SELECT result_json, decision_json FROM autoresearch_results
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            ("workspace-a", "campaign-1", "candidate-legacy-class"),
+        ).fetchone()
+        legacy_result = json.loads(row["result_json"])
+        del legacy_result["failure_class"]
+        legacy_digest = canonical_hash(
+            {key: value for key, value in legacy_result.items() if key != "recorded_at"}
+        )
+        legacy_decision = json.loads(row["decision_json"])
+        legacy_decision["result_digest"] = legacy_digest
+        connection.execute(
+            """
+            UPDATE autoresearch_results
+            SET result_json = ?, result_digest = ?, decision_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            (
+                json.dumps(legacy_result),
+                legacy_digest,
+                json.dumps(legacy_decision),
+                "workspace-a",
+                "campaign-1",
+                "candidate-legacy-class",
+            ),
+        )
+
+    replayed = repository._record_autoresearch_result(crashed)
+
+    assert replayed.replayed is True
+    assert replayed.result.failure_class is None
+
+
+def test_infrastructure_crash_spends_budget_but_not_an_attempt(tmp_path) -> None:
+    repository, core, baseline_study = _unseeded_verified_baseline(tmp_path)
+    candidate = _recipe_proposal("candidate-crash", learning_rate=0.002, seed=17).model_copy(
+        update={
+            "training_recipe": {"schema_version": "recipe.v1", "learning_rate": 0.002},
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+    core.submit_candidate(
+        candidate,
+        parent_proposal_id="baseline-seed",
+        changed_variables=("learning_rate",),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=principal(repository),
+        correlation_id="submit-candidate-crash",
+        idempotency_key="submit-candidate-crash",
+    )
+    candidate_study, candidate_attempt = select_and_finish(
+        repository, "candidate-crash", failed=True
+    )
+    before = core.state("workspace-a", "campaign-1", now=NOW)
+    crashed = result(
+        "candidate-crash", candidate_study, candidate_attempt, 0.0, role=ExperimentRole.CANDIDATE
+    ).model_copy(
+        update={
+            "outcome": ExperimentOutcome.CRASHED,
+            "metric_value": None,
+            "metrics": {},
+            "actual_cost": 0.3,
+            "failure_class": FailureClass.INFRASTRUCTURE,
+        }
+    )
+    assert counts_as_experiment(crashed) is False
+    assert (
+        counts_as_experiment(crashed.model_copy(update={"failure_class": FailureClass.EXECUTION}))
+        is True
+    )
+
+    core.record_result(crashed)
+    after = core.state("workspace-a", "campaign-1", now=NOW)
+
+    assert after.attempts_used == before.attempts_used
+    assert after.budget_used == pytest.approx(before.budget_used + 0.3)

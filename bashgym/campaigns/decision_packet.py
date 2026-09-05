@@ -24,7 +24,9 @@ from bashgym.campaigns.contracts import StudyProposal
 from bashgym.campaigns.method_selection import build_method_selection_packet
 from bashgym.campaigns.outcome_assessment import build_outcome_assessment
 from bashgym.campaigns.research_diagnostics import AutoResearchDiagnostics
+from bashgym.campaigns.result_reuse import NO_REUSE_LINKS, attempts_with_reuse_sources
 from bashgym.campaigns.tmax_recipe import TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA
+from bashgym.campaigns.training_seed import training_seed
 
 _MAX_SIGNALS = 5
 _MAX_CHECKPOINTS = 5
@@ -46,12 +48,17 @@ _AGENT_ACTIONS = frozenset(
 def latest_data_quality_for_outcome(
     dataset_versions: Sequence[Mapping[str, Any]],
     outcome: AutoResearchOutcomeRecord | None,
+    reuse_links: Mapping[str, str] = NO_REUSE_LINKS,
 ) -> dict[str, Any] | None:
-    """Select quality metadata bound to one of the outcome's exact attempts."""
+    """Select quality metadata bound to one of the outcome's exact attempts.
+
+    A study whose data build was reused registers no dataset version of its own, so
+    the attempt that executed that build is searched alongside the study's own.
+    """
 
     if outcome is None:
         return None
-    attempt_ids = frozenset(outcome.result.attempt_ids)
+    attempt_ids = attempts_with_reuse_sources(outcome.result.attempt_ids, reuse_links)
     for version in reversed(dataset_versions):
         metadata = version.get("metadata")
         if not isinstance(metadata, Mapping):
@@ -89,6 +96,8 @@ def _project_last_experiment(
         ),
         "hypothesis": proposal.hypothesis,
         "changed_variable": proposal.primary_variable,
+        "controlled_variables": list(proposal.controlled_variables),
+        "training_seed": training_seed(proposal.training_recipe),
         "expected_outcome": proposal.expected_outcome,
         "falsification_criterion": proposal.falsification_criterion,
         "stages": [item.stage.value for item in proposal.stage_plan.items],
@@ -110,6 +119,7 @@ def _project_result(outcome: AutoResearchOutcomeRecord | None) -> dict[str, Any]
         "decision": decision.decision.value,
         "reason_code": decision.reason_code,
         "improvement": decision.improvement,
+        "protected_metric_margins": dict(sorted(decision.protected_metric_margins.items())),
     }
 
 
@@ -366,6 +376,11 @@ def build_decision_packet(
                 decision=latest_outcome.decision.decision.value,
                 reason_code=latest_outcome.decision.reason_code,
                 failure_analysis=failure_analysis,
+                failure_class=(
+                    latest_outcome.result.failure_class.value
+                    if latest_outcome.result.failure_class
+                    else None
+                ),
             )
             if latest_outcome is not None
             else None

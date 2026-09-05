@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ import pytest
 
 from bashgym._compat import UTC
 from bashgym.campaigns import remote as remote_contracts
-from bashgym.campaigns.artifacts import SEAL_FILENAME, ArtifactSealer
+from bashgym.campaigns.artifacts import SEAL_FILENAME, ArtifactSealer, ArtifactSealError
 from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.autoresearch import (
     AutoResearchCampaignCore,
@@ -22,6 +23,12 @@ from bashgym.campaigns.autoresearch import (
     ExperimentRole,
     MetricDirection,
 )
+from bashgym.campaigns.autoresearch_dataset import (
+    AUTORESEARCH_DATASET_RECEIPT_FILENAME,
+    AutoResearchDatasetFile,
+    AutoResearchDatasetQuality,
+    AutoResearchDatasetReceipt,
+)
 from bashgym.campaigns.autoresearch_evidence import (
     AUTORESEARCH_EVALUATION_CONTEXT_FILENAME,
     AUTORESEARCH_EVALUATION_FILENAME,
@@ -29,10 +36,13 @@ from bashgym.campaigns.autoresearch_evidence import (
 )
 from bashgym.campaigns.contracts import (
     ActionAttempt,
+    ActionStatus,
     AttemptStatus,
     AutonomyProfile,
     CampaignTrigger,
     CredentialKind,
+    FailureClass,
+    ManifestRevision,
     SealedActionResult,
     StageDisposition,
     StageKind,
@@ -50,6 +60,13 @@ from bashgym.campaigns.diagnostic_actions import (
     diagnostic_recipe_digest,
 )
 from bashgym.campaigns.evaluation import load_retrieval_evaluation_artifact
+from bashgym.campaigns.executor_adapters import (
+    DevelopmentEvaluationExecutorAdapter,
+    FakeExecutorAdapter,
+    SshRemoteExecutorAdapter,
+    build_default_registry,
+)
+from bashgym.campaigns.executor_registry import ExecutorRegistry
 from bashgym.campaigns.executors import FakeExecutionRequest, RemoteOutputSealer, fake_digest
 from bashgym.campaigns.human_oversight import HumanOversightRepository
 from bashgym.campaigns.lineage import canonical_model_manifest_digest
@@ -81,7 +98,9 @@ from bashgym.campaigns.runtime import (
     ActionSpec,
     CampaignArtifactRecord,
     CampaignRuntimeRepository,
+    _artifact_reference,
 )
+from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.worker import (
     CampaignWorker,
     SimulatedWorkerCrashError,
@@ -99,7 +118,14 @@ from bashgym.ledger.contracts import (
     ProjectSpec,
 )
 from bashgym.ledger.persistence import ExperimentLedgerRepository
-from tests.campaigns.test_persistence import campaign, create, transition
+from tests.campaigns.reuse_helpers import (
+    derived_data_build_result_key,
+    rewrite_result_manifest,
+    set_action_status,
+    set_reuse_link,
+)
+from tests.campaigns.test_persistence import campaign, create, manifest, transition
+from tests.campaigns.test_proposals import principal
 
 START = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
 
@@ -130,6 +156,8 @@ def seed_validated_study(
     *,
     sequence: int = 1,
     stage: StageKind = StageKind.FULL_TRAINING,
+    campaign_id: str = "campaign-1",
+    input_contract: dict | None = None,
 ) -> StagePlan:
     """Insert already-validated controller fixtures; proposal planning is a later slice."""
 
@@ -140,7 +168,7 @@ def seed_validated_study(
                 stage=stage,
                 disposition=StageDisposition.REQUIRED,
                 reason="Prove one durable fake execution lifecycle.",
-                input_contract={"fixture": study_id},
+                input_contract=input_contract or {"fixture": study_id},
                 output_contract={"schema": "training_metrics_jsonl.v1"},
             ),
         )
@@ -153,7 +181,7 @@ def seed_validated_study(
                 estimated_cost, creation_sequence, proposal_json, created_at
             ) VALUES (?, ?, ?, 'accepted', 50, 0.1, ?, '{}', ?)
             """,
-            ("workspace-a", "campaign-1", proposal_id, sequence, START.isoformat()),
+            ("workspace-a", campaign_id, proposal_id, sequence, START.isoformat()),
         )
         connection.execute(
             """
@@ -165,7 +193,7 @@ def seed_validated_study(
             """,
             (
                 "workspace-a",
-                "campaign-1",
+                campaign_id,
                 study_id,
                 proposal_id,
                 StudyStatus.VALIDATED.value,
@@ -212,9 +240,10 @@ def schedule(repository, worker, plan, *, study_id="study-1", version=4):
 
 
 class FakeRemoteAdapter:
-    def __init__(self, *, admitted=True, states=(RemoteRunState.RUNNING,)):
+    def __init__(self, *, admitted=True, states=(RemoteRunState.RUNNING,), failed_exit_code=7):
         self.admitted = admitted
         self.states = list(states)
+        self.failed_exit_code = failed_exit_code
         self.identity = None
         self.launch_count = 0
         self.discover_count = 0
@@ -241,6 +270,8 @@ class FakeRemoteAdapter:
     async def discover(self, request):
         self.discover_count += 1
         self.last_request = request
+        if self.identity is None or self.identity.run_id != request.run_id:
+            return None
         return self.identity
 
     async def launch(self, request):
@@ -264,7 +295,7 @@ class FakeRemoteAdapter:
         state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
         exit_code = 0 if state == RemoteRunState.COMPLETED else None
         if state == RemoteRunState.FAILED:
-            exit_code = 7
+            exit_code = self.failed_exit_code
         return RemoteObservation(
             identity=identity,
             state=state,
@@ -343,7 +374,7 @@ class FakeRemoteAdapter:
     async def inventory_terminal_evidence(self, identity, *, observation):
         self.collect_count += 1
         payloads = {
-            "exit_code": b"7\n",
+            "exit_code": f"{self.failed_exit_code}\n".encode(),
             "launch_manifest.json": b"{}",
             "training.log": b"failed\n",
         }
@@ -503,6 +534,7 @@ def test_diagnostic_remote_request_is_worker_owned_and_restart_deterministic(tmp
         candidate_digest=fake_digest("candidate:study-1"),
         manifest_revision=1,
         stage=StageKind.CONTRACT_EVALUATION,
+        stage_index=0,
         executor=executor,
         created_at=START,
         updated_at=START,
@@ -805,6 +837,7 @@ def test_evaluation_remote_request_regenerates_context_and_revalidates_sealed_mo
         candidate_digest=fake_digest("candidate:study-1"),
         manifest_revision=1,
         stage=StageKind.FULL_TRAINING,
+        stage_index=1,
         sealed_result_uri=str(tmp_path / "sealed-training"),
         created_at=START,
         updated_at=START,
@@ -975,6 +1008,7 @@ def test_evaluation_remote_request_regenerates_context_and_revalidates_sealed_mo
         candidate_digest=training_attempt.candidate_digest,
         manifest_revision=1,
         stage=StageKind.DEVELOPMENT_EVALUATION,
+        stage_index=2,
         executor={"kind": "ssh_remote", **executor_config},
         created_at=START,
         updated_at=START,
@@ -2599,6 +2633,28 @@ def test_failed_remote_attempt_seals_evidence_and_settles_budget(tmp_path):
     assert study_status == StudyStatus.EXECUTION_FAILED.value
 
 
+def test_killed_remote_attempt_is_classified_as_infrastructure(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    adapter = FakeRemoteAdapter(states=(RemoteRunState.FAILED,), failed_exit_code=137)
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+    )
+    scheduled = schedule_remote(repository, worker, plan, tmp_path)
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_failed"
+    manifest = repository.get_attempt_result_manifest("workspace-a", scheduled.attempt_id)
+    assert manifest.failure_class == FailureClass.INFRASTRUCTURE
+    events = repository.list_events("workspace-a", "campaign-1")
+    failed_events = [event for _, event in events if event.event_type == "campaign:action-failed"]
+    assert failed_events[-1].payload["failure_class"] == "infrastructure"
+
+
 def test_campaign_cancel_terminates_remote_group_and_settles_cancelled(tmp_path):
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository)
@@ -3115,3 +3171,1788 @@ def test_reconcile_skips_remote_attempt_leased_by_a_live_foreign_worker(tmp_path
     ]
     assert refreshed.lease_owner == claimed.lease_owner
     assert refreshed.claim_generation == claimed.claim_generation
+
+
+def test_find_reusable_completion_returns_newest_completed_match(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    key = "d" * 64
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-1",
+            stage_index=0,
+            stage=StageKind.FULL_TRAINING,
+            input_contract=plan.items[0].input_contract,
+            candidate_digest=fake_digest("candidate:study-1"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            fake_steps=6,
+            result_key=key,
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+    assert (
+        repository.find_reusable_completion(
+            "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id="none"
+        )
+        is None
+    )
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+
+    found = repository.find_reusable_completion(
+        "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id="none"
+    )
+    assert found is not None
+    assert found.attempt.attempt_id == scheduled.attempt_id
+    assert found.manifest.attempt_id == scheduled.attempt_id
+    assert set(found.artifact_metadata_by_path) == {
+        output.path for output in found.manifest.outputs
+    }
+    for value in found.artifact_metadata_by_path.values():
+        assert "attempt_id" not in value
+
+    # Give one output real metadata beyond the attempt_id every artifact carries, so
+    # the mapping above cannot be satisfied by the {} fallback alone.
+    target_path = found.manifest.outputs[0].path
+    target_uri = _artifact_reference(str(found.attempt.sealed_result_uri), target_path)
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaign_artifacts SET metadata_json = ? WHERE workspace_id = ? AND uri = ?",
+            (
+                json.dumps({"attempt_id": found.attempt.attempt_id, "checkpoint_step": 3}),
+                "workspace-a",
+                target_uri,
+            ),
+        )
+    enriched = repository.find_reusable_completion(
+        "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id="none"
+    )
+    assert enriched is not None
+    assert enriched.artifact_metadata_by_path[target_path] == {"checkpoint_step": 3}
+
+    assert (
+        repository.find_reusable_completion(
+            "workspace-a",
+            key,
+            stage=StageKind.FULL_TRAINING,
+            exclude_action_id=scheduled.action_id,
+        )
+        is None
+    )
+    outputs = repository.completed_stage_outputs(
+        "workspace-a", "campaign-1", "study-1", StageKind.FULL_TRAINING
+    )
+    assert outputs == found.manifest.outputs
+
+
+def test_find_reusable_completion_prefers_the_newest_match_in_the_same_workspace(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plans = {
+        study_id: seed_validated_study(repository, study_id, sequence=index)
+        for index, study_id in enumerate(("study-1", "study-2"), start=1)
+    }
+    worker = make_worker(repository, tmp_path, "worker-a")
+    key = "e" * 64
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+
+    def schedule_with_key(study_id, version, now):
+        return repository.schedule_action_under_leader(
+            ActionSpec(
+                workspace_id="workspace-a",
+                campaign_id="campaign-1",
+                study_id=study_id,
+                stage_index=0,
+                stage=StageKind.FULL_TRAINING,
+                input_contract=plans[study_id].items[0].input_contract,
+                candidate_digest=fake_digest(f"candidate:{study_id}"),
+                manifest_revision=1,
+                budget_unit="gpu_hours",
+                budget_reservation=0.25,
+                fake_steps=6,
+                result_key=key,
+            ),
+            worker.leader,
+            expected_campaign_version=version,
+            now=now,
+        )
+
+    older = schedule_with_key("study-1", 4, START)
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+
+    newer = schedule_with_key("study-2", 6, START + timedelta(seconds=1))
+    # Training never reuses, so this executes even though it shares a content key.
+    assert worker.run_once(now=START + timedelta(seconds=30)) == "completed"
+
+    found = repository.find_reusable_completion(
+        "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id="none"
+    )
+    assert found is not None
+    assert found.attempt.attempt_id == newer.attempt_id
+
+    excluding_newer = repository.find_reusable_completion(
+        "workspace-a", key, stage=StageKind.FULL_TRAINING, exclude_action_id=newer.action_id
+    )
+    assert excluding_newer is not None
+    assert excluding_newer.attempt.attempt_id == older.attempt_id
+
+
+def test_completed_stage_outputs_filters_by_study_and_stage(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plans = {
+        study_id: seed_validated_study(repository, study_id, sequence=index)
+        for index, study_id in enumerate(("study-1", "study-2"), start=1)
+    }
+    worker = make_worker(repository, tmp_path, "worker-a")
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+
+    first = repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-1",
+            stage_index=0,
+            stage=StageKind.FULL_TRAINING,
+            input_contract=plans["study-1"].items[0].input_contract,
+            candidate_digest=fake_digest("candidate:study-1"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            fake_steps=6,
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+
+    repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-2",
+            stage_index=0,
+            stage=StageKind.FULL_TRAINING,
+            input_contract=plans["study-2"].items[0].input_contract,
+            candidate_digest=fake_digest("candidate:study-2"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            fake_steps=6,
+        ),
+        worker.leader,
+        expected_campaign_version=6,
+        now=START + timedelta(seconds=1),
+    )
+
+    assert (
+        repository.completed_stage_outputs(
+            "workspace-a", "campaign-1", "study-1", StageKind.DATA_BUILD
+        )
+        is None
+    )
+    assert (
+        repository.completed_stage_outputs(
+            "workspace-a", "campaign-1", "study-2", StageKind.FULL_TRAINING
+        )
+        is None
+    )
+
+    outputs = repository.completed_stage_outputs(
+        "workspace-a", "campaign-1", "study-1", StageKind.FULL_TRAINING
+    )
+    manifest = repository.get_attempt_result_manifest("workspace-a", first.attempt_id)
+    assert outputs == manifest.outputs
+
+
+def test_next_action_spec_carries_a_result_key_only_for_reusable_stages(tmp_path):
+    def memoize_recipes(repository: CampaignRuntimeRepository) -> None:
+        runtime = {"executor_kind": "fake", "memoize": True}
+        with repository._connection(immediate=True) as connection:
+            connection.execute(
+                """
+                UPDATE campaign_proposals SET proposal_json = ?
+                WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1'
+                  AND proposal_id = 'proposal-study-1'
+                """,
+                (
+                    json.dumps(
+                        {
+                            "primary_variable": "data.mixture",
+                            "dataset_recipe": {"schema_version": "dataset.v1", "runtime": runtime},
+                            "training_recipe": {
+                                "schema_version": "training.v1",
+                                "runtime": runtime,
+                            },
+                            "evaluation_recipe": {
+                                "schema_version": "evaluation.v1",
+                                "runtime": runtime,
+                            },
+                        }
+                    ),
+                ),
+            )
+
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository, stage=StageKind.DATA_BUILD)
+    memoize_recipes(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    assert worker.run_once(now=START) == "idle"
+
+    spec = repository.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        "study-1",
+        executor_profiles=worker.remote_executor_profiles,
+    )
+
+    assert spec.stage == StageKind.DATA_BUILD
+    assert spec.result_key is not None
+    assert len(spec.result_key) == 64
+
+    training = active_repository(tmp_path / "training.sqlite3")
+    seed_validated_study(training, stage=StageKind.FULL_TRAINING)
+    memoize_recipes(training)
+    training_worker = make_worker(training, tmp_path / "training", "worker-b")
+    assert training_worker.run_once(now=START) == "idle"
+
+    training_spec = training.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        "study-1",
+        executor_profiles=training_worker.remote_executor_profiles,
+    )
+
+    assert training_spec.stage == StageKind.FULL_TRAINING
+    assert training_spec.result_key is None
+
+    # A reusable stage with an unresolved upstream edge carries no key either. Only the data
+    # build is reusable, so the unresolved edge is declared rather than positional.
+    unresolved_plan = StagePlan(
+        items=(
+            StagePlanItem(
+                stage=StageKind.CONTRACT_EVALUATION,
+                disposition=StageDisposition.REQUIRED,
+                reason="Diagnose the failure cluster the data build targets.",
+                input_contract={"fixture": "study-1"},
+                output_contract={"schema": "autoresearch_diagnostic_evidence.v1"},
+            ),
+            StagePlanItem(
+                stage=StageKind.DATA_BUILD,
+                disposition=StageDisposition.REQUIRED,
+                reason="Build data from the diagnostic the previous stage produced.",
+                input_contract={"fixture": "study-1"},
+                output_contract={"schema": "autoresearch_dataset_receipt.v1"},
+                consumes=(StageKind.CONTRACT_EVALUATION,),
+            ),
+        )
+    )
+    assert unresolved_plan.consumed_stages(1) == (StageKind.CONTRACT_EVALUATION,)
+    with training._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE campaign_studies SET stage_plan_json = ?, current_stage_index = 1
+            WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1'
+              AND study_id = 'study-1'
+            """,
+            (unresolved_plan.model_dump_json(),),
+        )
+
+    unresolved_spec = training.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        "study-1",
+        executor_profiles=training_worker.remote_executor_profiles,
+    )
+
+    assert unresolved_spec.stage == StageKind.DATA_BUILD
+    assert unresolved_spec.result_key is None
+
+
+def seed_memoized_fake_data_builds(tmp_path):
+    """One repository and worker whose two data-build studies share a content key."""
+
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plans = {
+        study_id: seed_validated_study(
+            repository, study_id, sequence=index, stage=StageKind.DATA_BUILD
+        )
+        for index, study_id in enumerate(("study-1", "study-2"), start=1)
+    }
+    worker = make_worker(repository, tmp_path, "worker-a")
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+    return repository, worker, plans
+
+
+def schedule_fake_data_build(repository, worker, study_id, plan, now, *, result_key):
+    """Schedule one locally sealed fake data build under an explicit content key."""
+
+    return repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id=study_id,
+            stage_index=0,
+            stage=StageKind.DATA_BUILD,
+            input_contract=plan.items[0].input_contract,
+            candidate_digest=fake_digest(f"candidate:{study_id}"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            fake_steps=6,
+            result_key=result_key,
+        ),
+        worker.leader,
+        expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        now=now,
+    )
+
+
+def test_local_reuse_rejects_a_tampered_producer_manifest(tmp_path):
+    """A locally sealed producer row is bound to its sealed bytes before re-signing."""
+
+    repository, worker, plans = seed_memoized_fake_data_builds(tmp_path)
+    key = "e" * 64
+    producer = schedule_fake_data_build(
+        repository, worker, "study-1", plans["study-1"], START, result_key=key
+    )
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+
+    def tamper(payload):
+        payload["executor_id"] = "tampered-executor"
+        payload["outputs"][0]["schema_name"] = "tampered_schema.v1"
+
+    rewrite_result_manifest(repository, producer.attempt_id, tamper)
+    consumer = schedule_fake_data_build(
+        repository,
+        worker,
+        "study-2",
+        plans["study-2"],
+        START + timedelta(seconds=2),
+        result_key=key,
+    )
+
+    with pytest.raises(ArtifactSealError, match="campaign_artifact_seal_invalid"):
+        worker.run_once(now=START + timedelta(seconds=3))
+
+    assert worker.executor.execution_count == 1
+    reused = repository.get_attempt("workspace-a", consumer.attempt_id)
+    assert reused.status != AttemptStatus.COMPLETED
+    assert reused.sealed_result_uri is None
+    with pytest.raises(RecordNotFoundError):
+        repository.get_attempt_result_manifest("workspace-a", consumer.attempt_id)
+
+
+def test_identical_data_build_is_reused_across_studies_without_execution(tmp_path):
+    repository, worker, plans = seed_memoized_fake_data_builds(tmp_path)
+    key = "e" * 64
+
+    schedule_fake_data_build(repository, worker, "study-1", plans["study-1"], START, result_key=key)
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    schedule_fake_data_build(
+        repository,
+        worker,
+        "study-2",
+        plans["study-2"],
+        START + timedelta(seconds=2),
+        result_key=key,
+    )
+
+    assert worker.run_once(now=START + timedelta(seconds=3)) == "reused"
+
+    assert worker.executor.execution_count == 1
+    attempts = repository.list_attempts("workspace-a", "campaign-1")
+    completed = [item for item in attempts if item.status == AttemptStatus.COMPLETED]
+    assert len(completed) == 2
+    reused = next(item for item in completed if item.study_id == "study-2")
+    source = next(item for item in completed if item.study_id == "study-1")
+    manifest = repository.get_attempt_result_manifest("workspace-a", reused.attempt_id)
+    source_manifest = repository.get_attempt_result_manifest("workspace-a", source.attempt_id)
+    assert manifest.attempt_id == reused.attempt_id
+    assert manifest.action_id == reused.action_id
+    assert manifest.study_id == "study-2"
+    assert manifest.remote_process_identity == {
+        "kind": "reused",
+        "reused_from_attempt_id": source.attempt_id,
+        "reused_from_action_id": source.action_id,
+        "compute_profile_id": source_manifest.compute_profile_id,
+    }
+    assert manifest.log_reference is None
+    assert manifest.outputs == source_manifest.outputs
+    assert reused.sealed_result_uri != source.sealed_result_uri
+    reused_seal = Path(str(reused.sealed_result_uri))
+    for output in manifest.outputs:
+        assert (reused_seal / output.path).read_bytes() == (
+            Path(str(source.sealed_result_uri)) / output.path
+        ).read_bytes()
+    worker.sealer.verify(
+        reused_seal,
+        expected_workspace_id="workspace-a",
+        expected_attempt_id=reused.attempt_id,
+        expected_action_id=reused.action_id,
+    )
+    with repository._connection() as connection:
+        actual = connection.execute(
+            """
+            SELECT actual_delta FROM campaign_budget_ledger
+            WHERE entry_id = ?
+            """,
+            (f"budget-settle-{reused.action_id}",),
+        ).fetchone()[0]
+    assert actual == 0.0
+    events = repository.list_events("workspace-a", "campaign-1")
+    reuse_events = [
+        event
+        for _, event in events
+        if event.event_type == "campaign:action-completed"
+        and event.payload.get("reused_from_attempt_id") == source.attempt_id
+    ]
+    assert len(reuse_events) == 1
+    assert reuse_events[0].payload["attempt_id"] == reused.attempt_id
+
+
+class FakeDataBuildRemoteAdapter(FakeRemoteAdapter):
+    """Complete a remote DATA_BUILD with a dataset receipt and its generated rows."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        train = b'{"task":"terminal"}\n'
+        validation = b'{"task":"terminal-validation"}\n'
+        self.receipt = AutoResearchDatasetReceipt(
+            files=(
+                AutoResearchDatasetFile(
+                    path="dataset/train.jsonl",
+                    sha256=hashlib.sha256(train).hexdigest(),
+                    size_bytes=len(train),
+                    split="train",
+                    row_count=1,
+                ),
+                AutoResearchDatasetFile(
+                    path="dataset/validation.jsonl",
+                    sha256=hashlib.sha256(validation).hexdigest(),
+                    size_bytes=len(validation),
+                    split="validation",
+                    row_count=1,
+                ),
+            ),
+            generator={"kind": "nvidia_data_designer", "pipeline": "terminal_env_generation"},
+            quality=AutoResearchDatasetQuality(
+                generated_rows=3,
+                accepted_rows=2,
+                deterministic_verified_rows=2,
+                verification_failed_rows=1,
+                duplicate_rows_removed=0,
+                contamination_rows_removed=0,
+                verifier_digest="e" * 64,
+            ),
+        )
+        self.payloads = {
+            "exit_code": b"0\n",
+            "launch_manifest.json": b"{}",
+            "training.log": b"complete\n",
+            "dataset/train.jsonl": train,
+            "dataset/validation.jsonl": validation,
+            AUTORESEARCH_DATASET_RECEIPT_FILENAME: self.receipt.model_dump_json().encode(),
+        }
+
+    async def inventory_outputs(self, identity, request, *, observation):
+        self.collect_count += 1
+        return RemoteOutputInventory(
+            compute_profile_id=identity.compute_profile_id,
+            run_id=identity.run_id,
+            files=tuple(
+                RemoteOutputFile(
+                    path=path,
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    size_bytes=len(payload),
+                )
+                for path, payload in sorted(self.payloads.items())
+            ),
+        )
+
+    async def read_output_bytes(
+        self, identity, path, *, expected_sha256, expected_size_bytes, max_bytes
+    ):
+        del identity
+        payload = self.payloads[path]
+        assert hashlib.sha256(payload).hexdigest() == expected_sha256
+        assert len(payload) == expected_size_bytes
+        assert expected_size_bytes <= max_bytes
+        return payload
+
+
+def approved_data_build_profile(tmp_path):
+    script = tmp_path / "build_data.py"
+    config = tmp_path / "data-designer-config.json"
+    key = tmp_path / "data-build-key"
+    script.write_text("print('build data')\n", encoding="utf-8")
+    config.write_text("{}\n", encoding="utf-8")
+    key.write_text("test-only-key\n", encoding="utf-8")
+    stage = PinnedRemoteStageProfile(
+        stage=StageKind.DATA_BUILD,
+        script_path=script,
+        script_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
+        input_files=(config,),
+        input_sha256={config.name: hashlib.sha256(config.read_bytes()).hexdigest()},
+        output_paths=(AUTORESEARCH_DATASET_RECEIPT_FILENAME, "dataset"),
+        budget_unit="gpu_hours",
+        budget_reservation=0.25,
+    )
+    return ApprovedRemoteExecutorProfile(
+        profile_id="data-designer-v1",
+        profile_revision=1,
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="memexai-embedding-v1",
+        target_model_digest=canonical_hash(campaign().target_model.model_dump(mode="json")),
+        host="192.0.2.10",
+        username="trainer",
+        key_path=str(key),
+        remote_work_dir="~/bashgym-training",
+        stages=(stage,),
+    )
+
+
+def bind_generated_dataset_project(
+    repository, database, project_id="project-a", campaign_id="campaign-1"
+):
+    """Give the campaign manifest a ledger project so a data build can register its dataset."""
+
+    ledger = ExperimentLedgerRepository(database)
+    ledger.initialize()
+    ledger.register_project(
+        ProjectSpec(
+            workspace_id="workspace-a",
+            project_id=project_id,
+            display_name="Generated dataset fixture",
+            owner_actor_id="operator-a",
+        )
+    )
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            """
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", campaign_id),
+        ).fetchone()
+        payload = json.loads(row["manifest_json"])
+        payload["evaluation_plan"]["ledger_project_id"] = project_id
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                canonical_hash(payload),
+                "workspace-a",
+                campaign_id,
+            ),
+        )
+
+
+def test_remote_data_build_seal_is_reused_without_launching_a_second_run(tmp_path):
+    database = tmp_path / "campaigns.sqlite3"
+    repository = active_repository(database)
+    plans = {
+        study_id: seed_validated_study(
+            repository, study_id, sequence=index, stage=StageKind.DATA_BUILD
+        )
+        for index, study_id in enumerate(("study-1", "study-2"), start=1)
+    }
+    bind_generated_dataset_project(repository, database)
+    profile = approved_data_build_profile(tmp_path)
+    adapter = FakeDataBuildRemoteAdapter(states=(RemoteRunState.RUNNING, RemoteRunState.COMPLETED))
+    artifact_root = tmp_path / "artifacts"
+    worker = CampaignWorker(
+        repository,
+        artifact_root,
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles={("ssh-gpu-lab", "memexai-embedding-v1"): profile},
+    )
+    key = "f" * 64
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+
+    def schedule_with_key(study_id, now):
+        return repository.schedule_action_under_leader(
+            ActionSpec(
+                workspace_id="workspace-a",
+                campaign_id="campaign-1",
+                study_id=study_id,
+                stage_index=0,
+                stage=StageKind.DATA_BUILD,
+                input_contract=plans[study_id].items[0].input_contract,
+                candidate_digest=fake_digest(f"candidate:{study_id}"),
+                manifest_revision=1,
+                budget_unit="gpu_hours",
+                budget_reservation=0.25,
+                executor_kind="ssh_remote",
+                executor_config=remote_executor_config(
+                    profile, StageKind.DATA_BUILD, recipe_digest="e" * 64
+                ),
+                result_key=key,
+            ),
+            worker.leader,
+            expected_campaign_version=repository.get_campaign("workspace-a", "campaign-1").version,
+            now=now,
+        )
+
+    source_attempt = schedule_with_key("study-1", START)
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_running"
+    assert worker.run_once(now=START + timedelta(seconds=2)) == "completed"
+    reused_attempt = schedule_with_key("study-2", START + timedelta(seconds=3))
+
+    assert worker.run_once(now=START + timedelta(seconds=4)) == "reused"
+
+    assert adapter.launch_count == 1
+    assert repository.get_remote_run("workspace-a", reused_attempt.attempt_id) is None
+    assert repository.get_remote_run("workspace-a", source_attempt.attempt_id) is not None
+    assert not artifact_root.exists()
+    source = repository.get_attempt("workspace-a", source_attempt.attempt_id)
+    reused = repository.get_attempt("workspace-a", reused_attempt.attempt_id)
+    assert reused.status == AttemptStatus.COMPLETED
+    assert reused.stage == StageKind.DATA_BUILD
+    manifest = repository.get_attempt_result_manifest("workspace-a", reused.attempt_id)
+    source_manifest = repository.get_attempt_result_manifest("workspace-a", source.attempt_id)
+    assert manifest.remote_process_identity == {
+        "kind": "reused",
+        "reused_from_attempt_id": source.attempt_id,
+        "reused_from_action_id": source.action_id,
+        "compute_profile_id": source_manifest.compute_profile_id,
+    }
+    assert source_manifest.remote_process_identity["run_id"] == source.attempt_id
+    assert manifest.log_reference is None
+    assert manifest.resource_usage == ()
+    assert manifest.outputs == source_manifest.outputs
+    assert any(output.path == AUTORESEARCH_DATASET_RECEIPT_FILENAME for output in manifest.outputs)
+    expected_digest = hashlib.sha256(worker.sealer.envelope_bytes(manifest)).hexdigest()
+    assert reused.sealed_result_uri == (
+        f"bashgym-remote-seal://ssh-gpu-lab/{reused.attempt_id}/sha256/{expected_digest}"
+    )
+    assert reused.sealed_result_uri != source.sealed_result_uri
+    with repository._connection() as connection:
+        settled = connection.execute(
+            "SELECT actual_delta FROM campaign_budget_ledger WHERE entry_id = ?",
+            (f"budget-settle-{reused.action_id}",),
+        ).fetchone()[0]
+    assert settled == 0.0
+
+
+def approved_data_build_and_training_profile(tmp_path):
+    """One approved profile whose data build and full training share a compute target."""
+
+    data_build = approved_data_build_profile(tmp_path)
+    script = tmp_path / "train.py"
+    config = tmp_path / "trainer-config.json"
+    script.write_text("print('train')\n", encoding="utf-8")
+    config.write_text("{}\n", encoding="utf-8")
+    training = PinnedRemoteStageProfile(
+        stage=StageKind.FULL_TRAINING,
+        script_path=script,
+        script_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
+        input_files=(config,),
+        input_sha256={config.name: hashlib.sha256(config.read_bytes()).hexdigest()},
+        output_paths=("final",),
+        budget_unit="gpu_hours",
+        budget_reservation=0.25,
+    )
+    return ApprovedRemoteExecutorProfile(
+        **data_build.model_dump(
+            exclude={"profile_digest", "stages", "registered_base_model"},
+        ),
+        stages=(*data_build.stages, training),
+        registered_base_model=RegisteredRemoteModelSource(
+            source_id="registered-base-v1",
+            compute_profile_id="ssh-gpu-lab",
+            target_contract_key="memexai-embedding-v1",
+            model_digest=data_build.target_model_digest,
+            remote_model_path="/models/registered-base-v1",
+        ),
+    )
+
+
+SHARED_DATA_BUILD_INPUT = {"dataset_scope": "memexai-approved-training", "rows": 1000}
+
+
+def seed_data_build_then_training_study(
+    repository, study_id, *, sequence, campaign_id="campaign-1", input_contract=None
+):
+    """Seed a validated study whose full training consumes its own data build."""
+
+    plan = seed_validated_study(
+        repository,
+        study_id,
+        sequence=sequence,
+        stage=StageKind.DATA_BUILD,
+        campaign_id=campaign_id,
+        input_contract=input_contract,
+    )
+    extended = StagePlan(
+        items=(
+            *plan.items,
+            StagePlanItem(
+                stage=StageKind.FULL_TRAINING,
+                disposition=StageDisposition.REQUIRED,
+                reason="Consume the study's data build without copying its rows.",
+                input_contract={"fixture": study_id},
+                output_contract={"schema": "training_metrics_jsonl.v1"},
+                consumes=(StageKind.DATA_BUILD,),
+            ),
+        )
+    )
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE campaign_studies SET stage_plan_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND study_id = ?
+            """,
+            (extended.model_dump_json(), "workspace-a", campaign_id, study_id),
+        )
+    return extended
+
+
+def start_campaign(repository, campaign_id, *, campaign_manifest=None):
+    """Create and start one more campaign in the same workspace."""
+
+    value = campaign("workspace-a", campaign_id)
+    if campaign_manifest is None:
+        create(repository, value)
+    else:
+        repository.create_campaign(
+            value,
+            ManifestRevision(
+                workspace_id="workspace-a",
+                campaign_id=campaign_id,
+                revision=1,
+                manifest=campaign_manifest,
+                actor_id="codex-agent",
+                correlation_id=f"correlation-create-{campaign_id}",
+            ),
+            actor_id="codex-agent",
+            credential_kind=CredentialKind.ACCESS,
+            correlation_id=f"correlation-create-{campaign_id}",
+            idempotency_key=f"create-{campaign_id}",
+        )
+    for trigger, version, key in (
+        (CampaignTrigger.VALIDATE, 1, "validate"),
+        (CampaignTrigger.VALIDATION_PASSED, 2, "ready"),
+        (CampaignTrigger.START, 3, "start"),
+    ):
+        repository.transition_campaign(
+            "workspace-a",
+            campaign_id,
+            trigger,
+            expected_version=version,
+            actor_id="codex-agent",
+            credential_kind=CredentialKind.ACCESS,
+            correlation_id=f"correlation-{key}-{campaign_id}",
+            idempotency_key=f"{key}-{campaign_id}",
+        )
+
+
+def schedule_remote_data_build(
+    repository,
+    worker,
+    profile,
+    campaign_id,
+    study_id,
+    plan,
+    now,
+    *,
+    recipe_digest="e" * 64,
+):
+    """Schedule one data build under the content key its own campaign manifest derives."""
+
+    executor_config = remote_executor_config(
+        profile, StageKind.DATA_BUILD, recipe_digest=recipe_digest
+    )
+    return repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id=campaign_id,
+            study_id=study_id,
+            stage_index=0,
+            stage=StageKind.DATA_BUILD,
+            input_contract=plan.items[0].input_contract,
+            candidate_digest=fake_digest(f"candidate:{study_id}"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            executor_kind="ssh_remote",
+            executor_config=executor_config,
+            result_key=derived_data_build_result_key(
+                repository,
+                campaign_id,
+                stage_input=plan.items[0].input_contract,
+                executor_config=executor_config,
+                recipe_digest=recipe_digest,
+            ),
+        ),
+        worker.leader,
+        expected_campaign_version=repository.get_campaign("workspace-a", campaign_id).version,
+        now=now,
+    )
+
+
+def reuse_remote_data_build(tmp_path, *, consumer_campaign_id="campaign-1", consumer_manifest=None):
+    """Complete one remote data build, then let a second study reuse its sealed result."""
+
+    database = tmp_path / "campaigns.sqlite3"
+    repository = active_repository(database)
+    producer_plan = seed_validated_study(
+        repository,
+        "study-1",
+        sequence=1,
+        stage=StageKind.DATA_BUILD,
+        input_contract=SHARED_DATA_BUILD_INPUT,
+    )
+    bind_generated_dataset_project(repository, database)
+    if consumer_campaign_id != "campaign-1":
+        start_campaign(repository, consumer_campaign_id, campaign_manifest=consumer_manifest)
+    consumer_plan = seed_data_build_then_training_study(
+        repository,
+        "study-2",
+        sequence=2,
+        campaign_id=consumer_campaign_id,
+        input_contract=SHARED_DATA_BUILD_INPUT,
+    )
+    profile = approved_data_build_and_training_profile(tmp_path)
+    adapter = FakeDataBuildRemoteAdapter(states=(RemoteRunState.RUNNING, RemoteRunState.COMPLETED))
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        remote_adapters={"ssh-gpu-lab": adapter},
+        remote_executor_profiles={("ssh-gpu-lab", "memexai-embedding-v1"): profile},
+    )
+    if worker.leader is None:
+        assert worker.run_once(now=START) == "idle"
+    producer = schedule_remote_data_build(
+        repository, worker, profile, "campaign-1", "study-1", producer_plan, START
+    )
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "remote_running"
+    assert worker.run_once(now=START + timedelta(seconds=2)) == "completed"
+    consumer = schedule_remote_data_build(
+        repository,
+        worker,
+        profile,
+        consumer_campaign_id,
+        "study-2",
+        consumer_plan,
+        START + timedelta(seconds=3),
+    )
+    assert worker.run_once(now=START + timedelta(seconds=4)) == "reused"
+    assert adapter.launch_count == 1
+    return SimpleNamespace(
+        repository=repository,
+        worker=worker,
+        adapter=adapter,
+        profile=profile,
+        producer=producer,
+        consumer=consumer,
+        consumer_campaign_id=consumer_campaign_id,
+        consumer_plan=consumer_plan,
+    )
+
+
+def schedule_resident_dataset_training(fixture, resident, now):
+    """Schedule the consuming study's training against one resolved dataset source."""
+
+    return fixture.repository.schedule_action_under_leader(
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id=fixture.consumer_campaign_id,
+            study_id="study-2",
+            stage_index=1,
+            stage=StageKind.FULL_TRAINING,
+            input_contract=fixture.consumer_plan.items[1].input_contract,
+            candidate_digest=fake_digest("candidate:study-2"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            executor_kind="ssh_remote",
+            executor_config=remote_executor_config(
+                fixture.profile,
+                StageKind.FULL_TRAINING,
+                recipe_digest="e" * 64,
+                remote_resident_dataset=resident,
+            ),
+        ),
+        fixture.worker.leader,
+        expected_campaign_version=fixture.repository.get_campaign(
+            "workspace-a", fixture.consumer_campaign_id
+        ).version,
+        now=now,
+    )
+
+
+def test_training_after_a_reused_data_build_launches_against_the_producing_run(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    worker = fixture.worker
+    adapter = fixture.adapter
+
+    resident = repository.remote_resident_data_build_source(
+        "workspace-a", "campaign-1", "study-2", 1
+    )
+    assert resident.attempt_id == fixture.producer.attempt_id
+    assert resident.action_id == fixture.producer.action_id
+    assert resident.study_id == "study-1"
+    assert resident.stage_index == 0
+    assert resident.remote_dataset_path == (
+        f"/home/trainer/bashgym-training/{fixture.producer.attempt_id}/dataset"
+    )
+    assert resident.content_digest == adapter.receipt.content_digest
+
+    training_attempt = schedule_resident_dataset_training(
+        fixture, resident, START + timedelta(seconds=5)
+    )
+    # Holding the training run at RUNNING keeps this test on the launch inputs rather
+    # than output ingestion.
+    adapter.states = [RemoteRunState.RUNNING]
+
+    assert worker.run_once(now=START + timedelta(seconds=6)) == "remote_running"
+
+    request = adapter.last_request
+    assert request.run_id == training_attempt.attempt_id
+    assert request.remote_resident_dataset == resident
+    assert request.remote_resident_dataset.remote_dataset_path == (
+        f"/home/trainer/bashgym-training/{fixture.producer.attempt_id}/dataset"
+    )
+    assert adapter.launch_count == 2
+    assert repository.get_remote_run("workspace-a", fixture.consumer.attempt_id) is None
+    assert repository.get_remote_run("workspace-a", training_attempt.attempt_id) is not None
+
+    names_the_reusing_attempt = training_attempt.model_copy(deep=True)
+    names_the_reusing_attempt.executor["remote_resident_dataset"][
+        "attempt_id"
+    ] = fixture.consumer.attempt_id
+    with pytest.raises(RuntimeError, match="campaign_remote_training_dataset_invalid"):
+        worker._remote_request(names_the_reusing_attempt)
+
+    names_another_directory = training_attempt.model_copy(deep=True)
+    names_another_directory.executor["remote_resident_dataset"][
+        "remote_dataset_path"
+    ] = "/home/trainer/bashgym-training/elsewhere/dataset"
+    with pytest.raises(RuntimeError, match="campaign_remote_training_dataset_invalid"):
+        worker._remote_request(names_another_directory)
+
+    consumes_a_foreign_stage_edge = training_attempt.model_copy(update={"stage_index": 2})
+    with pytest.raises(RuntimeError, match="campaign_remote_training_dataset_invalid"):
+        worker._remote_request(consumes_a_foreign_stage_edge)
+
+
+def test_training_preflight_rejects_a_tampered_hop_in_the_reuse_chain(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    worker = fixture.worker
+    resident = fixture.repository.remote_resident_data_build_source(
+        "workspace-a", "campaign-1", "study-2", 1
+    )
+    training_attempt = schedule_resident_dataset_training(
+        fixture, resident, START + timedelta(seconds=5)
+    )
+    assert worker._remote_request(training_attempt).remote_resident_dataset == resident
+
+    # The producing manifest still describes the same outputs, dataset, and remote run, so
+    # resolution still succeeds; only its sealed envelope stops matching its seal reference.
+    rewrite_result_manifest(
+        fixture.repository,
+        fixture.producer.attempt_id,
+        lambda payload: payload.update({"exit_reason": "rewritten after sealing"}),
+    )
+    assert (
+        fixture.repository.remote_resident_data_build_source(
+            "workspace-a", "campaign-1", "study-2", 1
+        )
+        == resident
+    )
+
+    with pytest.raises(RuntimeError, match="campaign_remote_training_dataset_invalid"):
+        worker._remote_request(training_attempt)
+
+
+def test_reuse_link_resolves_only_to_a_completed_same_stage_source(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    consumer = repository.get_attempt("workspace-a", fixture.consumer.attempt_id)
+    producer = repository.get_attempt("workspace-a", fixture.producer.attempt_id)
+
+    chain = repository.reuse_source_chain(consumer)
+    assert [item.attempt_id for item, _manifest in chain] == [producer.attempt_id]
+    assert [manifest.attempt_id for _item, manifest in chain] == [producer.attempt_id]
+    assert repository.reuse_source_chain(producer) == ()
+    assert repository.reuse_source_attempt(consumer).attempt_id == producer.attempt_id
+    assert repository.reuse_source_attempt(producer).attempt_id == producer.attempt_id
+    assert (
+        repository.completed_data_build_attempt(
+            "workspace-a", "campaign-1", "study-2", 0
+        ).attempt_id
+        == consumer.attempt_id
+    )
+    with pytest.raises(CampaignPersistenceError, match="campaign_training_dataset_missing"):
+        repository.completed_data_build_attempt("workspace-a", "campaign-1", "study-2", 1)
+
+    set_reuse_link(repository, consumer.attempt_id, "attempt-does-not-exist")
+    with pytest.raises(CampaignPersistenceError, match="campaign_reuse_source_invalid"):
+        repository.reuse_source_attempt(consumer)
+
+    set_reuse_link(repository, consumer.attempt_id, consumer.attempt_id)
+    with pytest.raises(CampaignPersistenceError, match="campaign_reuse_source_invalid"):
+        repository.reuse_source_attempt(consumer)
+
+    pending_plan = seed_validated_study(
+        repository,
+        "study-3",
+        sequence=3,
+        stage=StageKind.DATA_BUILD,
+        input_contract=SHARED_DATA_BUILD_INPUT,
+    )
+    pending = schedule_remote_data_build(
+        repository,
+        fixture.worker,
+        fixture.profile,
+        "campaign-1",
+        "study-3",
+        pending_plan,
+        START + timedelta(seconds=5),
+    )
+    set_reuse_link(repository, consumer.attempt_id, pending.attempt_id)
+    with pytest.raises(CampaignPersistenceError, match="campaign_reuse_source_invalid"):
+        repository.reuse_source_attempt(consumer)
+
+    set_reuse_link(repository, consumer.attempt_id, producer.attempt_id)
+    assert repository.reuse_source_attempt(consumer).attempt_id == producer.attempt_id
+    set_action_status(repository, producer.action_id, ActionStatus.FAILED.value)
+    with pytest.raises(CampaignPersistenceError, match="campaign_reuse_source_invalid"):
+        repository.reuse_source_attempt(consumer)
+    set_action_status(repository, producer.action_id, ActionStatus.COMPLETED.value)
+
+    other_stage = consumer.model_copy(update={"stage": StageKind.FULL_TRAINING})
+    with pytest.raises(CampaignPersistenceError, match="campaign_reuse_source_invalid"):
+        repository.reuse_source_attempt(other_stage)
+
+
+def test_repeated_reuse_of_one_build_records_one_hop_to_the_executing_attempt(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    reusing = [fixture.consumer]
+    for index, study_id in enumerate(("study-3", "study-4"), start=3):
+        plan = seed_data_build_then_training_study(
+            repository, study_id, sequence=index, input_contract=SHARED_DATA_BUILD_INPUT
+        )
+        reusing.append(
+            schedule_remote_data_build(
+                repository,
+                fixture.worker,
+                fixture.profile,
+                "campaign-1",
+                study_id,
+                plan,
+                START + timedelta(seconds=index + 2),
+            )
+        )
+        assert fixture.worker.run_once(now=START + timedelta(seconds=index + 3)) == "reused"
+
+    assert fixture.adapter.launch_count == 1
+    for attempt in reusing:
+        manifest = repository.get_attempt_result_manifest("workspace-a", attempt.attempt_id)
+        assert manifest.remote_process_identity["reused_from_attempt_id"] == (
+            fixture.producer.attempt_id
+        )
+        assert manifest.remote_process_identity["reused_from_action_id"] == (
+            fixture.producer.action_id
+        )
+        assert len(repository.reuse_source_chain(attempt)) == 1
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {
+        attempt.attempt_id: fixture.producer.attempt_id for attempt in reusing
+    }
+    assert repository.reuse_source_links("workspace-a", "campaign-1") == {
+        attempt.attempt_id: fixture.producer.attempt_id for attempt in reusing
+    }
+    assert repository.resolved_reuse_links("workspace-a", "campaign-2") == {}
+
+
+def test_collapsed_map_follows_a_legacy_multi_hop_reuse_chain(tmp_path):
+    """Links written before write-time collapse name the matched attempt, not the producer."""
+
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    third_plan = seed_data_build_then_training_study(
+        repository, "study-3", sequence=3, input_contract=SHARED_DATA_BUILD_INPUT
+    )
+    third = schedule_remote_data_build(
+        repository,
+        fixture.worker,
+        fixture.profile,
+        "campaign-1",
+        "study-3",
+        third_plan,
+        START + timedelta(seconds=5),
+    )
+    assert fixture.worker.run_once(now=START + timedelta(seconds=6)) == "reused"
+    set_reuse_link(repository, third.attempt_id, fixture.consumer.attempt_id)
+
+    chain = repository.reuse_source_chain(repository.get_attempt("workspace-a", third.attempt_id))
+
+    assert [item.attempt_id for item, _manifest in chain] == [
+        fixture.consumer.attempt_id,
+        fixture.producer.attempt_id,
+    ]
+    assert repository.reuse_source_links("workspace-a", "campaign-1") == {
+        fixture.consumer.attempt_id: fixture.producer.attempt_id,
+        third.attempt_id: fixture.consumer.attempt_id,
+    }
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {
+        fixture.consumer.attempt_id: fixture.producer.attempt_id,
+        third.attempt_id: fixture.producer.attempt_id,
+    }
+
+
+def test_reuse_lookup_prefers_the_attempt_that_executed(tmp_path):
+    """The newest match is often itself a reusing attempt; the executed row wins."""
+
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    consumer = repository.get_attempt("workspace-a", fixture.consumer.attempt_id)
+    producer = repository.get_attempt("workspace-a", fixture.producer.attempt_id)
+    assert consumer.updated_at > producer.updated_at
+
+    match = repository.find_reusable_completion(
+        "workspace-a",
+        str(producer.result_key),
+        stage=StageKind.DATA_BUILD,
+        exclude_action_id="action-not-scheduled",
+    )
+
+    assert match is not None
+    assert match.attempt.attempt_id == producer.attempt_id
+
+
+def test_a_damaged_link_on_the_only_match_falls_through_to_execution(tmp_path, caplog):
+    """A cache miss costs one real launch, never a worker crash."""
+
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    set_reuse_link(repository, fixture.consumer.attempt_id, "attempt-does-not-exist")
+    set_action_status(repository, fixture.producer.action_id, ActionStatus.FAILED.value)
+    third_plan = seed_data_build_then_training_study(
+        repository, "study-3", sequence=3, input_contract=SHARED_DATA_BUILD_INPUT
+    )
+    third = schedule_remote_data_build(
+        repository,
+        fixture.worker,
+        fixture.profile,
+        "campaign-1",
+        "study-3",
+        third_plan,
+        START + timedelta(seconds=5),
+    )
+    fixture.adapter.states = [RemoteRunState.RUNNING]
+
+    with caplog.at_level(logging.WARNING, logger="bashgym.campaigns.worker"):
+        assert fixture.worker.run_once(now=START + timedelta(seconds=6)) == "remote_running"
+
+    assert fixture.adapter.launch_count == 2
+    assert repository.get_remote_run("workspace-a", third.attempt_id) is not None
+    assert fixture.consumer.attempt_id in caplog.text
+    assert "campaign_reuse_source_invalid" in caplog.text
+
+
+def test_reuse_links_drop_from_the_collapsed_map_without_failing_the_projection(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    consumer = fixture.consumer
+    stored = {consumer.attempt_id: fixture.producer.attempt_id}
+
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == stored
+
+    set_reuse_link(repository, consumer.attempt_id, consumer.attempt_id)
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {}
+    assert repository.reuse_source_links("workspace-a", "campaign-1") == {
+        consumer.attempt_id: consumer.attempt_id
+    }
+
+    set_reuse_link(repository, consumer.attempt_id, "attempt-does-not-exist")
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {}
+    assert repository.reuse_source_links("workspace-a", "campaign-1") == {
+        consumer.attempt_id: "attempt-does-not-exist"
+    }
+
+    set_reuse_link(repository, consumer.attempt_id, fixture.producer.attempt_id)
+    set_action_status(repository, fixture.producer.action_id, ActionStatus.FAILED.value)
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {}
+    set_action_status(repository, fixture.producer.action_id, ActionStatus.COMPLETED.value)
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == stored
+
+
+def test_reused_attempt_projects_its_producer_through_the_campaign_service(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path)
+    service = CampaignService(fixture.repository, export_root=tmp_path / "reports")
+    actor = principal(fixture.repository)
+
+    projected = {
+        item.attempt_id: item.reused_from_attempt_id
+        for item in service.attempts("workspace-a", "campaign-1", actor)
+    }
+
+    assert projected[fixture.consumer.attempt_id] == fixture.producer.attempt_id
+    assert projected[fixture.producer.attempt_id] is None
+
+
+def test_remote_reuse_rejects_a_tampered_producer_manifest(tmp_path):
+    """A stored producer row is re-signed under the consumer only after it verifies."""
+
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    third_plan = seed_data_build_then_training_study(
+        repository, "study-3", sequence=3, input_contract=SHARED_DATA_BUILD_INPUT
+    )
+    third = schedule_remote_data_build(
+        repository,
+        fixture.worker,
+        fixture.profile,
+        "campaign-1",
+        "study-3",
+        third_plan,
+        START + timedelta(seconds=5),
+    )
+
+    def tamper(payload):
+        payload["exit_reason"] = "rewritten in storage"
+
+    rewrite_result_manifest(repository, fixture.producer.attempt_id, tamper)
+
+    with pytest.raises(ValueError, match="remote dataset seal mismatch"):
+        fixture.worker.run_once(now=START + timedelta(seconds=6))
+
+    assert fixture.adapter.launch_count == 1
+    reused = repository.get_attempt("workspace-a", third.attempt_id)
+    assert reused.status != AttemptStatus.COMPLETED
+    assert reused.sealed_result_uri is None
+    with pytest.raises(RecordNotFoundError):
+        repository.get_attempt_result_manifest("workspace-a", third.attempt_id)
+
+
+def test_reuse_across_campaigns_ignores_budgets_and_the_evaluation_plan(tmp_path):
+    """Manifest sections a data build never reads do not partition the content key."""
+
+    relaxed = manifest().model_copy(
+        update={
+            "budget_limits": {"gpu_hours": 40.0},
+            "evaluation_plan": {"development_query_set": "dev-99-v9"},
+            "promotion_gates": {"mrr_at_10_delta_min": 0.5},
+            "max_proposal_rounds": 9,
+            "retention_days_failed": 7,
+        }
+    )
+    fixture = reuse_remote_data_build(
+        tmp_path, consumer_campaign_id="campaign-2", consumer_manifest=relaxed
+    )
+    repository = fixture.repository
+
+    producer = repository.get_attempt("workspace-a", fixture.producer.attempt_id)
+    consumer = repository.get_attempt("workspace-a", fixture.consumer.attempt_id)
+    assert repository.get_manifest_revision("workspace-a", "campaign-1", 1).manifest != (
+        repository.get_manifest_revision("workspace-a", "campaign-2", 1).manifest
+    )
+    assert producer.result_key == consumer.result_key
+    assert fixture.adapter.launch_count == 1
+    assert repository.resolved_reuse_links("workspace-a", "campaign-2") == {
+        fixture.consumer.attempt_id: fixture.producer.attempt_id
+    }
+
+
+def test_a_different_dataset_recipe_derives_a_different_key_and_executes(tmp_path):
+    """Recipe content is inside the key, so a changed build runs instead of reusing."""
+
+    fixture = reuse_remote_data_build(tmp_path)
+    repository = fixture.repository
+    third_plan = seed_data_build_then_training_study(
+        repository, "study-3", sequence=3, input_contract=SHARED_DATA_BUILD_INPUT
+    )
+    third = schedule_remote_data_build(
+        repository,
+        fixture.worker,
+        fixture.profile,
+        "campaign-1",
+        "study-3",
+        third_plan,
+        START + timedelta(seconds=5),
+        recipe_digest="d" * 64,
+    )
+    fixture.adapter.states = [RemoteRunState.RUNNING]
+
+    assert third.result_key != fixture.producer.result_key
+    assert fixture.worker.run_once(now=START + timedelta(seconds=6)) == "remote_running"
+    assert fixture.adapter.launch_count == 2
+    assert repository.get_remote_run("workspace-a", third.attempt_id) is not None
+
+
+def test_reuse_across_campaigns_binds_the_producing_campaign_dataset(tmp_path):
+    fixture = reuse_remote_data_build(tmp_path, consumer_campaign_id="campaign-2")
+    repository = fixture.repository
+    adapter = fixture.adapter
+
+    assert repository.resolved_reuse_links("workspace-a", "campaign-2") == {
+        fixture.consumer.attempt_id: fixture.producer.attempt_id
+    }
+    assert repository.resolved_reuse_links("workspace-a", "campaign-1") == {}
+    resident = repository.remote_resident_data_build_source(
+        "workspace-a", "campaign-2", "study-2", 1
+    )
+    assert resident.campaign_id == "campaign-1"
+    assert resident.study_id == "study-1"
+    assert resident.attempt_id == fixture.producer.attempt_id
+    assert resident.action_id == fixture.producer.action_id
+    assert resident.remote_dataset_path == (
+        f"/home/trainer/bashgym-training/{fixture.producer.attempt_id}/dataset"
+    )
+    version = repository.get_dataset_version_spec(
+        "workspace-a", "project-a", resident.dataset_version_id
+    )
+    assert version.metadata["producer_action_id"] == fixture.producer.action_id
+    assert version.metadata["producer_attempt_id"] == fixture.producer.attempt_id
+    assert version.content_digest == resident.content_digest
+
+    training_attempt = schedule_resident_dataset_training(
+        fixture, resident, START + timedelta(seconds=5)
+    )
+    adapter.states = [RemoteRunState.RUNNING]
+
+    assert fixture.worker.run_once(now=START + timedelta(seconds=6)) == "remote_running"
+
+    request = adapter.last_request
+    assert request.run_id == training_attempt.attempt_id
+    assert request.remote_resident_dataset == resident
+    assert request.remote_resident_dataset.campaign_id == "campaign-1"
+    assert adapter.launch_count == 2
+    assert repository.get_remote_run("workspace-a", fixture.consumer.attempt_id) is None
+
+
+def rewrite_executor_kind(repository, attempt_id: str, kind: str) -> None:
+    """Store an executor kind that the local worker registry does not contain."""
+
+    with repository._connection(immediate=True) as connection:
+        row = connection.execute(
+            "SELECT executor_json FROM campaign_attempts WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchone()
+        executor = json.loads(row[0])
+        executor["kind"] = kind
+        connection.execute(
+            "UPDATE campaign_attempts SET executor_json=? WHERE attempt_id=?",
+            (json.dumps(executor), attempt_id),
+        )
+
+
+def write_recipe_runtimes(repository, **runtimes):
+    """Replace the seeded proposal with one whose named recipes carry the given runtimes."""
+
+    recipes = {
+        f"{name}_recipe": {"schema_version": f"{name}.v1"}
+        for name in ("dataset", "training", "evaluation")
+    }
+    for name, runtime in runtimes.items():
+        recipes[f"{name}_recipe"]["runtime"] = runtime
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE campaign_proposals SET proposal_json = ?
+            WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1'
+              AND proposal_id = 'proposal-study-1'
+            """,
+            (json.dumps({"primary_variable": "data.mixture", **recipes}),),
+        )
+
+
+def materialization_error(repository, tmp_path, worker_id="worker-a"):
+    """Return the persistence error code raised while materializing the seeded study."""
+
+    worker = make_worker(repository, tmp_path, worker_id)
+    assert worker.run_once(now=START) == "idle"
+    with pytest.raises(CampaignPersistenceError) as raised:
+        repository.next_action_spec(
+            "workspace-a",
+            "campaign-1",
+            "study-1",
+            executor_profiles=worker.remote_executor_profiles,
+        )
+    return str(raised.value)
+
+
+def test_next_action_spec_rejects_an_unregistered_recipe_executor(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository)
+    write_recipe_runtimes(repository, training={"executor_kind": "mystery"})
+
+    assert materialization_error(repository, tmp_path) == ("campaign_executor_kind_not_registered")
+
+
+def test_next_action_spec_rejects_a_registered_kind_it_cannot_materialize(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository, stage=StageKind.DEVELOPMENT_EVALUATION)
+    write_recipe_runtimes(repository, evaluation={"executor_kind": "development_evaluation"})
+
+    assert materialization_error(repository, tmp_path) == (
+        "campaign_executor_kind_not_materializable"
+    )
+
+
+def test_next_action_spec_rejects_a_registered_kind_on_an_unregistered_stage(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    seed_validated_study(repository, stage=StageKind.PROMOTION)
+    write_recipe_runtimes(repository, evaluation={"executor_kind": "registered_compute"})
+
+    assert materialization_error(repository, tmp_path) == "campaign_remote_stage_not_allowed"
+
+
+def registry_with(*adapters):
+    """Build a frozen registry from the built-in adapters plus the given extras."""
+
+    defaults = build_default_registry()
+    registry = ExecutorRegistry()
+    for kind in defaults.kinds():
+        registry.register(defaults.get(kind))
+    for adapter in adapters:
+        registry.register(adapter)
+    registry.freeze()
+    return registry
+
+
+def test_worker_dispatches_through_the_executor_registry(tmp_path):
+    ticked = []
+
+    class RecordingAdapter:
+        kind = "recording"
+        allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        reuses_completed_results = False
+
+        def tick(self, worker, attempt, *, now):
+            ticked.append(attempt.attempt_id)
+            return worker._fake_tick(attempt, now=now)
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return True
+
+    registry = registry_with(RecordingAdapter())
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        executor_registry=registry,
+    )
+    assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec.model_validate(
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "study_id": "study-1",
+                "stage_index": 0,
+                "stage": StageKind.FULL_TRAINING,
+                "input_contract": plan.items[0].input_contract,
+                "candidate_digest": fake_digest("candidate:study-1"),
+                "manifest_revision": 1,
+                "budget_unit": "gpu_hours",
+                "budget_reservation": 0.25,
+                "executor_kind": "recording",
+            },
+            context={"executor_registry": registry},
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    assert ticked == [scheduled.attempt_id]
+    assert repository.get_attempt("workspace-a", scheduled.attempt_id).status == (
+        AttemptStatus.COMPLETED
+    )
+
+
+def test_fake_attempts_dispatch_through_the_fake_executor_adapter(tmp_path):
+    ticked = []
+
+    class RecordingFakeAdapter(FakeExecutorAdapter):
+        def tick(self, worker, attempt, *, now):
+            ticked.append(attempt.attempt_id)
+            return super().tick(worker, attempt, now=now)
+
+    registry = ExecutorRegistry()
+    registry.register(RecordingFakeAdapter())
+    registry.register(SshRemoteExecutorAdapter())
+    registry.register(DevelopmentEvaluationExecutorAdapter())
+    registry.freeze()
+
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        executor_registry=registry,
+    )
+    scheduled = schedule(repository, worker, plan)
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    assert ticked == [scheduled.attempt_id]
+
+
+def test_reconcile_leaves_an_expired_attempt_of_a_non_repairable_kind_untouched(tmp_path):
+    class InertAdapter:
+        kind = "inert"
+        allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        reuses_completed_results = False
+
+        def tick(self, worker, attempt, *, now):
+            return "inert_running"
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return False
+
+    registry = registry_with(InertAdapter())
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+        data_directory=tmp_path / "data-root",
+        worker_id="worker-a",
+        executor_registry=registry,
+    )
+    assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec.model_validate(
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "study_id": "study-1",
+                "stage_index": 0,
+                "stage": StageKind.FULL_TRAINING,
+                "input_contract": plan.items[0].input_contract,
+                "candidate_digest": fake_digest("candidate:study-1"),
+                "manifest_revision": 1,
+                "budget_unit": "gpu_hours",
+                "budget_reservation": 0.25,
+                "executor_kind": "inert",
+            },
+            context={"executor_registry": registry},
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "inert_running"
+    claimed = repository.get_attempt("workspace-a", scheduled.attempt_id)
+    assert claimed.status == AttemptStatus.RUNNING
+    assert claimed.lease_expires_at is not None
+    assert claimed.lease_expires_at <= START + timedelta(minutes=5)
+
+    assert worker.reconcile_once(now=START + timedelta(minutes=5)) is None
+
+    assert repository.get_attempt("workspace-a", scheduled.attempt_id) == claimed
+
+
+def test_unknown_executor_kind_is_rejected_at_spec_validation():
+    with pytest.raises(ValueError, match="campaign_executor_kind_not_registered"):
+        ActionSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            study_id="study-1",
+            stage_index=0,
+            stage=StageKind.FULL_TRAINING,
+            input_contract={},
+            candidate_digest=fake_digest("candidate"),
+            manifest_revision=1,
+            budget_unit="gpu_hours",
+            budget_reservation=0.25,
+            executor_kind="not-a-kind",
+        )
+
+
+def test_run_once_settles_a_claimed_attempt_whose_executor_kind_is_unregistered(tmp_path):
+    class RecordingAdapter:
+        kind = "recording"
+        allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        reuses_completed_results = False
+
+        def tick(self, worker, attempt, *, now):
+            return worker._fake_tick(attempt, now=now)
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return True
+
+    scheduling_registry = registry_with(RecordingAdapter())
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec.model_validate(
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "study_id": "study-1",
+                "stage_index": 0,
+                "stage": StageKind.FULL_TRAINING,
+                "input_contract": plan.items[0].input_contract,
+                "candidate_digest": fake_digest("candidate:study-1"),
+                "manifest_revision": 1,
+                "budget_unit": "gpu_hours",
+                "budget_reservation": 0.25,
+                "executor_kind": "recording",
+            },
+            context={"executor_registry": scheduling_registry},
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+    assert repository.get_campaign("workspace-a", "campaign-1").active_action_id == (
+        scheduled.action_id
+    )
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "blocked"
+
+    settled = repository.get_attempt("workspace-a", scheduled.attempt_id)
+    assert settled.status == AttemptStatus.FAILED
+    assert repository.get_campaign("workspace-a", "campaign-1").active_action_id is None
+    failures = [
+        event
+        for _, event in repository.list_events("workspace-a", "campaign-1")
+        if event.event_type == "campaign:action-failed"
+    ]
+    assert len(failures) == 1
+    assert failures[0].payload["attempt_id"] == scheduled.attempt_id
+    assert failures[0].payload["exit_reason"] == "campaign_executor_kind_not_registered"
+    assert failures[0].payload["failure_class"] == FailureClass.CONFIGURATION.value
+    manifest = repository.get_attempt_result_manifest("workspace-a", scheduled.attempt_id)
+    assert manifest.failure_class == FailureClass.CONFIGURATION
+    assert manifest.compute_profile_id == "unassigned"
+    assert repository.list_unfinished_attempts() == []
+    assert worker.run_once(now=START + timedelta(seconds=2)) == "idle"
+
+
+def test_settlement_survives_an_executor_config_with_an_invalid_compute_profile(tmp_path):
+    class RecordingAdapter:
+        kind = "recording"
+        allowed_stages = frozenset({StageKind.FULL_TRAINING})
+        reuses_completed_results = False
+
+        def tick(self, worker, attempt, *, now):
+            return worker._fake_tick(attempt, now=now)
+
+        def reconcile(self, worker, attempt, *, now):
+            return None
+
+        def repair_allowed(self):
+            return True
+
+    scheduling_registry = registry_with(RecordingAdapter())
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    assert worker.run_once(now=START) == "idle"
+    scheduled = repository.schedule_action_under_leader(
+        ActionSpec.model_validate(
+            {
+                "workspace_id": "workspace-a",
+                "campaign_id": "campaign-1",
+                "study_id": "study-1",
+                "stage_index": 0,
+                "stage": StageKind.FULL_TRAINING,
+                "input_contract": plan.items[0].input_contract,
+                "candidate_digest": fake_digest("candidate:study-1"),
+                "manifest_revision": 1,
+                "budget_unit": "gpu_hours",
+                "budget_reservation": 0.25,
+                "executor_kind": "recording",
+                "executor_config": {"compute_profile_id": "vendor gpu profile"},
+            },
+            context={"executor_registry": scheduling_registry},
+        ),
+        worker.leader,
+        expected_campaign_version=4,
+        now=START,
+    )
+
+    assert worker.run_once(now=START + timedelta(seconds=1)) == "blocked"
+
+    assert repository.get_attempt("workspace-a", scheduled.attempt_id).status == (
+        AttemptStatus.FAILED
+    )
+    assert repository.get_campaign("workspace-a", "campaign-1").active_action_id is None
+    manifest = repository.get_attempt_result_manifest("workspace-a", scheduled.attempt_id)
+    assert manifest.compute_profile_id == "unassigned"
+
+
+def test_reconcile_marks_an_expired_unregistered_kind_attempt_unknown(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    schedule(repository, worker, plan)
+    with pytest.raises(SimulatedWorkerCrashError):
+        worker.run_once(now=START, crash_after_seal=True)
+    stranded = repository.list_unfinished_attempts()[0]
+    rewrite_executor_kind(repository, stranded.attempt_id, "vendor_gpu")
+
+    assert worker.reconcile_once(now=START + timedelta(minutes=5)) == "unknown"
+
+    after = repository.get_attempt("workspace-a", stranded.attempt_id)
+    assert after.status == AttemptStatus.UNKNOWN
+
+
+def test_reconcile_skips_and_warns_for_an_unregistered_executor_kind(tmp_path, caplog):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    schedule(repository, worker, plan)
+    with pytest.raises(SimulatedWorkerCrashError):
+        worker.run_once(now=START, crash_after_seal=True)
+    unfinished = repository.list_unfinished_attempts()
+    assert len(unfinished) == 1
+    stranded = unfinished[0]
+    rewrite_executor_kind(repository, stranded.attempt_id, "vendor_gpu")
+
+    with caplog.at_level(logging.WARNING, logger="bashgym.campaigns.worker"):
+        assert worker.reconcile_once(now=START + timedelta(seconds=1)) is None
+
+    assert "campaign_executor_kind_not_registered" in caplog.text
+    assert stranded.attempt_id in caplog.text
+    assert "vendor_gpu" in caplog.text
+    after = repository.get_attempt("workspace-a", stranded.attempt_id)
+    assert after.status == AttemptStatus.RUNNING

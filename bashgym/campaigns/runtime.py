@@ -12,7 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
@@ -24,6 +25,7 @@ from bashgym.campaigns.contracts import (
     PUBLIC_CAMPAIGN_BLOCKER_CODES,
     ActionAttempt,
     ActionStatus,
+    ArtifactOutput,
     AttemptStatus,
     BudgetEntryKind,
     BudgetLedgerEntry,
@@ -57,6 +59,7 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
+from bashgym.campaigns.executor_adapters import default_registry
 from bashgym.campaigns.lineage import (
     canonical_model_manifest_digest,
     code_mutation_kind_for_variable,
@@ -100,6 +103,14 @@ from bashgym.campaigns.remote import (
     SealedStageArtifactSource,
     remote_executor_config,
 )
+from bashgym.campaigns.result_reuse import (
+    REUSABLE_STAGES,
+    REUSED_FROM_ATTEMPT_KEY,
+    manifest_content_digest,
+    reuse_enabled,
+    reused_from_attempt_id,
+    stage_result_key,
+)
 from bashgym.campaigns.tmax_recipe import (
     TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA,
     TMaxCompositeTrainingRecipe,
@@ -107,6 +118,11 @@ from bashgym.campaigns.tmax_recipe import (
 
 if TYPE_CHECKING:
     from bashgym.ledger.contracts import DatasetSpec, DatasetVersionSpec
+
+
+RECIPE_KIND_ALIASES: Mapping[str, str] = MappingProxyType(
+    {"registered_compute": "ssh_remote", "registered_training": "ssh_remote"}
+)
 
 
 class ActionClaimConflictError(CampaignPersistenceError):
@@ -147,14 +163,16 @@ def _recipe_script_args_for_stage(
 def _settlement_actual_cost(
     *, unit: str, reservation_amount: float, manifest: SealedActionResult
 ) -> float:
-    """Convert signed measured usage into the campaign budget unit when possible."""
+    """Charge measured usage; a completed seal with none charges its reservation."""
 
+    if reused_from_attempt_id(manifest) is not None:
+        return 0.0
     measured = tuple(item for item in manifest.resource_usage if item.confidence == "measured")
     direct = sum(item.amount for item in measured if item.unit == unit)
     if unit == "gpu_hours":
         direct += sum(item.amount / 3600 for item in measured if item.unit == "wall_clock_seconds")
     if direct <= 0 or not math.isfinite(direct):
-        return float(reservation_amount)
+        return 0.0 if manifest.outcome != "completed" else float(reservation_amount)
     return min(float(reservation_amount), direct)
 
 
@@ -172,24 +190,20 @@ class ActionSpec(ContractModel):
     manifest_revision: int = Field(ge=1)
     budget_unit: str
     budget_reservation: float = Field(gt=0)
-    executor_kind: Literal["fake", "ssh_remote", "development_evaluation"] = "fake"
+    executor_kind: str = "fake"
     executor_config: dict[str, Any] = Field(default_factory=dict)
     fake_steps: int = Field(default=8, ge=2, le=10000)
+    result_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     def model_post_init(self, __context: Any) -> None:
-        if self.executor_kind == "ssh_remote" and self.stage not in {
-            StageKind.DATA_BUILD,
-            StageKind.CONTRACT_EVALUATION,
-            StageKind.SMOKE_TRAINING,
-            StageKind.FULL_TRAINING,
-            StageKind.DEVELOPMENT_EVALUATION,
-        }:
-            raise ValueError("remote executor is restricted to approved compute stages")
-        if (
-            self.executor_kind == "development_evaluation"
-            and self.stage != StageKind.DEVELOPMENT_EVALUATION
-        ):
-            raise ValueError("development evaluation executor is restricted to its approved stage")
+        registry = __context.get("executor_registry") if isinstance(__context, dict) else None
+        registry = registry or default_registry()
+        if not registry.is_registered(self.executor_kind):
+            raise ValueError("campaign_executor_kind_not_registered")
+        if self.stage not in registry.allowed_stages(self.executor_kind):
+            raise ValueError(
+                f"executor {self.executor_kind} is restricted to its registered stages"
+            )
 
     @property
     def input_digest(self) -> str:
@@ -206,7 +220,7 @@ class ActionSpec(ContractModel):
 
     @property
     def action_key(self) -> str:
-        return canonical_hash(self.model_dump(mode="json"))
+        return canonical_hash(self.model_dump(mode="json", exclude={"result_key"}))
 
 
 @dataclass(frozen=True)
@@ -215,6 +229,13 @@ class RuntimeCompletion:
     campaign_version: int
     event: CampaignEvent
     replayed: bool = False
+
+
+@dataclass(frozen=True)
+class ReusableCompletion:
+    attempt: ActionAttempt
+    manifest: SealedActionResult
+    artifact_metadata_by_path: dict[str, dict[str, Any]]
 
 
 class RemoteRunRecord(FrozenContractModel):
@@ -248,6 +269,9 @@ class CampaignArtifactRecord(FrozenContractModel):
 
 
 _ARTIFACT_CURSOR_PREFIX = "a1."
+_REUSE_CHAIN_LIMIT = 64
+_REUSE_SOURCE_JSON_PATH = f"$.remote_process_identity.{REUSED_FROM_ATTEMPT_KEY}"
+_REUSABLE_STAGE_VALUES = tuple(sorted(stage.value for stage in REUSABLE_STAGES))
 
 
 def _encode_artifact_cursor(sequence: int) -> str:
@@ -333,11 +357,13 @@ class CampaignRuntimeRepository(CampaignRepository):
             candidate_digest=row["candidate_digest"],
             manifest_revision=row["manifest_revision"],
             stage=row["stage_kind"],
+            stage_index=row["stage_index"],
             lease_owner=row["lease_owner"],
             lease_expires_at=row["lease_expires_at"],
             heartbeat_at=row["heartbeat_at"],
             executor=json.loads(row["executor_json"]),
             sealed_result_uri=row["sealed_result_uri"],
+            result_key=row["result_key"],
             created_at=row["attempt_created_at"],
             updated_at=row["attempt_updated_at"],
         )
@@ -347,7 +373,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         return """
             SELECT a.workspace_id, a.campaign_id, a.study_id, a.action_id,
                    a.stage_index, a.stage_kind, a.input_digest, a.candidate_digest,
-                   a.manifest_revision, a.sealed_result_uri,
+                   a.manifest_revision, a.sealed_result_uri, a.result_key,
                    t.attempt_id, t.attempt_number, t.claim_generation,
                    t.status AS attempt_status, t.lease_owner, t.lease_expires_at,
                    t.heartbeat_at, t.executor_json,
@@ -536,16 +562,14 @@ class CampaignRuntimeRepository(CampaignRepository):
         if not isinstance(runtime, dict):
             raise CampaignPersistenceError("campaign_recipe_runtime_invalid")
         executor_kind = runtime.get("executor_kind", "fake")
+        runtime_kind = RECIPE_KIND_ALIASES.get(executor_kind, executor_kind)
+        registry = default_registry()
+        if not registry.is_registered(runtime_kind):
+            raise CampaignPersistenceError("campaign_executor_kind_not_registered")
+        if item.stage not in registry.allowed_stages(runtime_kind):
+            raise CampaignPersistenceError("campaign_remote_stage_not_allowed")
         executor_config: dict[str, Any] = {}
-        if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}:
-            if item.stage not in {
-                StageKind.DATA_BUILD,
-                StageKind.CONTRACT_EVALUATION,
-                StageKind.SMOKE_TRAINING,
-                StageKind.FULL_TRAINING,
-                StageKind.DEVELOPMENT_EVALUATION,
-            }:
-                raise CampaignPersistenceError("campaign_remote_stage_not_allowed")
+        if runtime_kind == "ssh_remote":
             profile_key = (
                 manifest.compute_profile_id,
                 campaign.target_model.target_contract_key,
@@ -682,7 +706,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 raise CampaignPersistenceError("campaign_remote_profile_material_invalid") from exc
             budget_unit = configured_stage.budget_unit
             reservation = configured_stage.budget_reservation
-        elif executor_kind == "fake":
+        elif runtime_kind == "fake":
             budget_unit = str(
                 runtime.get(
                     "budget_unit",
@@ -695,9 +719,43 @@ class CampaignRuntimeRepository(CampaignRepository):
             )
             reservation = float(runtime.get("budget_reservation", 0.01))
         else:
-            raise CampaignPersistenceError("campaign_executor_kind_not_registered")
+            raise CampaignPersistenceError("campaign_executor_kind_not_materializable")
         if budget_unit not in manifest.budget_limits:
             raise CampaignPersistenceError("campaign_budget_unit_not_approved")
+        result_key: str | None = None
+        if reuse_enabled(
+            stage=item.stage,
+            executor_kind=runtime_kind,
+            runtime=runtime,
+            registry=registry,
+        ):
+            upstream_outputs: list[tuple[str, str, str]] = []
+            resolvable = True
+            for consumed in plan.consumed_stages(study.current_stage_index):
+                outputs = self.completed_stage_outputs(
+                    workspace_id, campaign_id, study_id, consumed
+                )
+                if outputs is None:
+                    resolvable = False
+                    break
+                upstream_outputs.extend(
+                    (consumed.value, output.path, output.sha256) for output in outputs
+                )
+            if resolvable:
+                stage_recipe_digest = (
+                    executor_config["recipe_digest"]
+                    if "recipe_digest" in executor_config
+                    else canonical_hash({"stage_recipe": recipe, "stage": item.stage.value})
+                )
+                result_key = stage_result_key(
+                    stage=item.stage,
+                    executor_kind=runtime_kind,
+                    manifest_content_digest=manifest_content_digest(manifest),
+                    stage_input=item.input_contract,
+                    recipe_digest=stage_recipe_digest,
+                    executor_config=executor_config,
+                    upstream_outputs=tuple(upstream_outputs),
+                )
         fake_steps = int(runtime.get("fake_steps", 8))
         input_contract = {
             "stage_input": item.input_contract,
@@ -740,13 +798,10 @@ class CampaignRuntimeRepository(CampaignRepository):
             manifest_revision=campaign.manifest_revision,
             budget_unit=budget_unit,
             budget_reservation=reservation,
-            executor_kind=(
-                "ssh_remote"
-                if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}
-                else executor_kind
-            ),
+            executor_kind=runtime_kind,
             executor_config=executor_config,
             fake_steps=fake_steps,
+            result_key=result_key,
         )
 
     def record_controller_blocker_under_leader(
@@ -1594,6 +1649,243 @@ class CampaignRuntimeRepository(CampaignRepository):
             created_at=row["created_at"],
         )
 
+    def find_reusable_completion(
+        self, workspace_id: str, result_key: str, *, stage: StageKind, exclude_action_id: str
+    ) -> ReusableCompletion | None:
+        """Completed action of one stage in the workspace whose content key matches.
+
+        Attempts that executed their own stage are preferred over attempts that
+        themselves reused a result, so the common case resolves without walking a
+        reuse link at all; the newest row breaks the remaining tie.
+        """
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                self._attempt_select() + """
+                WHERE a.workspace_id = ? AND a.result_key = ? AND a.action_id != ?
+                  AND a.stage_kind = ?
+                  AND a.status = ? AND t.status = ? AND t.result_json IS NOT NULL
+                ORDER BY json_extract(t.result_json, ?) IS NOT NULL,
+                         t.updated_at DESC, t.attempt_id DESC LIMIT 1
+                """,
+                (
+                    workspace_id,
+                    result_key,
+                    exclude_action_id,
+                    stage.value,
+                    ActionStatus.COMPLETED.value,
+                    AttemptStatus.COMPLETED.value,
+                    _REUSE_SOURCE_JSON_PATH,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            attempt = self._attempt_from_row(row)
+            artifact_rows = connection.execute(
+                """
+                SELECT uri, metadata_json FROM campaign_artifacts
+                WHERE workspace_id = ? AND producer_action_id = ?
+                  AND json_extract(metadata_json, '$.attempt_id') = ?
+                """,
+                (workspace_id, attempt.action_id, attempt.attempt_id),
+            ).fetchall()
+        manifest = self.get_attempt_result_manifest(workspace_id, attempt.attempt_id)
+        metadata_by_path: dict[str, dict[str, Any]] = {}
+        for output in manifest.outputs:
+            reference = _artifact_reference(str(attempt.sealed_result_uri), output.path)
+            for artifact in artifact_rows:
+                if artifact["uri"] == reference:
+                    metadata = json.loads(artifact["metadata_json"])
+                    metadata.pop("attempt_id", None)
+                    metadata_by_path[output.path] = metadata
+                    break
+            else:
+                metadata_by_path[output.path] = {}
+        return ReusableCompletion(
+            attempt=attempt, manifest=manifest, artifact_metadata_by_path=metadata_by_path
+        )
+
+    def _completed_reuse_source(self, workspace_id: str, attempt_id: str) -> ActionAttempt | None:
+        """Load one reuse source only when its action and its attempt are both completed."""
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                self._attempt_select() + """
+                WHERE t.workspace_id = ? AND t.attempt_id = ?
+                  AND a.status = ? AND t.status = ?
+                """,
+                (
+                    workspace_id,
+                    attempt_id,
+                    ActionStatus.COMPLETED.value,
+                    AttemptStatus.COMPLETED.value,
+                ),
+            ).fetchone()
+        return None if row is None else self._attempt_from_row(row)
+
+    def reuse_source_chain(
+        self, attempt: ActionAttempt
+    ) -> tuple[tuple[ActionAttempt, SealedActionResult], ...]:
+        """Follow reuse links hop by hop, newest first, until an attempt that executed.
+
+        Each hop carries the manifest this walk read, so a caller verifies exactly the
+        manifests the resolution trusted.
+        """
+
+        try:
+            manifest = self.get_attempt_result_manifest(attempt.workspace_id, attempt.attempt_id)
+        except (RecordNotFoundError, CampaignPersistenceError):
+            return ()
+        chain: list[tuple[ActionAttempt, SealedActionResult]] = []
+        seen = {attempt.attempt_id}
+        current = attempt
+        while True:
+            source_id = reused_from_attempt_id(manifest)
+            if source_id is None:
+                return tuple(chain)
+            if source_id in seen or len(chain) >= _REUSE_CHAIN_LIMIT:
+                raise CampaignPersistenceError("campaign_reuse_source_invalid")
+            source = self._completed_reuse_source(attempt.workspace_id, source_id)
+            if source is None or source.stage != current.stage:
+                raise CampaignPersistenceError("campaign_reuse_source_invalid")
+            try:
+                manifest = self.get_attempt_result_manifest(attempt.workspace_id, source_id)
+            except (RecordNotFoundError, CampaignPersistenceError) as exc:
+                raise CampaignPersistenceError("campaign_reuse_source_invalid") from exc
+            seen.add(source_id)
+            chain.append((source, manifest))
+            current = source
+
+    def reuse_source_attempt(self, attempt: ActionAttempt) -> ActionAttempt:
+        """Resolve a reused attempt to the attempt whose execution produced its bytes."""
+
+        chain = self.reuse_source_chain(attempt)
+        return chain[-1][0] if chain else attempt
+
+    def _completed_reusable_stage_links(
+        self, workspace_id: str, campaign_id: str | None = None
+    ) -> tuple[tuple[str, str, str | None], ...]:
+        """Read (attempt, campaign, immediate reuse link) for completed reusable stages.
+
+        Only the stages reuse can produce are scanned, from `REUSABLE_STAGES`, and
+        each stored manifest is parsed once. A row whose link is null is an attempt
+        that executed its own stage. A campaign narrows the scan for a reader that
+        never follows a link out of its own campaign.
+        """
+
+        self._require_initialized()
+        stage_placeholders = ", ".join("?" for _stage in _REUSABLE_STAGE_VALUES)
+        campaign_clause = " AND a.campaign_id = ?" if campaign_id is not None else ""
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT t.attempt_id, a.campaign_id,
+                       json_extract(t.result_json, ?) AS source_attempt_id
+                FROM campaign_attempts t
+                JOIN campaign_actions a
+                  ON a.workspace_id = t.workspace_id AND a.action_id = t.action_id
+                WHERE t.workspace_id = ? AND a.stage_kind IN ({stage_placeholders})
+                  AND a.status = ? AND t.status = ?
+                  AND t.result_json IS NOT NULL{campaign_clause}
+                """,
+                (
+                    _REUSE_SOURCE_JSON_PATH,
+                    workspace_id,
+                    *_REUSABLE_STAGE_VALUES,
+                    ActionStatus.COMPLETED.value,
+                    AttemptStatus.COMPLETED.value,
+                    *((campaign_id,) if campaign_id is not None else ()),
+                ),
+            ).fetchall()
+        return tuple(
+            (
+                str(row["attempt_id"]),
+                str(row["campaign_id"]),
+                (
+                    str(row["source_attempt_id"])
+                    if isinstance(row["source_attempt_id"], str) and row["source_attempt_id"]
+                    else None
+                ),
+            )
+            for row in rows
+        )
+
+    def reuse_source_links(self, workspace_id: str, campaign_id: str) -> dict[str, str]:
+        """Immediate stored reuse link of each completed reusable stage in one campaign.
+
+        This is the consuming attempt's own sealed statement. No chain is walked and
+        no source is verified, so a projection of it cannot fail on a damaged link,
+        and the scan is narrowed to the campaign because no link is followed.
+        """
+
+        return {
+            attempt_id: source
+            for attempt_id, _campaign, source in self._completed_reusable_stage_links(
+                workspace_id, campaign_id
+            )
+            if source is not None
+        }
+
+    def resolved_reuse_links(self, workspace_id: str, campaign_id: str) -> dict[str, str]:
+        """Map each reused stage of one campaign to the attempt that executed it.
+
+        Preconditions: only reusable-stage attempts whose action and attempt are both
+        completed are considered, and a chain is kept only when it ends at such an
+        attempt that carries no reuse link of its own. A cyclic, over-long, or
+        unresolvable chain is dropped from the map rather than raised, so one damaged
+        link costs its own study its dataset record instead of failing the projection.
+        The query is workspace-scoped because a chain can leave the consuming
+        campaign; `reuse_source_chain` is the verifying walk that execution binds to.
+        """
+
+        rows = self._completed_reusable_stage_links(workspace_id)
+        sources = {attempt_id: source for attempt_id, _campaign, source in rows if source}
+        executed = {attempt_id for attempt_id, _campaign, source in rows if source is None}
+        resolved: dict[str, str] = {}
+        for attempt_id, campaign, source in rows:
+            if campaign != campaign_id or source is None:
+                continue
+            seen = {attempt_id}
+            current = source
+            while True:
+                if current in executed:
+                    resolved[attempt_id] = current
+                    break
+                if current not in sources or current in seen or len(seen) > _REUSE_CHAIN_LIMIT:
+                    break
+                seen.add(current)
+                current = sources[current]
+        return resolved
+
+    def completed_stage_outputs(
+        self, workspace_id: str, campaign_id: str, study_id: str, stage: StageKind
+    ) -> tuple[ArtifactOutput, ...] | None:
+        """Sealed outputs of the study's completed attempt for one stage, if any."""
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                self._attempt_select() + """
+                WHERE a.workspace_id = ? AND a.campaign_id = ? AND a.study_id = ?
+                  AND a.stage_kind = ? AND a.status = ? AND t.status = ?
+                  AND t.result_json IS NOT NULL
+                ORDER BY t.attempt_number DESC LIMIT 1
+                """,
+                (
+                    workspace_id,
+                    campaign_id,
+                    study_id,
+                    stage.value,
+                    ActionStatus.COMPLETED.value,
+                    AttemptStatus.COMPLETED.value,
+                ),
+            ).fetchone()
+        if row is None:
+            return None
+        return self.get_attempt_result_manifest(workspace_id, row["attempt_id"]).outputs
+
     def get_dataset_version_spec(self, workspace_id: str, project_id: str, dataset_version_id: str):
         """Load one registered dataset as its typed immutable ledger contract."""
 
@@ -1671,23 +1963,12 @@ class CampaignRuntimeRepository(CampaignRepository):
         )
         return inputs
 
-    def remote_resident_data_build_source(
-        self,
-        workspace_id: str,
-        campaign_id: str,
-        study_id: str,
-        training_stage_index: int,
-    ) -> RemoteResidentDatasetSource:
-        """Resolve the immediately preceding remote DATA_BUILD without copying rows."""
+    def completed_data_build_attempt(
+        self, workspace_id: str, campaign_id: str, study_id: str, stage_index: int
+    ) -> ActionAttempt:
+        """Return the study's own completed remote data build at one plan stage index."""
 
-        from bashgym.campaigns.autoresearch_dataset import (
-            AUTORESEARCH_DATASET_FILE_SCHEMA,
-            AUTORESEARCH_DATASET_RECEIPT_FILENAME,
-            AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
-            AutoResearchDatasetReceipt,
-        )
-
-        if training_stage_index < 1:
+        if stage_index < 0:
             raise CampaignPersistenceError("campaign_training_dataset_missing")
         self._require_initialized()
         with self._connection() as connection:
@@ -1702,17 +1983,49 @@ class CampaignRuntimeRepository(CampaignRepository):
                     workspace_id,
                     campaign_id,
                     study_id,
-                    training_stage_index - 1,
+                    stage_index,
                     StageKind.DATA_BUILD.value,
                     ActionStatus.COMPLETED.value,
                     AttemptStatus.COMPLETED.value,
                 ),
             ).fetchone()
-            if row is None or not str(row["sealed_result_uri"] or "").startswith(
-                "bashgym-remote-seal://"
-            ):
-                raise CampaignPersistenceError("campaign_training_dataset_missing")
-            attempt = self._attempt_from_row(row)
+        if row is None or not str(row["sealed_result_uri"] or "").startswith(
+            "bashgym-remote-seal://"
+        ):
+            raise CampaignPersistenceError("campaign_training_dataset_missing")
+        return self._attempt_from_row(row)
+
+    def remote_resident_data_build_source(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        study_id: str,
+        training_stage_index: int,
+    ) -> RemoteResidentDatasetSource:
+        """Resolve the immediately preceding remote DATA_BUILD without copying rows.
+
+        The consuming study's own completed data build binds the plan edge; when that
+        attempt reused a content-identical result, every physical fact is read from the
+        producing attempt named by its sealed manifest.
+        """
+
+        from bashgym.campaigns.autoresearch_dataset import (
+            AUTORESEARCH_DATASET_FILE_SCHEMA,
+            AUTORESEARCH_DATASET_RECEIPT_FILENAME,
+            AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
+            AutoResearchDatasetReceipt,
+        )
+
+        if training_stage_index < 1:
+            raise CampaignPersistenceError("campaign_training_dataset_missing")
+        attempt = self.completed_data_build_attempt(
+            workspace_id, campaign_id, study_id, training_stage_index - 1
+        )
+        source = self.reuse_source_attempt(attempt)
+        if not str(source.sealed_result_uri or "").startswith("bashgym-remote-seal://"):
+            raise CampaignPersistenceError("campaign_training_dataset_invalid")
+        self._require_initialized()
+        with self._connection() as connection:
             artifact_rows = connection.execute(
                 """
                 SELECT * FROM campaign_artifacts
@@ -1723,11 +2036,11 @@ class CampaignRuntimeRepository(CampaignRepository):
                 """,
                 (
                     workspace_id,
-                    campaign_id,
-                    attempt.action_id,
+                    source.campaign_id,
+                    source.action_id,
                     AUTORESEARCH_DATASET_FILE_SCHEMA,
                     AUTORESEARCH_DATASET_RECEIPT_SCHEMA,
-                    attempt.attempt_id,
+                    source.attempt_id,
                 ),
             ).fetchall()
         receipt_rows = [
@@ -1756,9 +2069,9 @@ class CampaignRuntimeRepository(CampaignRepository):
         if (
             receipt_row["uri"]
             != _artifact_reference(
-                str(row["sealed_result_uri"]), AUTORESEARCH_DATASET_RECEIPT_FILENAME
+                str(source.sealed_result_uri), AUTORESEARCH_DATASET_RECEIPT_FILENAME
             )
-            or receipt_metadata.get("attempt_id") != attempt.attempt_id
+            or receipt_metadata.get("attempt_id") != source.attempt_id
             or receipt_metadata.get("content_digest") != receipt.content_digest
         ):
             raise CampaignPersistenceError("campaign_training_dataset_invalid")
@@ -1775,8 +2088,8 @@ class CampaignRuntimeRepository(CampaignRepository):
             or version.content_digest != receipt.content_digest
             or version.source_uri
             != f"autoresearch-remote-dataset://sha256/{receipt.content_digest}"
-            or version.metadata.get("producer_action_id") != attempt.action_id
-            or version.metadata.get("producer_attempt_id") != attempt.attempt_id
+            or version.metadata.get("producer_action_id") != source.action_id
+            or version.metadata.get("producer_attempt_id") != source.attempt_id
         ):
             raise CampaignPersistenceError("campaign_training_dataset_invalid")
         expected_receipt_files = {
@@ -1791,8 +2104,8 @@ class CampaignRuntimeRepository(CampaignRepository):
             if (
                 not relative_path
                 or artifact["uri"]
-                != _artifact_reference(str(row["sealed_result_uri"]), output_path)
-                or metadata.get("attempt_id") != attempt.attempt_id
+                != _artifact_reference(str(source.sealed_result_uri), output_path)
+                or metadata.get("attempt_id") != source.attempt_id
                 or metadata.get("dataset_version_id") != dataset_version_id
                 or metadata.get("content_digest") != receipt.content_digest
             ):
@@ -1807,14 +2120,14 @@ class CampaignRuntimeRepository(CampaignRepository):
             )
         if actual_artifact_files != expected_receipt_files:
             raise CampaignPersistenceError("campaign_training_dataset_invalid")
-        remote_run = self.get_remote_run(workspace_id, attempt.attempt_id)
-        if remote_run is None or remote_run.identity.run_id != attempt.attempt_id:
+        remote_run = self.get_remote_run(workspace_id, source.attempt_id)
+        if remote_run is None or remote_run.identity.run_id != source.attempt_id:
             raise CampaignPersistenceError("campaign_training_dataset_invalid")
         return RemoteResidentDatasetSource(
-            campaign_id=campaign_id,
-            study_id=study_id,
-            action_id=attempt.action_id,
-            attempt_id=attempt.attempt_id,
+            campaign_id=source.campaign_id,
+            study_id=source.study_id,
+            action_id=source.action_id,
+            attempt_id=source.attempt_id,
             stage_index=training_stage_index - 1,
             compute_profile_id=remote_run.identity.compute_profile_id,
             remote_dataset_path=f"{remote_run.identity.remote_run_directory}/dataset",
@@ -2894,8 +3207,9 @@ class CampaignRuntimeRepository(CampaignRepository):
                 INSERT INTO campaign_actions(
                     workspace_id, campaign_id, study_id, action_id, stage_index,
                     stage_kind, input_digest, candidate_digest, manifest_revision,
-                    action_key, reservation_json, status, version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    action_key, reservation_json, status, version, created_at, updated_at,
+                    result_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                 """,
                 (
                     spec.workspace_id,
@@ -2912,6 +3226,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                     ActionStatus.SCHEDULED.value,
                     _iso(scheduled_at),
                     _iso(scheduled_at),
+                    spec.result_key,
                 ),
             )
             connection.execute(
@@ -3522,6 +3837,9 @@ class CampaignRuntimeRepository(CampaignRepository):
                     "stage": attempt.stage.value,
                     "outcome": manifest.outcome,
                     "exit_reason": manifest.exit_reason,
+                    "failure_class": (
+                        manifest.failure_class.value if manifest.failure_class else None
+                    ),
                 },
                 actor_id="campaign-controller",
                 credential_kind=CredentialKind.CONTROLLER,
@@ -3928,6 +4246,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                     "study_id": manifest.study_id,
                     "stage": attempt.stage.value,
                     "sealed_result_uri": str(sealed_directory),
+                    "reused_from_attempt_id": reused_from_attempt_id(manifest),
                 },
                 actor_id="campaign-controller",
                 credential_kind=CredentialKind.CONTROLLER,
@@ -3940,7 +4259,11 @@ class CampaignRuntimeRepository(CampaignRepository):
                 self._attempt_select() + " WHERE t.workspace_id = ? AND t.attempt_id = ?",
                 (manifest.workspace_id, manifest.attempt_id),
             ).fetchone()
-        return RuntimeCompletion(self._attempt_from_row(completed), campaign.version + 1, event)
+        return RuntimeCompletion(
+            self._attempt_from_row(completed),
+            campaign.version + 1,
+            event,
+        )
 
 
 __all__ = [
@@ -3949,6 +4272,7 @@ __all__ = [
     "ActionSpec",
     "CampaignRuntimeRepository",
     "CampaignArtifactRecord",
+    "ReusableCompletion",
     "RuntimeCompletion",
     "RemoteRunRecord",
 ]

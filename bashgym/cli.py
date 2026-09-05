@@ -2183,6 +2183,9 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "research submit-iteration": (
                 "Submit one baseline or candidate iteration through the campaign authority."
             ),
+            "research clone-study": (
+                "Prefill a new proposal from a persisted study; submit it with research submit-iteration"
+            ),
             "research conclude-family": (
                 "Record an evidence-bound conclusion for a completed hypothesis family."
             ),
@@ -4616,6 +4619,52 @@ def cmd_campaign_study(args: argparse.Namespace) -> int:
     )
 
 
+def _parse_set_changes(values: list[str] | None) -> dict[str, Any]:
+    changes: dict[str, Any] = {}
+    for item in values or ():
+        key, separator, raw = item.partition("=")
+        if not separator or not key.strip():
+            raise ValueError("--set expects KEY=JSON")
+        changes[key.strip()] = json.loads(raw)
+    return changes
+
+
+def cmd_research_clone_study(args: argparse.Namespace) -> int:
+    try:
+        changes = _parse_set_changes(args.set_changes)
+        if args.changes_path:
+            changes = {
+                **_read_campaign_json(args.changes_path, label="clone changes"),
+                **changes,
+            }
+    except ValueError as exc:
+        return _campaign_error(args, exc)
+    response, error = _campaign_request(
+        args,
+        "POST",
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/studies/"
+        f"{_quoted_identifier(args.study_id)}/clone",
+        payload={
+            "workspace_id": args.workspace_id,
+            "proposal_id": args.proposal_id,
+            "changes": changes,
+        },
+    )
+    if error is not None:
+        return error
+    if args.output and isinstance(response, dict) and isinstance(response.get("submission"), dict):
+        try:
+            Path(args.output).write_text(
+                json.dumps(response["submission"], indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            return _campaign_error(
+                args, ValueError(f"could not write the clone submission to {args.output}: {exc}")
+            )
+    return _emit_campaign_result(args, response, collection="clone")
+
+
 def cmd_campaign_attempts(args: argparse.Namespace) -> int:
     return _campaign_read_collection(args, "attempts", "attempts")
 
@@ -6356,6 +6405,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reference proposal ID; required for a candidate or diagnostic",
     )
     research_submit.set_defaults(func=cmd_campaign_propose)
+
+    research_clone = research_sub.add_parser(
+        "clone-study",
+        help="Prefill a new proposal from a persisted study and report the diff",
+        parents=[json_parent, campaign_connection],
+    )
+    research_clone.add_argument("--campaign", dest="campaign_id", required=True)
+    research_clone.add_argument("--study", dest="study_id", required=True)
+    research_clone.add_argument("--proposal-id", required=True)
+    research_clone.add_argument(
+        "--set",
+        dest="set_changes",
+        action="append",
+        metavar="KEY=JSON",
+        help="Override one cloneable field; repeatable; overrides --changes on the same key",
+    )
+    research_clone.add_argument(
+        "--changes",
+        dest="changes_path",
+        help="JSON file of changes; a --set value for the same key overrides it",
+    )
+    research_clone.add_argument(
+        "--output", help="Write the prefilled submission here for research submit-iteration"
+    )
+    research_clone.set_defaults(func=cmd_research_clone_study)
 
     research_conclude_family = research_sub.add_parser(
         "conclude-family",

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
+import shutil
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
@@ -62,7 +64,10 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
+from bashgym.campaigns.executor_adapters import default_registry
+from bashgym.campaigns.executor_registry import ExecutorAdapter, ExecutorRegistry
 from bashgym.campaigns.executors import (
+    UNREGISTERED_EXECUTOR_KIND_CODE,
     DevelopmentEvaluationConfig,
     DevelopmentEvaluationExecutor,
     FakeExecutionRequest,
@@ -99,15 +104,29 @@ from bashgym.campaigns.remote import (
     SealedStageArtifactSource,
     remote_executor_config,
 )
-from bashgym.campaigns.runtime import CampaignRuntimeRepository
+from bashgym.campaigns.result_reuse import (
+    REUSABLE_STAGES,
+    REUSED_FROM_ACTION_KEY,
+    REUSED_FROM_ATTEMPT_KEY,
+)
+from bashgym.campaigns.runtime import (
+    CampaignRuntimeRepository,
+    ReusableCompletion,
+)
 from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 
 if TYPE_CHECKING:
     from bashgym.campaigns.autoresearch_loop import AutoResearchLoopCoordinator
 
+logger = logging.getLogger(__name__)
+
 
 class SimulatedWorkerCrashError(RuntimeError):
     """Test-only fault boundary after external side effect and before DB commit."""
+
+
+class UnregisteredExecutorKindError(RuntimeError):
+    """Raised when an attempt names an executor kind absent from this registry."""
 
 
 def scheduler_lease_key(data_directory: Path) -> str:
@@ -143,6 +162,7 @@ class CampaignWorker:
         source_repository_profiles: Mapping[str, ApprovedSourceRepositoryProfile] | None = None,
         lineage_manager: GitHypothesisLineageManager | None = None,
         autoresearch_loop: AutoResearchLoopCoordinator | None = None,
+        executor_registry: ExecutorRegistry | None = None,
     ):
         self.repository = repository
         self.artifact_root = artifact_root.resolve()
@@ -153,6 +173,7 @@ class CampaignWorker:
         self.action_ttl = action_ttl
         self._leader: LeaseRecord | None = None
         self._stop_requested = False
+        self.executor_registry = executor_registry or default_registry()
         self.executor = FakeExecutor(self.artifact_root, sealer)
         self.remote_output_sealer = RemoteOutputSealer(self.artifact_root, sealer)
         self.development_evaluation_executor = DevelopmentEvaluationExecutor(
@@ -349,47 +370,77 @@ class CampaignWorker:
             now=now,
         )
 
+    def _adapter_for(self, attempt: ActionAttempt) -> ExecutorAdapter:
+        """Resolve the registered adapter for one attempt, or fail with its public code."""
+
+        kind = str(attempt.executor.get("kind", "fake"))
+        try:
+            return self.executor_registry.get(kind)
+        except KeyError as exc:
+            raise UnregisteredExecutorKindError(UNREGISTERED_EXECUTOR_KIND_CODE) from exc
+
+    def _reconcile_remote(self, attempt: ActionAttempt, *, now: datetime) -> str | None:
+        """Adopt an unowned remote attempt, then advance its registered remote run."""
+
+        if (
+            attempt.lease_owner != self.worker_id
+            or attempt.lease_expires_at is None
+            or attempt.lease_expires_at <= now
+        ):
+            try:
+                attempt = self.repository.adopt_remote_attempt(
+                    attempt,
+                    self._leader,
+                    ttl=self.action_ttl,
+                    now=now,
+                )
+            except LeaseBusyError:
+                # Another live worker still holds this attempt's lease.
+                # Leave it for the owner (or for adoption after expiry)
+                # instead of failing the whole reconcile pass.
+                return None
+        return asyncio.run(self._remote_tick(attempt, now=now))
+
     def reconcile_once(self, *, now: datetime) -> str | None:
         """Register sealed results before marking expired uncertain work."""
 
         for attempt in self.repository.list_unfinished_attempts():
-            if attempt.executor.get("kind") == "ssh_remote":
-                if (
-                    attempt.lease_owner != self.worker_id
-                    or attempt.lease_expires_at is None
-                    or attempt.lease_expires_at <= now
-                ):
-                    try:
-                        attempt = self.repository.adopt_remote_attempt(
+            try:
+                adapter: ExecutorAdapter | None = self._adapter_for(attempt)
+            except UnregisteredExecutorKindError:
+                # Only the adapter-driven work is skipped; the lease-expiry
+                # branch below needs no adapter and still runs.
+                logger.warning(
+                    "%s: skipping attempt %s with executor kind %s",
+                    UNREGISTERED_EXECUTOR_KIND_CODE,
+                    attempt.attempt_id,
+                    attempt.executor.get("kind"),
+                )
+                adapter = None
+            if adapter is not None:
+                short_circuit = adapter.reconcile(self, attempt, now=now)
+                if short_circuit is not None:
+                    return short_circuit
+                if not adapter.repair_allowed():
+                    continue
+                sealed_path = self.sealed_path(attempt)
+                if sealed_path.is_dir():
+                    manifest = self._verify(attempt, sealed_path)
+                    self._ingest_sealed_metrics(attempt, sealed_path, now=now)
+                    if attempt.executor.get("kind") == "development_evaluation":
+                        self._persist_development_evaluation_evidence(
                             attempt,
-                            self._leader,
-                            ttl=self.action_ttl,
+                            sealed_path,
                             now=now,
                         )
-                    except LeaseBusyError:
-                        # Another live worker still holds this attempt's lease.
-                        # Leave it for the owner (or for adoption after expiry)
-                        # instead of failing the whole reconcile pass.
-                        continue
-                return asyncio.run(self._remote_tick(attempt, now=now))
-            sealed_path = self.sealed_path(attempt)
-            if sealed_path.is_dir():
-                manifest = self._verify(attempt, sealed_path)
-                self._ingest_sealed_metrics(attempt, sealed_path, now=now)
-                if attempt.executor.get("kind") == "development_evaluation":
-                    self._persist_development_evaluation_evidence(
-                        attempt,
+                    self.repository.complete_from_seal(
+                        manifest,
                         sealed_path,
+                        worker_id=self.worker_id,
+                        reconcile=True,
                         now=now,
                     )
-                self.repository.complete_from_seal(
-                    manifest,
-                    sealed_path,
-                    worker_id=self.worker_id,
-                    reconcile=True,
-                    now=now,
-                )
-                return "reconciled"
+                    return "reconciled"
             if (
                 attempt.status == AttemptStatus.RUNNING
                 and attempt.lease_expires_at is not None
@@ -398,6 +449,64 @@ class CampaignWorker:
                 self.repository.mark_expired_unknown(attempt, now=now)
                 return "unknown"
         return None
+
+    def _settle_controller_state(
+        self, attempt: ActionAttempt, manifest: SealedActionResult, *, now: datetime
+    ) -> None:
+        """Commit authenticated controller state as this attempt's terminal seal."""
+
+        envelope = self.sealer.envelope_bytes(manifest)
+        verified = self.sealer.verify_envelope_bytes(
+            envelope,
+            expected_workspace_id=attempt.workspace_id,
+            expected_campaign_id=attempt.campaign_id,
+            expected_study_id=attempt.study_id,
+            expected_action_id=attempt.action_id,
+            expected_attempt_id=attempt.attempt_id,
+            expected_manifest_revision=attempt.manifest_revision,
+            expected_candidate_digest=attempt.candidate_digest,
+            expected_input_digest=attempt.input_digest,
+            expected_claim_generation=attempt.claim_generation,
+        )
+        sealed_reference = (
+            f"bashgym-controller-state://{attempt.attempt_id}/sha256/"
+            f"{hashlib.sha256(envelope).hexdigest()}"
+        )
+        self.repository.settle_terminal_from_seal(
+            verified,
+            sealed_reference,
+            worker_id=self.worker_id,
+            now=now,
+        )
+
+    def _settle_unregistered_attempt(self, attempt: ActionAttempt, *, now: datetime) -> str:
+        """Fail a claimed attempt this worker cannot execute, releasing its claim."""
+
+        logger.warning(
+            "%s: settling attempt %s with executor kind %s",
+            UNREGISTERED_EXECUTOR_KIND_CODE,
+            attempt.attempt_id,
+            attempt.executor.get("kind"),
+        )
+        manifest = self.remote_output_sealer.unregistered_executor_manifest(attempt)
+        self._settle_controller_state(attempt, manifest, now=now)
+        return "blocked"
+
+    def _repair_allowed(self, attempt: ActionAttempt) -> bool:
+        """Report whether the attempt's registered executor supports local repair."""
+
+        return self._adapter_for(attempt).repair_allowed()
+
+    def _settle_unregistered_kind(self, claim: RecoveryWorkClaim, *, now: datetime) -> str:
+        """Block a recovery claim whose attempt names an executor kind this worker lacks."""
+
+        self.recovery.settle(
+            claim,
+            status="blocked",
+            outcome_code=UNREGISTERED_EXECUTOR_KIND_CODE,
+            now=now,
+        )
+        return "recovery_blocked"
 
     def _repair_recovery(self, claim: RecoveryWorkClaim, *, now: datetime) -> str:
         """Reconcile only one exact existing sealed local attempt, or block safely."""
@@ -422,13 +531,18 @@ class CampaignWorker:
                 )
                 return "recovery_repaired"
         else:
-            candidates = tuple(
-                value
-                for value in self.repository.list_attempts(claim.workspace_id, claim.campaign_id)
-                if value.status in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}
-                and value.executor.get("kind") != "ssh_remote"
-                and self.sealed_path(value).is_dir()
-            )
+            try:
+                candidates = tuple(
+                    value
+                    for value in self.repository.list_attempts(
+                        claim.workspace_id, claim.campaign_id
+                    )
+                    if value.status in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}
+                    and self._repair_allowed(value)
+                    and self.sealed_path(value).is_dir()
+                )
+            except UnregisteredExecutorKindError:
+                return self._settle_unregistered_kind(claim, now=now)
             if len(candidates) != 1:
                 self.recovery.settle(
                     claim, status="blocked", outcome_code="needs_operator", now=now
@@ -438,7 +552,11 @@ class CampaignWorker:
             claim = self.recovery.set_repair_target(claim, attempt.attempt_id)
 
         sealed_path = self.sealed_path(attempt)
-        if not sealed_path.is_dir() or attempt.executor.get("kind") == "ssh_remote":
+        try:
+            repairable = self._repair_allowed(attempt)
+        except UnregisteredExecutorKindError:
+            return self._settle_unregistered_kind(claim, now=now)
+        if not sealed_path.is_dir() or not repairable:
             self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
             return "recovery_blocked"
         try:
@@ -559,6 +677,37 @@ class CampaignWorker:
         )
         return "action_scheduled"
 
+    def _verify_sealed_data_build(
+        self,
+        data_attempt: ActionAttempt,
+        data_manifest: SealedActionResult,
+        *,
+        compute_profile_id: str,
+    ) -> None:
+        """Bind one data build's remote seal reference to its own sealed identity."""
+
+        envelope = self.sealer.envelope_bytes(data_manifest)
+        prefix = f"bashgym-remote-seal://{compute_profile_id}/{data_attempt.attempt_id}/sha256/"
+        if (
+            not data_attempt.sealed_result_uri
+            or not data_attempt.sealed_result_uri.startswith(prefix)
+            or hashlib.sha256(envelope).hexdigest()
+            != data_attempt.sealed_result_uri.removeprefix(prefix)
+        ):
+            raise ValueError("remote dataset seal mismatch")
+        self.sealer.verify_envelope_bytes(
+            envelope,
+            expected_workspace_id=data_attempt.workspace_id,
+            expected_campaign_id=data_attempt.campaign_id,
+            expected_study_id=data_attempt.study_id,
+            expected_action_id=data_attempt.action_id,
+            expected_attempt_id=data_attempt.attempt_id,
+            expected_manifest_revision=data_attempt.manifest_revision,
+            expected_candidate_digest=data_attempt.candidate_digest,
+            expected_input_digest=data_attempt.input_digest,
+            expected_claim_generation=data_attempt.claim_generation,
+        )
+
     def _remote_request(self, attempt: ActionAttempt) -> RemoteLaunchRequest:
         executor = attempt.executor
         required = {
@@ -677,42 +826,42 @@ class CampaignWorker:
                     attempt.study_id,
                     remote_resident_dataset.stage_index + 1,
                 )
-                data_attempt = self.repository.get_attempt(
+                data_attempt = self.repository.completed_data_build_attempt(
                     attempt.workspace_id,
-                    remote_resident_dataset.attempt_id,
+                    attempt.campaign_id,
+                    attempt.study_id,
+                    remote_resident_dataset.stage_index,
                 )
                 data_manifest = self.repository.get_attempt_result_manifest(
                     attempt.workspace_id,
                     data_attempt.attempt_id,
                 )
-                data_envelope = self.sealer.envelope_bytes(data_manifest)
-                data_prefix = (
-                    f"bashgym-remote-seal://{remote_resident_dataset.compute_profile_id}/"
-                    f"{data_attempt.attempt_id}/sha256/"
-                )
                 if (
                     actual_dataset_source != remote_resident_dataset
+                    or remote_resident_dataset.stage_index + 1 != attempt.stage_index
                     or data_attempt.status.value != "completed"
                     or data_attempt.stage.value != "data_build"
                     or data_attempt.candidate_digest != attempt.candidate_digest
-                    or not data_attempt.sealed_result_uri
-                    or not data_attempt.sealed_result_uri.startswith(data_prefix)
-                    or hashlib.sha256(data_envelope).hexdigest()
-                    != data_attempt.sealed_result_uri.removeprefix(data_prefix)
                 ):
                     raise ValueError("remote dataset source mismatch")
-                self.sealer.verify_envelope_bytes(
-                    data_envelope,
-                    expected_workspace_id=data_attempt.workspace_id,
-                    expected_campaign_id=data_attempt.campaign_id,
-                    expected_study_id=data_attempt.study_id,
-                    expected_action_id=data_attempt.action_id,
-                    expected_attempt_id=data_attempt.attempt_id,
-                    expected_manifest_revision=data_attempt.manifest_revision,
-                    expected_candidate_digest=data_attempt.candidate_digest,
-                    expected_input_digest=data_attempt.input_digest,
-                    expected_claim_generation=data_attempt.claim_generation,
+                self._verify_sealed_data_build(
+                    data_attempt,
+                    data_manifest,
+                    compute_profile_id=remote_resident_dataset.compute_profile_id,
                 )
+                reuse_chain = self.repository.reuse_source_chain(data_attempt)
+                source_attempt = reuse_chain[-1][0] if reuse_chain else data_attempt
+                if (
+                    source_attempt.attempt_id != remote_resident_dataset.attempt_id
+                    or source_attempt.action_id != remote_resident_dataset.action_id
+                ):
+                    raise ValueError("remote dataset source mismatch")
+                for reused_attempt, reused_manifest in reuse_chain:
+                    self._verify_sealed_data_build(
+                        reused_attempt,
+                        reused_manifest,
+                        compute_profile_id=remote_resident_dataset.compute_profile_id,
+                    )
                 sealed_files = {
                     (output.path, output.sha256, output.size_bytes)
                     for output in data_manifest.outputs
@@ -1299,29 +1448,7 @@ class CampaignWorker:
                     manifest = self.remote_output_sealer.unlaunched_cancelled_manifest(
                         attempt, compute_profile_id=request.compute_profile_id
                     )
-                    envelope = self.sealer.envelope_bytes(manifest)
-                    verified = self.sealer.verify_envelope_bytes(
-                        envelope,
-                        expected_workspace_id=attempt.workspace_id,
-                        expected_campaign_id=attempt.campaign_id,
-                        expected_study_id=attempt.study_id,
-                        expected_action_id=attempt.action_id,
-                        expected_attempt_id=attempt.attempt_id,
-                        expected_manifest_revision=attempt.manifest_revision,
-                        expected_candidate_digest=attempt.candidate_digest,
-                        expected_input_digest=attempt.input_digest,
-                        expected_claim_generation=attempt.claim_generation,
-                    )
-                    sealed_reference = (
-                        f"bashgym-controller-state://{attempt.attempt_id}/sha256/"
-                        f"{hashlib.sha256(envelope).hexdigest()}"
-                    )
-                    self.repository.settle_terminal_from_seal(
-                        verified,
-                        sealed_reference,
-                        worker_id=self.worker_id,
-                        now=now,
-                    )
+                    self._settle_controller_state(attempt, manifest, now=now)
                     return "remote_cancelled"
                 capacity_config = attempt.executor.get("capacity_policy", {})
                 capacity = await adapter.capacity_preflight(
@@ -1645,6 +1772,169 @@ class CampaignWorker:
         )
         return "completed"
 
+    def _resolve_reusable_completion(
+        self, attempt: ActionAttempt
+    ) -> tuple[ReusableCompletion, tuple[tuple[ActionAttempt, SealedActionResult], ...]] | None:
+        """Match one content-identical completion, treating a damaged row as a miss.
+
+        A reuse link written by another study can be unresolvable: its source row was
+        removed, its action later failed, or the chain is cyclic. That is a cache miss,
+        not a reason to fail the claimed action, so the worker reports the damaged
+        attempt and executes the stage for real. Integrity of a resolved source is a
+        separate question, decided by `_verify_reuse_source`, and it fails closed.
+        """
+
+        source = None
+        try:
+            source = self.repository.find_reusable_completion(
+                attempt.workspace_id,
+                attempt.result_key or "",
+                stage=attempt.stage,
+                exclude_action_id=attempt.action_id,
+            )
+            if source is None:
+                return None
+            return source, self.repository.reuse_source_chain(source.attempt)
+        except (CampaignPersistenceError, RecordNotFoundError) as exc:
+            logger.warning(
+                "campaign reuse skipped for attempt %s: matched attempt %s is unresolvable: %s",
+                attempt.attempt_id,
+                source.attempt.attempt_id if source is not None else "none",
+                exc,
+            )
+            return None
+
+    def _verify_reuse_source(
+        self, source_attempt: ActionAttempt, source_manifest: SealedActionResult
+    ) -> SealedActionResult:
+        """Bind one stored producer row to its sealed bytes and return the bound manifest.
+
+        Reuse re-signs a producer's content under the consuming identity, so the row
+        the resolution read is never trusted for having been stored. A remote seal
+        binds through the digest inside its seal reference; a local seal binds through
+        the signed envelope on disk, and the manifest that envelope carries is what the
+        caller must build from.
+        """
+
+        source_uri = str(source_attempt.sealed_result_uri or "")
+        if source_uri.startswith("bashgym-remote-seal://"):
+            self._verify_sealed_data_build(
+                source_attempt,
+                source_manifest,
+                compute_profile_id=source_manifest.compute_profile_id,
+            )
+            return source_manifest
+        sealed_manifest = self._verify(source_attempt, Path(source_uri))
+        if sealed_manifest != source_manifest:
+            raise ArtifactSealError(
+                f"{ArtifactSealError.code}: stored result does not match the sealed manifest"
+            )
+        return sealed_manifest
+
+    def _reuse_tick(
+        self,
+        attempt: ActionAttempt,
+        source: ReusableCompletion,
+        chain: tuple[tuple[ActionAttempt, SealedActionResult], ...],
+        *,
+        now: datetime,
+    ) -> str:
+        """Complete the claimed attempt from a content-identical sealed result.
+
+        The match may itself be a reusing attempt. The link is written against the
+        attempt that executed, so every recorded link is one hop and repeated reuse
+        of one content key cannot grow a chain.
+        """
+
+        verified_source = self._verify_reuse_source(source.attempt, source.manifest)
+        verified_chain = tuple(
+            (hop_attempt, self._verify_reuse_source(hop_attempt, hop_manifest))
+            for hop_attempt, hop_manifest in chain
+        )
+        producer, producer_manifest = (
+            verified_chain[-1] if verified_chain else (source.attempt, verified_source)
+        )
+        provenance = {
+            "kind": "reused",
+            REUSED_FROM_ATTEMPT_KEY: producer.attempt_id,
+            REUSED_FROM_ACTION_KEY: producer.action_id,
+            "compute_profile_id": producer_manifest.compute_profile_id,
+        }
+        derived = producer_manifest.model_copy(
+            update={
+                "workspace_id": attempt.workspace_id,
+                "campaign_id": attempt.campaign_id,
+                "study_id": attempt.study_id,
+                "action_id": attempt.action_id,
+                "attempt_id": attempt.attempt_id,
+                "manifest_revision": attempt.manifest_revision,
+                "candidate_digest": attempt.candidate_digest,
+                "input_digest": attempt.input_digest,
+                "claim_generation": attempt.claim_generation,
+                "remote_process_identity": provenance,
+                "log_reference": None,
+                "started_at": now,
+                "ended_at": now,
+                "exit_reason": f"reused sealed result from {producer.attempt_id}",
+                "resource_usage": (),
+            }
+        )
+        source_uri = str(source.attempt.sealed_result_uri or "")
+        if source_uri.startswith("bashgym-remote-seal://"):
+            envelope = self.sealer.envelope_bytes(derived)
+            sealed_reference: Path | str = (
+                f"bashgym-remote-seal://{derived.compute_profile_id}/"
+                f"{attempt.attempt_id}/sha256/{hashlib.sha256(envelope).hexdigest()}"
+            )
+        else:
+            source_directory = Path(source_uri)
+            sealed_directory = self.sealed_path(attempt)
+            temporary = sealed_directory.with_name(sealed_directory.name + ".reuse-tmp")
+            if temporary.exists():
+                shutil.rmtree(temporary)
+            for output in derived.outputs:
+                destination = temporary / output.path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.link(source_directory / output.path, destination)
+                except OSError:
+                    shutil.copyfile(source_directory / output.path, destination)
+            sealed_reference = self.sealer.seal(temporary, sealed_directory, derived)
+            self._verify(attempt, Path(sealed_reference))
+        self.repository.complete_from_seal(
+            derived,
+            sealed_reference,
+            worker_id=self.worker_id,
+            artifact_metadata_by_path=source.artifact_metadata_by_path,
+            now=now,
+        )
+        return "reused"
+
+    def _fake_tick(
+        self, attempt: ActionAttempt, *, now: datetime, crash_after_seal: bool = False
+    ) -> str:
+        request = FakeExecutionRequest(
+            workspace_id=attempt.workspace_id,
+            campaign_id=attempt.campaign_id,
+            study_id=attempt.study_id,
+            action_id=attempt.action_id,
+            attempt_id=attempt.attempt_id,
+            manifest_revision=attempt.manifest_revision,
+            candidate_digest=attempt.candidate_digest,
+            input_digest=attempt.input_digest,
+            claim_generation=attempt.claim_generation,
+            steps=int(attempt.executor.get("steps", 8)),
+        )
+        sealed_path, _manifest = self.executor.execute(request)
+        if crash_after_seal:
+            raise SimulatedWorkerCrashError(
+                "simulated crash after seal and before completion commit"
+            )
+        verified = self._verify(attempt, sealed_path)
+        self._ingest_sealed_metrics(attempt, sealed_path, now=now)
+        self.repository.complete_from_seal(verified, sealed_path, worker_id=self.worker_id, now=now)
+        return "completed"
+
     def run_once(
         self,
         *,
@@ -1690,36 +1980,19 @@ class CampaignWorker:
         )
         if attempt is None:
             return controller_result or deferred_autoresearch_status or "idle"
-        if attempt.executor.get("kind") == "ssh_remote":
-            return asyncio.run(self._remote_tick(attempt, now=tick_at))
-        if attempt.executor.get("kind") == "development_evaluation":
-            return self._development_evaluation_tick(attempt, now=tick_at)
-        request = FakeExecutionRequest(
-            workspace_id=attempt.workspace_id,
-            campaign_id=attempt.campaign_id,
-            study_id=attempt.study_id,
-            action_id=attempt.action_id,
-            attempt_id=attempt.attempt_id,
-            manifest_revision=attempt.manifest_revision,
-            candidate_digest=attempt.candidate_digest,
-            input_digest=attempt.input_digest,
-            claim_generation=attempt.claim_generation,
-            steps=int(attempt.executor.get("steps", 8)),
-        )
-        sealed_path, _manifest = self.executor.execute(request)
+        if attempt.result_key is not None and attempt.stage in REUSABLE_STAGES:
+            resolved = self._resolve_reusable_completion(attempt)
+            if resolved is not None:
+                return self._reuse_tick(attempt, *resolved, now=tick_at)
+        try:
+            adapter = self._adapter_for(attempt)
+        except UnregisteredExecutorKindError:
+            return self._settle_unregistered_attempt(attempt, now=tick_at)
         if crash_after_seal:
-            raise SimulatedWorkerCrashError(
-                "simulated crash after seal and before completion commit"
-            )
-        verified = self._verify(attempt, sealed_path)
-        self._ingest_sealed_metrics(attempt, sealed_path, now=tick_at)
-        self.repository.complete_from_seal(
-            verified,
-            sealed_path,
-            worker_id=self.worker_id,
-            now=tick_at,
-        )
-        return "completed"
+            if adapter.kind != "fake":
+                raise ValueError("crash_after_seal is only supported by the fake executor")
+            return self._fake_tick(attempt, now=tick_at, crash_after_seal=True)
+        return adapter.tick(self, attempt, now=tick_at)
 
     def run_forever(
         self,
@@ -1750,6 +2023,7 @@ class CampaignWorker:
                         if result
                         in {
                             "completed",
+                            "reused",
                             "reconciled",
                             "unknown",
                             "remote_running",

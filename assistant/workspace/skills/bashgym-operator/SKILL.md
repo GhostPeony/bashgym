@@ -258,7 +258,10 @@ Do not make the user repeat choices that already exist in registered context.
    the user to choose `max_attempts`, `budget_unit`, `max_total_cost`, and
    `minimum_improvement`; attempts include the baseline and candidates. Never
    infer these values from a prior campaign or silently use the template
-   policy. Preserve the template's fixed primary metric, direction, and
+   policy. `attempts_used` counts scientific experiments only: an
+   infrastructure-, permission-, or configuration-class crash does not consume
+   an attempt, though its measured spend still counts against
+   `max_total_cost`. Preserve the template's fixed primary metric, direction, and
    protected gates. Preview
    it with `bashgym research onboard --contract <file> --json`. This returns the
    ordered plan without applying it.
@@ -292,12 +295,60 @@ Do not make the user repeat choices that already exist in registered context.
    use `campaign proposal lineage-prepare`, edit only the returned worktree,
    and finish with `campaign proposal lineage-capture`. Scalar recipe changes
    remain ledger-native.
+   To build a candidate proposal from a prior study instead of writing one
+   from scratch, clone the study of the proposal that will be its parent: run
+   `research clone-study --campaign <id> --study <parent-study-id>
+--proposal-id <new-id> --set training_recipe='{"seed":23}' --set
+primary_variable='"training_recipe.seed"' --set
+prerequisite_study_ids='["<parent-study-id>"]' --output proposal.json`; review
+   the printed diff; then submit with `research submit-iteration --proposal
+proposal.json --role candidate --parent-proposal <parent-proposal-id>`, where
+   `<parent-proposal-id>` owns `<parent-study-id>` and is `source.proposal_id`
+   in the clone response when the clone source is the parent itself. The
+   candidate is rejected with
+   `autoresearch_candidate_parent_not_research_eligible` when the parent has no
+   completed real outcome and with
+   `autoresearch_candidate_must_depend_on_parent_study` when the parent's study
+   is absent from `prerequisite_study_ids`; the clone never adds it for you.
+   Clone submits nothing. A `--set`/`--changes` value for `dataset_recipe`,
+   `training_recipe`, or `evaluation_recipe` merges at the top level into the
+   source recipe (only a key the change names with `null` is removed; a stored
+   `null` survives), so a seed-only replication clone changes only `seed`;
+   every other cloneable field is replaced outright, `--set` wins over
+   `--changes` on the same key, and the printed diff always shows the field's
+   full before/after recipe. `research_context` is not cloneable because its
+   `retrieval_digest` covers the source proposal ID; the clone leaves it unset,
+   so run `research context` for the new proposal ID when the candidate needs
+   citations. `acquisition` is rebound to the new proposal ID and is not
+   reported as a change. The diff is relative to the clone source while the
+   confound check is relative to `--parent-proposal`, so they agree only when
+   the source is the parent. The MCP equivalent is
+   `research_clone_study(campaign_id, study_id, proposal_id, changes)`, which
+   returns the same `source`, `submission`, and `diff` fields; call
+   `research_submit_iteration` to submit the reviewed candidate.
 8. Evaluate every candidate on the pinned suite and ingest the exact run,
    attempt, artifact, and evaluation lineage. The primary metric comes from the
    evaluator, not training loss. Smoke or simulated results prove wiring only;
-   they cannot establish a baseline or incumbent.
+   they cannot establish a baseline or incumbent. When an attempt or completion
+   event carries `reused_from_attempt_id`, that stage was not executed again:
+   a data build on registered compute matched the content key of one already
+   completed in the workspace, so the attempt costs zero and its bytes are the
+   producing attempt's. Read it as the same result, not as new evidence of
+   determinism. Evaluation and training stages always execute. Each stage
+   recipe names an executor kind, and only a registered kind runs: an
+   unregistered kind fails closed at materialization instead of falling back
+   to a default. A recipe may name only `fake`, `registered_compute`,
+   `registered_training`, or `ssh_remote`. A third-party kind registered
+   through the `bashgym.campaign_executors` entry-point group is dispatched by
+   the worker once an action names it, but recipe-level acceptance of such a
+   kind is a follow-up. `available_executors` in the evidence snapshot lists
+   the executor kinds registered in the serving process.
 9. Re-read `research state` and `research failures` after each result. Continue only with a specific
-   evidence-backed hypothesis. Stop on the durable stop rule or an authorized
+   evidence-backed hypothesis. On a crash, read
+   `decision_packet.outcome_assessment.failure_kind`: it names the failure
+   class, so `infrastructure`, `permission`, or `configuration` means fix the
+   environment and rerun the same experiment rather than revising the
+   hypothesis. Stop on the durable stop rule or an authorized
    pause/cancel, then request the final artifacts with `research report`.
 
 Use `bashgym campaign doctor`, the authenticated campaign API, and the durable

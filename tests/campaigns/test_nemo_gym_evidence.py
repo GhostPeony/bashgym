@@ -49,6 +49,7 @@ def _attempt(*, attempt_id: str = "attempt-1") -> ActionAttempt:
         candidate_digest="2" * 64,
         manifest_revision=3,
         stage=StageKind.FULL_TRAINING,
+        stage_index=1,
         created_at=NOW,
         updated_at=NOW,
     )

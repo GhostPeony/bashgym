@@ -7,13 +7,16 @@ from bashgym.campaigns.contracts import (
     CANONICAL_CAMPAIGN_EVENT_TYPES,
     CampaignEvent,
     CredentialKind,
+    FailureClass,
     PublicCampaignArtifactV1,
+    PublicCampaignAttemptV1,
     PublicCampaignEventSummaryV1,
     PublicCampaignEventV1,
 )
 from bashgym.campaigns.visibility import (
     PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_ARTIFACT_FIELDS,
+    PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_ATTEMPT_FIELDS,
     PUBLIC_CAMPAIGN_EVENT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_EVENT_FIELDS,
@@ -63,6 +66,12 @@ def test_public_event_contract_has_an_exact_recursive_visibility_allowlist():
     assert "idempotency_identity" not in PUBLIC_CAMPAIGN_EVENT_FIELDS
     assert set(PublicCampaignArtifactV1.model_fields) == PUBLIC_CAMPAIGN_ARTIFACT_FIELDS
     assert set(PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES) == PUBLIC_CAMPAIGN_ARTIFACT_FIELDS
+    assert set(PublicCampaignAttemptV1.model_fields) == PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
+    assert set(PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES) == PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
+    assert set(PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES.values()) <= {
+        "public_metadata",
+        "workspace_safe",
+    }
 
 
 def test_unknown_events_and_fields_fail_closed_to_safe_identity():
@@ -120,6 +129,41 @@ def test_known_event_keeps_only_registered_typed_summary_fields():
     assert "operator-error-canary" not in serialized
     assert "private.json" not in serialized
     assert "candidate-map-canary" not in serialized
+
+
+def test_failed_action_summary_exposes_only_a_known_failure_class():
+    projected = project_public_campaign_event(
+        raw_event(
+            event_type="campaign:action-failed",
+            payload={
+                "action_id": "action-1",
+                "attempt_id": "attempt-1",
+                "study_id": "study-1",
+                "stage": "full_training",
+                "outcome": "failed",
+                "exit_reason": "operator-error-canary",
+                "failure_class": "infrastructure",
+            },
+        )
+    )
+
+    assert projected.summary is not None
+    assert projected.summary.failure_class == FailureClass.INFRASTRUCTURE
+    serialized = json.dumps(projected.model_dump(mode="json"), sort_keys=True)
+    assert "operator-error-canary" not in serialized
+
+    unknown = project_public_campaign_event(
+        raw_event(
+            event_type="campaign:action-failed",
+            payload={
+                "action_id": "action-1",
+                "failure_class": "private-cluster-identity",
+            },
+        )
+    )
+
+    assert unknown.summary is not None
+    assert unknown.summary.failure_class is None
 
 
 def test_allowed_field_names_reject_untrusted_values_and_non_finite_numbers():
@@ -255,6 +299,36 @@ def test_public_attempt_projection_normalizes_untrusted_executor_kind():
     assert unsafe.executor_kind is None
     assert "canary" not in json.dumps(unsafe.model_dump(mode="json"))
     assert missing.executor_kind is None
+
+
+def test_public_attempt_projection_reports_the_resolved_reuse_source():
+    base = {
+        "attempt_id": "attempt-2",
+        "workspace_id": "workspace-a",
+        "campaign_id": "campaign-1",
+        "study_id": "study-2",
+        "action_id": "action-2",
+        "attempt_number": 1,
+        "claim_generation": 0,
+        "status": "completed",
+        "input_digest": "a" * 64,
+        "candidate_digest": "b" * 64,
+        "manifest_revision": 1,
+        "stage": "data_build",
+        "created_at": "2026-07-17T00:00:00Z",
+        "updated_at": "2026-07-17T00:00:00Z",
+    }
+    reused = project_public_campaign_attempt(base, reused_from_attempt_id="attempt-1")
+    ordinary = project_public_campaign_attempt(base)
+    unsafe = project_public_campaign_attempt(
+        base, reused_from_attempt_id="C:/unsafe reuse source canary"
+    )
+
+    assert set(reused.model_dump(mode="json")) == PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
+    assert reused.reused_from_attempt_id == "attempt-1"
+    assert ordinary.reused_from_attempt_id is None
+    assert unsafe.reused_from_attempt_id is None
+    assert "canary" not in json.dumps(unsafe.model_dump(mode="json"))
 
 
 def test_public_artifact_projection_drops_uri_metadata_and_runtime_extras():

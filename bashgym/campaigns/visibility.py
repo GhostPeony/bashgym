@@ -14,6 +14,7 @@ from .contracts import (
     PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES,
     PUBLIC_CAMPAIGN_BLOCKER_CODES,
     CampaignEvent,
+    FailureClass,
     PublicCampaignArtifactV1,
     PublicCampaignAttemptV1,
     PublicCampaignEventSummaryV1,
@@ -57,11 +58,13 @@ PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS = frozenset(
         "schema_version",
         "action_id",
         "attempt_id",
+        "reused_from_attempt_id",
         "study_id",
         "proposal_id",
         "entry_id",
         "stage",
         "code",
+        "failure_class",
         "manifest_revision",
         "stage_index",
         "next_stage_index",
@@ -76,12 +79,13 @@ _IDENTITY_FIELDS = frozenset(
     {
         "action_id",
         "attempt_id",
+        "reused_from_attempt_id",
         "study_id",
         "proposal_id",
         "entry_id",
     }
 )
-_ENUM_FIELDS = frozenset({"stage", "code"})
+_ENUM_FIELDS = frozenset({"stage", "code", "failure_class"})
 _INTEGER_FIELDS = frozenset(
     {
         "manifest_revision",
@@ -149,6 +153,7 @@ PUBLIC_CAMPAIGN_ATTEMPT_FIELDS = frozenset(
         "input_digest",
         "candidate_digest",
         "executor_kind",
+        "reused_from_attempt_id",
         "created_at",
         "updated_at",
     }
@@ -169,6 +174,7 @@ PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES = MappingProxyType(
         "input_digest": "workspace_safe",
         "candidate_digest": "workspace_safe",
         "executor_kind": "workspace_safe",
+        "reused_from_attempt_id": "workspace_safe",
         "created_at": "workspace_safe",
         "updated_at": "workspace_safe",
     }
@@ -221,9 +227,13 @@ PUBLIC_EVENT_TYPE_FIELDS = MappingProxyType(
         "campaign:action-scheduled": _fields("action_id", "attempt_id", "study_id", "stage"),
         "campaign:action-claimed": _fields("action_id", "attempt_id", "claim_generation"),
         "campaign:action-unknown": _fields("action_id", "attempt_id"),
-        "campaign:action-failed": _fields("action_id", "attempt_id", "study_id", "stage"),
+        "campaign:action-failed": _fields(
+            "action_id", "attempt_id", "study_id", "stage", "failure_class"
+        ),
         "campaign:action-cancelled": _fields("action_id", "attempt_id", "study_id", "stage"),
-        "campaign:action-completed": _fields("action_id", "attempt_id", "study_id", "stage"),
+        "campaign:action-completed": _fields(
+            "action_id", "attempt_id", "study_id", "stage", "reused_from_attempt_id"
+        ),
         "campaign:action-force-stopped": _fields("action_id", "attempt_id", "study_id", "stage"),
         "campaign:budget-recorded": _fields("entry_id"),
         "campaign:budget-overrun": _fields("entry_id"),
@@ -248,6 +258,7 @@ if frozenset(PUBLIC_EVENT_TYPE_FIELDS) != CANONICAL_CAMPAIGN_EVENT_TYPES:
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 _STAGES = frozenset(item.value for item in StageKind)
+_FAILURE_CLASSES = frozenset(item.value for item in FailureClass)
 
 
 def _safe_identifier(value: Any) -> str | None:
@@ -273,6 +284,7 @@ def _safe_summary(
             allowed_values = {
                 "stage": _STAGES,
                 "code": PUBLIC_CAMPAIGN_BLOCKER_CODES,
+                "failure_class": _FAILURE_CLASSES,
             }[field]
             if isinstance(value, str) and value in allowed_values:
                 projected[field] = value
@@ -318,8 +330,14 @@ def project_public_campaign_event(
     )
 
 
-def project_public_campaign_attempt(attempt: Any) -> PublicCampaignAttemptV1:
-    """Project raw or untrusted attempt-shaped input without executor configuration."""
+def project_public_campaign_attempt(
+    attempt: Any, *, reused_from_attempt_id: str | None = None
+) -> PublicCampaignAttemptV1:
+    """Project raw or untrusted attempt-shaped input without executor configuration.
+
+    The reuse source is supplied by the caller that resolved it, because the attempt
+    record itself does not carry the sealed manifest that names it.
+    """
 
     raw = attempt.model_dump(mode="json") if hasattr(attempt, "model_dump") else dict(attempt)
     executor = raw.get("executor")
@@ -338,6 +356,7 @@ def project_public_campaign_attempt(attempt: Any) -> PublicCampaignAttemptV1:
         input_digest=raw["input_digest"],
         candidate_digest=raw["candidate_digest"],
         executor_kind=_safe_identifier(executor_kind),
+        reused_from_attempt_id=_safe_identifier(reused_from_attempt_id),
         created_at=raw["created_at"],
         updated_at=raw["updated_at"],
     )

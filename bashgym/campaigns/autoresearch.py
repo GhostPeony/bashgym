@@ -34,6 +34,7 @@ from bashgym.campaigns.contracts import (
     CodeLineageRecord,
     CodeMutationKind,
     CredentialKind,
+    FailureClass,
     FrozenContractModel,
     Identifier,
     ProposalStatus,
@@ -46,6 +47,7 @@ from bashgym.campaigns.contracts import (
     utc_now,
 )
 from bashgym.campaigns.diagnostic_actions import AutoResearchDiagnosticRecipe
+from bashgym.campaigns.failure_classification import NON_SCIENTIFIC_FAILURE_CLASSES
 from bashgym.campaigns.failure_observations import build_research_failure_packet
 from bashgym.campaigns.lineage import code_mutation_kind_for_variable
 from bashgym.campaigns.method_policy import AutoResearchMethodThresholds
@@ -62,6 +64,7 @@ from bashgym.campaigns.research_diagnostics import (
 )
 from bashgym.campaigns.runtime import CampaignArtifactRecord, CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
+from bashgym.campaigns.training_seed import training_seed, training_stages_required
 from bashgym.ledger.contracts import DecisionSpec, LedgerEventSpec, stable_ledger_id
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 
@@ -448,6 +451,7 @@ class AutoResearchResult(FrozenContractModel):
     metric_name: Identifier
     metric_value: float | None = None
     metrics: dict[Identifier, float] = Field(default_factory=dict)
+    failure_class: FailureClass | None = None
     actual_cost: float = Field(ge=0)
     attempt_ids: tuple[Identifier, ...]
     evidence_references: tuple[Identifier, ...] = ()
@@ -467,6 +471,8 @@ class AutoResearchResult(FrozenContractModel):
         if self.outcome == ExperimentOutcome.COMPLETED:
             if self.metric_value is None or not math.isfinite(self.metric_value):
                 raise ValueError("completed AutoResearch result requires a finite metric")
+            if self.failure_class is not None:
+                raise ValueError("completed AutoResearch result cannot carry a failure class")
         elif self.metric_value is not None:
             raise ValueError("crashed AutoResearch result cannot claim a final metric")
         if not math.isfinite(self.actual_cost):
@@ -483,6 +489,25 @@ class AutoResearchResult(FrozenContractModel):
     def result_digest(self) -> str:
         return canonical_hash(self.model_dump(mode="json", exclude={"recorded_at"}))
 
+    def digest_matches(self, digest: str) -> bool:
+        """Accept this result's digest, or the one written before failure_class existed."""
+
+        if digest == self.result_digest:
+            return True
+        if self.failure_class is not None:
+            return False
+        return digest == canonical_hash(
+            self.model_dump(mode="json", exclude={"recorded_at", "failure_class"})
+        )
+
+
+def counts_as_experiment(result: AutoResearchResult) -> bool:
+    """A completed result or an execution crash is scientific evidence; infra faults are not."""
+
+    if result.outcome != ExperimentOutcome.CRASHED:
+        return True
+    return result.failure_class not in NON_SCIENTIFIC_FAILURE_CLASSES
+
 
 class AutoResearchDecision(FrozenContractModel):
     schema_version: Literal["autoresearch_decision.v1"] = "autoresearch_decision.v1"
@@ -493,6 +518,7 @@ class AutoResearchDecision(FrozenContractModel):
     previous_best_proposal_id: Identifier | None = None
     previous_best_metric: float | None = None
     improvement: float | None = None
+    protected_metric_margins: dict[Identifier, float] = Field(default_factory=dict)
     result_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     decided_at: datetime = Field(default_factory=utc_now)
 
@@ -1446,19 +1472,35 @@ class AutoResearchRepository(CampaignRuntimeRepository):
         )
 
     @classmethod
+    def _protected_metric_margins(
+        cls,
+        gates: tuple[ProtectedMetricGate, ...],
+        incumbent: AutoResearchResult,
+        candidate: AutoResearchResult,
+    ) -> dict[str, float]:
+        """Headroom per protected metric; negative means the gate is breached."""
+
+        margins: dict[str, float] = {}
+        for gate in gates:
+            previous = incumbent.metrics.get(gate.metric_name)
+            current = candidate.metrics.get(gate.metric_name)
+            if previous is None or current is None:
+                continue
+            regression = -cls._improvement(gate.direction, previous, current)
+            margins[gate.metric_name] = gate.max_regression - regression
+        return margins
+
+    @classmethod
     def _protected_metric_failure(
         cls,
         gates: tuple[ProtectedMetricGate, ...],
         incumbent: AutoResearchResult,
         candidate: AutoResearchResult,
     ) -> str | None:
+        margins = cls._protected_metric_margins(gates, incumbent, candidate)
         for gate in gates:
-            previous = incumbent.metrics.get(gate.metric_name)
-            current = candidate.metrics.get(gate.metric_name)
-            if previous is None or current is None:
-                return gate.metric_name
-            regression = -cls._improvement(gate.direction, previous, current)
-            if regression > gate.max_regression:
+            margin = margins.get(gate.metric_name)
+            if margin is None or margin < 0:
                 return gate.metric_name
         return None
 
@@ -1468,7 +1510,11 @@ class AutoResearchRepository(CampaignRuntimeRepository):
         spec: AutoResearchCampaignSpec,
         outcome: AutoResearchOutcomeRecord,
         context: AutoResearchLedgerCommitContext,
+        *,
+        result_digest: str,
     ) -> None:
+        """Mirror one outcome into the ledger under the results row's digest of record."""
+
         result = outcome.result
         decision = outcome.decision
         if spec.ledger_project_id != context.project_id:
@@ -1528,7 +1574,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 "proposal_id": result.proposal_id,
                 "study_id": result.study_id,
                 "result_id": result.result_id,
-                "result_digest": result.result_digest,
+                "result_digest": result_digest,
                 "decision": decision.decision.value,
                 "reason_code": decision.reason_code,
                 "eligible_for_best": decision.eligible_for_best,
@@ -1603,6 +1649,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             ).fetchone()
             stored_result: AutoResearchResult | None = None
             stored_decision: AutoResearchDecision | None = None
+            digest_of_record = result.result_digest
             if by_proposal is not None:
                 try:
                     stored_result = AutoResearchResult.model_validate_json(
@@ -1613,12 +1660,14 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                     )
                 except (TypeError, ValueError) as exc:
                     raise AutoResearchConflictError("autoresearch_result_conflict") from exc
+                stored_digest = by_proposal["result_digest"]
                 if (
-                    by_proposal["result_digest"] != result.result_digest
-                    or stored_result.result_digest != by_proposal["result_digest"]
+                    not result.digest_matches(stored_digest)
+                    or not stored_result.digest_matches(stored_digest)
                     or stored_result != result
                 ):
                     raise AutoResearchConflictError("autoresearch_result_conflict")
+                digest_of_record = stored_digest
             elif by_id is not None:
                 raise AutoResearchConflictError("autoresearch_result_id_conflict")
 
@@ -1690,6 +1739,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             previous_metric = incumbent.result.metric_value if incumbent else None
 
             improvement: float | None = None
+            protected_margins: dict[str, float] = {}
             if result.outcome == ExperimentOutcome.CRASHED:
                 choice = ResultDecision.CRASH
                 reason = "experiment_crashed"
@@ -1732,6 +1782,11 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                     incumbent.result,
                     result,
                 )
+                protected_margins = self._protected_metric_margins(
+                    spec.stop_rules.protected_metrics,
+                    incumbent.result,
+                    result,
+                )
                 improved = clears_primary and protected_failure is None
                 choice = ResultDecision.KEEP if improved else ResultDecision.DISCARD
                 if protected_failure is not None:
@@ -1750,11 +1805,14 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 previous_best_proposal_id=previous_id,
                 previous_best_metric=previous_metric,
                 improvement=improvement,
-                result_digest=result.result_digest,
+                protected_metric_margins=protected_margins,
+                result_digest=digest_of_record,
                 decided_at=result.recorded_at,
             )
             if stored_result is not None and stored_decision is not None:
-                if stored_decision != decision:
+                if stored_decision.model_dump(
+                    mode="json", exclude={"protected_metric_margins"}
+                ) != decision.model_dump(mode="json", exclude={"protected_metric_margins"}):
                     raise AutoResearchConflictError("autoresearch_result_conflict")
                 outcome = AutoResearchOutcomeRecord(
                     result=stored_result,
@@ -1763,7 +1821,11 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                 )
                 if ledger_context is not None:
                     self._record_outcome_ledger_in_connection(
-                        connection, spec, outcome, ledger_context
+                        connection,
+                        spec,
+                        outcome,
+                        ledger_context,
+                        result_digest=digest_of_record,
                     )
                 return outcome
             connection.execute(
@@ -1786,7 +1848,13 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             )
             outcome = AutoResearchOutcomeRecord(result=result, decision=decision)
             if ledger_context is not None:
-                self._record_outcome_ledger_in_connection(connection, spec, outcome, ledger_context)
+                self._record_outcome_ledger_in_connection(
+                    connection,
+                    spec,
+                    outcome,
+                    ledger_context,
+                    result_digest=digest_of_record,
+                )
         return outcome
 
 
@@ -1912,6 +1980,7 @@ class AutoResearchCampaignCore:
         budget_used = sum(item.result.actual_cost for item in outcomes) + sum(
             item.actual_cost for item in diagnostics
         )
+        scientific_attempts = sum(1 for item in outcomes if counts_as_experiment(item.result))
         manifest_remaining = self.repository.build_evidence_snapshot(
             workspace_id, campaign_id
         ).budget_remaining[spec.stop_rules.budget_unit]
@@ -1955,7 +2024,7 @@ class AutoResearchCampaignCore:
             )
         elif spec.stop_rules.deadline is not None and current_time >= spec.stop_rules.deadline:
             next_action, reason = AutoResearchNextAction.STOP, "deadline_reached"
-        elif len(outcomes) >= spec.stop_rules.max_attempts:
+        elif scientific_attempts >= spec.stop_rules.max_attempts:
             next_action, reason = AutoResearchNextAction.STOP, "attempt_limit_reached"
         elif budget_remaining <= 0:
             next_action, reason = AutoResearchNextAction.STOP, "budget_exhausted"
@@ -1999,7 +2068,7 @@ class AutoResearchCampaignCore:
             best_proposal_id=best.result.proposal_id if best else None,
             best_study_id=best_study_id,
             best_metric=best.result.metric_value if best else None,
-            attempts_used=len(outcomes),
+            attempts_used=scientific_attempts,
             proposals_used=len(controls),
             budget_used=budget_used,
             budget_remaining=budget_remaining,
@@ -2206,6 +2275,10 @@ class AutoResearchCampaignCore:
                 raise AutoResearchInvariantError(
                     "autoresearch_candidate_requires_controlled_variables"
                 )
+            if training_stages_required(submission.stage_plan) and (
+                training_seed(submission.training_recipe) is None
+            ):
+                raise AutoResearchInvariantError("autoresearch_candidate_requires_training_seed")
             parent_outcome = next(
                 (
                     item

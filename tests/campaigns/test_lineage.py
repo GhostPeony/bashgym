@@ -740,6 +740,7 @@ def test_worker_materializes_captured_commit_into_remote_launch_request(
         candidate_digest=action.candidate_digest,
         manifest_revision=action.manifest_revision,
         stage=action.stage,
+        stage_index=action.stage_index,
         executor={"kind": action.executor_kind, **action.executor_config},
     )
     worker = CampaignWorker(

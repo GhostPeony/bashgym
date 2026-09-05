@@ -23,6 +23,8 @@ from bashgym.campaigns.contracts import StudyProposal, canonical_hash
 from bashgym.campaigns.experiment_power import build_experiment_power_projection
 from bashgym.campaigns.failure_observations import build_research_failure_packet
 from bashgym.campaigns.outcome_assessment import build_outcome_assessment
+from bashgym.campaigns.result_reuse import NO_REUSE_LINKS, attempts_with_reuse_sources
+from bashgym.campaigns.training_seed import training_seed
 
 _MAX_HISTORY = 100
 _MAX_METRICS = 16
@@ -121,9 +123,17 @@ def _replication_comparison_digest(
 
 
 def _dataset_for_outcome(
-    versions: Sequence[Mapping[str, Any]], outcome: AutoResearchOutcomeRecord
+    versions: Sequence[Mapping[str, Any]],
+    outcome: AutoResearchOutcomeRecord,
+    reuse_links: Mapping[str, str],
 ) -> dict[str, Any] | None:
-    attempts = frozenset(outcome.result.attempt_ids)
+    """Match the registered dataset of this experiment, following any reuse link.
+
+    A study whose data build was reused registers no version of its own, so the
+    attempt that executed the build is searched alongside the study's own attempts.
+    """
+
+    attempts = attempts_with_reuse_sources(outcome.result.attempt_ids, reuse_links)
     for version in versions:
         metadata = version.get("metadata")
         if not isinstance(metadata, Mapping):
@@ -198,6 +208,7 @@ def _entry(
     evaluations: Sequence[Mapping[str, Any]],
     evidence_strength: str,
     hypothesis_family: Mapping[str, Any] | None,
+    reuse_links: Mapping[str, str],
 ) -> dict[str, Any]:
     result = outcome.result
     decision = outcome.decision
@@ -340,7 +351,7 @@ def _entry(
             evaluations=evaluations,
             hypothesis_family=hypothesis_family,
         ),
-        "data": _dataset_for_outcome(dataset_versions, outcome),
+        "data": _dataset_for_outcome(dataset_versions, outcome, reuse_links),
         "attempt_ids": attempts,
         "attempt_ids_omitted": attempts_omitted,
         "evidence_references": references,
@@ -398,8 +409,8 @@ def _hypothesis_families(
             proposal = proposal_by_id.get(control.proposal_id)
             if proposal is None:
                 continue
-            seed = proposal.training_recipe.get("seed")
-            if isinstance(seed, int) and not isinstance(seed, bool) and seed not in seeds:
+            seed = training_seed(proposal.training_recipe)
+            if seed is not None and seed not in seeds:
                 seeds.append(seed)
             outcome = outcomes_by_proposal.get(control.proposal_id)
             if outcome is None:
@@ -493,6 +504,7 @@ def build_autoresearch_history(
     dataset_versions: Sequence[Mapping[str, Any]] = (),
     evaluations: Sequence[Mapping[str, Any]] = (),
     hypothesis_family_conclusions: Sequence[AutoResearchHypothesisFamilyConclusion] = (),
+    reuse_links: Mapping[str, str] = NO_REUSE_LINKS,
     limit: int = _MAX_HISTORY,
 ) -> dict[str, Any]:
     """Join completed experiment records and project bounded scientific facts."""
@@ -543,6 +555,7 @@ def build_autoresearch_history(
                     if control.hypothesis_family_id is not None
                     else None
                 ),
+                reuse_links=reuse_links,
             )
         )
     return {

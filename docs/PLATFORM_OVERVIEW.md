@@ -44,7 +44,7 @@ experiment engine and they do not choose hypotheses.
 
 | Responsibility          | Code                                                                                                              | What it does                                                                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Agent tools             | `bashgym/mcp/campaign_server.py`, `bashgym/cli.py`                                                                | Exposes preparation, state/wait, Start, iteration submission, family conclusions, and reports.                                            |
+| Agent tools             | `bashgym/mcp/campaign_server.py`, `bashgym/cli.py`                                                                | Exposes preparation, state/wait, Start, iteration submission, family conclusions, and reports.                                             |
 | HTTP boundary           | `bashgym/api/campaign_routes.py`                                                                                  | Creates, starts, reads, mutates, and exports campaigns.                                                                                    |
 | Experiment rules        | `bashgym/campaigns/autoresearch.py`                                                                               | Requires a baseline, binds a candidate to the current reference, limits the declared change, records keep/discard, and applies stop rules. |
 | Proposal checks         | `bashgym/campaigns/proposals.py`                                                                                  | Checks stage shape, registered runtimes, recipe contracts, and code-lineage requirements.                                                  |
@@ -148,6 +148,32 @@ These are code boundaries, not roadmap labels:
 - DPPO launchers and several backend integrations produce plans or smoke
   evidence; they are not interchangeable with an executed campaign training
   stage.
+
+### Executor adapters
+
+Each stage runs through an executor adapter keyed by executor kind. Built-in
+kinds register in code; a third-party package can register additional kinds
+through the `bashgym.campaign_executors` entry-point group, one adapter per
+executor kind. An adapter implements `kind`, `allowed_stages`,
+`reuses_completed_results`, `tick`, `reconcile`, and `repair_allowed`. An
+executor kind that is not registered is rejected at spec validation and at
+materialization; there is no unregistered fallback.
+
+Entry-point registration wires worker dispatch. The worker runs a third-party
+kind once an action names it, and it fails an attempt whose kind it cannot
+resolve with `campaign_executor_kind_not_registered` rather than leaving that
+attempt claimed. Recipe-level acceptance of third-party kinds is a follow-up:
+proposal validation and `next_action_spec` materialization still admit only
+built-in kinds, so today a recipe may name `fake`, `registered_compute`,
+`registered_training`, or `ssh_remote`.
+
+Each process builds the registry once, on first use. An entry point that fails
+to import, whose factory raises, that does not implement the adapter protocol,
+or whose kind is not an identifier or is already registered, is skipped with a
+warning naming the entry point and the error. Its kind stays unregistered and
+fails closed wherever an action or a recipe names it, and campaign reads in
+that process keep working. A built-in adapter that fails to register is a
+repository defect and raises instead.
 
 ## Architecture cleanup priorities
 

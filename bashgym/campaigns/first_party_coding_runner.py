@@ -45,6 +45,7 @@ class CodingRunnerConfig(FrozenContractModel):
     dtype: Literal["float32", "float16", "bfloat16"]
     device: str
     seed: int = Field(strict=True, ge=0, le=2**32 - 1)
+    completion_protocol: Literal["raw", "humaneval_body_v1"]
 
     @field_validator("sandbox_image")
     @classmethod
@@ -154,6 +155,26 @@ class LocalCompletion:
         return self.tokenizer.decode(
             output.sequences[0, inputs["input_ids"].shape[-1] :], skip_special_tokens=True
         )
+
+
+def process_completion(completion: str, protocol: Literal["raw", "humaneval_body_v1"]) -> str:
+    """Apply the declared textual stop convention without repairing generated code.
+
+    Body completion ends at the first column-zero declaration, import, print,
+    comment, conditional, or Markdown fence. Indented nested code is preserved.
+    This is a fixed delimiter protocol, not Python parsing or semantic repair;
+    it deliberately applies the same boundaries even inside multiline strings.
+    """
+    if protocol == "raw":
+        return completion
+    if protocol != "humaneval_body_v1":
+        raise ValueError("coding_completion_protocol_invalid")
+    boundary = re.search(
+        r"^(?:def[ \t]|class[ \t]|if[ \t]|import[ \t]|from[ \t]|print(?:[ \t]|\()|#|```)",
+        completion,
+        flags=re.MULTILINE,
+    )
+    return completion[: boundary.start()] if boundary else completion
 
 
 # check_correctness performs prompt + completion + test + check(entry_point).
@@ -280,6 +301,7 @@ def run(
             completion = complete(task.prompt)
             if not isinstance(completion, str) or len(completion.encode()) > 1024 * 1024:
                 raise ValueError("coding_completion_invalid")
+            completion = process_completion(completion, config.completion_protocol)
         except TimeoutError:
             counts["generation_timeout"] += 1
             counts["not_run"] = len(tasks) - index - 1
@@ -326,6 +348,7 @@ def run(
         {
             "schema_version": "coding_task_results.v1",
             "scope": config.scope,
+            "completion_protocol": config.completion_protocol,
             "attempt_id": context.attempt_id,
             "dataset_content_digest": context.dataset_content_digest,
             "evaluated_model_manifest_digest": context.evaluated_model_manifest_digest,
@@ -341,6 +364,7 @@ def run(
         slice_metrics={
             "coding_benchmark": {
                 "scope": config.scope,
+                "completion_protocol": config.completion_protocol,
                 "split": config.split,
                 "task_count": len(tasks),
                 "task_results_file": task_results_path.name,

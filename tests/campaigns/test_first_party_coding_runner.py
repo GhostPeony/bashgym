@@ -34,6 +34,7 @@ def inputs(tmp_path):
         dtype="float32",
         device="cpu",
         seed=7,
+        completion_protocol="raw",
     )
     rows = [
         dict(
@@ -103,6 +104,58 @@ def test_fixed_denominator_and_real_evidence_schema(inputs):
         {"task_id": "task/2", "status": "test_timeout"},
     ]
     assert b"prompt" not in artifact and b"return a+b" not in artifact
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "def other():",
+        "class Other:",
+        "if True:",
+        "import math",
+        "from math import pi",
+        "print('other')",
+        "# unrelated example",
+        "```python",
+    ],
+)
+def test_humaneval_body_stops_before_dedented_continuation(boundary):
+    body = "    def nested(value):\n        return value\n    return nested(a + b)\n\n"
+    raw = body + boundary + '\n    """unfinished unrelated text'
+    assert runner.process_completion(raw, "humaneval_body_v1") == body
+    assert runner.process_completion(raw, "raw") == raw
+    namespace = {}
+    exec("def add(a, b):\n" + runner.process_completion(raw, "humaneval_body_v1"), namespace)
+    assert namespace["add"](1, 2) == 3
+
+
+def test_completion_protocol_is_required_and_does_not_repair_invalid_body(inputs):
+    config = json.loads(inputs["config_path"].read_text())
+    config.pop("completion_protocol")
+    with pytest.raises(ValueError, match="completion_protocol"):
+        runner.CodingRunnerConfig.model_validate(config)
+    invalid = "    return (a +\n"
+    assert runner.process_completion(invalid, "humaneval_body_v1") == invalid
+
+
+def test_run_applies_declared_completion_protocol_and_records_it(inputs):
+    config = json.loads(inputs["config_path"].read_text())
+    config["completion_protocol"] = "humaneval_body_v1"
+    inputs["config_path"].write_text(json.dumps(config))
+    raw = '    return a + b\n\ndef unrelated():\n    """unfinished docstring'
+
+    def evaluate(task, completion, selected):
+        assert selected.completion_protocol == "humaneval_body_v1"
+        namespace = {}
+        exec(task.prompt + completion, namespace)
+        return "passed" if namespace[task.entry_point](1, 2) == 3 else "failed"
+
+    result = runner.run(**inputs, complete=lambda prompt: raw, evaluate=evaluate)
+    summary = result.slice_metrics["coding_benchmark"]
+    assert summary["completion_protocol"] == "humaneval_body_v1"
+    assert result.metrics["pass_fraction"] == 1
+    artifact = json.loads(inputs["output_path"].with_name("coding_task_results.json").read_text())
+    assert artifact["completion_protocol"] == "humaneval_body_v1"
 
 
 @pytest.mark.parametrize("phase", ["generation", "evaluation"])

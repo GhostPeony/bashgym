@@ -22,6 +22,8 @@ from bashgym.campaigns.diagnostic_actions import (
     AUTORESEARCH_DIAGNOSTIC_RECIPE_SCHEMA,
     AutoResearchDiagnosticRecipe,
 )
+from bashgym.campaigns.runtime import RECIPE_KIND_ALIASES
+from bashgym.campaigns.secret_scan import scan_values
 from bashgym.campaigns.tmax_recipe import (
     TMAX_COMPOSITE_TRAINING_RECIPE_SCHEMA,
     TMaxCompositeTrainingRecipe,
@@ -44,9 +46,11 @@ _FORBIDDEN_EXECUTION_KEYS = frozenset(
         "process_group_id",
     }
 )
-_FAKE_RUNTIME_KEYS = frozenset({"executor_kind", "budget_unit", "budget_reservation", "fake_steps"})
+_FAKE_RUNTIME_KEYS = frozenset(
+    {"executor_kind", "budget_unit", "budget_reservation", "fake_steps", "memoize"}
+)
 _LIVE_RUNTIME_KEYS = frozenset({"executor_kind"})
-_REGISTERED_COMPUTE_KINDS = frozenset({"registered_compute", "registered_training", "ssh_remote"})
+_REGISTERED_COMPUTE_KINDS = frozenset(RECIPE_KIND_ALIASES) | frozenset(RECIPE_KIND_ALIASES.values())
 
 
 def _recipe_has_schema_version(recipe: Mapping[str, Any]) -> bool:
@@ -212,6 +216,30 @@ def validate_proposal_submission(
     reasons.update(_runtime_policy_reasons(submission.dataset_recipe, live_compute_allowed=True))
     reasons.update(_runtime_policy_reasons(submission.training_recipe, live_compute_allowed=True))
     reasons.update(_runtime_policy_reasons(submission.evaluation_recipe, live_compute_allowed=True))
+
+    scan_targets: dict[str, Any] = {
+        "dataset_recipe": submission.dataset_recipe,
+        "training_recipe": submission.training_recipe,
+        "evaluation_recipe": submission.evaluation_recipe,
+        "hypothesis": submission.hypothesis,
+        "rationale": submission.rationale,
+        "expected_outcome": submission.expected_outcome,
+        "falsification_criterion": submission.falsification_criterion,
+        "primary_variable": submission.primary_variable,
+        "evidence_references": list(submission.evidence_references),
+        "controlled_variables": list(submission.controlled_variables),
+    }
+    if submission.research_context is not None:
+        scan_targets["research_context"] = submission.research_context.model_dump(mode="json")
+    if submission.acquisition is not None:
+        scan_targets["acquisition"] = submission.acquisition.model_dump(mode="json")
+    for finding in scan_values(scan_targets):
+        if finding.kind == "credential":
+            reasons.add("proposal_credential_shaped_value")
+        elif finding.kind == "placeholder":
+            reasons.add("proposal_unresolved_placeholder")
+        else:
+            reasons.add("proposal_content_unscannable")
 
     required = set(submission.required_capabilities)
     if not required.issubset(principal.capabilities):

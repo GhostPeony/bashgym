@@ -138,6 +138,14 @@ class RecordingClient:
                 "comparison": [],
                 "truncated": False,
             }
+        if path.endswith("/clone") and method == "POST":
+            return {
+                "source": {"study_id": path.split("/")[-2], "proposal_id": "proposal-source"},
+                "submission": {"proposal_id": payload["proposal_id"], "hypothesis": "h"},
+                "diff": {
+                    "training_recipe": {"from": {}, "to": payload["changes"].get("training_recipe")}
+                },
+            }
         if method == "POST":
             return {
                 "campaign": {"campaign_id": "campaign-1", "version": 3},
@@ -309,6 +317,33 @@ async def test_research_failures_delegates_to_the_canonical_read_route():
     ]
 
 
+async def test_research_clone_study_returns_prefilled_submission():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    cloned = await call_tool(
+        server,
+        "research_clone_study",
+        {
+            "campaign_id": "campaign-1",
+            "study_id": "study-2",
+            "proposal_id": "proposal-clone",
+            "changes": {"training_recipe": {"seed": 23}},
+        },
+    )
+
+    assert cloned["ok"] is True
+    assert cloned["source"] == {"study_id": "study-2", "proposal_id": "proposal-source"}
+    assert cloned["submission"]["proposal_id"] == "proposal-clone"
+    assert cloned["diff"] == {"training_recipe": {"from": {}, "to": {"seed": 23}}}
+    assert client.calls[-1]["payload"]["workspace_id"] == "workspace-a"
+
+
 async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
     runtime = McpClientRuntime()
     connected = await runtime.connect_stdio(
@@ -347,6 +382,7 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
             "campaign_proposals",
             "campaign_studies",
             "campaign_study",
+            "research_clone_study",
             "campaign_attempts",
             "campaign_comparisons",
             "campaign_events",

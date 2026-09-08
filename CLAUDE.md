@@ -59,8 +59,9 @@ Keep these boundaries explicit:
 - fake executors and smoke templates prove wiring, not model improvement.
 - standalone holdout, pass@k, regression, and release-gate utilities are not all
   part of the campaign KEEP/DISCARD decision yet.
-- the canvas and experiment view render campaign state; they do not choose the
-  next experiment.
+- the canvas and experiment view render campaign state and may author
+  proposals through the same validated submission routes the agent uses; they
+  do not automatically select the next experiment.
 - named models and training runs belong in examples and case studies, not in
   the generic architecture.
 

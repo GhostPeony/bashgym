@@ -30,7 +30,11 @@ from bashgym.campaigns.contracts import (
 )
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.worker import CampaignWorker, SimulatedWorkerCrashError
-from tests.campaigns.test_worker import schedule, seed_validated_study
+from tests.campaigns.test_worker import (
+    rewrite_executor_kind,
+    schedule,
+    seed_validated_study,
+)
 
 NOW = datetime(2026, 7, 16, 20, 30, tzinfo=UTC)
 INSTALLATION = "ins_" + "1" * 32
@@ -1108,3 +1112,39 @@ def test_repair_with_multiple_sealed_local_attempts_needs_operator(repositories,
     assert outcome["outcome_code"] == "needs_operator"
     assert outcome["attempt_id"] is None
     assert len(campaigns.list_unfinished_attempts()) == 2
+
+
+def test_repair_blocks_when_the_attempt_executor_kind_is_not_registered(repositories, tmp_path):
+    campaigns, recovery = repositories
+    worker = _resident_worker(campaigns, recovery, tmp_path)
+    for trigger, version, key in (
+        (CampaignTrigger.VALIDATE, 1, "unregistered-repair-validate"),
+        (CampaignTrigger.VALIDATION_PASSED, 2, "unregistered-repair-ready"),
+        (CampaignTrigger.START, 3, "unregistered-repair-start"),
+    ):
+        campaigns.transition_campaign(
+            "workspace-a",
+            "campaign-1",
+            trigger,
+            expected_version=version,
+            actor_id="human-operator",
+            credential_kind=CredentialKind.ACCESS,
+            correlation_id=key,
+            idempotency_key=key,
+        )
+    plan = seed_validated_study(campaigns)
+    schedule(campaigns, worker, plan)
+    with pytest.raises(SimulatedWorkerCrashError):
+        worker.run_once(now=NOW, crash_after_seal=True)
+    stranded = campaigns.list_unfinished_attempts()[0]
+    rewrite_executor_kind(campaigns, stranded.attempt_id, "vendor_gpu")
+
+    snapshot = recovery.project("workspace-a", "campaign-1", now=NOW + timedelta(seconds=1))
+    request = _request(snapshot, action=RecoveryAction.REPAIR, key="idem_" + "7" * 32)
+    recovery.request(request, actor_id="human-operator", now=NOW + timedelta(seconds=2))
+
+    assert worker.run_once(now=NOW + timedelta(seconds=3)) == "recovery_blocked"
+    outcome = recovery.execution_status("workspace-a", "campaign-1", request.idempotency_key)
+    assert outcome["status"] == "blocked"
+    assert outcome["outcome_code"] == "campaign_executor_kind_not_registered"
+    assert campaigns.get_attempt("workspace-a", stranded.attempt_id).status == stranded.status

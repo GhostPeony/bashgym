@@ -161,6 +161,18 @@ A candidate must:
 - include captured Git lineage when the changed variable represents trainer,
   algorithm, environment, reward, evaluator, verifier, or other approved code.
 
+A candidate whose stage plan runs a training stage must declare an integer
+`seed` in its training recipe; submission is rejected with
+`autoresearch_candidate_requires_training_seed` otherwise. A recipe schema
+default such as the TMax recipe's `seed=42` does not satisfy this rule; the
+seed must appear in the submitted recipe. Replication studies of the same
+intervention vary only that seed, holding every other declared variable
+constant. The decision packet reports the declared value at
+`last_experiment.training_seed` and the held-constant variables at
+`last_experiment.controlled_variables`.
+
+Proposals are rejected with `proposal_credential_shaped_value` when any recipe or free-text field contains a credential-shaped string, and with `proposal_unresolved_placeholder` when a placeholder such as `REPLACE_ME` or `<ASK_USER` remains; credentials belong in the secret store and are referenced by name.
+
 Examples of useful variables are a dataset revision, sampling policy, learning
 rate, training method, reward definition, evaluator implementation, or bounded
 source change. Code mutation remains controlled-only until its exact lineage is
@@ -171,6 +183,85 @@ Every completed candidate is compared with the current retained reference for
 KEEP or DISCARD. When the exact training parent is a different branch, the
 history also reports the parent delta. A discarded but valid candidate may
 remain useful as a branch parent; it does not become the retained reference.
+
+#### Clone a prior study
+
+`research clone-study` prefills a new proposal from a persisted study instead
+of writing one from scratch. It copies the source proposal's scientific
+fields (hypothesis, recipes, stage plan, declared variables, and the rest),
+applies the given overrides, and reports exactly what changed. It does not
+submit anything.
+
+The parent rule above still applies to a cloned candidate, so the workable
+sequence clones the study of the proposal that will be its parent: the current
+reference, or another completed real proposal you mean to branch from. The
+clone must then declare the changed path and depend on the parent's study,
+both of which the clone command can set:
+
+```bash
+bashgym research clone-study \
+  --workspace-id <workspace> --credential-ref <credential-ref> \
+  --campaign <campaign-id> --study <parent-study-id> \
+  --proposal-id <new-proposal-id> \
+  --set training_recipe='{"seed":23}' \
+  --set primary_variable='"training_recipe.seed"' \
+  --set prerequisite_study_ids='["<parent-study-id>"]' \
+  --output proposal.json --json
+```
+
+Override one field with `--set KEY=JSON` (repeatable) or several at once with
+`--changes <file>`; when both name the same key, `--set` wins. The command
+writes the resulting proposal to `--output` in the shape
+`research submit-iteration --proposal` expects, and prints the source study
+and proposal, the prefilled submission, and a diff of exactly which fields
+changed, each reported as `{"from": ..., "to": ...}`.
+
+Recipe fields (`dataset_recipe`, `training_recipe`, `evaluation_recipe`) merge
+at the top level: a `--set training_recipe='{"seed":23}'` change updates only
+`seed` and keeps every other key already in the source study's recipe. Only a
+key the change itself names with a `null` value is removed; a `null` already
+stored in the source recipe survives. Every other cloneable field is replaced
+outright by the value given. The printed diff always shows the field's full
+before-and-after recipe, not just the keys that moved. The clone above reports
+three changed fields: `training_recipe`, plus the `primary_variable` and
+`prerequisite_study_ids` declarations. The source's `controlled_variables`
+carry over unchanged; add `--set controlled_variables=...` when the source
+holds the new primary variable constant, because a candidate whose primary
+variable also appears there is rejected with
+`proposal_primary_variable_is_controlled`.
+
+`research_context` is not cloneable. Its `retrieval_digest` covers the
+proposal ID the sources were collected for, so it cannot be rebound to a new
+proposal and the clone leaves it unset. When the candidate needs its own
+citations, collect them for the new proposal ID with
+`research context --proposal <new-proposal-id> --query <query>` and add the
+returned bundle to `proposal.json` before submitting. `acquisition` carries no
+such digest and is rebound to the new proposal ID, which the diff does not
+report as a change because nothing about the beliefs changed.
+
+Review the diff, then submit the reviewed proposal with:
+
+```bash
+bashgym research submit-iteration \
+  --workspace-id <workspace> --credential-ref <credential-ref> \
+  --campaign <campaign-id> --expected-version <version> \
+  --proposal proposal.json --role candidate \
+  --parent-proposal <parent-proposal-id> \
+  --idempotency-key <key> --json
+```
+
+where `<parent-proposal-id>` is the proposal that owns `<parent-study-id>`,
+reported as `source.proposal_id` when the clone source is the parent itself.
+Submission is rejected with `autoresearch_candidate_parent_not_research_eligible`
+when that proposal has no completed real outcome, and with
+`autoresearch_candidate_must_depend_on_parent_study` when its study is missing
+from `prerequisite_study_ids`. The printed diff is relative to the clone
+source; the confound check that accepts or rejects the candidate is relative
+to `--parent-proposal`, so the two agree only when the source is the parent.
+
+The MCP tool `research_clone_study(campaign_id, study_id, proposal_id, changes)`
+returns the same `source`, `submission`, and `diff` fields and also submits
+nothing; call `research_submit_iteration` to submit the reviewed candidate.
 
 ### 5. Run the candidate stages
 
@@ -184,6 +275,21 @@ The data-build stage is omitted when the proposal uses an already registered
 dataset. Training consumes the declared dataset and starting-model binding.
 Evaluation consumes the trained output and the same pinned suite used by the
 baseline.
+
+A stage plan item may declare the stages it consumes. In version one those edges
+are declarative: the runtime binds stage data by strict adjacency, so full
+training reads the data build immediately before it and development evaluation
+reads the full training immediately before it. A plan whose declared edge for
+either of those two stages disagrees with that adjacency is rejected when the
+plan is validated. Other stages may declare edges freely; nothing binds data
+from them yet.
+
+A data build on registered compute whose content key matches a data build
+already completed in the workspace is reused instead of executed again. The
+reusing study still records its own attempt and its own sealed manifest; that
+manifest names the producing attempt as `reused_from_attempt_id`, the stage
+settles zero actual cost, and the completion event carries the same field.
+Evaluation and training stages always execute.
 
 When a compatible trainer and evaluator are installed, activation may set
 `--intermediate-checkpoint-limit N` (maximum 8). The training stage then retains
@@ -248,6 +354,10 @@ KEEP iff improvement > 0 and improvement >= minimum_improvement
 otherwise DISCARD
 ```
 
+Each decision records `protected_metric_margins`, the remaining headroom per
+protected metric in metric units; a negative margin names the gate that
+failed.
+
 KEEP/DISCARD selects the next reference; it is not a complete scientific
 interpretation. Before Start, the campaign should separate evaluation evidence
 into five roles:
@@ -266,6 +376,21 @@ scientific regression because that boundary was declared before the run. An
 unprotected regression is evidence of a tradeoff, not automatically a failed
 candidate. Likewise, a discarded candidate with a useful secondary gain is
 mixed evidence rather than proof that the hypothesis had no value.
+
+A crash carries a `failure_class` of `infrastructure`, `permission`,
+`configuration`, or `execution`, reported as `outcome_assessment.failure_kind`.
+Only an `execution` crash counts toward `max_attempts`, because only that class
+is evidence about the intervention. An `infrastructure`, `permission`, or
+`configuration` crash leaves `attempts_used` unchanged.
+
+Its spend still counts toward the campaign budget whenever the executor reports
+measured usage; the registered SSH executor always reports wall-clock seconds,
+so a repeatedly failing remote environment does draw down `max_total_cost`. A
+terminal attempt with no measured usage settles at zero instead of charging
+its whole reservation, so such a crash consumes neither an attempt nor budget.
+For that case the backstop is the manifest's `max_proposal_rounds` ceiling,
+which stops the campaign with `proposal_round_limit_reached` once the total
+submitted proposals reach it.
 
 A kept candidate becomes the incumbent. A discarded candidate remains in the
 history, but the prior incumbent stays unchanged. The outcome assessment names
@@ -561,6 +686,15 @@ adjacent stages:
   opaque references rather than copying every dataset row or model file to the
   API process.
 
+A reused stage points at the source bytes rather than copying them. Before a
+consumer binds remote-resident data, it resolves the reuse link to the attempt
+that executed the build, so training and evaluation read that attempt's dataset
+path, digest, and registered dataset version. The worker records one hop: a
+reusing study's link always names the attempt that executed, so repeated reuse
+of one result cannot grow a chain. Multi-hop links stored before that rule are
+still tolerated on read, and every hop resolves to the one attempt that produced
+the bytes.
+
 The worker verifies stage manifests and the evaluation projector checks the
 sealed result before recording a real metric. If an execution target cannot
 preserve resident outputs, its adapter must provide an equivalent verified
@@ -600,9 +734,16 @@ quality.
 
 - The host agent proposes hypotheses and candidate changes. There is no
   repository-resident scientific proposer.
-- The durable campaign path currently resolves registered stages through its
-  SSH execution adapter. It does not yet provide a generic in-process campaign
-  adapter or a generic hosted-compute campaign adapter.
+- Executor kinds are registered adapters: `fake`, `ssh_remote`, and
+  `development_evaluation` register in code, and a third-party package can
+  register more through the `bashgym.campaign_executors` entry-point group.
+  Entry-point registration wires worker dispatch: the worker runs a
+  third-party kind once an action names it. Recipe-level acceptance of such a
+  kind is a follow-up, so a recipe may name only `fake`, `registered_compute`,
+  `registered_training`, or `ssh_remote`. Any other kind is rejected at
+  proposal validation, and a registered kind with no materialization branch is
+  rejected at materialization. No container or hosted-compute adapter ships in
+  this repository yet.
 - Direct training endpoints and `gym/trainer.py` are separate execution paths;
   a direct run does not automatically become an AutoResearch iteration.
 - The primary keep/discard decision uses the pinned evaluation suite, primary
@@ -612,6 +753,13 @@ quality.
 - Fake executors and smoke templates prove orchestration, persistence, and
   evidence wiring only. They cannot establish a real baseline or model-quality
   result.
+- Result reuse matches completed results only. A running execution is never
+  shared between studies, and training reuse is not implemented.
+- `failure_class` is derived only from proven exit codes: 126 and 127 are
+  `configuration`, 137 and 143 are `infrastructure`, 77 is `permission`, and
+  every other code, including a missing one, is `execution`. Log-based failure
+  classification is not implemented, so a genuine infrastructure fault that
+  exits with an unrecognized code is still counted as an attempt.
 - Durable work uses `/api/campaigns/*` through the `research` tools.
 
 These boundaries are implementation facts, not restrictions on which model,

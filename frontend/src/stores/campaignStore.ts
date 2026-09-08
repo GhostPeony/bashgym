@@ -92,6 +92,7 @@ export interface CampaignAttempt {
   manifest_revision: number
   stage: string
   executor_kind: string | null
+  reused_from_attempt_id?: string | null
   created_at: string
   updated_at: string
 }

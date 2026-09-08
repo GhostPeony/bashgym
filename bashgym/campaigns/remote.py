@@ -540,7 +540,13 @@ class RemoteResidentDatasetSource(FrozenContractModel):
     study_id: Identifier
     action_id: Identifier
     attempt_id: Identifier
-    stage_index: int = Field(ge=0)
+    stage_index: int = Field(
+        ge=0,
+        description=(
+            "Data-build stage index inside the consuming study's plan; every other"
+            " identifier on this model names the producing attempt."
+        ),
+    )
     compute_profile_id: Identifier
     remote_dataset_path: str = Field(min_length=2, max_length=4096)
     dataset_id: Identifier

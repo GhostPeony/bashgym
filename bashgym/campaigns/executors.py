@@ -6,9 +6,10 @@ import hashlib
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import Field, model_validator
@@ -27,9 +28,11 @@ from bashgym.campaigns.contracts import (
     ActionAttempt,
     ArtifactOutput,
     ContractModel,
+    FailureClass,
     ResourceUsage,
     SealedActionResult,
     utc_now,
+    validated_identifier,
 )
 from bashgym.campaigns.diagnostic_actions import (
     AUTORESEARCH_DIAGNOSTIC_EVIDENCE_FILENAME,
@@ -43,6 +46,7 @@ from bashgym.campaigns.evaluation import (
     compare_development_evaluations,
     load_retrieval_evaluation_artifact,
 )
+from bashgym.campaigns.failure_classification import classify_exit_code
 from bashgym.campaigns.nemo_gym_evidence import (
     NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
     NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA,
@@ -60,6 +64,8 @@ from bashgym.campaigns.remote import (
     RemoteOutputInventory,
     RemoteRunIdentity,
 )
+
+UNREGISTERED_EXECUTOR_KIND_CODE = "campaign_executor_kind_not_registered"
 
 
 @dataclass(frozen=True)
@@ -257,6 +263,9 @@ class RemoteOutputSealer:
             outcome=outcome,
             exit_code=observation.exit_code,
             exit_reason=observation.safe_reason,
+            failure_class=(
+                classify_exit_code(observation.exit_code) if outcome == "failed" else None
+            ),
             resource_usage=(
                 ResourceUsage(
                     unit="wall_clock_seconds",
@@ -397,6 +406,9 @@ class RemoteOutputSealer:
             outcome=outcome,
             exit_code=observation.exit_code,
             exit_reason=observation.safe_reason,
+            failure_class=(
+                classify_exit_code(observation.exit_code) if outcome == "failed" else None
+            ),
             resource_usage=(
                 ResourceUsage(
                     unit="wall_clock_seconds",
@@ -475,20 +487,29 @@ class RemoteOutputSealer:
         self.sealer.seal(temporary, sealed, manifest)
         return sealed, manifest
 
-    def unlaunched_cancelled_manifest(
+    def controller_state_manifest(
         self,
         attempt: ActionAttempt,
         *,
         compute_profile_id: str,
+        outcome: Literal["failed", "cancelled", "force_stopped"],
+        reason: str,
+        output_path: str,
+        schema_name: str,
+        process_kind: str,
+        executor_id: str | None = None,
+        failure_class: FailureClass | None = None,
+        detail: Mapping[str, Any] | None = None,
     ) -> SealedActionResult:
-        """Represent a pre-launch cancellation as authenticated controller state only."""
+        """Represent controller-decided state for an attempt no executor ran."""
 
         observed_at = utc_now()
         payload = json.dumps(
             {
-                "schema_version": "campaign_unlaunched_cancellation.v1",
+                "schema_version": schema_name,
                 "attempt_id": attempt.attempt_id,
-                "reason": "campaign_cancelled_before_remote_launch",
+                "reason": reason,
+                **dict(detail or {}),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -503,22 +524,64 @@ class RemoteOutputSealer:
             candidate_digest=attempt.candidate_digest,
             input_digest=attempt.input_digest,
             claim_generation=attempt.claim_generation,
-            executor_id=self.executor_id,
+            executor_id=executor_id or self.executor_id,
             executor_version=self.executor_version,
             compute_profile_id=compute_profile_id,
-            remote_process_identity={"kind": "unlaunched"},
+            remote_process_identity={"kind": process_kind},
             started_at=observed_at,
             ended_at=observed_at,
-            outcome="cancelled",
-            exit_reason="campaign_cancelled_before_remote_launch",
+            outcome=outcome,
+            exit_reason=reason,
+            failure_class=failure_class,
             outputs=(
                 ArtifactOutput(
-                    path="cancellation.json",
+                    path=output_path,
                     sha256=hashlib.sha256(payload).hexdigest(),
                     size_bytes=len(payload),
-                    schema_name="campaign_unlaunched_cancellation.v1",
+                    schema_name=schema_name,
                 ),
             ),
+        )
+
+    def unlaunched_cancelled_manifest(
+        self,
+        attempt: ActionAttempt,
+        *,
+        compute_profile_id: str,
+    ) -> SealedActionResult:
+        """Represent a pre-launch cancellation as authenticated controller state only."""
+
+        return self.controller_state_manifest(
+            attempt,
+            compute_profile_id=compute_profile_id,
+            outcome="cancelled",
+            reason="campaign_cancelled_before_remote_launch",
+            output_path="cancellation.json",
+            schema_name="campaign_unlaunched_cancellation.v1",
+            process_kind="unlaunched",
+        )
+
+    def unregistered_executor_manifest(self, attempt: ActionAttempt) -> SealedActionResult:
+        """Represent an executor kind this process cannot resolve as controller state.
+
+        The attempt was claimed but never executed, so the compute profile is
+        reported only when the stored executor contract carries a valid one, and
+        the failure is a configuration fault rather than scientific evidence.
+        """
+
+        return self.controller_state_manifest(
+            attempt,
+            compute_profile_id=(
+                validated_identifier(attempt.executor.get("compute_profile_id")) or "unassigned"
+            ),
+            outcome="failed",
+            reason=UNREGISTERED_EXECUTOR_KIND_CODE,
+            output_path="executor_unavailable.json",
+            schema_name="campaign_unregistered_executor.v1",
+            process_kind="unexecuted",
+            executor_id="campaign-controller",
+            failure_class=FailureClass.CONFIGURATION,
+            detail={"executor_kind": str(attempt.executor.get("kind", ""))},
         )
 
     @staticmethod

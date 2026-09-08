@@ -372,6 +372,7 @@ def test_projector_authenticates_remote_diagnostic_projection_before_recording()
         candidate_digest="2" * 64,
         manifest_revision=1,
         stage=StageKind.CONTRACT_EVALUATION,
+        stage_index=0,
         executor={
             "kind": "ssh_remote",
             "stage": "contract_evaluation",

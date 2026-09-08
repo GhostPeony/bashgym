@@ -590,8 +590,7 @@ function isActiveWork(value: unknown): boolean {
     isStringArray(value.controlled_variable_summary, 64) &&
     (value.progress_fraction === null || isFiniteNumber(value.progress_fraction, 0, 1)) &&
     (value.eta_seconds === null || isFiniteNumber(value.eta_seconds, 0)) &&
-    (value.executor_type === null ||
-      ['fake', 'ssh_remote', 'development_evaluation'].includes(String(value.executor_type))) &&
+    isNullableIdentifier(value.executor_type) &&
     (value.process_identity === null || isProcessIdentity(value.process_identity))
   )
 }

@@ -16,6 +16,8 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    TypeAdapter,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -44,6 +46,24 @@ GitObjectId = Annotated[
     str,
     StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"),
 ]
+
+
+_IDENTIFIER_ADAPTER: TypeAdapter[str] = TypeAdapter(Identifier)
+
+
+def validated_identifier(value: object) -> str | None:
+    """Return the value when it is already an Identifier, otherwise None.
+
+    ``Identifier`` strips surrounding whitespace, so a value that only becomes
+    valid after normalization is reported as invalid rather than silently
+    renamed.
+    """
+
+    try:
+        validated = _IDENTIFIER_ADAPTER.validate_python(value)
+    except ValidationError:
+        return None
+    return validated if validated == value else None
 
 
 class ContractModel(BaseModel):
@@ -190,6 +210,15 @@ class BudgetEntryKind(str, Enum):
     CORRECTION = "correction"
 
 
+class FailureClass(str, Enum):
+    """Why a terminal attempt failed, from the most conservative evidence available."""
+
+    INFRASTRUCTURE = "infrastructure"
+    PERMISSION = "permission"
+    CONFIGURATION = "configuration"
+    EXECUTION = "execution"
+
+
 CANONICAL_CAMPAIGN_EVENT_TYPES = frozenset(
     {
         "campaign:created",
@@ -260,6 +289,7 @@ PUBLIC_CAMPAIGN_BLOCKER_CODES = frozenset(
         "campaign_remote_target_model_mismatch",
         "campaign_remote_profile_material_invalid",
         "campaign_executor_kind_not_registered",
+        "campaign_executor_kind_not_materializable",
         "campaign_budget_unit_not_approved",
     }
 )
@@ -502,6 +532,45 @@ class StagePlanItem(FrozenContractModel):
     reason: str = Field(min_length=1, max_length=2000)
     input_contract: dict[str, Any] = Field(default_factory=dict)
     output_contract: dict[str, Any] = Field(default_factory=dict)
+    consumes: tuple[StageKind, ...] = Field(
+        default=(),
+        description=(
+            "Stages this item reads output from. An empty tuple means unspecified, not"
+            " 'consumes nothing': the runtime still binds full training to the data build"
+            " immediately before it and development evaluation to the full training"
+            " immediately before it, so an omitted or empty edge resolves to that"
+            " adjacency. A declared edge on either of those two stages must name exactly"
+            " the stage the runtime binds."
+        ),
+    )
+
+    @field_validator("consumes")
+    @classmethod
+    def validate_consumes(cls, value: tuple[StageKind, ...]) -> tuple[StageKind, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("stage plan item cannot consume a stage twice")
+        return value
+
+
+# Version one binds stage data by strict index-1 adjacency: full training reads the data
+# build immediately before it, development evaluation reads the full training immediately
+# before it. An explicit edge on those two stages is declarative and must agree with what
+# the runtime binds; other stages may declare edges freely because nothing binds them yet.
+_IMPLICIT_EDGES: dict[StageKind, StageKind] = {
+    StageKind.FULL_TRAINING: StageKind.DATA_BUILD,
+    StageKind.DEVELOPMENT_EVALUATION: StageKind.FULL_TRAINING,
+}
+
+
+def _bound_edge(items: tuple[StagePlanItem, ...], index: int) -> tuple[StageKind, ...] | None:
+    """Edge the runtime binds for one item, or None when no binding rule applies."""
+
+    upstream = _IMPLICIT_EDGES.get(items[index].stage)
+    if upstream is None:
+        return None
+    if index > 0 and items[index - 1].stage == upstream:
+        return (upstream,)
+    return ()
 
 
 class StagePlan(FrozenContractModel):
@@ -516,7 +585,31 @@ class StagePlan(FrozenContractModel):
         stages = [item.stage for item in value]
         if len(set(stages)) != len(stages):
             raise ValueError("stage plan cannot repeat a stage")
+        position = {stage: index for index, stage in enumerate(stages)}
+        for index, item in enumerate(value):
+            for consumed in item.consumes:
+                if consumed == item.stage:
+                    raise ValueError("stage plan item cannot consume itself")
+                if consumed not in position:
+                    raise ValueError("stage plan consumes an unknown stage")
+                if position[consumed] > index:
+                    raise ValueError("stage plan consumes a later stage")
+            bound = _bound_edge(value, index)
+            if item.consumes and bound is not None and item.consumes != bound:
+                raise ValueError(
+                    "stage plan edge does not match the bound stage: "
+                    f"{item.stage.value} binds {tuple(stage.value for stage in bound)}"
+                )
         return value
+
+    def consumed_stages(self, index: int) -> tuple[StageKind, ...]:
+        """Declared edges, or the positional rule for plans that predate `consumes`."""
+
+        item = self.items[index]
+        if item.consumes:
+            return item.consumes
+        bound = _bound_edge(self.items, index)
+        return bound if bound is not None else ()
 
 
 class StudyProposalSubmission(FrozenContractModel):
@@ -987,7 +1080,7 @@ class ActiveWorkSummaryV1(FrozenContractModel):
     controlled_variable_summary: tuple[str, ...] = Field(max_length=64)
     progress_fraction: float | None = Field(ge=0, le=1)
     eta_seconds: float | None = Field(ge=0)
-    executor_type: Literal["fake", "ssh_remote", "development_evaluation"] | None
+    executor_type: Identifier | None
     process_identity: OpaqueProcessIdentityV1 | None
 
 
@@ -1202,11 +1295,13 @@ class ActionAttempt(ContractModel):
     candidate_digest: HexDigest
     manifest_revision: int = Field(ge=1)
     stage: StageKind
+    stage_index: int = Field(ge=0)
     lease_owner: Identifier | None = None
     lease_expires_at: datetime | None = None
     heartbeat_at: datetime | None = None
     executor: dict[str, Any] = Field(default_factory=dict)
     sealed_result_uri: str | None = Field(default=None, max_length=4096)
+    result_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -1251,11 +1346,13 @@ class PublicCampaignEventSummaryV1(FrozenContractModel):
     schema_version: Literal["public_campaign_event_summary.v1"] = "public_campaign_event_summary.v1"
     action_id: Identifier | None = None
     attempt_id: Identifier | None = None
+    reused_from_attempt_id: Identifier | None = None
     study_id: Identifier | None = None
     proposal_id: Identifier | None = None
     entry_id: Identifier | None = None
     stage: Identifier | None = None
     code: Identifier | None = None
+    failure_class: FailureClass | None = None
     manifest_revision: int | None = Field(default=None, ge=1)
     stage_index: int | None = Field(default=None, ge=0)
     next_stage_index: int | None = Field(default=None, ge=0)
@@ -1322,6 +1419,7 @@ class PublicCampaignAttemptV1(FrozenContractModel):
     input_digest: HexDigest
     candidate_digest: HexDigest
     executor_kind: Identifier | None = None
+    reused_from_attempt_id: Identifier | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -1404,6 +1502,7 @@ class SealedActionResult(FrozenContractModel):
     outcome: Literal["completed", "failed", "cancelled", "force_stopped"]
     exit_code: int | None = None
     exit_reason: str = Field(min_length=1, max_length=2000)
+    failure_class: FailureClass | None = None
     resource_usage: tuple[ResourceUsage, ...] = ()
     log_reference: str | None = Field(default=None, max_length=4096)
     outputs: tuple[ArtifactOutput, ...]
@@ -1424,6 +1523,8 @@ class SealedActionResult(FrozenContractModel):
             raise ValueError("ended_at cannot precede started_at")
         if self.outcome == "completed" and self.exit_code not in {0, None}:
             raise ValueError("completed result cannot have a failing exit code")
+        if self.outcome == "completed" and self.failure_class is not None:
+            raise ValueError("completed result cannot carry a failure class")
         return self
 
 

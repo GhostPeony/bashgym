@@ -42,6 +42,7 @@ def build_outcome_assessment(
     reason_code: str,
     failure_analysis: Mapping[str, Any] | None,
     evidence_strength: str = "single_observation",
+    failure_class: str | None = None,
 ) -> dict[str, Any]:
     """Explain one persisted decision without changing reference-selection policy."""
 
@@ -57,7 +58,7 @@ def build_outcome_assessment(
     if outcome == "crashed":
         classification = "invalid_execution"
         is_failure = True
-        failure_kind = "execution"
+        failure_kind = failure_class or "execution"
         assessment_reason = "execution_did_not_produce_quality_evidence"
     elif outcome != "completed":
         assessment_reason = "quality_evidence_incomplete"

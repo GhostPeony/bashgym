@@ -39,6 +39,7 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.executor_adapters import default_registry
 from bashgym.campaigns.nemo_gym_evidence import NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
 from bashgym.campaigns.transitions import (
     evaluate_promotion_gate,
@@ -1118,6 +1119,14 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         "human_oversight_authenticated_replay",
         (
             "ALTER TABLE campaign_human_mutations ADD COLUMN response_seal_key_version TEXT NOT NULL DEFAULT ''",
+        ),
+    ),
+    (
+        16,
+        "stage_result_reuse",
+        (
+            "ALTER TABLE campaign_actions ADD COLUMN result_key TEXT",
+            "CREATE INDEX idx_campaign_actions_result_key ON campaign_actions(workspace_id, result_key) WHERE result_key IS NOT NULL",
         ),
     ),
 )
@@ -2643,7 +2652,7 @@ class CampaignRepository:
             completed_hypotheses=summaries,
             artifact_references=artifacts,
             nemo_gym_evidence_references=tuple(nemo_gym_references),
-            available_executors=("fake", "registered_remote"),
+            available_executors=default_registry().kinds(),
             active_study_id=campaign.active_study_id,
             active_action_id=campaign.active_action_id,
         )

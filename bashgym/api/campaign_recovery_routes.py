@@ -103,6 +103,10 @@ def _services(
 
 def _principal(request: Request):
     _campaigns, auth, _recovery = _services(request)
+    if not request.headers.get("Authorization"):
+        from bashgym.api.campaign_routes import _principal as campaign_principal
+
+        return campaign_principal(request)
     return auth.authenticate_access(_bearer(request))
 
 

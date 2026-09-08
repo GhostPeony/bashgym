@@ -9,6 +9,45 @@ execution paths:
 
 ## Install
 
+### Personal research studio
+
+The browser and agent skills use the same durable experiment service. A release
+wheel with the web assets included needs Python, but no Node.js or Electron on
+the user's machine:
+
+```bash
+python -m pip install ./bashgym-<version>-py3-none-any.whl
+bashgym init --agent-host hermes
+bashgym doctor --json
+bashgym research prepare --json
+```
+
+Use `--agent-host codex` or `--agent-host claude` for those hosts. Initialization
+installs reviewed skills and sets up scoped local credentials. Repeating it
+resumes the same setup; it never selects a model or starts training. Use
+`--no-service` to prepare access without installing the resident API service.
+Paste the five-minute pairing code into the browser login form. Codes are
+single-use; run init again to obtain a new one. Agent and learner model choices
+are independent. Existing local configuration is not silently rebound to a
+different workspace or agent host.
+
+Choose the objective, fixed evaluation, data, learner, execution target, recipe
+and limits in the shared setup flow. The resulting READY contract must be shown
+before the separate Start decision. A healthy API or installed package is not
+proof that the selected training recipe works.
+
+Data Designer remains available through the Factory integration with
+`bashgym[data-designer]`. Training and optimized kernels belong in the selected
+execution environment. Document and PDF exports use `bashgym[reports]`;
+`bashgym[compat]` retains the previous reporting dependencies.
+
+### Building from source
+
+For release packaging, run the frontend's `web:build` before building the Python
+wheel. The build copies browser assets into the wheel; installing that wheel
+does not run npm. A wheel built without web assets remains a headless CLI/API
+distribution.
+
 Requirements:
 
 - Python 3.10 or newer;
@@ -233,8 +272,21 @@ preference or failure-analysis data when they are labeled correctly.
 
 ## Next
 
+- [Personal research studio](RESEARCH_STUDIO.md)
 - [Architecture](PLATFORM_OVERVIEW.md)
 - [Training data](TRAINING_DATA_GUIDE.md)
 - [Training strategy](training/strategy-guide.md)
 - [AutoResearch campaigns](training/autoresearch-campaign.md)
 - [Metrics runbook](training/metrics-runbook.md)
+
+## Comparing optimization runs
+
+After explicitly running a compatible baseline and candidate on the same target,
+compare their measured records with
+`bashgym training compare-recipes --baseline baseline.json --candidate candidate.json --json`.
+The `bashgym.recipe_run_record.v1` schema is defined by
+`bashgym.gym.recipe_comparison.RecipeRunRecord`. It requires matching checkpoint,
+data, evaluation, target, software, training and measurement contracts, together
+with measured speed, peak GPU memory, elapsed time, cost and quality metrics.
+Missing measurements fail validation. The report remains exploratory and leaves
+the keep/discard decision to the research agent and campaign evidence gates.

@@ -22,6 +22,7 @@ import { useActivityStore } from '../../stores/activityStore'
 import { useCanvasOrchestratorStore } from '../../stores/canvasOrchestratorStore'
 import { useSessionResource } from '../../stores/sessionResource'
 import { designerModelsResource, designerPipelinesResource } from '../../stores/factoryResources'
+import { DesignerReadinessPanel } from './DesignerReadinessPanel'
 
 const EMPTY_PIPELINES: DesignerPipelineInfo[] = []
 const EMPTY_MODELS: DesignerModel[] = []
@@ -76,9 +77,49 @@ function ModelSelect({
   )
 }
 
-export function DataDesignerTab() {
-  const { data: pipelinesData, loading: loadingPipelines } =
-    useSessionResource(designerPipelinesResource)
+export function DesignerDatasetHandoff({
+  campaignMode,
+  output,
+  onUseDataset
+}: {
+  campaignMode: boolean
+  output: string
+  onUseDataset: () => void
+}) {
+  return (
+    <div className="flex items-center justify-between mt-4 p-3 card bg-status-success/10 border-l-4 border-l-status-success">
+      <div className="font-mono text-xs">
+        <CheckCircle2 className="w-3 h-3 inline mr-1 text-status-success" />
+        Output: <span className="text-text-primary">{output}</span>
+      </div>
+      {campaignMode ? (
+        <div className="text-xs leading-5">
+          <p>
+            Ask your agent to inspect this export and register the approved dataset before selecting
+            it in setup.
+          </p>
+          <a href="#setup" className="text-accent-dark underline">
+            Return to campaign setup
+          </a>
+        </div>
+      ) : (
+        <button onClick={onUseDataset} className="btn-secondary flex items-center gap-1 text-xs">
+          Use this dataset
+          <ArrowRight className="w-3 h-3" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+export function DataDesignerTab({ campaignMode = false }: { campaignMode?: boolean }) {
+  const {
+    data: pipelinesData,
+    loading: loadingPipelines,
+    refreshing: refreshingPipelines,
+    error: pipelinesError,
+    refresh: refreshPipelines
+  } = useSessionResource(designerPipelinesResource)
   const {
     data: modelsData,
     loading: modelsInitialLoading,
@@ -86,8 +127,16 @@ export function DataDesignerTab() {
     refresh: refreshModels
   } = useSessionResource(designerModelsResource)
   const pipelines = pipelinesData?.pipelines ?? EMPTY_PIPELINES
-  const available = pipelinesData?.available ?? true
-  const models = modelsData?.models ?? EMPTY_MODELS
+  const available = pipelinesData?.available === true
+  // This form submits the NVIDIA provider. Never offer a local model and then
+  // silently send its name to a different provider.
+  const models = useMemo(
+    () =>
+      (modelsData?.models ?? EMPTY_MODELS).filter((model) =>
+        ['nvidia_nim', 'nvidia', 'nvidia-nim'].includes(model.provider)
+      ),
+    [modelsData]
+  )
   const modelsLoading = modelsInitialLoading || modelsRefreshing
   const [selected, setSelected] = useState<string | null>(null)
 
@@ -115,10 +164,6 @@ export function DataDesignerTab() {
   const selectedPipeline = pipelines.find((p) => p.name === selected) || null
   const isRollout = seedType === 'agent_rollouts'
   const isToolPipeline = selected === 'mcp_tool_use'
-
-  useEffect(() => {
-    if (pipelines.length > 0) setSelected((s) => s ?? pipelines[0].name)
-  }, [pipelines])
 
   const clearJobPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -219,19 +264,24 @@ export function DataDesignerTab() {
   }, [job, setDatasetPathOverride])
 
   const jobRunning = !!job && job.status !== 'completed' && job.status !== 'failed'
+  const canGenerate =
+    available &&
+    !pipelinesError &&
+    !refreshingPipelines &&
+    pipelinesData?.readiness?.credential_configured === true &&
+    Boolean(selectedPipeline)
+  const readinessPanel = (
+    <DesignerReadinessPanel
+      data={pipelinesData}
+      error={pipelinesError}
+      checking={loadingPipelines || refreshingPipelines}
+      onRefresh={() => void refreshPipelines()}
+      showSetupLink={campaignMode}
+    />
+  )
 
-  if (!available && !loadingPipelines) {
-    return (
-      <div className="p-6 max-w-5xl mx-auto">
-        <div className="card p-4 border-l-4 border-l-status-warning bg-status-warning/10">
-          <p className="font-mono text-xs text-text-primary">
-            Data Designer is not installed. Run{' '}
-            <code className="text-accent-dark">pip install "bashgym[data-designer]"</code> to enable
-            synthetic data generation.
-          </p>
-        </div>
-      </div>
-    )
+  if (!available) {
+    return <div className="p-6 max-w-5xl mx-auto">{readinessPanel}</div>
   }
 
   return (
@@ -252,9 +302,11 @@ export function DataDesignerTab() {
         </span>
       </div>
 
+      {readinessPanel}
+
       {/* Pipeline selector */}
       <h3 className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-secondary mb-2">
-        Pipeline
+        Choose a pipeline
       </h3>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
         {loadingPipelines && (
@@ -471,7 +523,7 @@ export function DataDesignerTab() {
             <div className="flex items-center gap-2 mt-5">
               <button
                 onClick={handlePreview}
-                disabled={previewLoading}
+                disabled={previewLoading || !canGenerate}
                 className="btn-secondary flex items-center gap-2"
               >
                 {previewLoading ? (
@@ -479,11 +531,11 @@ export function DataDesignerTab() {
                 ) : (
                   <Eye className="w-4 h-4" />
                 )}
-                Preview
+                Generate preview
               </button>
               <button
                 onClick={handleGenerate}
-                disabled={jobRunning}
+                disabled={jobRunning || !canGenerate}
                 className="btn-primary flex items-center gap-2"
               >
                 <Play className="w-4 h-4" />
@@ -561,19 +613,11 @@ export function DataDesignerTab() {
           )}
 
           {job.status === 'completed' && job.output_dir && (
-            <div className="flex items-center justify-between mt-4 p-3 card bg-status-success/10 border-l-4 border-l-status-success">
-              <div className="font-mono text-xs">
-                <CheckCircle2 className="w-3 h-3 inline mr-1 text-status-success" />
-                Output: <span className="text-text-primary">{job.output_dir}</span>
-              </div>
-              <button
-                onClick={handleUseDataset}
-                className="btn-secondary flex items-center gap-1 text-xs"
-              >
-                Use this dataset
-                <ArrowRight className="w-3 h-3" />
-              </button>
-            </div>
+            <DesignerDatasetHandoff
+              campaignMode={campaignMode}
+              output={job.output_dir}
+              onUseDataset={handleUseDataset}
+            />
           )}
 
           {jobError && <p className="font-mono text-xs text-status-error mt-3">{jobError}</p>}

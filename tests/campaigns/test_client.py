@@ -28,6 +28,48 @@ class Response:
         return json.dumps(self.payload).encode("utf-8")
 
 
+@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("phase", ["open", "read"])
+@pytest.mark.parametrize(
+    "failure,code",
+    [
+        (TimeoutError("private network detail"), "campaign_api_timeout"),
+        (ConnectionResetError("private network detail"), "campaign_api_unavailable"),
+        (urllib.error.URLError(TimeoutError("private network detail")), "campaign_api_unavailable"),
+    ],
+)
+def test_transport_failure_does_not_replay_unknown_mutation(
+    monkeypatch, method, phase, failure, code
+):
+    calls = []
+
+    class BrokenResponse(Response):
+        def read(self):
+            raise failure
+
+    def unavailable(request, timeout):
+        calls.append(request)
+        if phase == "open":
+            raise failure
+        return BrokenResponse({})
+
+    monkeypatch.setattr("bashgym.campaigns.client.urllib.request.urlopen", unavailable)
+    client = CampaignApiClient(
+        api_base="http://localhost:8003/api",
+        credential_ref="CAMPAIGN_TEST_REF",
+        secret_resolver=lambda _: "test-refresh",
+    )
+    client._access_token = "test-access"
+    with pytest.raises(CampaignClientError) as caught:
+        client.request_json(method, "/campaigns/test-campaign")
+    assert caught.value.code == code
+    assert caught.value.exit_code == 8
+    assert caught.value.retryable is (method == "GET")
+    assert "read campaign state" in caught.value.message
+    assert "private network detail" not in str(caught.value.as_dict())
+    assert len(calls) == 1
+
+
 def http_error(request, status, code, message):
     return urllib.error.HTTPError(
         request.full_url,

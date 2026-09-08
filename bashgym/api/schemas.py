@@ -3,7 +3,7 @@ Bash Gym API Schemas - Pydantic models for request/response validation
 """
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -726,6 +726,8 @@ class ExportExamplesRequest(BaseModel):
     )
     include_gold_only: bool = Field(True, description="Only include gold traces")
     train_split: float = Field(0.9, ge=0.5, le=1.0, description="Training set proportion")
+    split_group_by: Literal["repository", "task"] = "repository"
+    split_seed: int = Field(0, ge=0, le=2**32 - 1)
 
 
 class ExportExamplesResponse(BaseModel):
@@ -734,6 +736,8 @@ class ExportExamplesResponse(BaseModel):
     success: bool
     train_path: str | None = None
     val_path: str | None = None
+    manifest_path: str | None = None
+    export_id: str | None = None
     train_count: int = 0
     val_count: int = 0
     message: str | None = None
@@ -780,6 +784,8 @@ class HealthCheck(BaseModel):
     timestamp: str
     version: str
     state_root_digest: str
+    studio_protocol: str = "bashgym.studio.v1"
+    authentication_required: bool = False
 
 
 class SystemStats(BaseModel):

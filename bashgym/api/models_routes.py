@@ -422,27 +422,17 @@ async def star_model(
 
 @router.post("/{model_id}/evaluate")
 async def trigger_evaluation(model_id: str):
-    """
-    Trigger evaluation of a model.
-
-    Runs all configured benchmarks and custom evaluations.
-    Returns immediately - results available via WebSocket or polling.
-    """
+    """Fail explicitly until this compatibility route can launch a real evaluation."""
     registry = get_registry()
     profile = registry.get(model_id)
 
     if not profile:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    # TODO: Implement async evaluation trigger
-    # This would queue an evaluation job that runs benchmarks
-    # and updates the profile when complete
-
-    return {
-        "status": "queued",
-        "model_id": model_id,
-        "message": "Evaluation queued - results will be available shortly",
-    }
+    raise HTTPException(
+        status_code=501,
+        detail="Select an evaluation suite in Evaluator or prepare a campaign evaluation. No evaluation was queued.",
+    )
 
 
 @router.get("/{model_id}/artifacts")

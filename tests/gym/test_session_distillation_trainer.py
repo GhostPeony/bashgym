@@ -251,7 +251,7 @@ def test_session_distillation_script_emits_throughput_telemetry():
 def test_plain_sft_script_emits_throughput_telemetry():
     from bashgym.families import resolve_family_profile
 
-    config = TrainerConfig(base_model="tiny-local-model")
+    config = TrainerConfig(base_model="tiny-local-model", load_in_4bit=False)
     run = TrainingRun(
         run_id="sft-throughput",
         strategy=TrainingStrategy.SFT,

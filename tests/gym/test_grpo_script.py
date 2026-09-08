@@ -22,48 +22,48 @@ def _generate_script(config: TrainerConfig) -> str:
 
 class TestGRPOScriptGeneration:
     def test_use_vllm_false_by_default(self):
-        script = _generate_script(TrainerConfig())
+        script = _generate_script(TrainerConfig(load_in_4bit=False))
         assert "use_vllm=False" in script
 
     def test_use_vllm_true_when_configured(self):
-        script = _generate_script(TrainerConfig(grpo_use_vllm=True))
+        script = _generate_script(TrainerConfig(load_in_4bit=False, grpo_use_vllm=True))
         assert "use_vllm=True" in script
 
     def test_max_steps_passed_through(self):
-        script = _generate_script(TrainerConfig(max_steps=200))
+        script = _generate_script(TrainerConfig(load_in_4bit=False, max_steps=200))
         assert "max_steps=200" in script
 
     def test_max_steps_default_minus_one(self):
-        script = _generate_script(TrainerConfig())
+        script = _generate_script(TrainerConfig(load_in_4bit=False))
         assert "max_steps=-1" in script
 
     def test_temperature_passed_through(self):
-        script = _generate_script(TrainerConfig(grpo_temperature=0.7))
+        script = _generate_script(TrainerConfig(load_in_4bit=False, grpo_temperature=0.7))
         assert "temperature=0.7" in script
 
     def test_temperature_custom_value(self):
-        script = _generate_script(TrainerConfig(grpo_temperature=0.9))
+        script = _generate_script(TrainerConfig(load_in_4bit=False, grpo_temperature=0.9))
         assert "temperature=0.9" in script
 
     def test_no_vllm_import(self):
-        script = _generate_script(TrainerConfig())
+        script = _generate_script(TrainerConfig(load_in_4bit=False))
         assert "import vllm" not in script
         assert "from vllm" not in script
 
     def test_reward_mode_in_script(self):
-        script = _generate_script(TrainerConfig(grpo_reward_mode="execution"))
+        script = _generate_script(TrainerConfig(load_in_4bit=False, grpo_reward_mode="execution"))
         assert 'REWARD_MODE = "execution"' in script
 
     def test_cascade_config_produces_correct_script(self):
         """Simulate what cascade scheduler passes to GRPO."""
         config = TrainerConfig(
+            load_in_4bit=False,
             base_model="google/gemma-4-31B-it",
             strategy=TrainingStrategy.GRPO,
             grpo_num_generations=4,
             grpo_temperature=0.7,
             grpo_reward_mode="syntax",
             max_steps=200,
-            load_in_4bit=False,
         )
         script = _generate_script(config)
         assert "use_vllm=False" in script
@@ -75,7 +75,7 @@ class TestGRPOScriptGeneration:
         """The generator consumes the ModelFamilyProfile rather than a hardcoded list."""
         from bashgym.families import resolve_family_profile
 
-        config = TrainerConfig(base_model="google/gemma-4-31B-it")
+        config = TrainerConfig(load_in_4bit=False, base_model="google/gemma-4-31B-it")
         script = _generate_script(config)
         profile = resolve_family_profile(config.base_model)
         assert profile.lora_target_modules  # sanity
@@ -85,7 +85,9 @@ class TestGRPOScriptGeneration:
 
 class TestGRPOBackendDispatch:
     def test_plain_backend_generates_plain_transformers_script(self):
-        config = TrainerConfig(grpo_backend="plain", base_model="google/gemma-4-31B-it")
+        config = TrainerConfig(
+            load_in_4bit=False, grpo_backend="plain", base_model="google/gemma-4-31B-it"
+        )
         script = _generate_script(config)
         assert "AutoModelForCausalLM" in script
         assert "from unsloth" not in script
@@ -94,13 +96,17 @@ class TestGRPOBackendDispatch:
         assert "exclude_modules=['vision_tower', 'multi_modal_projector', 'audio_tower']" in script
 
     def test_plain_backend_no_gemma_patch_for_qwen(self):
-        config = TrainerConfig(grpo_backend="plain", base_model="Qwen/Qwen3.6-35B-A3B")
+        config = TrainerConfig(
+            load_in_4bit=False, grpo_backend="plain", base_model="Qwen/Qwen3.6-35B-A3B"
+        )
         script = _generate_script(config)
         assert "apply_patches([])" in script
         assert "exclude_modules=[]" in script
 
     def test_unsloth_backend_generates_unsloth_script(self):
-        config = TrainerConfig(grpo_backend="unsloth", base_model="google/gemma-4-31B-it")
+        config = TrainerConfig(
+            load_in_4bit=False, grpo_backend="unsloth", base_model="google/gemma-4-31B-it"
+        )
         script = _generate_script(config)
         assert "FastLanguageModel" in script
 
@@ -108,7 +114,9 @@ class TestGRPOBackendDispatch:
         import ast
 
         for backend in ("plain", "unsloth"):
-            config = TrainerConfig(grpo_backend=backend, base_model="google/gemma-4-31B-it")
+            config = TrainerConfig(
+                load_in_4bit=False, grpo_backend=backend, base_model="google/gemma-4-31B-it"
+            )
             ast.parse(_generate_script(config))  # raises SyntaxError if escaping is wrong
 
 
@@ -117,22 +125,27 @@ class TestGRPOLossType:
 
     def test_default_is_grpo(self):
         for backend in ("plain", "unsloth"):
-            script = _generate_script(TrainerConfig(grpo_backend=backend))
+            script = _generate_script(TrainerConfig(load_in_4bit=False, grpo_backend=backend))
             assert 'loss_type="grpo"' in script
 
     def test_gspo_threads_into_both_backends(self):
         for backend in ("plain", "unsloth"):
-            script = _generate_script(TrainerConfig(grpo_backend=backend, grpo_loss_type="gspo"))
+            script = _generate_script(
+                TrainerConfig(load_in_4bit=False, grpo_backend=backend, grpo_loss_type="gspo")
+            )
             assert 'loss_type="gspo"' in script
 
     def test_dr_grpo_variant(self):
-        script = _generate_script(TrainerConfig(grpo_backend="plain", grpo_loss_type="dr_grpo"))
+        script = _generate_script(
+            TrainerConfig(load_in_4bit=False, grpo_backend="plain", grpo_loss_type="dr_grpo")
+        )
         assert 'loss_type="dr_grpo"' in script
 
     def test_dapo_asymmetric_clip_threads_into_both_backends(self):
         for backend in ("plain", "unsloth"):
             script = _generate_script(
                 TrainerConfig(
+                    load_in_4bit=False,
                     grpo_backend=backend,
                     grpo_loss_type="dapo",
                     grpo_ratio_clip_min=0.15,
@@ -144,13 +157,15 @@ class TestGRPOLossType:
 
     def test_invalid_loss_type_raises(self):
         with pytest.raises(ValueError, match="grpo_loss_type"):
-            _generate_script(TrainerConfig(grpo_loss_type="not_a_real_loss"))
+            _generate_script(TrainerConfig(load_in_4bit=False, grpo_loss_type="not_a_real_loss"))
 
     def test_gspo_script_still_valid_python(self):
         import ast
 
         for backend in ("plain", "unsloth"):
-            script = _generate_script(TrainerConfig(grpo_backend=backend, grpo_loss_type="gspo"))
+            script = _generate_script(
+                TrainerConfig(load_in_4bit=False, grpo_backend=backend, grpo_loss_type="gspo")
+            )
             ast.parse(script)
 
 
@@ -161,6 +176,7 @@ class TestTerminalRLProfile:
         for backend in ("plain", "unsloth"):
             script = _generate_script(
                 TrainerConfig(
+                    load_in_4bit=False,
                     grpo_backend=backend,
                     training_profile="terminal_rl_tmax_like",
                 )
@@ -186,6 +202,7 @@ class TestTerminalRLProfile:
     def test_tmax_like_profile_allows_group_size_override(self):
         script = _generate_script(
             TrainerConfig(
+                load_in_4bit=False,
                 grpo_backend="plain",
                 training_profile="terminal_rl_tmax_like",
                 grpo_group_size=20,

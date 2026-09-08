@@ -11,7 +11,7 @@ import {
   tracesApi,
   type DataQualityDefaults,
   type DesignerModel,
-  type DesignerPipelineInfo,
+  type DesignerPipelinesResponse,
   type EnvironmentPipelinesResponse,
   type EvaluationResponse,
   type FactoryConfig,
@@ -60,10 +60,9 @@ export const syntheticPresetsResource = createSessionResource<Record<string, Syn
 )
 
 /** Data Designer pipeline catalog + install availability. */
-export const designerPipelinesResource = createSessionResource<{
-  pipelines: DesignerPipelineInfo[]
-  available: boolean
-}>(() => designerApi.listPipelines())
+export const designerPipelinesResource = createSessionResource<DesignerPipelinesResponse>(() =>
+  designerApi.listPipelines()
+)
 
 /** Live teacher-model catalog for Data Designer. */
 export const designerModelsResource = createSessionResource<{

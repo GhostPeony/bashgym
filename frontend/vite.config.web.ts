@@ -4,7 +4,14 @@ import path from 'path'
 
 // Web-only Vite config — no Electron plugins, no node-pty
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'studio-self-hosted-fonts',
+      transformIndexHtml: (html) =>
+        html.replace(/<link\b[^>]*https:\/\/fonts\.(?:googleapis|gstatic)\.com[^>]*>\s*/g, '')
+    }
+  ],
   define: {
     'import.meta.env.VITE_MODE': JSON.stringify('web')
   },

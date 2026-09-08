@@ -11,6 +11,7 @@ from bashgym.campaigns.autoresearch import (
     AutoResearchProposalControl,
     ExperimentRole,
 )
+from bashgym.campaigns.diagnostic_actions import DiagnosticInputBinding
 
 
 def build_plasticity_comparison(
@@ -57,6 +58,14 @@ def build_plasticity_comparison(
 
     observations: list[dict[str, Any]] = []
     for result in matching:
+        try:
+            binding = DiagnosticInputBinding.model_validate(result.projection.get("input_binding"))
+        except ValueError:
+            return empty
+        if binding.recipe_digest != latest_digest or list(binding.data_scope_ids) != contract.get(
+            "data_scope_ids"
+        ):
+            return empty
         control = controls_by_id.get(result.proposal_id)
         if control is None or control.role != ExperimentRole.DIAGNOSTIC:
             return empty
@@ -108,6 +117,7 @@ def build_plasticity_comparison(
         "status": "comparable",
         "reason_code": "fixed_probe_comparison_ready",
         "classification": classification,
+        "evidence_strength": "exploratory",
         "observations": observations,
         "comparison": {
             "reference_parent_proposal_id": reference["parent_proposal_id"],

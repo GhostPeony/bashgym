@@ -7,6 +7,8 @@ Mirrors test_grpo_script.py: generate the script string and assert on markers;
 import ast
 from pathlib import Path
 
+import pytest
+
 from bashgym.gym.trainer import Trainer, TrainerConfig, TrainingRun, TrainingStrategy
 
 
@@ -33,8 +35,56 @@ def _dpo(config: TrainerConfig) -> str:
 
 
 class TestSFTDispatch:
+    @pytest.mark.parametrize("backend", ["plain", "unsloth"])
+    @pytest.mark.parametrize("sequence_length", [512, 1024])
+    def test_generated_sft_config_applies_trl_sequence_limit(self, backend, sequence_length):
+        """Execute the generated config call against TRL's max_length contract.
+
+        The base test install deliberately excludes TRL and torch. This narrow
+        constructor contract checks the generated argument binding without
+        loading a model; execution-environment checks use the real SFTConfig.
+        """
+        script = _sft(
+            TrainerConfig(
+                load_in_4bit=False,
+                sft_backend=backend,
+                base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
+                max_seq_length=sequence_length,
+                max_steps=16,
+            )
+        )
+        calls = [
+            node
+            for node in ast.walk(ast.parse(script))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "SFTConfig"
+        ]
+        assert len(calls) == 1
+
+        def sft_config(*, max_length, **training_args):
+            return {"max_length": max_length, **training_args}
+
+        namespace = {
+            "SFTConfig": sft_config,
+            "max_seq_length": sequence_length,
+            "val_dataset": None,
+            "is_bfloat16_supported": lambda: True,
+        }
+        result = eval(
+            compile(ast.Expression(calls[0]), "<generated-sft-config>", "eval"), namespace
+        )
+        assert result["max_length"] == sequence_length
+        assert result["max_steps"] == 16
+        assert result["bf16"] is True
+        assert result["eval_strategy"] == "no"
+
     def test_plain_backend(self):
-        s = _sft(TrainerConfig(sft_backend="plain", base_model="google/gemma-4-31B-it"))
+        s = _sft(
+            TrainerConfig(
+                load_in_4bit=False, sft_backend="plain", base_model="google/gemma-4-31B-it"
+            )
+        )
         assert "AutoModelForCausalLM" in s
         assert "from unsloth" not in s
         # family-correct patch + multimodal excludes flow from the profile
@@ -42,47 +92,83 @@ class TestSFTDispatch:
         assert "exclude_modules=['vision_tower', 'multi_modal_projector', 'audio_tower']" in s
 
     def test_unsloth_backend(self):
-        s = _sft(TrainerConfig(sft_backend="unsloth", base_model="google/gemma-4-31B-it"))
+        s = _sft(
+            TrainerConfig(
+                load_in_4bit=False, sft_backend="unsloth", base_model="google/gemma-4-31B-it"
+            )
+        )
         assert "FastLanguageModel" in s
 
     def test_both_emit_valid_python(self):
         for backend in ("plain", "unsloth"):
-            ast.parse(_sft(TrainerConfig(sft_backend=backend, base_model="google/gemma-4-31B-it")))
+            ast.parse(
+                _sft(
+                    TrainerConfig(
+                        load_in_4bit=False, sft_backend=backend, base_model="google/gemma-4-31B-it"
+                    )
+                )
+            )
 
 
 class TestDPODispatch:
     def test_plain_backend(self):
-        s = _dpo(TrainerConfig(dpo_backend="plain", base_model="google/gemma-4-31B-it"))
+        s = _dpo(
+            TrainerConfig(
+                load_in_4bit=False, dpo_backend="plain", base_model="google/gemma-4-31B-it"
+            )
+        )
         assert "DPOTrainer" in s and "AutoModelForCausalLM" in s
         assert "ref_model=None" in s  # implicit-reference DPO
         assert "from unsloth" not in s
 
     def test_unsloth_backend(self):
-        s = _dpo(TrainerConfig(dpo_backend="unsloth", base_model="google/gemma-4-31B-it"))
+        s = _dpo(
+            TrainerConfig(
+                load_in_4bit=False, dpo_backend="unsloth", base_model="google/gemma-4-31B-it"
+            )
+        )
         assert "FastLanguageModel" in s
 
     def test_both_emit_valid_python(self):
         for backend in ("plain", "unsloth"):
-            ast.parse(_dpo(TrainerConfig(dpo_backend=backend, base_model="google/gemma-4-31B-it")))
+            ast.parse(
+                _dpo(
+                    TrainerConfig(
+                        load_in_4bit=False, dpo_backend=backend, base_model="google/gemma-4-31B-it"
+                    )
+                )
+            )
 
 
 class TestLigerWiring:
     def test_liger_off_by_default(self):
-        assert "use_liger_kernel=False" in _sft(TrainerConfig(sft_backend="plain"))
-        assert "use_liger_kernel=False" in _dpo(TrainerConfig(dpo_backend="plain"))
+        assert "use_liger_kernel=False" in _sft(
+            TrainerConfig(load_in_4bit=False, sft_backend="plain")
+        )
+        assert "use_liger_kernel=False" in _dpo(
+            TrainerConfig(load_in_4bit=False, dpo_backend="plain")
+        )
 
     def test_liger_on_when_enabled(self):
-        assert "use_liger_kernel=True" in _sft(TrainerConfig(sft_backend="plain", use_liger=True))
-        assert "use_liger_kernel=True" in _dpo(TrainerConfig(dpo_backend="plain", use_liger=True))
+        assert "use_liger_kernel=True" in _sft(
+            TrainerConfig(load_in_4bit=False, sft_backend="plain", use_liger=True)
+        )
+        assert "use_liger_kernel=True" in _dpo(
+            TrainerConfig(load_in_4bit=False, dpo_backend="plain", use_liger=True)
+        )
 
     def test_liger_not_in_unsloth_path(self):
         # Liger is a plain-backend (transformers-native) concern; Unsloth has its own CE.
-        assert "use_liger_kernel" not in _sft(TrainerConfig(sft_backend="unsloth"))
+        assert "use_liger_kernel" not in _sft(
+            TrainerConfig(load_in_4bit=False, sft_backend="unsloth")
+        )
 
     def test_plain_sft_uses_family_targets(self):
         from bashgym.families import resolve_family_profile
 
-        config = TrainerConfig(sft_backend="plain", base_model="google/gemma-4-31B-it")
+        config = TrainerConfig(
+            load_in_4bit=False, sft_backend="plain", base_model="google/gemma-4-31B-it"
+        )
         s = _sft(config)
         profile = resolve_family_profile(config.base_model)
         assert profile.lora_target_modules  # sanity

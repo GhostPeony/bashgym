@@ -31,7 +31,7 @@ import { toCampaignArtifactPreview, type CampaignArtifactPreview } from '../camp
 export const API_BASE =
   (typeof window !== 'undefined' ? window.bashgym?.runtime?.apiBase : undefined) ||
   import.meta.env?.VITE_API_URL ||
-  'http://127.0.0.1:8003/api'
+  (typeof window !== 'undefined' && !window.bashgym ? '/api' : 'http://127.0.0.1:8003/api')
 
 function backendStartCommand(apiBase: string): string {
   try {
@@ -59,6 +59,10 @@ function normalizeApiError(error: unknown): string {
 
   if (!looksOffline) {
     return raw
+  }
+
+  if (typeof window !== 'undefined' && !window.bashgym) {
+    return 'The research service is disconnected. Reconnect it, then retry to load verified evidence.'
   }
 
   return [
@@ -518,7 +522,7 @@ export interface ApiResponse<T> {
 async function request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
   try {
     // Use Electron IPC proxy if available (avoids CORS in dev)
-    if (window.bashgym?.api) {
+    if (typeof window !== 'undefined' && window.bashgym?.api) {
       const result = await window.bashgym.api.fetch(`${API_BASE}${endpoint}`, options)
       const apiResult = result as ApiResponse<T>
       if (!apiResult.ok && apiResult.error) {
@@ -533,7 +537,6 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<ApiR
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': localStorage.getItem('bashgym_api_key') || '',
         'X-Requested-With': 'XMLHttpRequest',
         ...options?.headers
       }
@@ -874,16 +877,28 @@ async function campaignRequest<T>(
   authority?: { idempotencyKey?: string }
 ): Promise<ApiResponse<T>> {
   const bridge = (
-    window.bashgym as typeof window.bashgym & {
+    (typeof window !== 'undefined' ? window.bashgym : undefined) as typeof window.bashgym & {
       campaignRequest?: CampaignBridgeRequest
     }
   )?.campaignRequest
   if (!bridge) {
-    return {
-      ok: false,
-      code: 'campaign_desktop_bridge_required',
-      error: 'Campaign controls require the authenticated BashGym desktop bridge.'
+    if (typeof window !== 'undefined' && window.bashgym) {
+      return {
+        ok: false,
+        code: 'campaign_desktop_bridge_required',
+        error: 'Campaign controls require the authenticated BashGym desktop bridge.'
+      }
     }
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query || {})) params.set(key, String(value))
+    const suffix = params.size ? `?${params}` : ''
+    return request<T>(`${route.replace(/^\/api/, '')}${suffix}`, {
+      method,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      ...(authority?.idempotencyKey
+        ? { headers: { 'Idempotency-Key': authority.idempotencyKey } }
+        : {})
+    })
   }
   try {
     return (await bridge(method, route, body, query, authority)) as ApiResponse<T>
@@ -893,6 +908,8 @@ async function campaignRequest<T>(
 }
 
 export const campaignApi = {
+  capabilities: () =>
+    campaignRequest<{ workspace_ids: string[] }>('GET', '/api/campaign-auth/capabilities'),
   campaignAgentView: async (
     workspaceId: string,
     campaignId: string
@@ -1075,6 +1092,19 @@ export const campaignApi = {
     }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/proposals`, undefined, {
       workspace_id: workspaceId
     }),
+  submitProposal: (
+    campaignId: string,
+    role: 'general' | 'baseline' | 'candidate',
+    body: Record<string, unknown>,
+    idempotencyKey: string
+  ) =>
+    campaignRequest<{ record: import('../stores/campaignStore').CampaignProposalRecord }>(
+      'POST',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/${role === 'general' ? 'proposals' : role === 'baseline' ? 'autoresearch/baseline' : 'autoresearch/candidates'}`,
+      body,
+      undefined,
+      { idempotencyKey }
+    ),
   evidence: (workspaceId: string, campaignId: string) =>
     campaignRequest<import('../stores/campaignStore').CampaignEvidence>(
       'GET',
@@ -1518,11 +1548,15 @@ export const trainingApi = {
     trace_ids?: string[]
     include_gold_only?: boolean
     train_split?: number
+    split_group_by?: 'repository' | 'task'
+    split_seed?: number
   }) =>
     request<{
       success: boolean
       train_path?: string
       val_path?: string
+      manifest_path?: string
+      export_id?: string
       train_count: number
       val_count: number
       message?: string
@@ -1556,11 +1590,15 @@ export const trainingApi = {
     ),
 
   // Download exported JSONL file as browser download
-  downloadExport: async (split: 'train' | 'val' = 'train') => {
+  downloadExport: async (split: 'train' | 'val' = 'train', exportId?: string) => {
     try {
-      const response = await fetch(`${API_BASE}/training/export/download?split=${split}`, {
-        credentials: 'include'
-      })
+      const selection = exportId ? `&export_id=${encodeURIComponent(exportId)}` : ''
+      const response = await fetch(
+        `${API_BASE}/training/export/download?split=${split}${selection}`,
+        {
+          credentials: 'include'
+        }
+      )
       if (!response.ok) {
         const text = await response.text()
         return { ok: false as const, error: text }
@@ -1626,6 +1664,25 @@ export interface DesignerPipelineInfo {
   columns: string[]
 }
 
+export interface DesignerReadiness {
+  checked_at: string
+  scope: 'backend_process_imports'
+  data_designer_importable: boolean
+  pandas_importable: boolean
+  pipeline_builders_importable: boolean
+  browser_provider: 'nvidia'
+  credential_configured: boolean
+  provider_verified: false
+  generation_verified: false
+  recipe_verified: false
+}
+
+export interface DesignerPipelinesResponse {
+  pipelines: DesignerPipelineInfo[]
+  available: boolean
+  readiness?: DesignerReadiness
+}
+
 export interface DesignerPreviewRequest {
   pipeline: string
   num_records?: number
@@ -1686,10 +1743,7 @@ export interface DesignerJobStatus {
 }
 
 export const designerApi = {
-  listPipelines: () =>
-    request<{ pipelines: DesignerPipelineInfo[]; available: boolean }>(
-      '/factory/designer/pipelines'
-    ),
+  listPipelines: () => request<DesignerPipelinesResponse>('/factory/designer/pipelines'),
 
   preview: (req: DesignerPreviewRequest) =>
     request<{ records: Record<string, unknown>[]; columns: string[]; count: number }>(
@@ -4328,6 +4382,7 @@ export interface HFDataset {
 }
 
 export interface HFDatasetUploadRequest {
+  export_id?: string
   local_path: string
   repo_name: string
   private?: boolean

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import math
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,7 @@ from bashgym.campaigns.diagnostic_actions import (
     AutoResearchDiagnosticEvidence,
     AutoResearchDiagnosticRecipe,
     AutoResearchDiagnosticRequest,
+    DiagnosticInputBinding,
     DiagnosticMeasurementRequest,
     diagnostic_recipe_digest,
 )
@@ -19,6 +22,7 @@ from bashgym.campaigns.first_party_diagnostic_runner import (
     PlasticityProbeSummary,
     PreferenceIntegritySummary,
     RewardIntegritySummary,
+    _bounded_request,
     run_first_party_diagnostic,
 )
 from bashgym.campaigns.reward_integrity import build_reward_integrity_evidence
@@ -74,6 +78,17 @@ def _run(
         recipe_digest=diagnostic_recipe_digest(recipe),
         runner_id=FIRST_PARTY_DIAGNOSTIC_RUNNER_ID,
         runner_version=FIRST_PARTY_DIAGNOSTIC_RUNNER_VERSION,
+        input_binding=(
+            DiagnosticInputBinding(
+                parent_model_digest=bundle.sources[0].parent_model_digest,
+                candidate_model_digest=bundle.sources[0].candidate_model_digest,
+                source_bundle_digest=hashlib.sha256(bundle.model_dump_json().encode()).hexdigest(),
+                recipe_digest=diagnostic_recipe_digest(recipe),
+                data_scope_ids=recipe.data_scope_ids,
+            )
+            if recipe.probe_family == "plasticity_probe"
+            else None
+        ),
     )
     request_path = tmp_path / "autoresearch_diagnostic_request.json"
     source_path = tmp_path / "autoresearch_diagnostic_sources.json"
@@ -124,6 +139,7 @@ def test_runner_projects_fixed_budget_plasticity_receipt(tmp_path: Path) -> None
                 dataset_revision_count=2,
                 parent_model_digest="a" * 64,
                 candidate_model_digest="b" * 64,
+                probe_recipe_digest=diagnostic_recipe_digest(recipe),
             ),
         )
     )
@@ -308,6 +324,9 @@ def test_runner_derives_paired_session_recovery_lower_bound(tmp_path: Path) -> N
                     "reader_contract_digest": "c" * 64,
                     "confidence_level": 0.95,
                     "accepted_recovery_traces": 80,
+                    "sampling_unit": "independent_paired_case",
+                    "independent_case_count": 100,
+                    "sampling_design_digest": "d" * 64,
                     "both_failed": 50,
                     "baseline_only_success": 5,
                     "hinted_only_success": 25,
@@ -323,7 +342,7 @@ def test_runner_derives_paired_session_recovery_lower_bound(tmp_path: Path) -> N
     assert evidence.measurements[0].value == 80
     assert evidence.measurements[0].sample_count == 80
     assert evidence.measurements[1].name == "recovery_lift_lower_bound"
-    assert evidence.measurements[1].value == pytest.approx(0.10006105396891199)
+    assert evidence.measurements[1].value == pytest.approx(0.2 - math.sqrt(2 * math.log(20) / 100))
     assert evidence.measurements[1].sample_count == 100
 
 
@@ -374,3 +393,26 @@ def test_preference_source_rejects_inconsistent_aggregate_counts() -> None:
             label_conflicts=0,
             heldout_overlaps=0,
         )
+
+
+def test_previous_runner_request_fails_closed_without_rewriting_history(tmp_path):
+    recipe = _recipe("new_agent_probe", (("novel_signal", "fraction"),))
+    request = AutoResearchDiagnosticRequest(
+        workspace_id="workspace-a",
+        campaign_id="campaign-a",
+        proposal_id="diagnostic-a",
+        study_id="study-a",
+        action_id="action-a",
+        attempt_id="attempt-a",
+        recipe=recipe,
+        recipe_digest=diagnostic_recipe_digest(recipe),
+        runner_id=FIRST_PARTY_DIAGNOSTIC_RUNNER_ID,
+        runner_version="1",
+    )
+    path = tmp_path / "old-request.json"
+    payload = request.model_dump_json()
+    path.write_text(payload)
+    assert AutoResearchDiagnosticRequest.model_validate_json(payload).runner_version == "1"
+    with pytest.raises(ValueError, match="runner identity mismatch"):
+        _bounded_request(path)
+    assert path.read_text() == payload

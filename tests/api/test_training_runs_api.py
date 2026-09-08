@@ -14,6 +14,15 @@ def client():
 
 
 class TestTrainingRuns:
+    def test_plain_quantization_rejected_before_queue(self, client, monkeypatch):
+        monkeypatch.setenv("BASHGYM_MODE", "desktop")
+        resp = client.post(
+            "/api/training/start",
+            json={"strategy": "sft", "sft_backend": "plain", "load_in_4bit": True},
+        )
+        assert resp.status_code == 422
+        assert "load_in_4bit" in resp.json()["detail"]
+
     def test_direct_training_rejects_ambiguous_cloud_label(self, client):
         resp = client.post(
             "/api/training/start",

@@ -81,6 +81,23 @@ bashgym operator skills install --host agents
 Installing a skill does not start an experiment or replace the agent's own
 planning tools.
 
+## Browser and headless setup
+
+Install a release wheel containing the browser assets, then run
+`bashgym init --agent-host hermes` (or `codex` / `claude`) and
+`bashgym doctor --json`. The cream-and-pastel research studio provides setup,
+research authoring, logs, evidence and resume without Electron. Browser and
+skills share the same persisted preparation draft. Pair with the short-lived
+code shown by the CLI; the research agent's provider and learner checkpoint
+remain separate selections.
+
+See the [research studio guide](docs/RESEARCH_STUDIO.md) for readiness checks,
+optional NeMo Data Designer, installation boundaries and remaining live gates.
+The [bounded coding benchmark path](docs/training/coding-benchmarks.md) connects
+pinned function-completion evaluations and a small SFT intervention to the
+existing campaign worker. Preparation and fixture checks do not establish a
+model quality improvement.
+
 ## Models, datasets, and methods
 
 A campaign binds the exact model, dataset, evaluator, and installed stage

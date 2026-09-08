@@ -103,6 +103,21 @@ direction, and derives acceptance from accepted/total outputs. For
 `recovery_trace_probe`, bind the recovery dataset and reader contract and supply
 the paired outcome table for the same cases. The runner derives the recovery
 lift and its 95% lower confidence bound; do not provide a hand-authored lift.
+Runner version 2 uses a one-sided Hoeffding bound for paired differences in
+[-1, 1]. Its source receipt must specify `sampling_unit=independent_paired_case`,
+an `independent_case_count` equal to the paired table total, and a pinned
+`sampling_design_digest`. Repeated observations of one case are not independent
+cases. The evidence records the method, sampling unit, and design identity.
+For plasticity, version 2 binds the receipt's `probe_recipe_digest`, data scope,
+parent and candidate checkpoint digests, and installation-pinned source bundle.
+The parent must match its completed campaign evaluation. The candidate remains
+an installation-owned aggregate receipt, not proof of a fresh probe execution.
+These observations are exploratory. Version 1 requests cannot execute with the
+version 2 runner; reinstall the runner profile and prepare a new request. Old
+sealed records remain readable and are never rewritten to imply new evidence.
+Method readiness uses only evidence matching the selected proposal's model,
+dataset, evaluation or labeling contract, and data scope. An absent or changed
+input contract requires a diagnostic before claiming readiness.
 Both probes inform readiness only. The installed training runner must still
 declare the method, campaign thresholds must pass, and the trained candidate
 must still clear its fixed heldout evaluation.

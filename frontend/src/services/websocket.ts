@@ -172,7 +172,7 @@ export class WebSocketService {
       this.url = window.bashgym.runtime.webSocketUrl
     } else if (env.VITE_WS_URL) {
       this.url = env.VITE_WS_URL
-    } else if (typeof window !== 'undefined' && env.VITE_MODE === 'web') {
+    } else if (typeof window !== 'undefined' && !window.bashgym) {
       // Web mode: derive WebSocket URL from current host (same-origin)
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       this.url = `${proto}//${window.location.host}/ws`

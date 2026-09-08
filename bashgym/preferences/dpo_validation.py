@@ -10,6 +10,7 @@ from ._validation import first_text as _text
 from ._validation import load_json_records
 from ._validation import record_metadata as _metadata
 from ._validation import validation_level as _level
+from .conditioning import conditioning_binding
 
 PREFERENCE_PAIR_VALIDATION_SCHEMA_VERSION = "bashgym.preference_pair_validation.v1"
 
@@ -152,6 +153,22 @@ def validate_preference_pair_records(
         prompt_hash = _text(record, "prompt_hash") or _metadata_text(metadata, "prompt_hash")
         computed_prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16] if prompt else ""
         generation_method = _infer_generation_method(metadata)
+        if generation_method in {"embedding_similarity_trace_pair", "trace_pair"}:
+            binding = conditioning_binding(prompt, metadata.get("preference_context"))
+            if (
+                not binding
+                or metadata.get("conditioning_verified") is not True
+                or metadata.get("conditioning_digest") != binding
+            ):
+                findings.append(
+                    _finding(
+                        code="unverified_pair_conditioning",
+                        level="fail",
+                        message="independent trace pairs require matching immutable task and context evidence",
+                        index=index,
+                        pair_id=pair_id or None,
+                    )
+                )
 
         normalized.append(
             {

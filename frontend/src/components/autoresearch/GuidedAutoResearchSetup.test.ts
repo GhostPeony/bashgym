@@ -44,6 +44,79 @@ const context = parseGuidedSetupContext({
   }
 })
 
+function renderSetup(nextContext: GuidedSetupContext, selectedOptionId = '') {
+  const noop = () => {}
+  return renderToStaticMarkup(
+    createElement(GuidedAutoResearchSetup, {
+      context: nextContext,
+      connectionState: 'live',
+      pending: false,
+      error: null,
+      doctor: null,
+      validation: null,
+      selectedOptionId,
+      campaignId: '',
+      title: '',
+      budgetUnit: '',
+      budgetLimit: '',
+      maxAttempts: '',
+      minimumImprovement: '',
+      onSelectedOptionChange: noop,
+      onCampaignIdChange: noop,
+      onTitleChange: noop,
+      onBudgetUnitChange: noop,
+      onBudgetLimitChange: noop,
+      onMaxAttemptsChange: noop,
+      onMinimumImprovementChange: noop,
+      onAdvance: noop,
+      onDoctor: noop,
+      onValidate: noop,
+      onCreate: noop,
+      onRetry: noop
+    })
+  )
+}
+
+test('empty registration state provides a preparation path and refresh without enabling creation', () => {
+  assert.ok(context)
+  const html = renderSetup({ ...context, templates: [] })
+  assert.match(html, /Prepare with your agent or CLI/)
+  assert.match(html, /bashgym research prepare --help/)
+  assert.match(html, /workspace-a/)
+  assert.match(html, /Refresh registrations/)
+  assert.match(html, /Your saved choices are preserved/)
+  assert.match(html, /href="#resources"/)
+  assert.doesNotMatch(html, /Create and review Start/)
+  assert.match(html, /learner model, training data, evaluation and execution environment/)
+})
+
+test('incomplete registered installation remains selectable with visible recipe blockers', () => {
+  assert.ok(context)
+  const installationId = `ins_${'b'.repeat(32)}`
+  const selected = {
+    ...context,
+    installations: [
+      {
+        installation_id: installationId,
+        ready: false,
+        reason_codes: ['model_binding_unavailable'],
+        bindings: { model: [], data: [], compute: [], evaluation: [] },
+        truncation: { truncated: false, reason_codes: [], limit_per_kind: 32, kinds: [] }
+      }
+    ],
+    session: {
+      version: 1,
+      selections: { template_id: 'template-modern', installation_id: null, bindings: {} },
+      latest_receipt: { receipt_id: 'template-receipt' }
+    }
+  } as unknown as GuidedSetupContext
+  const html = renderSetup(selected, installationId)
+  assert.match(html, /model binding unavailable/)
+  assert.match(html, /Saving this installation does not verify its recipe inputs/)
+  assert.doesNotMatch(html, /disabled=""[^>]*>Save choice<\/button>/)
+  assert.doesNotMatch(html, /Create and review Start/)
+})
+
 test('keeps a useful compact six-step setup visible while authority is offline', () => {
   const html = renderToStaticMarkup(
     createElement(GuidedAutoResearchSetup, {
@@ -88,7 +161,31 @@ test('renders only authoritative registered choices and explicit truncation', ()
   assert.ok(context)
   const html = renderToStaticMarkup(
     createElement(GuidedAutoResearchSetup, {
-      context,
+      context: {
+        ...context,
+        preparation_inventory: {
+          schema_version: 'bashgym.preparation_inventory.v1',
+          workspace_id: 'workspace-a',
+          checked_at: '2026-07-17T00:00:00Z',
+          training_started: false,
+          execution_verified: false,
+          truncated: false,
+          reason_codes: [],
+          candidates: {
+            models: [
+              {
+                candidate_id: 'asset_existing',
+                label: 'Existing learner',
+                evidence: 'registered_metadata',
+                execution_verified: false
+              }
+            ],
+            data: [],
+            evaluation: [],
+            compute: []
+          }
+        }
+      },
       connectionState: 'live',
       pending: false,
       error: null,
@@ -115,6 +212,10 @@ test('renders only authoritative registered choices and explicit truncation', ()
       onRetry: () => {}
     })
   )
+  assert.match(html, /Existing workspace assets/)
+  assert.match(html, /Existing learner/)
+  assert.match(html, /approved installation binding/)
+  assert.doesNotMatch(html, /<option[^>]*value="asset_existing"/)
   assert.match(html, /template-modern/)
   assert.match(html, /installations truncated/)
   assert.match(html, /0 of 6 choices sealed/)

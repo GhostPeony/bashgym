@@ -367,6 +367,7 @@ def test_trainer_records_only_opaque_remote_artifact_references(tmp_path):
         TrainerConfig(
             base_model="registered-base-model",
             output_dir=str(tmp_path / "controller-runs"),
+            load_in_4bit=False,
         )
     )
     trainer.ssh_config = SSHConfig(host="research-host", username="research-user")

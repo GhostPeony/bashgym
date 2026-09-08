@@ -1,5 +1,5 @@
 """
-DPO Failure Pairing — Match failed traces to similar gold traces for DPO training.
+DPO Failure Pairing — Match verified traces with identical task conditioning.
 
 Uses embedding-based similarity (via NVIDIA NIM API) to pair each failed trace
 with the nearest gold trace. Produces DPOExample pairs where the gold response
@@ -15,6 +15,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
+
+from bashgym.preferences.conditioning import conditioning_binding
 
 from .data_factory import DPOExample
 from .dedup import DedupConfig, EmbeddingDeduplicator
@@ -51,14 +53,9 @@ def _extract_prompt(trace: dict[str, Any]) -> str:
     # Fall back to first user message
     for msg in trace.get("messages", []):
         if msg.get("role") == "user":
-            return msg.get("content", "")[:500]
+            return msg.get("content", "")
 
-    # Fall back to first step command
-    steps = trace.get("trace", trace.get("steps", []))
-    if steps:
-        return steps[0].get("command", "coding task")[:500]
-
-    return "coding task"
+    return ""
 
 
 def _serialize_trace_response(trace: dict[str, Any]) -> str:
@@ -70,21 +67,21 @@ def _serialize_trace_response(trace: dict[str, Any]) -> str:
         if msg.get("role") == "assistant":
             content = msg.get("content", "")
             if content:
-                parts.append(content[:500])
+                parts.append(content)
             for tc in msg.get("tool_calls", []):
                 fn = tc.get("function", {})
-                parts.append(f"[{fn.get('name', 'tool')}] {fn.get('arguments', '')}"[:300])
+                parts.append(f"[{fn.get('name', 'tool')}] {fn.get('arguments', '')}")
 
     if parts:
-        return "\n".join(parts)[:3000]
+        return "\n".join(parts)
 
     # Fall back to trace/steps format
     for step in trace.get("trace", trace.get("steps", [])):
         tool = step.get("tool_name", step.get("tool", ""))
         cmd = step.get("command", step.get("input", ""))
-        parts.append(f"[{tool}] {cmd}"[:300])
+        parts.append(f"[{tool}] {cmd}")
 
-    return "\n".join(parts)[:3000] or "(empty response)"
+    return "\n".join(parts)
 
 
 def _load_traces_from_dir(trace_dir: Path, max_count: int = 500) -> list[dict[str, Any]]:
@@ -107,7 +104,7 @@ def pair_failures_for_dpo(
     max_pairs: int = 200,
     dedup_config: DedupConfig | None = None,
 ) -> list[DPOExample]:
-    """Match failed traces to similar gold traces and produce DPO pairs.
+    """Match failed traces to verified same-context gold traces for DPO pairs.
 
     For each failed trace, finds the nearest gold trace by embedding
     similarity (preferring same-repo matches). Produces a DPOExample
@@ -154,8 +151,10 @@ def pair_failures_for_dpo(
         logger.warning("[DPO Pairer] Embedding API unavailable, skipping: %s", e)
         return []
 
-    # Build repo index for gold traces (prefer same-repo matches)
-    gold_repos = [_extract_repo_name(t) for t in gold_traces]
+    gold_bindings = [
+        conditioning_binding(_extract_prompt(t), t.get("metadata", {}).get("preference_context"))
+        for t in gold_traces
+    ]
 
     # Match each failed trace to nearest gold trace
     pairs: list[DPOExample] = []
@@ -165,7 +164,12 @@ def pair_failures_for_dpo(
         if len(pairs) >= max_pairs:
             break
 
-        failed_repo = _extract_repo_name(failed_trace)
+        failed_meta = failed_trace.get("metadata", {})
+        binding = conditioning_binding(
+            _extract_prompt(failed_trace), failed_meta.get("preference_context")
+        )
+        if binding is None or failed_meta.get("verification_passed") is not False:
+            continue
 
         # Score all gold traces by similarity, with repo bonus
         best_gi = -1
@@ -174,10 +178,12 @@ def pair_failures_for_dpo(
         for gi, gold_emb in enumerate(gold_embeddings):
             if gi in used_gold:
                 continue
+            if (
+                gold_bindings[gi] != binding
+                or gold_traces[gi].get("metadata", {}).get("verification_passed") is not True
+            ):
+                continue
             sim = deduplicator._cosine_similarity(failed_emb, gold_emb)
-            # Repo-match bonus: +0.1 if same repo
-            if failed_repo and gold_repos[gi] == failed_repo:
-                sim += 0.1
             if sim > best_score:
                 best_score = sim
                 best_gi = gi
@@ -191,6 +197,8 @@ def pair_failures_for_dpo(
         prompt = _extract_prompt(failed_trace) or _extract_prompt(gold_trace)
         chosen = _serialize_trace_response(gold_trace)
         rejected = _serialize_trace_response(failed_trace)
+        if not chosen or not rejected or chosen == rejected:
+            continue
 
         example_id = hashlib.sha256(f"{prompt}{chosen}{rejected}".encode()).hexdigest()[:16]
         prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
@@ -210,6 +218,9 @@ def pair_failures_for_dpo(
                     "failed_repo": _extract_repo_name(failed_trace),
                     "similarity": round(best_score, 4),
                     "pair_generation_method": "embedding_similarity_trace_pair",
+                    "conditioning_verified": True,
+                    "conditioning_digest": binding,
+                    "preference_context": failed_meta["preference_context"],
                     "label_strength": "gold_vs_failed_trace",
                     "label_source": "trace_verifier_plus_similarity",
                     "chosen_length_chars": len(chosen),

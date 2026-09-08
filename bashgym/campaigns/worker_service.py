@@ -1845,6 +1845,14 @@ def probe_api_health(
         "healthy": True,
         "state_root_match": state_root_match,
         "code": "api_http_healthy" if state_root_match else "api_state_root_mismatch",
+        **(
+            {
+                "studio_compatible": payload.get("studio_protocol") == "bashgym.studio.v1"
+                and payload.get("authentication_required") is True
+            }
+            if "studio_protocol" in payload
+            else {}
+        ),
     }
 
 
@@ -1961,6 +1969,12 @@ def run_headless_api(
     if not 1 <= port <= 65535:
         raise WorkerServiceError("bashgym_api_service_argument_invalid")
     _reject_controls(host)
+    try:
+        local_host = host.casefold().rstrip(".") == "localhost" or ip_address(host).is_loopback
+    except ValueError:
+        local_host = False
+    if not local_host and not os.environ.get("BASHGYM_API_KEY"):
+        raise WorkerServiceError("bashgym_remote_api_requires_authenticated_configuration")
     os.environ["BASHGYM_MODE"] = "headless"
     if data_directory is not None:
         state_root = data_directory.expanduser().resolve()

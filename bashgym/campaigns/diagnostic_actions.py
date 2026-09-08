@@ -275,6 +275,22 @@ class DiagnosticMeasurementResult(FrozenContractModel):
         return value
 
 
+class DiagnosticInputBinding(FrozenContractModel):
+    """Installation-pinned probe receipt identity, independent of agent parameters."""
+
+    parent_model_digest: HexDigest
+    candidate_model_digest: HexDigest
+    source_bundle_digest: HexDigest
+    recipe_digest: HexDigest
+    data_scope_ids: tuple[Identifier, ...]
+
+    @model_validator(mode="after")
+    def distinct_checkpoints(self) -> DiagnosticInputBinding:
+        if self.parent_model_digest == self.candidate_model_digest:
+            raise ValueError("diagnostic binding requires distinct checkpoints")
+        return self
+
+
 class AutoResearchDiagnosticRequest(FrozenContractModel):
     """Exact worker-owned request passed to the registered diagnostic runner."""
 
@@ -291,11 +307,17 @@ class AutoResearchDiagnosticRequest(FrozenContractModel):
     recipe_digest: HexDigest
     runner_id: Identifier
     runner_version: str = Field(min_length=1, max_length=240)
+    input_binding: DiagnosticInputBinding | None = None
 
     @model_validator(mode="after")
     def verify_recipe_digest(self) -> AutoResearchDiagnosticRequest:
         if self.recipe_digest != diagnostic_recipe_digest(self.recipe):
             raise ValueError("diagnostic request recipe digest mismatch")
+        if self.input_binding is not None and (
+            self.input_binding.recipe_digest != self.recipe_digest
+            or self.input_binding.data_scope_ids != self.recipe.data_scope_ids
+        ):
+            raise ValueError("diagnostic request input binding mismatch")
         return self
 
 
@@ -334,6 +356,10 @@ class AutoResearchDiagnosticEvidence(FrozenContractModel):
     observations: tuple[DiagnosticObservation, ...] = Field(default=(), max_length=12)
     resource_usage: tuple[ResourceUsage, ...] = Field(default=(), max_length=8)
     unsupported_reason: Identifier | None = None
+    input_binding: DiagnosticInputBinding | None = None
+    statistical_method: Literal["paired_hoeffding_one_sided"] | None = None
+    sampling_unit: Literal["independent_paired_case"] | None = None
+    sampling_design_digest: HexDigest | None = None
 
     @model_validator(mode="after")
     def validate_status_and_uniqueness(self) -> AutoResearchDiagnosticEvidence:
@@ -362,9 +388,12 @@ def diagnostic_recipe_digest(recipe: AutoResearchDiagnosticRecipe) -> str:
 
 
 def diagnostic_request_bytes(request: AutoResearchDiagnosticRequest) -> bytes:
+    payload = request.model_dump(mode="json")
+    if request.input_binding is None:
+        payload.pop("input_binding")
     return (
         json.dumps(
-            request.model_dump(mode="json"),
+            payload,
             sort_keys=True,
             separators=(",", ":"),
         )
@@ -397,6 +426,7 @@ def validated_diagnostic_evidence(
     expected_identity: Mapping[str, str],
     expected_runner_id: str,
     expected_runner_version: str,
+    expected_input_binding: DiagnosticInputBinding | Mapping[str, Any] | None = None,
 ) -> AutoResearchDiagnosticEvidence:
     """Authenticate evidence against the exact request and attempt identities."""
 
@@ -423,6 +453,16 @@ def validated_diagnostic_evidence(
     ):
         raise ValueError("diagnostic_runner_identity_mismatch")
     if evidence.status == "completed":
+        if recipe.probe_family == "plasticity_probe":
+            if (
+                expected_input_binding is None
+                or evidence.input_binding is None
+                or evidence.input_binding
+                != DiagnosticInputBinding.model_validate(expected_input_binding)
+                or evidence.input_binding.recipe_digest != evidence.recipe_digest
+                or evidence.input_binding.data_scope_ids != recipe.data_scope_ids
+            ):
+                raise ValueError("diagnostic_input_binding_mismatch")
         requested = tuple(item.name for item in recipe.measurements)
         observed = tuple(item.name for item in evidence.measurements)
         if observed != requested:
@@ -469,6 +509,12 @@ def validated_diagnostic_evidence(
             if not 0 <= observed["teacher_output_acceptance_rate"] <= 1:
                 raise ValueError("teacher_gap_measurement_out_of_range")
         if recipe.probe_family == "recovery_trace_probe":
+            if (
+                evidence.statistical_method != "paired_hoeffding_one_sided"
+                or evidence.sampling_unit != "independent_paired_case"
+                or evidence.sampling_design_digest is None
+            ):
+                raise ValueError("recovery_sampling_contract_required")
             observed = {item.name: item.value for item in evidence.measurements}
             traces = observed["recovery_traces"]
             if (
@@ -538,6 +584,9 @@ def public_diagnostic_projection(
             "seed": recipe.seed,
             "data_scope_ids": list(recipe.data_scope_ids),
         }
+        if evidence.input_binding is not None:
+            projection["input_binding"] = evidence.input_binding.model_dump(mode="json")
+        projection["evidence_strength"] = "exploratory"
     elif recipe.probe_family == "reward_integrity_probe":
         projection["comparison_contract"] = {
             "reward_spec_digest": recipe.parameters["reward_spec_digest"],
@@ -571,7 +620,12 @@ def public_diagnostic_projection(
             "confidence_level": recipe.parameters["confidence_level"],
             "sample_limit": recipe.sample_limit,
             "seed": recipe.seed,
+            "statistical_method": evidence.statistical_method,
+            "sampling_unit": evidence.sampling_unit,
+            "sampling_design_digest": evidence.sampling_design_digest,
         }
+    if "comparison_contract" in projection:
+        projection["comparison_contract"]["data_scope_ids"] = list(recipe.data_scope_ids)
     return projection
 
 
@@ -586,6 +640,7 @@ __all__ = [
     "AutoResearchDiagnosticRecipe",
     "AutoResearchDiagnosticRequest",
     "DiagnosticMeasurementRequest",
+    "DiagnosticInputBinding",
     "DiagnosticMeasurementResult",
     "DiagnosticObservation",
     "diagnostic_recipe_digest",

@@ -1,47 +1,28 @@
 """Bash Gym API - FastAPI endpoints for frontend integration"""
 
-from bashgym.api.routes import app, create_app
-from bashgym.api.schemas import (
-    ExportFormat,
-    ExportRequest,
-    ExportResponse,
-    HealthCheck,
-    ModelInfo,
-    RouterStats,
-    RoutingDecisionInfo,
-    RoutingStrategyEnum,
-    SystemStats,
-    TaskRequest,
-    TaskResponse,
-    TaskStatus,
-    TraceDetail,
-    TraceInfo,
-    TraceQuality,
-    TraceStatus,
-    TraceStep,
-    TrainingProgress,
-    TrainingRequest,
-    TrainingResponse,
-    TrainingStatus,
-    TrainingStrategy,
-    WSMessage,
-)
-from bashgym.api.websocket import (
-    ConnectionManager,
-    MessageType,
-    TrainingProgressCallback,
-    broadcast_router_stats,
-    broadcast_task_status,
-    broadcast_trace_event,
-    broadcast_training_complete,
-    broadcast_training_failed,
-    broadcast_training_queued,
-    broadcast_verification_result,
-    broadcast_workspace_canvas_intent,
-    broadcast_workspace_context_updated,
-    handle_websocket,
-    manager,
-)
+from importlib import import_module
+
+
+def __getattr__(name):
+    """Importing a lightweight API utility must not construct the whole server."""
+    if name not in __all__:
+        raise AttributeError(name)
+    if name in {"app", "create_app"}:
+        module = "routes"
+    elif name.startswith("broadcast_") or name in {
+        "ConnectionManager",
+        "MessageType",
+        "TrainingProgressCallback",
+        "handle_websocket",
+        "manager",
+    }:
+        module = "websocket"
+    else:
+        module = "schemas"
+    value = getattr(import_module(f"bashgym.api.{module}"), name)
+    globals()[name] = value
+    return value
+
 
 __all__ = [
     # App

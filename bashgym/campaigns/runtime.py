@@ -702,6 +702,16 @@ class CampaignRuntimeRepository(CampaignRepository):
                 )
                 if diagnostic_recipe is not None:
                     executor_config["diagnostic_proposal_id"] = study.proposal_id
+                    from bashgym.campaigns.first_party_diagnostic_runner import (
+                        diagnostic_input_binding_from_executor,
+                    )
+
+                    binding = diagnostic_input_binding_from_executor(executor_config)
+                    if binding is not None:
+                        self.validate_diagnostic_parent_binding(
+                            workspace_id, campaign_id, study.proposal_id, binding
+                        )
+                        executor_config["diagnostic_input_binding"] = binding
             except (KeyError, OSError, ValueError) as exc:
                 raise CampaignPersistenceError("campaign_remote_profile_material_invalid") from exc
             budget_unit = configured_stage.budget_unit
@@ -3302,6 +3312,40 @@ class CampaignRuntimeRepository(CampaignRepository):
             ).fetchone()
         return self._attempt_from_row(row)
 
+    def validate_diagnostic_parent_binding(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        proposal_id: str,
+        binding: Mapping[str, Any],
+    ) -> None:
+        """Verify the installed receipt starts at the diagnostic's evaluated parent."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT t.executor_json FROM autoresearch_proposal_controls c
+                JOIN campaign_studies s ON s.workspace_id = c.workspace_id
+                  AND s.campaign_id = c.campaign_id AND s.proposal_id = c.parent_proposal_id
+                JOIN campaign_actions a ON a.workspace_id = s.workspace_id
+                  AND a.campaign_id = s.campaign_id AND a.study_id = s.study_id
+                JOIN campaign_attempts t ON t.workspace_id = a.workspace_id
+                  AND t.action_id = a.action_id
+                WHERE c.workspace_id = ? AND c.campaign_id = ? AND c.proposal_id = ?
+                  AND c.role = 'diagnostic' AND a.stage_kind = 'development_evaluation'
+                  AND a.status = 'completed' AND t.status = 'completed'
+                """,
+                (workspace_id, campaign_id, proposal_id),
+            ).fetchall()
+        executors = [json.loads(row["executor_json"]) for row in rows]
+        digests = {
+            executor.get("evaluated_model_digest")
+            for executor in executors
+            if executor.get("kind") == "ssh_remote"
+            and executor.get("stage") == "development_evaluation"
+        }
+        if digests != {binding["parent_model_digest"]}:
+            raise CampaignPersistenceError("campaign_diagnostic_parent_checkpoint_mismatch")
+
     @staticmethod
     def _scheduled_executor_contract(
         spec: ActionSpec, action_id: str, attempt_id: str
@@ -3375,6 +3419,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 recipe_digest=executor["recipe_digest"],
                 runner_id=contract["runner_id"],
                 runner_version=contract["runner_version"],
+                input_binding=executor.get("diagnostic_input_binding"),
             )
             executor["diagnostic_request_sha256"] = hashlib.sha256(
                 diagnostic_request_bytes(request)

@@ -19,7 +19,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import Field, HttpUrl
+from pydantic import Field, HttpUrl, model_validator
 
 from bashgym.campaigns.autoresearch import AutoResearchStopRules, MetricDirection
 from bashgym.campaigns.contracts import (
@@ -73,7 +73,29 @@ class AutoResearchOnboardingContract(FrozenContractModel):
     credential_ref: Identifier
     campaign_id: Identifier
     campaign_title: str = Field(min_length=1, max_length=240)
+    guided_setup_session_id: str | None = Field(default=None, pattern=r"^setupsess_[0-9a-f]{32}$")
+    guided_setup_expected_version: int | None = Field(default=None, ge=0, le=6)
+    guided_setup_session_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    expected_input_sha256: dict[str, str] | None = None
     stop_rules: AutoResearchStopRules
+
+    @model_validator(mode="after")
+    def coherent_preparation_pins(self) -> AutoResearchOnboardingContract:
+        version_pinned = self.guided_setup_expected_version is not None
+        digest_pinned = self.guided_setup_session_digest is not None
+        if version_pinned != digest_pinned or (
+            version_pinned and self.guided_setup_session_id is None
+        ):
+            raise ValueError("onboarding_session_pins_incomplete")
+        if self.expected_input_sha256 is not None and (
+            set(self.expected_input_sha256) != {"definition", "activation", "model_request"}
+            or any(
+                re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                for digest in self.expected_input_sha256.values()
+            )
+        ):
+            raise ValueError("onboarding_input_pins_invalid")
+        return self
 
     @classmethod
     def from_file(cls, path: Path) -> AutoResearchOnboardingContract:
@@ -92,6 +114,15 @@ class AutoResearchOnboardingContract(FrozenContractModel):
     @property
     def contract_digest(self) -> str:
         payload = self.model_dump(mode="json")
+        # Preserve digests of pre-bridge contracts when optional pins are absent.
+        for name in (
+            "guided_setup_session_id",
+            "guided_setup_expected_version",
+            "guided_setup_session_digest",
+            "expected_input_sha256",
+        ):
+            if payload[name] is None:
+                payload.pop(name)
         payload["input_sha256"] = {
             name: _bounded_file_sha256(path)
             for name, path in (
@@ -101,6 +132,77 @@ class AutoResearchOnboardingContract(FrozenContractModel):
             )
         }
         return canonical_hash(payload)
+
+
+def guided_setup_snapshot_digest(session: dict) -> str:
+    """Pin saved draft authority without volatile readiness projections."""
+    return canonical_hash(
+        {
+            key: session.get(key)
+            for key in (
+                "workspace_id",
+                "session_id",
+                "version",
+                "completed_steps",
+                "selections",
+                "latest_receipt",
+            )
+        }
+    )
+
+
+def validate_guided_setup_resume(contract, definition, session) -> int:
+    """Reject mismatched saved choices before skipping any completed step."""
+    from bashgym.campaigns.installation import autoresearch_binding_plan
+
+    if session is None:
+        if contract.guided_setup_session_id is not None:
+            raise AutoResearchOnboardingConflict("guided_setup_session_missing")
+        return 0
+    if not isinstance(session, dict):
+        raise AutoResearchOnboardingConflict("guided_setup_session_invalid")
+    version = session.get("version", 0)
+    if type(version) is not int or not 0 <= version <= 6:
+        raise AutoResearchOnboardingConflict("guided_setup_session_invalid")
+    if contract.guided_setup_session_id is not None and (
+        session.get("session_id") != contract.guided_setup_session_id
+        or session.get("workspace_id") != contract.workspace_id
+    ):
+        raise AutoResearchOnboardingConflict("guided_setup_session_scope_conflict")
+    pinned_version = contract.guided_setup_expected_version
+    if pinned_version is not None:
+        if version < pinned_version:
+            raise AutoResearchOnboardingConflict("guided_setup_version_conflict")
+        # A later sealed session can only append steps; all selections are checked below.
+        if (
+            version == pinned_version
+            and guided_setup_snapshot_digest(session) != contract.guided_setup_session_digest
+        ):
+            raise AutoResearchOnboardingConflict("guided_setup_digest_conflict")
+    binding = autoresearch_binding_plan(definition)
+    expected = {
+        "template": definition.template_id,
+        "installation": contract.installation_id,
+        "model": binding.target_contract_key,
+        "data": binding.dataset_version_id,
+        "compute": binding.compute_profile_id,
+        "evaluation": binding.evaluation_suite_id,
+    }
+    if version:
+        if session.get("completed_steps") != list(expected)[:version]:
+            raise AutoResearchOnboardingConflict("guided_setup_session_steps_conflict")
+        selections = session.get("selections", {})
+        if not isinstance(selections, dict) or not isinstance(selections.get("bindings"), dict):
+            raise AutoResearchOnboardingConflict("guided_setup_session_invalid")
+        actual = {
+            "template": selections.get("template_id"),
+            "installation": selections.get("installation_id"),
+            **selections["bindings"],
+        }
+        for step in list(expected)[:version]:
+            if actual.get(step) != expected[step]:
+                raise AutoResearchOnboardingConflict("guided_setup_selection_conflict:" + step)
+    return version
 
 
 class AutoResearchOnboardingStepResult(FrozenContractModel):
@@ -204,10 +306,41 @@ def _read_onboarding_model(path: Path, model: Any, *, error_code: str) -> Any:
         raise AutoResearchOnboardingError(error_code) from exc
 
 
+def validate_onboarding_secret_references(
+    credential_ref: str, controller_lease_key_ref: str
+) -> None:
+    """Apply the resident-service secret reference policy before preparation work."""
+    from bashgym.mcp.policy import validate_secret_ref_name
+
+    for name, value in (
+        ("credential_ref", credential_ref),
+        ("controller_lease_key_ref", controller_lease_key_ref),
+    ):
+        try:
+            validate_secret_ref_name(value)
+        except ValueError as exc:
+            raise AutoResearchOnboardingError("onboarding_" + name + "_invalid") from exc
+
+
 def validate_local_onboarding_contract(
     contract: AutoResearchOnboardingContract,
 ) -> tuple[Any, Any, Any]:
     """Validate all local inputs and their exact logical bindings without I/O effects."""
+
+    validate_onboarding_secret_references(
+        contract.credential_ref, contract.controller_lease_key_ref
+    )
+    if contract.expected_input_sha256 is not None:
+        observed = {
+            name: _bounded_file_sha256(path)
+            for name, path in (
+                ("definition", contract.definition_file),
+                ("activation", contract.activation_file),
+                ("model_request", contract.model_request_file),
+            )
+        }
+        if observed != contract.expected_input_sha256:
+            raise AutoResearchOnboardingConflict("onboarding_input_digest_conflict")
 
     from bashgym.campaigns.activation import (
         AutoResearchActivationRequest,
@@ -408,8 +541,10 @@ def _apply_local_activation(definition, activation_request, contract):
     from bashgym.campaigns.activation import activate_autoresearch
     from bashgym.campaigns.installation import install_autoresearch_definition
     from bashgym.campaigns.worker_service import read_worker_config, write_worker_config
+    from bashgym.studio import finalize_installation
 
     root = contract.data_directory.expanduser().resolve()
+    finalize_installation(contract)
     install_autoresearch_definition(
         definition,
         directory=root / "campaigns" / "autoresearch-templates",
@@ -456,6 +591,8 @@ def _ensure_local_operator_credential(contract: AutoResearchOnboardingContract) 
     validate_secret_ref_name(contract.credential_ref)
     if secret_store.get_secret(contract.credential_ref) is not None:
         return
+    if contract.credential_ref.startswith("BASHGYM_STUDIO_"):
+        raise AutoResearchOnboardingError("studio_preparation_authority_unavailable")
     repository = AutoResearchRepository(
         contract.data_directory.expanduser().resolve() / "campaigns" / "campaigns.sqlite3"
     )
@@ -719,7 +856,24 @@ class LocalAutoResearchOnboardingServices:
         self.definition, self.activation, self.model_request = validate_local_onboarding_contract(
             contract
         )
+        self._check_current_approvals(contract)
         self.client = _campaign_client(contract)
+        if contract.guided_setup_session_id is not None:
+            context = self.client.request_json(
+                "GET",
+                "/campaigns/setup/context",
+                query={
+                    "workspace_id": contract.workspace_id,
+                    "session_id": contract.guided_setup_session_id,
+                },
+            )
+            validate_guided_setup_resume(contract, self.definition, context.get("session"))
+
+    def _check_current_approvals(self, contract):
+        if getattr(contract, "expected_input_sha256", None) is not None:
+            from bashgym.campaigns.studio_preparation import validate_current_preparation_approvals
+
+            validate_current_preparation_approvals(contract, self.definition, self.activation)
 
     @staticmethod
     def _result(step: str, reference: str, *, replayed: bool = False):
@@ -764,6 +918,11 @@ class LocalAutoResearchOnboardingServices:
         contract: AutoResearchOnboardingContract,
         completed_steps: tuple[str, ...],
     ) -> None:
+        self._check_current_approvals(contract)
+        if "activation" in completed_steps:
+            from bashgym.studio import finalize_installation
+
+            finalize_installation(contract)
         if "target_model" in completed_steps:
             self._target_model(contract)
         if "resident_services" in completed_steps:
@@ -795,7 +954,10 @@ class LocalAutoResearchOnboardingServices:
         from bashgym.campaigns.installation import autoresearch_binding_plan
 
         binding = autoresearch_binding_plan(self.definition)
-        session_id = f"setupsess_{canonical_hash(contract.onboarding_id)[:32]}"
+        session_id = (
+            contract.guided_setup_session_id
+            or f"setupsess_{canonical_hash(contract.onboarding_id)[:32]}"
+        )
         steps = (
             ("template", self.definition.template_id),
             ("installation", contract.installation_id),
@@ -811,8 +973,7 @@ class LocalAutoResearchOnboardingServices:
         )
         session = context.get("session") if isinstance(context, dict) else None
         version = int(session.get("version", 0)) if isinstance(session, dict) else 0
-        if not 0 <= version <= len(steps):
-            raise AutoResearchOnboardingConflict("guided_setup_session_invalid")
+        validate_guided_setup_resume(contract, self.definition, session)
         for expected_version, (step, selection_id) in enumerate(steps[version:], start=version):
             self.client.request_json(
                 "POST",
@@ -881,6 +1042,7 @@ class LocalAutoResearchOnboardingServices:
         return self._result("campaign_prepare", contract.campaign_id)
 
     def run_step(self, step: str, contract: AutoResearchOnboardingContract):
+        self._check_current_approvals(contract)
         if step == "target_model":
             return self._target_model(contract)
         if step == "activation":

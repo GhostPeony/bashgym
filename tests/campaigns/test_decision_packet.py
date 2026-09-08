@@ -39,8 +39,23 @@ from bashgym.campaigns.research_diagnostics import (
 NOW = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
 
 
+def _matching_evidence(results):
+    for result in results:
+        result["comparison_contract"]["data_scope_ids"] = ["scope-a"]
+        if result["probe_family"] == "recovery_trace_probe":
+            result["comparison_contract"].update(
+                statistical_method="paired_hoeffding_one_sided",
+                sampling_unit="independent_paired_case",
+                sampling_design_digest="f" * 64,
+            )
+    expected = {item["probe_family"]: dict(item["comparison_contract"]) for item in results}
+    evidence = method_evidence_from_diagnostic_results(results, expected_contracts=expected)
+    assert evidence.pop("comparison_contracts") == expected
+    return evidence
+
+
 def test_reward_integrity_diagnostic_becomes_method_evidence_without_raw_details() -> None:
-    evidence = method_evidence_from_diagnostic_results(
+    evidence = _matching_evidence(
         (
             {
                 "probe_family": "reward_integrity_probe",
@@ -90,7 +105,7 @@ def test_incomplete_or_unsupported_reward_diagnostic_does_not_claim_verification
 
 
 def test_preference_integrity_diagnostic_becomes_dpo_evidence_without_raw_pairs() -> None:
-    evidence = method_evidence_from_diagnostic_results(
+    evidence = _matching_evidence(
         (
             {
                 "probe_family": "preference_integrity_probe",
@@ -142,7 +157,7 @@ def test_incomplete_preference_integrity_diagnostic_does_not_claim_verification(
 
 
 def test_distillation_diagnostics_become_method_evidence_from_exact_contracts() -> None:
-    evidence = method_evidence_from_diagnostic_results(
+    evidence = _matching_evidence(
         (
             {
                 "probe_family": "teacher_gap_probe",
@@ -801,5 +816,6 @@ def test_decision_packet_infers_only_the_typed_runner_method():
     )
 
     methods = {item["method"]: item for item in packet["method_selection"]["methods"]}
-    assert methods["grpo"]["status"] == "eligible"
+    assert methods["grpo"]["status"] == "diagnostic_needed"
+    assert "reward_spec_verified" in methods["grpo"]["missing_evidence"]
     assert methods["sft"]["status"] == "unsupported_by_runner"

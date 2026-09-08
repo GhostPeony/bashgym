@@ -313,6 +313,10 @@ def _service(request: Request) -> tuple[CampaignAgentService, CampaignAuthServic
 
 def _human_principal(request: Request):
     _agent_service, auth = _service(request)
+    if not request.headers.get("Authorization"):
+        from bashgym.api.campaign_routes import _principal
+
+        return _principal(request)
     return auth.authenticate_access(_bearer(request))
 
 

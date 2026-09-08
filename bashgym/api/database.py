@@ -7,6 +7,7 @@ Tokens are stored as SHA-256 hashes — raw tokens never touch disk.
 import hashlib
 import secrets
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -28,6 +29,19 @@ def init_db() -> None:
     _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS local_pairing_codes (
+                code_hash TEXT PRIMARY KEY,
+                credential_id TEXT NOT NULL,
+                authorization_revision INTEGER NOT NULL,
+                issued_at REAL NOT NULL,
+                expires_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS local_session_grants (
+                token_hash TEXT PRIMARY KEY REFERENCES sessions(token_hash) ON DELETE CASCADE,
+                credential_id TEXT NOT NULL,
+                authorization_revision INTEGER NOT NULL,
+                issued_at REAL NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS users (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 github_id   INTEGER UNIQUE NOT NULL,
@@ -152,3 +166,65 @@ def cleanup_expired_sessions() -> int:
     with get_conn() as conn:
         cursor = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         return cursor.rowcount
+
+
+def issue_local_pairing(
+    credential_id: str, authorization_revision: int, *, ttl_seconds: int = 300
+) -> str:
+    """Local CLI only: issue a high-entropy, short-lived capability exchange code."""
+    code = secrets.token_urlsafe(24)
+    now = time.time()
+    with get_conn() as conn:
+        conn.execute("DELETE FROM local_pairing_codes WHERE expires_at <= ?", (now,))
+        conn.execute(
+            "INSERT INTO local_pairing_codes VALUES (?, ?, ?, ?, ?)",
+            (_hash_token(code), credential_id, authorization_revision, now, now + ttl_seconds),
+        )
+    return code
+
+
+def consume_local_pairing(code: str) -> str | None:
+    """Atomically consume a code and bind a session to the CLI-selected authority."""
+    raw_token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM local_pairing_codes WHERE code_hash = ? AND expires_at > ?",
+            (_hash_token(code), time.time()),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute("DELETE FROM local_pairing_codes WHERE code_hash = ?", (_hash_token(code),))
+        conn.execute(
+            "INSERT OR IGNORE INTO users(github_id, username, display_name) VALUES (-1, 'local-operator', 'Local operator')"
+        )
+        user_id = conn.execute("SELECT id FROM users WHERE github_id = -1").fetchone()[0]
+        conn.execute(
+            "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES (?,?,?)",
+            (
+                _hash_token(raw_token),
+                user_id,
+                (now + timedelta(days=SESSION_MAX_AGE_DAYS)).isoformat(),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO local_session_grants VALUES (?,?,?,?)",
+            (
+                _hash_token(raw_token),
+                row["credential_id"],
+                row["authorization_revision"],
+                row["issued_at"],
+            ),
+        )
+    return raw_token
+
+
+def get_local_session_grant(token: str) -> dict | None:
+    if get_session_user(token) is None:
+        return None
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM local_session_grants WHERE token_hash = ?", (_hash_token(token),)
+        ).fetchone()
+    return dict(row) if row else None

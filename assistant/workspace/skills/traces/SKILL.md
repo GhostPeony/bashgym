@@ -72,12 +72,26 @@ bashgym api GET /api/training/examples
 
 ## Export to NeMo Format
 
-Export generated examples for training:
-Save `{}` as `export-request.json`, then run:
+Export the selected personal traces with a deterministic repository split.
+Save the selected `trace_ids`, `split_group_by: "repository"`, `split_seed: 0`
+and requested `train_split` in `export-request.json`, then run:
 
 ```text
 bashgym api POST /api/training/export --data-file export-request.json
 ```
+
+Repository/task aliases, shared source traces and exact duplicate training
+content stay together. Missing identity or a single group cannot produce a
+nonempty holdout. Use `split_group_by: "task"` only when every example carries
+an explicit task ID. An explicit `train_split: 1` creates training-only data;
+it does not establish evaluation readiness.
+
+Keep the returned `export_id` and private `manifest_path` with the proposal.
+Download an exact recorded partition with
+`GET /api/training/export/download?split=train&export_id=<export_id>` (or
+`split=val`). The service rejects modified artifacts. Validation is development
+data; keep final confirmation evaluation separate. Do not reseed a split after
+examining results to improve the reported score.
 
 ## Sync Traces
 

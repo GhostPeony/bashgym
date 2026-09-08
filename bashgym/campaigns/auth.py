@@ -309,6 +309,32 @@ class CampaignAuthService:
             audit_event_id=f"auth-{uuid4().hex}",
         )
 
+    def authenticate_local_session(self, grant: dict) -> ActorPrincipal:
+        """Resolve only a server-side grant from a validated local session cookie."""
+        parent = self.repository.get_actor_credential(grant["credential_id"])
+        now = utc_now()
+        if (
+            parent is None
+            or parent.revoked_at is not None
+            or parent.expires_at <= now
+            or parent.authorization_revision != grant["authorization_revision"]
+            or parent.token_not_before.timestamp() > grant["issued_at"]
+        ):
+            raise CampaignAuthenticationError()
+        profile = AutonomyProfile(parent.autonomy_profile)
+        if profile != AutonomyProfile.DESKTOP_USER:
+            raise CampaignAuthenticationError()
+        return ActorPrincipal(
+            actor_id=parent.actor_id,
+            autonomy_profile=profile,
+            credential_id=parent.credential_id,
+            credential_kind=CredentialKind.ACCESS,
+            workspace_ids=parent.workspace_ids,
+            capabilities=capabilities_for(profile),
+            authorization_revision=parent.authorization_revision,
+            expires_at=parent.expires_at,
+        )
+
     def revoke_credential(self, credential_id: str, *, reason: str) -> int:
         """Immediately revoke the refresh credential and every live child."""
 

@@ -636,6 +636,7 @@ def create_app() -> FastAPI:
     @app.get("/api/health", response_model=HealthCheck, tags=["System"])
     async def health_check():
         """Check API health status."""
+        from bashgym.api.auth import _is_web_mode
         from bashgym.config import state_root_digest
 
         return HealthCheck(
@@ -643,6 +644,7 @@ def create_app() -> FastAPI:
             timestamp=datetime.utcnow().isoformat(),
             version="0.1.0",
             state_root_digest=state_root_digest(),
+            authentication_required=_is_web_mode(),
         )
 
     @app.get("/api/debug/traces", tags=["System"])
@@ -1328,6 +1330,21 @@ def create_app() -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Validate explicitly selected plain recipes before creating a run or
+        # generating training data. Automatic dispatch validates at resolution.
+        strategy_name = request.strategy.value
+        if (
+            strategy_name in {"sft", "dpo", "grpo"}
+            and getattr(request, f"{strategy_name}_backend", "auto") == "plain"
+        ):
+            try:
+                from bashgym.gym.trainer import TrainerConfig
+
+                TrainerConfig(
+                    use_lora=request.use_lora, load_in_4bit=request.load_in_4bit
+                ).validate_backend_recipe("plain")
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         run_id = f"run_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         origin = _training_origin(request, http_request)
         correlation_id = _training_correlation_id(request, http_request)
@@ -3867,22 +3884,42 @@ def create_app() -> FastAPI:
         # Export with train/val split
         try:
             result = generator.export_for_nemo(
-                all_examples, data_dir / "training_batches", train_split=request.train_split
+                all_examples,
+                data_dir / "training_batches",
+                train_split=request.train_split,
+                split_group_by=request.split_group_by,
+                split_seed=request.split_seed,
             )
 
             return ExportExamplesResponse(
                 success=True,
                 train_path=str(result["train"]),
                 val_path=str(result["validation"]),
+                manifest_path=str(result["manifest"]),
+                export_id=result["export_id"],
                 train_count=result["train_count"],
                 val_count=result["val_count"],
-                message=f"Exported {len(all_examples)} examples",
+                message=f"Exported {result['train_count'] + result['val_count']} unique examples",
+            )
+        except ValueError as exc:
+            messages = {
+                "personal_trace_repository_identity_required": "Assign a repository identity to every selected trace before exporting.",
+                "personal_trace_task_identity_required": "Task-based splitting requires an explicit task ID on every selected trace.",
+                "personal_trace_holdout_requires_multiple_groups": "Training and validation need at least two independent groups. Select another repository or task, or explicitly export training-only data with a separate evaluation suite.",
+                "personal_trace_examples_required": "No examples remain after filtering. Select traces that match the requested repositories.",
+                "personal_trace_export_conflict": "A recorded export has changed. Preserve it for inspection and export to a new destination.",
+            }
+            return ExportExamplesResponse(
+                success=False,
+                message=messages.get(
+                    str(exc), "The selected examples or split settings are invalid."
+                ),
             )
         except Exception as e:
             return ExportExamplesResponse(success=False, message=f"Export failed: {str(e)}")
 
     @app.get("/api/training/export/download", tags=["Training Examples"])
-    async def download_training_export(split: str = "train"):
+    async def download_training_export(split: str = "train", export_id: str | None = None):
         """Download the most recent exported JSONL file as a browser download.
 
         Args:
@@ -3891,6 +3928,7 @@ def create_app() -> FastAPI:
         from fastapi.responses import FileResponse
 
         from bashgym.config import get_settings
+        from bashgym.factory.export_artifacts import resolve_training_export
 
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
@@ -3899,17 +3937,16 @@ def create_app() -> FastAPI:
         if split not in ("train", "val"):
             raise HTTPException(status_code=400, detail="split must be 'train' or 'val'")
 
-        filename = f"{split}.jsonl"
-        file_path = batches_dir / filename
-
-        if not file_path.exists():
-            raise HTTPException(
-                status_code=404, detail=f"No exported {split} file found. Run export first."
-            )
+        try:
+            file_path = resolve_training_export(batches_dir, split, export_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
         return FileResponse(
             path=str(file_path),
-            filename=filename,
+            filename=f"{split}.jsonl",
             media_type="application/jsonl",
         )
 
@@ -6206,7 +6243,9 @@ All endpoints (except `/api/health`) require the `X-API-Key` header when `BASHGY
     # =========================================================================
     # Static file serving (SPA) — serve built frontend when available
     # =========================================================================
-    _frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+    from bashgym.web_assets import frontend_directory
+
+    _frontend_dist = frontend_directory()
     if _frontend_dist.exists():
         from starlette.responses import FileResponse
         from starlette.staticfiles import StaticFiles
@@ -6245,7 +6284,7 @@ All endpoints (except `/api/health`) require the `X-API-Key` header when `BASHGY
             if full_path:
                 file_path = (_frontend_dist / full_path).resolve()
                 # Path traversal guard: ensure resolved path stays within dist/
-                if str(file_path).startswith(str(_dist_resolved)) and file_path.is_file():
+                if file_path.is_relative_to(_dist_resolved) and file_path.is_file():
                     return FileResponse(str(file_path))
 
             # Otherwise serve index.html for SPA routing

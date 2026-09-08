@@ -1120,6 +1120,19 @@ class CampaignWorker:
         if diagnostic_recipe is not None:
             expected_executor["diagnostic_proposal_id"] = executor.get("diagnostic_proposal_id")
             expected_executor["diagnostic_request_sha256"] = persisted_diagnostic_sha
+            from bashgym.campaigns.first_party_diagnostic_runner import (
+                diagnostic_input_binding_from_executor,
+            )
+
+            binding = diagnostic_input_binding_from_executor(expected_executor)
+            if binding is not None:
+                self.repository.validate_diagnostic_parent_binding(
+                    attempt.workspace_id,
+                    attempt.campaign_id,
+                    executor["diagnostic_proposal_id"],
+                    binding,
+                )
+                expected_executor["diagnostic_input_binding"] = binding
         if executor != expected_executor:
             raise RuntimeError("campaign_remote_executor_profile_mismatch")
         script_args = tuple(executor["script_args"])
@@ -1171,6 +1184,7 @@ class CampaignWorker:
                 recipe_digest=executor["recipe_digest"],
                 runner_id=diagnostic_contract.runner_id,
                 runner_version=diagnostic_contract.runner_version,
+                input_binding=executor.get("diagnostic_input_binding"),
             )
             request_bytes = diagnostic_request_bytes(request)
             if persisted_diagnostic_sha != hashlib.sha256(request_bytes).hexdigest():
@@ -1720,6 +1734,7 @@ class CampaignWorker:
                     },
                     expected_runner_id=str(contract.get("runner_id", "")),
                     expected_runner_version=str(contract.get("runner_version", "")),
+                    expected_input_binding=attempt.executor.get("diagnostic_input_binding"),
                 )
             except ValueError as exc:
                 raise RuntimeError("campaign_remote_diagnostic_output_invalid") from exc

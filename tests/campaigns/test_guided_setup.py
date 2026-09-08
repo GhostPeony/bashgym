@@ -825,3 +825,192 @@ def test_session_receipt_chain_detects_deleted_intermediate_step(tmp_path):
             session_id=session_id,
             definitions={_definition().template_id: _definition()},
         )
+
+
+def test_legacy_session_seals_survive_explicit_owner_sharing_and_new_writer(tmp_path):
+    campaigns, _recovery, setup = _repositories(tmp_path)
+    session_id = "setupsess_99999999999999999999999999999999"
+    scope = dict(
+        workspace_id="workspace-a",
+        session_id=session_id,
+        definitions={_definition().template_id: _definition()},
+    )
+    first, _ = setup.advance_session(
+        **scope,
+        actor_id="legacy-owner",
+        expected_version=0,
+        step="template",
+        selection_id=_definition().template_id,
+        idempotency_key="legacy-template",
+    )
+    with sqlite3.connect(campaigns.db_path) as connection:
+        old_receipt = connection.execute(
+            "SELECT * FROM campaign_guided_setup_step_receipts"
+        ).fetchone()
+    assert setup.context(**scope, actor_id="new-writer", workspace_shared=True)["session"] is None
+    with pytest.raises(GuidedSetupConflictError, match="private"):
+        setup.advance_session(
+            **scope,
+            actor_id="new-writer",
+            workspace_shared=True,
+            expected_version=0,
+            step="template",
+            selection_id=_definition().template_id,
+            idempotency_key="claim-private",
+        )
+    setup.advance_session(
+        **scope,
+        actor_id="legacy-owner",
+        workspace_shared=True,
+        expected_version=1,
+        step="installation",
+        selection_id=_draft().installation_id,
+        idempotency_key="owner-share",
+    )
+    advanced, _ = setup.advance_session(
+        **scope,
+        actor_id="new-writer",
+        workspace_shared=True,
+        expected_version=2,
+        step="model",
+        selection_id=_bindings().model,
+        idempotency_key="new-model",
+    )
+    restarted = GuidedSetupRepository(campaigns.db_path, sealer=_SEALER)
+    restarted.initialize()
+    assert (
+        restarted.context(**scope, actor_id="third-reader", workspace_shared=True)["session"]
+        == advanced["session"]
+    )
+    with sqlite3.connect(campaigns.db_path) as connection:
+        assert (
+            connection.execute(
+                "SELECT * FROM campaign_guided_setup_step_receipts WHERE receipt_id=?",
+                (first["receipt"]["receipt_id"],),
+            ).fetchone()
+            == old_receipt
+        )
+        connection.execute(
+            "UPDATE campaign_guided_setup_step_receipts SET selection_id='tampered' WHERE receipt_id=?",
+            (first["receipt"]["receipt_id"],),
+        )
+    with pytest.raises(GuidedSetupConflictError, match="seal"):
+        restarted.context(**scope, actor_id="third-reader", workspace_shared=True)
+
+
+def test_unsealed_workspace_share_marker_does_not_grant_access(tmp_path):
+    campaigns, _recovery, setup = _repositories(tmp_path)
+    scope = dict(
+        workspace_id="workspace-a",
+        session_id="setupsess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        definitions={_definition().template_id: _definition()},
+    )
+    setup.advance_session(
+        **scope,
+        actor_id="owner",
+        expected_version=0,
+        step="template",
+        selection_id=_definition().template_id,
+        idempotency_key="private-template",
+    )
+    with sqlite3.connect(campaigns.db_path) as connection:
+        connection.execute(
+            "UPDATE campaign_guided_setup_sessions SET state_json=json_set(state_json, '$.authority_scope', 'workspace')"
+        )
+    with pytest.raises(GuidedSetupConflictError, match="authority"):
+        setup.context(**scope, actor_id="other", workspace_shared=True)
+
+
+def test_shared_draft_concurrent_writers_require_exact_version(tmp_path):
+    _campaigns, _recovery, setup = _repositories(tmp_path)
+    scope = dict(
+        workspace_id="workspace-a",
+        session_id="setupsess_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        definitions={_definition().template_id: _definition()},
+        workspace_shared=True,
+    )
+    setup.advance_session(
+        **scope,
+        actor_id="owner",
+        expected_version=0,
+        step="template",
+        selection_id=_definition().template_id,
+        idempotency_key="shared-template",
+    )
+
+    def advance(actor):
+        try:
+            return setup.advance_session(
+                **scope,
+                actor_id=actor,
+                expected_version=1,
+                step="installation",
+                selection_id=_draft().installation_id,
+                idempotency_key=f"installation-{actor}",
+            )[0]
+        except GuidedSetupConflictError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(advance, ("browser", "agent")))
+    winners = [result for result in results if result is not None]
+    assert len(winners) == 1
+    assert setup.context(**scope, actor_id="reader")["session"] == winners[0]["session"]
+
+
+def test_shared_discovery_selects_latest_and_explicit_draft_within_workspace(tmp_path):
+    from datetime import datetime, timedelta
+
+    from bashgym._compat import UTC
+
+    _campaigns, _recovery, setup = _repositories(tmp_path)
+    definitions = {_definition().template_id: _definition()}
+    first_id = "setupsess_cccccccccccccccccccccccccccccccc"
+    latest_id = "setupsess_dddddddddddddddddddddddddddddddd"
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    for index, (workspace, session) in enumerate(
+        [
+            ("workspace-a", first_id),
+            ("workspace-a", latest_id),
+            ("workspace-b", latest_id),
+        ]
+    ):
+        setup.advance_session(
+            workspace_id=workspace,
+            session_id=session,
+            actor_id="owner",
+            definitions=definitions,
+            workspace_shared=True,
+            expected_version=0,
+            step="template",
+            selection_id=_definition().template_id,
+            idempotency_key=f"discover-{index}",
+            now=start + timedelta(seconds=index),
+        )
+    latest = setup.context(
+        workspace_id="workspace-a",
+        actor_id="reader",
+        definitions=definitions,
+        workspace_shared=True,
+    )
+    assert latest["session"]["session_id"] == latest_id
+    assert latest["session"]["workspace_id"] == "workspace-a"
+    assert (
+        setup.context(
+            workspace_id="workspace-a",
+            actor_id="reader",
+            definitions=definitions,
+            workspace_shared=True,
+            session_id=first_id,
+        )["session"]["session_id"]
+        == first_id
+    )
+    assert (
+        setup.context(
+            workspace_id="workspace-c",
+            actor_id="reader",
+            definitions=definitions,
+            workspace_shared=True,
+        )["session"]
+        is None
+    )

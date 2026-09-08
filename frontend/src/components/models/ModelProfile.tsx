@@ -145,8 +145,16 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
   const handleEvaluate = async () => {
     const result = await modelsApi.evaluate(modelId)
     if (result.ok) {
-      setActionMessage({ type: 'success', text: 'Evaluation queued' })
-      setTimeout(() => setActionMessage(null), 3000)
+      setActionMessage({
+        type: 'success',
+        text: result.data?.message || 'Evaluation request accepted'
+      })
+    } else {
+      setActionMessage({
+        type: 'error',
+        text:
+          result.error || 'Evaluation is unavailable. Use a registered campaign evaluation suite.'
+      })
     }
   }
 

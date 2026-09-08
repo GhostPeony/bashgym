@@ -8,6 +8,7 @@ import html
 import json
 import math
 import re
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -226,10 +227,10 @@ def _loss_svg(snapshot: dict[str, Any]) -> str:
         '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480">',
         '<rect width="960" height="480" fill="#fffdf7"/>',
         '<text x="70" y="28" font-family="sans-serif" font-size="18" font-weight="700">Campaign training loss</text>',
-        f'<line x1="{left}" y1="{height-bottom}" x2="{width-right}" y2="{height-bottom}" stroke="#332f2a" stroke-width="2"/>',
-        f'<line x1="{left}" y1="{top}" x2="{left}" y2="{height-bottom}" stroke="#332f2a" stroke-width="2"/>',
-        f'<text x="{width/2:.0f}" y="455" text-anchor="middle" font-family="sans-serif" font-size="13">Training step</text>',
-        f'<text x="18" y="{height/2:.0f}" text-anchor="middle" transform="rotate(-90 18 {height/2:.0f})" font-family="sans-serif" font-size="13">Loss</text>',
+        f'<line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#332f2a" stroke-width="2"/>',
+        f'<line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#332f2a" stroke-width="2"/>',
+        f'<text x="{width / 2:.0f}" y="455" text-anchor="middle" font-family="sans-serif" font-size="13">Training step</text>',
+        f'<text x="18" y="{height / 2:.0f}" text-anchor="middle" transform="rotate(-90 18 {height / 2:.0f})" font-family="sans-serif" font-size="13">Loss</text>',
     ]
     colors = ("#7c3aed", "#d97706", "#15803d", "#0369a1", "#be123c")
     for index, (attempt_id, stage, points) in enumerate(series):
@@ -620,8 +621,46 @@ def _table_value(value: Any) -> str:
 def export_campaign_evidence(
     value: CampaignExportSnapshot,
     output_directory: Path,
+    *,
+    formats: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    """Write deterministic evidence, chart, Word, and PDF projections."""
+    """Publish a complete export, loading only requested optional renderers.
+
+    Direct callers retain the full compatibility bundle by default. The API
+    passes explicit formats. Canonical evidence and the manifest accompany all
+    projections. Failed rendering never leaves a partially published bundle.
+    """
+    supported = ("markdown", "json", "csv", "png", "docx", "pdf")
+    selected = supported if formats is None else tuple(formats)
+    if not selected or len(set(selected)) != len(selected) or set(selected) - set(supported):
+        raise CampaignExportError("campaign_export_formats_invalid")
+    output_directory = Path(output_directory)
+    if output_directory.is_symlink():
+        raise CampaignExportError("campaign_export_directory_invalid")
+    if output_directory.exists() and (
+        not output_directory.is_dir() or any(output_directory.iterdir())
+    ):
+        raise CampaignExportError("campaign_export_directory_not_empty")
+    output_directory.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".campaign-export-", dir=output_directory.parent
+    ) as staging_root:
+        staged = Path(staging_root) / "bundle"
+        manifest = _write_campaign_evidence(value, staged, selected)
+        if output_directory.exists():
+            # Preserve all nonempty destinations, including a concurrently
+            # published bundle. Only a pre-existing empty directory can be used.
+            try:
+                output_directory.rmdir()
+            except OSError as exc:
+                raise CampaignExportError("campaign_export_directory_not_empty") from exc
+        staged.rename(output_directory)
+    return manifest
+
+
+def _write_campaign_evidence(
+    value: CampaignExportSnapshot, output_directory: Path, formats: tuple[str, ...]
+) -> dict[str, Any]:
 
     snapshot = value.safe_payload()
     source_digest = canonical_hash(snapshot)
@@ -631,6 +670,57 @@ def export_campaign_evidence(
 
     evidence_path = output_directory / "campaign_evidence.json"
     evidence_path.write_bytes(_json_bytes(snapshot) + b"\n")
+    if "csv" in formats:
+        _write_export_csv(snapshot, output_directory)
+    if "png" in formats:
+        (output_directory / "training_loss.svg").write_text(_loss_svg(snapshot), encoding="utf-8")
+    loss_png = output_directory / "training_loss.png"
+    if set(formats) & {"png", "docx", "pdf"}:
+        write_loss_png(snapshot, loss_png)
+    if "markdown" in formats:
+        (output_directory / "campaign_report.md").write_text(
+            _markdown(snapshot, source_digest), encoding="utf-8", newline="\n"
+        )
+    if "docx" in formats:
+        write_campaign_docx(
+            snapshot, source_digest, loss_png, output_directory / "campaign_report.docx"
+        )
+    if "pdf" in formats:
+        write_campaign_pdf(
+            snapshot, source_digest, loss_png, output_directory / "campaign_report.pdf"
+        )
+
+    files = []
+    for path in sorted(output_directory.iterdir(), key=lambda item: item.name):
+        files.append(
+            {"name": path.name, "sha256": _sha256(path), "size_bytes": path.stat().st_size}
+        )
+    manifest = {
+        "schema_version": "campaign_export_manifest.v1",
+        "campaign_id": snapshot["campaign"].get("campaign_id"),
+        "source_digest": source_digest,
+        "formats": sorted(formats),
+        "quality_findings_available": bool(
+            (
+                any(
+                    item.get("stage") == "full_training" and item.get("status") == "completed"
+                    for item in snapshot["attempts"]
+                )
+                and snapshot["comparisons"]
+            )
+            or any(
+                item.get("result", {}).get("outcome") == "completed"
+                and item.get("result", {}).get("provenance") == "real"
+                for item in (snapshot.get("autoresearch_history") or {}).get("experiments", [])
+            )
+        ),
+        "files": files,
+    }
+    (output_directory / "export_manifest.json").write_bytes(_json_bytes(manifest) + b"\n")
+    return manifest
+
+
+def _write_export_csv(snapshot: dict[str, Any], output_directory: Path) -> None:
     _write_csv(
         output_directory / "attempts.csv",
         (
@@ -672,52 +762,6 @@ def export_campaign_evidence(
         ),
         snapshot["comparisons"],
     )
-    (output_directory / "training_loss.svg").write_text(_loss_svg(snapshot), encoding="utf-8")
-    loss_png = output_directory / "training_loss.png"
-    write_loss_png(snapshot, loss_png)
-    (output_directory / "campaign_report.md").write_text(
-        _markdown(snapshot, source_digest), encoding="utf-8", newline="\n"
-    )
-    write_campaign_docx(
-        snapshot,
-        source_digest,
-        loss_png,
-        output_directory / "campaign_report.docx",
-    )
-    write_campaign_pdf(
-        snapshot,
-        source_digest,
-        loss_png,
-        output_directory / "campaign_report.pdf",
-    )
-
-    files = []
-    for path in sorted(output_directory.iterdir(), key=lambda item: item.name):
-        files.append(
-            {"name": path.name, "sha256": _sha256(path), "size_bytes": path.stat().st_size}
-        )
-    manifest = {
-        "schema_version": "campaign_export_manifest.v1",
-        "campaign_id": snapshot["campaign"].get("campaign_id"),
-        "source_digest": source_digest,
-        "quality_findings_available": bool(
-            (
-                any(
-                    item.get("stage") == "full_training" and item.get("status") == "completed"
-                    for item in snapshot["attempts"]
-                )
-                and snapshot["comparisons"]
-            )
-            or any(
-                item.get("result", {}).get("outcome") == "completed"
-                and item.get("result", {}).get("provenance") == "real"
-                for item in (snapshot.get("autoresearch_history") or {}).get("experiments", [])
-            )
-        ),
-        "files": files,
-    }
-    (output_directory / "export_manifest.json").write_bytes(_json_bytes(manifest) + b"\n")
-    return manifest
 
 
 __all__ = [

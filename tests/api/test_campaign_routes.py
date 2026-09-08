@@ -3145,6 +3145,59 @@ def test_operator_rest_actions_are_real_versioned_and_capability_gated(tmp_path)
     assert "path" not in str(exported.json()).casefold()
 
 
+def test_campaign_basic_export_works_without_reporting_and_replays(tmp_path, monkeypatch):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+
+    def unavailable(*args, **kwargs):
+        raise AssertionError("Unrequested report renderer invoked")
+
+    for name in ("write_campaign_docx", "write_campaign_pdf", "write_loss_png"):
+        monkeypatch.setattr(f"bashgym.campaigns.export.{name}", unavailable)
+    arguments = {
+        "headers": {**bearer(access), "Idempotency-Key": "basic-export"},
+        "json": {
+            "workspace_id": "workspace-a",
+            "expected_version": 1,
+            "formats": ["markdown", "json"],
+        },
+    }
+    exported = http.post("/api/campaigns/campaign-1/export", **arguments)
+    assert exported.status_code == 200, exported.text
+    replay = http.post("/api/campaigns/campaign-1/export", **arguments)
+    assert replay.status_code == 200
+    assert replay.json()["replayed"] is True
+
+
+def test_missing_optional_renderer_returns_actionable_error_and_allows_retry(tmp_path, monkeypatch):
+    from bashgym.campaigns.reporting import CampaignReportingUnavailableError
+
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+
+    def unavailable(*args, **kwargs):
+        raise CampaignReportingUnavailableError("Missing optional dependency")
+
+    monkeypatch.setattr("bashgym.campaigns.export.write_campaign_docx", unavailable)
+    arguments = {
+        "headers": {**bearer(access), "Idempotency-Key": "optional-export"},
+        "json": {"workspace_id": "workspace-a", "expected_version": 1, "formats": ["docx"]},
+    }
+    failed = http.post("/api/campaigns/campaign-1/export", **arguments)
+    assert failed.status_code == 503
+    assert failed.json()["detail"]["code"] == "campaign_reporting_unavailable"
+    assert "bashgym[reports]" in failed.json()["detail"]["message"]
+    monkeypatch.setattr(
+        "bashgym.campaigns.export.write_campaign_docx",
+        lambda snapshot, digest, image, output: output.write_bytes(b"fixture-report"),
+    )
+    retried = http.post("/api/campaigns/campaign-1/export", **arguments)
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["replayed"] is False
+
+
 def test_protected_result_is_candidate_locked_replayable_and_promotable(tmp_path):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)

@@ -177,6 +177,46 @@ test('projects the exact next receipt step and selectable registered choices', (
   assert.equal(view.completedCount, 2)
 })
 
+test('a registered installation can be chosen before recipe bindings exist', () => {
+  const raw = context()
+  const parsed = parseGuidedSetupContext({
+    ...raw,
+    installations: [
+      {
+        ...raw.installations[0],
+        ready: false,
+        reason_codes: ['model_binding_unavailable'],
+        bindings: { ...raw.installations[0].bindings, model: [] }
+      }
+    ]
+  })
+  assert.ok(parsed)
+  // Project the next step from an already sealed template choice.
+  const session = {
+    version: 1,
+    selections: { template_id: 'template-modern', installation_id: null, bindings: {} }
+  } as unknown as NonNullable<typeof parsed.session>
+  const installationView = buildGuidedSetupView({ ...parsed, session })
+  assert.equal(installationView.currentStep, 'installation')
+  assert.equal(installationView.options[0].selectable, true)
+  assert.deepEqual(installationView.options[0].reasonCodes, ['model_binding_unavailable'])
+  assert.match(installationView.options[0].detail || '', /bindings needed/)
+  const modelView = buildGuidedSetupView({
+    ...parsed,
+    session: {
+      ...session,
+      version: 2,
+      selections: {
+        ...session.selections,
+        installation_id: parsed.installations[0].installation_id
+      }
+    }
+  })
+  assert.equal(modelView.currentStep, 'model')
+  assert.deepEqual(modelView.options, [])
+  assert.equal(modelView.completedCount, 2)
+})
+
 test('exposes explicit discovery truncation and rejects unsafe binding response shapes', () => {
   const parsed = parseGuidedSetupContext(
     context({
@@ -290,4 +330,80 @@ test('projects only the safe creation handoff from an exact response envelope', 
     null
   )
   assert.equal(parseGuidedSetupCreation({ ...creation, private_path: 'C:/secret' }), null)
+})
+
+test('accepts actual shared receipt writer while preserving legacy parsing', () => {
+  const receipt = {
+    schema_version: 'guided_setup_step_receipt.v1',
+    receipt_id: `setupstep_${'a'.repeat(32)}`,
+    session_id: `setupsess_${'b'.repeat(32)}`,
+    version: 1,
+    step: 'template',
+    selection_id: 'template-modern',
+    state_digest: 'c'.repeat(64),
+    previous_receipt_id: null,
+    previous_receipt_digest: null,
+    created_at: '2026-07-17T00:00:00Z',
+    receipt_digest: `sha256:${'d'.repeat(64)}`,
+    actor_id: 'studio-codex',
+    authority_scope: 'workspace'
+  }
+  const wire = context({
+    session: {
+      schema_version: 'guided_setup_session.v1',
+      workspace_id: 'workspace-a',
+      session_id: receipt.session_id,
+      version: 1,
+      completed_steps: ['template'],
+      selections: {
+        template_id: 'template-modern',
+        installation_id: null,
+        bindings: { model: null, data: null, compute: null, evaluation: null }
+      },
+      ready_for_validation: false,
+      reason_codes: ['installation_not_selected'],
+      latest_receipt: receipt,
+      updated_at: receipt.created_at
+    }
+  })
+  const parsed = parseGuidedSetupContext(wire)
+  assert.equal(parsed?.session?.latest_receipt.actor_id, 'studio-codex')
+  receipt.authority_scope = 'desktop-user'
+  assert.equal(parseGuidedSetupContext(wire), null)
+})
+
+test('workspace inventory metadata never becomes a selectable binding', () => {
+  const inventory = {
+    schema_version: 'bashgym.preparation_inventory.v1',
+    workspace_id: 'workspace-a',
+    checked_at: '2026-07-17T00:00:00+00:00',
+    training_started: false,
+    execution_verified: false,
+    truncated: false,
+    reason_codes: [],
+    candidates: {
+      models: [
+        {
+          candidate_id: 'asset_registered',
+          label: 'Existing learner',
+          evidence: 'registered_metadata',
+          execution_verified: false
+        }
+      ],
+      data: [],
+      evaluation: [],
+      compute: []
+    }
+  }
+  const parsed = parseGuidedSetupContext(context({ preparation_inventory: inventory }))
+  assert.ok(parsed)
+  assert.ok(!buildGuidedSetupView(parsed).options.some((item) => item.id === 'asset_registered'))
+  assert.equal(
+    parseGuidedSetupContext(
+      context({ preparation_inventory: { ...inventory, workspace_id: 'workspace-b' } })
+    ),
+    null
+  )
+  inventory.candidates.models[0].execution_verified = true
+  assert.equal(parseGuidedSetupContext(context({ preparation_inventory: inventory })), null)
 })

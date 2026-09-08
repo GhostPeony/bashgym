@@ -6,6 +6,19 @@ import importlib
 from typing import Any
 
 _MODULE_EXPORTS = {
+    "bashgym.environments.personal_coding_nemo": (
+        "export_personal_coding_nemo_gym_bundle",
+        "score_personal_coding_nemo_response",
+    ),
+    "bashgym.environments.docker_coding": (
+        "run_docker_environment_attempt",
+        "run_docker_model_environment_attempt",
+    ),
+    "bashgym.environments.personal_coding": (
+        "build_personal_coding_bundle",
+        "load_personal_coding_bundle",
+        "personal_coding_environment_specs",
+    ),
     "bashgym.environments.contracts": (
         "BuildSpec",
         "EnvironmentAxis",

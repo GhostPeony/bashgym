@@ -26,6 +26,7 @@ def _run(strategy: TrainingStrategy) -> TrainingRun:
 def test_sft_dpo_and_grpo_scripts_apply_storage_policy(policy: str, backend: str) -> None:
     config = TrainerConfig(
         base_model="google/gemma-4-12b-it",
+        load_in_4bit=False,
         artifact_retention=policy,
         checkpoint_limit=2,
         auto_export_gguf=True,

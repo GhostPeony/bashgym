@@ -465,13 +465,13 @@ def test_plasticity_probe_projects_only_its_fixed_comparison_contract() -> None:
     projected = public_diagnostic_projection(recipe, evidence)
 
     assert projected["comparison_contract"] == {
+        "data_scope_ids": ["approved-train"],
         "metric_direction": "maximize",
         "fixed_step_budget": 20,
         "minimum_efficiency_ratio": 0.75,
         "maximum_retention_drop": 0.02,
         "sample_limit": 96,
         "seed": 17,
-        "data_scope_ids": ["approved-train"],
     }
     assert "optimizer_label" not in str(projected)
 
@@ -527,6 +527,7 @@ def test_reward_integrity_probe_projects_spec_identity_and_bounded_measurements(
     projected = public_diagnostic_projection(recipe, evidence)
 
     assert projected["comparison_contract"] == {
+        "data_scope_ids": ["approved-train"],
         "reward_spec_digest": "a" * 64,
         "canary_suite_id": "reward-hacking-v1",
         "sample_limit": 96,
@@ -698,6 +699,7 @@ def test_preference_integrity_probe_projects_contract_identity_and_aggregates() 
     projected = public_diagnostic_projection(recipe, evidence)
 
     assert projected["comparison_contract"] == {
+        "data_scope_ids": ["approved-train"],
         "preference_dataset_digest": "b" * 64,
         "labeling_contract_digest": "c" * 64,
         "sample_limit": 240,
@@ -830,6 +832,7 @@ def test_teacher_gap_probe_projects_exact_comparison_contract() -> None:
     projected = public_diagnostic_projection(recipe, evidence)
 
     assert projected["comparison_contract"] == {
+        "data_scope_ids": ["approved-train"],
         "evaluation_suite_id": "heldout-v1",
         "metric_direction": "maximize",
         "teacher_model_digest": "d" * 64,
@@ -900,9 +903,13 @@ def test_recovery_trace_probe_projects_paired_comparison_contract() -> None:
     projected = public_diagnostic_projection(recipe, evidence)
 
     assert projected["comparison_contract"] == {
+        "data_scope_ids": ["approved-train"],
         "recovery_dataset_digest": "a" * 64,
         "reader_contract_digest": "b" * 64,
         "confidence_level": 0.95,
+        "statistical_method": None,
+        "sampling_unit": None,
+        "sampling_design_digest": None,
         "sample_limit": 96,
         "seed": 17,
     }
@@ -929,6 +936,9 @@ def test_recovery_trace_evidence_rejects_fractional_trace_count() -> None:
         validated_diagnostic_evidence(
             _evidence(
                 recipe,
+                statistical_method="paired_hoeffding_one_sided",
+                sampling_unit="independent_paired_case",
+                sampling_design_digest="d" * 64,
                 measurements=(
                     {"name": "recovery_traces", "value": 1.5, "sample_count": 2},
                     {

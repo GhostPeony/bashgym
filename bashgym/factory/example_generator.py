@@ -10,6 +10,9 @@ Module 3: Data Synthesis (The "Factory")
 
 import hashlib
 import json
+import math
+import os
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -168,8 +171,8 @@ Always explain your reasoning before executing commands."""
         Returns:
             Tuple of (steps, metadata)
         """
-        with open(session_path, encoding="utf-8", errors="replace") as f:
-            data = json.load(f)
+        source_bytes = Path(session_path).read_bytes()
+        data = json.loads(source_bytes.decode("utf-8", errors="replace"))
 
         # Handle both formats: {"trace": [...], "metadata": {...}} or [...]
         if isinstance(data, list):
@@ -177,8 +180,21 @@ Always explain your reasoning before executing commands."""
             metadata = {}
         else:
             raw_steps = data.get("trace", data.get("steps", []))
-            metadata = data.get("metadata", {})
+            metadata = dict(data.get("metadata", {}))
+            for key in (
+                "session_id",
+                "source_session_id",
+                "trace_id",
+                "task_id",
+                "repo_id",
+                "repo_name",
+                "repo_path",
+                "primary_repo",
+            ):
+                if key not in metadata and key in data:
+                    metadata[key] = data[key]
 
+        metadata["source_trace_sha256"] = hashlib.sha256(source_bytes).hexdigest()
         steps = [TraceStep.from_dict(s, i) for i, s in enumerate(raw_steps)]
         return steps, metadata
 
@@ -563,6 +579,8 @@ Always explain your reasoning before executing commands."""
         if not steps:
             return []
 
+        # Keep source identity independent of search-root/file placement.
+        source_trace_digest = metadata["source_trace_sha256"]
         # Segment the session
         segments = self.segment_session(steps, metadata)
 
@@ -577,6 +595,17 @@ Always explain your reasoning before executing commands."""
                 continue
 
             example = self.segment_to_example(segment)
+            example.metadata["source_trace_sha256"] = source_trace_digest
+            primary = metadata.get("primary_repo", {})
+            primary = primary if isinstance(primary, dict) else {}
+            for field, key in (("repo_id", "id"), ("repo_name", "name"), ("repo_path", "path")):
+                value = metadata.get(field) or primary.get(key)
+                if isinstance(value, str) and value.strip():
+                    example.metadata[field] = value.strip()
+            for field in ("session_id", "source_session_id", "trace_id", "task_id"):
+                value = metadata.get(field)
+                if isinstance(value, str) and value.strip():
+                    example.metadata[field] = value.strip()
             examples.append(example)
 
         return examples
@@ -656,51 +685,203 @@ Always explain your reasoning before executing commands."""
         output_dir: Path,
         train_split: float = 0.9,
         repo_filter: list[str] | None = None,
-    ) -> dict[str, Path]:
+        *,
+        split_group_by: str = "repository",
+        split_seed: int = 0,
+    ) -> dict[str, Any]:
+        """Export deterministic, deduplicated groups and a private split manifest.
+
+        A holdout requires at least two independently identified groups. Explicit
+        repository aliases and source-session identities connect whole groups;
+        task grouping is opt-in and requires an explicit task_id on every row.
+        No missing identity is replaced with an example/row identifier.
         """
-        Export examples in NeMo training format with train/val split.
+        if (
+            not isinstance(train_split, (int, float))
+            or isinstance(train_split, bool)
+            or not math.isfinite(train_split)
+            or not 0 < train_split <= 1
+        ):
+            raise ValueError("personal_trace_train_split_invalid")
+        if split_group_by not in {"repository", "task"}:
+            raise ValueError("personal_trace_grouping_invalid")
+        if type(split_seed) is not int:
+            raise ValueError("personal_trace_split_seed_invalid")
+        train_split = float(train_split)
+        filter_set = set(repo_filter or ())
+        selected = [
+            e for e in examples if not filter_set or e.metadata.get("repo_name") in filter_set
+        ]
+        if not selected:
+            raise ValueError("personal_trace_examples_required")
 
-        Args:
-            examples: List of training examples
-            output_dir: Directory to save files
-            train_split: Fraction for training (rest goes to validation)
-            repo_filter: Optional list of repo names to include. When set,
-                only examples whose metadata.repo_name is in this list are exported.
+        def canonical(value):
+            return json.dumps(
+                value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+            )
 
-        Returns:
-            Dict with paths to train and val files
-        """
-        import random
+        def digest(value):
+            return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
 
+        def identity_tokens(metadata):
+            keys = (
+                ("repo_id", "repo_name", "repo_path")
+                if split_group_by == "repository"
+                else ("task_id",)
+            )
+            tokens = []
+            for key in keys:
+                value = metadata.get(key)
+                if isinstance(value, str) and value.strip():
+                    value = value.strip()
+                    if key == "repo_path":
+                        value = value.replace("\\", "/").rstrip("/")
+                        if len(value) > 1 and value[1] == ":":
+                            value = value.casefold()
+                    tokens.append(key + ":" + value)
+            if not tokens:
+                raise ValueError("personal_trace_" + split_group_by + "_identity_required")
+            for key in ("session_id", "source_session_id", "trace_id", "source_trace_sha256"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value.strip():
+                    # Both spellings identify the same session namespace.
+                    namespace = "session_id" if key == "source_session_id" else key
+                    tokens.append(namespace + ":" + value.strip())
+            return tokens
+
+        # Identical training content is kept once, but every source/group alias
+        # remains attached, preventing duplicate content from bridging partitions.
+        unique = {}
+        input_rows = []
+        for example in selected:
+            original = example.to_dict()
+            payload = {key: original[key] for key in ("messages", "tools") if key in original}
+            content_digest = digest(payload)
+            metadata = {
+                key: value for key, value in example.metadata.items() if key != "generated_at"
+            }
+            tokens = identity_tokens(metadata)
+            provenance = {**metadata, "source_example_id": example.example_id}
+            entry = unique.setdefault(
+                content_digest, {"payload": payload, "provenance": {}, "tokens": set()}
+            )
+            entry["provenance"][canonical(provenance)] = provenance
+            entry["tokens"].update(tokens)
+            input_rows.append(digest({"content": content_digest, "provenance": provenance}))
+
+        parents = {key: key for key in unique}
+
+        def find(key):
+            while parents[key] != key:
+                parents[key] = parents[parents[key]]
+                key = parents[key]
+            return key
+
+        aliases = {}
+        for key in sorted(unique):
+            for token in sorted(unique[key]["tokens"]):
+                if token in aliases:
+                    left, right = find(key), find(aliases[token])
+                    parents[max(left, right)] = min(left, right)
+                else:
+                    aliases[token] = key
+        components = {}
+        for key in sorted(unique):
+            components.setdefault(find(key), []).append(key)
+        groups = {}
+        for members in components.values():
+            tokens = sorted({token for key in members for token in unique[key]["tokens"]})
+            groups[digest(tokens)] = members
+        if train_split < 1 and len(groups) < 2:
+            raise ValueError("personal_trace_holdout_requires_multiple_groups")
+        ordered_groups = sorted(
+            groups, key=lambda group: (digest({"seed": split_seed, "group": group}), group)
+        )
+        if train_split == 1:
+            cut = len(ordered_groups)
+        else:
+            target = len(unique) * train_split
+            cumulative = 0
+            candidates = []
+            for index, group in enumerate(ordered_groups[:-1], start=1):
+                cumulative += len(groups[group])
+                candidates.append((abs(cumulative - target), index))
+            cut = min(candidates)[1]
+        partitions = {"train": ordered_groups[:cut], "validation": ordered_groups[cut:]}
+        encoded = {}
+        for partition, group_ids in partitions.items():
+            records = []
+            for group_id in group_ids:
+                for key in groups[group_id]:
+                    entry = unique[key]
+                    provenance = [entry["provenance"][item] for item in sorted(entry["provenance"])]
+                    metadata = {
+                        **provenance[0],
+                        "provenance": provenance,
+                        "example_content_sha256": key,
+                        "split_group_sha256": group_id,
+                    }
+                    records.append({**entry["payload"], "metadata": metadata})
+            encoded[partition] = "".join(canonical(record) + "\n" for record in records).encode(
+                "utf-8"
+            )
+        file_hashes = {key: hashlib.sha256(value).hexdigest() for key, value in encoded.items()}
+        manifest = {
+            "schema_version": "bashgym.personal_trace_split.v1",
+            "method": "deterministic_grouped_v1",
+            "grouping": split_group_by,
+            "seed": split_seed,
+            "requested_train_split": train_split,
+            "input_digest": digest(sorted(input_rows)),
+            "input_count": len(selected),
+            "unique_count": len(unique),
+            "duplicate_count": len(selected) - len(unique),
+            "group_count": len(groups),
+            "group_hashes": partitions,
+            "counts": {
+                partition: sum(len(groups[group]) for group in ids)
+                for partition, ids in partitions.items()
+            },
+            "file_hashes": file_hashes,
+        }
+        export_id = digest(manifest)
+        manifest["export_id"] = export_id
+        manifest["files"] = {
+            key: {"name": f"personal_{export_id}_{key}.jsonl", "sha256": file_hashes[key]}
+            for key in encoded
+        }
         output_dir = Path(output_dir)
+        paths = {key: output_dir / record["name"] for key, record in manifest["files"].items()}
+        manifest_path = output_dir / f"personal_{export_id}_manifest.json"
+        publications = {paths[key]: value for key, value in encoded.items()}
+        publications[manifest_path] = (canonical(manifest) + "\n").encode("utf-8")
+        # Validate every conflict before making even a partial export visible.
+        for path, content in publications.items():
+            if path.is_symlink() or (path.exists() and path.read_bytes() != content):
+                raise ValueError("personal_trace_export_conflict")
         output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Apply repo filter if specified
-        if repo_filter:
-            filter_set = set(repo_filter)
-            examples = [e for e in examples if e.metadata.get("repo_name") in filter_set]
-
-        # Shuffle and split
-        shuffled = examples.copy()
-        random.shuffle(shuffled)
-
-        split_idx = int(len(shuffled) * train_split)
-        train_examples = shuffled[:split_idx]
-        val_examples = shuffled[split_idx:]
-
-        # Save files
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        train_path = output_dir / f"train_{timestamp}.jsonl"
-        val_path = output_dir / f"val_{timestamp}.jsonl"
-
-        self.save_examples(train_examples, train_path)
-        self.save_examples(val_examples, val_path)
-
+        for path, content in publications.items():
+            descriptor, name = tempfile.mkstemp(prefix=".personal-trace-", dir=output_dir)
+            temporary = Path(name)
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    output.write(content)
+                    output.flush()
+                    os.fsync(output.fileno())
+                try:
+                    os.link(temporary, path)
+                except FileExistsError:
+                    if path.is_symlink() or path.read_bytes() != content:
+                        raise ValueError("personal_trace_export_conflict")
+            finally:
+                temporary.unlink(missing_ok=True)
         return {
-            "train": train_path,
-            "validation": val_path,
-            "train_count": len(train_examples),
-            "val_count": len(val_examples),
+            **paths,
+            "manifest": manifest_path,
+            "export_id": export_id,
+            "split_method": manifest["method"],
+            "train_count": manifest["counts"]["train"],
+            "val_count": manifest["counts"]["validation"],
         }
 
 

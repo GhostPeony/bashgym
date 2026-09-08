@@ -8,7 +8,6 @@ const logoSurfaces = [
   '../layout/NavigationBar.tsx',
   '../layout/Sidebar.tsx',
   '../home/HomeScreen.tsx',
-  '../auth/LoginPage.tsx',
   '../download/DownloadPage.tsx'
 ]
 

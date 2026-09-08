@@ -498,6 +498,19 @@ try {
   state = 'offline'
   await page.goto(`${baseUrl}/#home`)
   await page.getByRole('button', { name: 'Retry connection', exact: true }).waitFor()
+  // A rejected session bootstrap must return to pairing and retain the saved setup.
+  paired = false
+  await page.reload()
+  await page.getByRole('heading', { name: 'Connect your studio' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Retry project access' }).count(), 0)
+  state = 'empty'
+  await page.getByLabel('Pairing code').fill('local-test-code')
+  await page.getByRole('button', { name: 'Open studio' }).click()
+  await page.getByRole('link', { name: 'Setup', exact: true }).click()
+  await page.getByText('2 of 6 choices sealed', { exact: true }).waitFor()
+  assert.deepEqual(setupSession, savedDraft)
+  assert.equal(setupContextRequests.at(-1), savedDraft.session_id)
+  assert.equal(pairingCalls, 2)
   assert.deepEqual(errors, [])
   assert.equal(setupMutations.length, 2)
   assert.ok(!requestedUrls.some((url) => /\/setup\/(doctor|validate|create)(?:\?|$)/.test(url)))
@@ -513,6 +526,7 @@ try {
         direct_designer_missing_readiness: true,
         readiness_failed_refresh_recovered: true,
         existing_data_link_resumes_setup: true,
+        rejected_session_returns_to_pairing_and_resumes_draft: true,
         generation_requested: false,
         setup_validation_or_creation_requested: false,
         page_errors: errors

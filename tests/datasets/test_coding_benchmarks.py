@@ -133,6 +133,30 @@ def test_description_is_only_a_docstring_even_with_quotes_and_newlines():
     check_fixture(bundle.tasks[0], bundle.canaries[0]["canonical_solution"])
 
 
+def test_humaneval_plus_indirect_assertion_helper_matches_published_shape():
+    row = {
+        "task_id": "HumanEval/0",
+        "prompt": 'def increment(value):\n    """Increase by one."""\n',
+        "canonical_solution": "    return value + 1\n",
+        "entry_point": "increment",
+        "test": (
+            "def assertion(actual, expected):\n"
+            "    assert actual == expected\n\n"
+            "def check(candidate):\n"
+            "    assertion(candidate(3), 4)\n"
+        ),
+    }
+    bundle = prepare_humaneval_plus([row], task_ids=["HumanEval/0"])
+    check_fixture(bundle.tasks[0], bundle.canaries[0]["canonical_solution"])
+    with pytest.raises(AssertionError):
+        check_fixture(bundle.tasks[0], "    return value - 1\n")
+    with pytest.raises(ValueError, match="check"):
+        prepare_humaneval_plus(
+            [row | {"test": row["test"].replace("candidate(3)", "4")}],
+            task_ids=["HumanEval/0"],
+        )
+
+
 @pytest.mark.parametrize("test_list", [[], ["assert True"], ["increment(3)"]])
 def test_mbpp_must_have_assertions_that_reference_the_entry_point(test_list):
     with pytest.raises(ValueError):

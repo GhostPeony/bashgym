@@ -216,7 +216,15 @@ def prepare_humaneval_plus(
         if (
             len(checks) != 1
             or len(checks[0].args.args) != 1
-            or not any(isinstance(node, ast.Assert) for node in ast.walk(checks[0]))
+            # The pinned HF projection calls a separate assertion() helper.
+            # Validate its published shape, not an imagined inline-only grader.
+            or not any(isinstance(node, ast.Assert) for node in ast.walk(tree))
+            or not any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == checks[0].args.args[0].arg
+                for node in ast.walk(checks[0])
+            )
         ):
             raise ValueError("coding_humaneval_check_invalid")
         # Check syntax and selected entry point without executing reference code.

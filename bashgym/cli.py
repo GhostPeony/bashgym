@@ -3672,6 +3672,7 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         RegisteredRemoteEvaluationDatasetSource,
         RegisteredRemoteModelSource,
         RemoteCapacityPolicy,
+        RemoteModelArtifactReceipt,
         RemoteTrainingAdapter,
     )
     from bashgym.config import get_bashgym_dir
@@ -3755,12 +3756,38 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
         if all(value is not None for value in readiness_values)
         else None
     )
+    artifact_receipt = None
+    receipt_path = getattr(args, "model_artifact_receipt", None)
+    if receipt_path is not None:
+        artifact_receipt = RemoteModelArtifactReceipt.model_validate(
+            _read_campaign_json(receipt_path, label="model artifact receipt")
+        )
+        if binding.model_ref != f"hf://{artifact_receipt.model_id}@{artifact_receipt.revision}":
+            raise ValueError("activation_model_receipt_identity_mismatch")
+    if args.apply and artifact_receipt is None:
+        raise ValueError("activation_model_artifact_receipt_required")
+    evaluation_outputs = PinnedRemoteStageProfile.confined_outputs(
+        tuple(
+            sorted(
+                {
+                    AUTORESEARCH_EVALUATION_FILENAME,
+                    *getattr(args, "evaluation_output", []),
+                }
+            )
+        )
+    )
     registered_base_model = RegisteredRemoteModelSource(
+        schema_version=(
+            "campaign_registered_remote_model_source.v2"
+            if artifact_receipt is not None
+            else "campaign_registered_remote_model_source.v1"
+        ),
         source_id=(args.model_source_id or f"{args.executor_profile_id}-registered-base"),
         compute_profile_id=binding.compute_profile_id,
         target_contract_key=binding.target_contract_key,
         model_digest=binding.target_model_digest,
         remote_model_path=args.remote_model_path,
+        artifact_receipt=artifact_receipt,
     )
     registered_evaluation_dataset = RegisteredRemoteEvaluationDatasetSource(
         source_id=args.dataset_source_id,
@@ -3902,7 +3929,7 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
                 else ()
             ),
         ),
-        output_paths=(AUTORESEARCH_EVALUATION_FILENAME,),
+        output_paths=evaluation_outputs,
         capacity_policy=capacity,
         budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
         budget_reservation=args.evaluation_budget_reservation,
@@ -5817,6 +5844,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign_activate.add_argument("--evaluator-file", required=True)
     campaign_activate.add_argument("--evaluation-input", action="append", default=[])
+    campaign_activate.add_argument(
+        "--evaluation-output",
+        action="append",
+        default=[],
+        help="Additional confined evaluator output; standardized evaluation evidence is always included",
+    )
     campaign_activate.add_argument("--evaluation-arg", action="append", default=[])
     campaign_activate.add_argument("--evaluation-budget-reservation", type=float, required=True)
     campaign_activate.add_argument(
@@ -5857,6 +5890,10 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_activate.add_argument(
         "--model-source-id",
         help="Stable opaque ID for the registered remote base model",
+    )
+    campaign_activate.add_argument(
+        "--model-artifact-receipt",
+        help="JSON physical model artifact receipt matching the exact installed model revision; required for --apply",
     )
     campaign_activate.add_argument("--source-repository", required=True)
     campaign_activate.add_argument("--source-entrypoint", required=True)

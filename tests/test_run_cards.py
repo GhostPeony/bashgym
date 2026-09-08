@@ -1,6 +1,7 @@
 import json
 
 from bashgym.factory.session_distillation import build_session_distillation_records
+from bashgym.preferences.conditioning import conditioning_binding
 from bashgym.run_cards import (
     attach_run_card_evidence,
     create_run_card,
@@ -11,7 +12,7 @@ from bashgym.run_cards import (
 
 
 def _strict_pair():
-    return {
+    record = {
         "id": "pair-1",
         "prompt": "Fix the failing test",
         "chosen_response": "Run pytest, inspect the failure, patch the function.",
@@ -32,6 +33,13 @@ def _strict_pair():
             "decontamination_status": "checked",
         },
     }
+    context = {"task_id": "test-fix", "snapshot_digest": "a" * 64, "tools_digest": "b" * 64}
+    record["metadata"].update(
+        preference_context=context,
+        conditioning_verified=True,
+        conditioning_digest=conditioning_binding(record["prompt"], context),
+    )
+    return record
 
 
 def _strict_reward_example():
@@ -496,6 +504,17 @@ def test_validate_run_card_file_strict_validates_dpo_preference_pairs(tmp_path):
     validation = validate_run_card_file(path, promotion=True)
 
     assert validation["ok"] is True
+
+    # The same otherwise-valid run card cannot promote a historical pair that
+    # lacks the immutable task/context binding required by strict DPO validation.
+    pair = _strict_pair()
+    pair["metadata"].pop("preference_context")
+    tmp_path.joinpath("dpo_pairs.jsonl").write_text(json.dumps(pair) + "\n", encoding="utf-8")
+    invalid = validate_run_card_file(path, promotion=True)
+    assert invalid["ok"] is False
+    assert "preference_pairs_unverified_pair_conditioning" in {
+        finding["code"] for finding in invalid["findings"]
+    }
 
 
 def test_validate_run_card_file_blocks_weak_dpo_preference_pairs(tmp_path):

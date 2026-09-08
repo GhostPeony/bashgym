@@ -3,8 +3,8 @@
 Generated Python runs only in Docker through the installed HumanEval checker.
 This implements ordinary benchmark correctness, not adversarial reward integrity.
 Profiles must collect both autoresearch_evaluation.json and coding_task_results.json.
-Transformers max_time is cooperative; the execution adapter still needs a hard
-worker/process deadline. Smoke scope exits 3 and cannot produce a completed seal.
+The campaign CLI bounds model loading, generation and grading in an owned child.
+Smoke scope exits 3 and cannot produce a completed seal.
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ import argparse
 import hashlib
 import json
 import re
+import signal
+import sys
 import time
 from pathlib import Path
 from typing import Literal
@@ -46,6 +48,7 @@ class CodingRunnerConfig(FrozenContractModel):
     device: str
     seed: int = Field(strict=True, ge=0, le=2**32 - 1)
     completion_protocol: Literal["raw", "humaneval_body_v1"]
+    max_seconds: int = Field(strict=True, ge=1, le=86400)
 
     @field_validator("sandbox_image")
     @classmethod
@@ -349,6 +352,7 @@ def run(
             "schema_version": "coding_task_results.v1",
             "scope": config.scope,
             "completion_protocol": config.completion_protocol,
+            "max_seconds": config.max_seconds,
             "attempt_id": context.attempt_id,
             "dataset_content_digest": context.dataset_content_digest,
             "evaluated_model_manifest_digest": context.evaluated_model_manifest_digest,
@@ -365,6 +369,7 @@ def run(
             "coding_benchmark": {
                 "scope": config.scope,
                 "completion_protocol": config.completion_protocol,
+                "max_seconds": config.max_seconds,
                 "split": config.split,
                 "task_count": len(tasks),
                 "task_results_file": task_results_path.name,
@@ -387,12 +392,54 @@ def run(
     return evidence
 
 
+def _run_child(context, model_directory, dataset, output, config) -> None:
+    """Allow normal context cleanup before the supervisor's forced-stop fallback."""
+
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt("coding_evaluation_interrupted")
+
+    previous = {}
+    try:
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            previous[signum] = signal.signal(signum, interrupted)
+        run(*(Path(value) for value in (context, model_directory, dataset, output, config)))
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def run_evaluation_process(argv: list[str], *, timeout: float) -> None:
+    """Use the existing owned-process supervisor without importing training libraries."""
+    from bashgym.campaigns.sft_runner import run_training_process
+
+    run_training_process(argv, timeout=timeout)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for argument in ("context", "model-dir", "dataset", "output", "config"):
         parser.add_argument("--" + argument, type=Path, required=True)
     args = parser.parse_args(argv)
-    result = run(args.context, args.model_dir, args.dataset, args.output, args.config)
+    config = CodingRunnerConfig.model_validate_json(_read_file(args.config, 65536))
+    bootstrap = (
+        "import sys; from bashgym.campaigns.first_party_coding_runner import _run_child; "
+        "_run_child(*sys.argv[1:])"
+    )
+    run_evaluation_process(
+        [
+            sys.executable,
+            "-c",
+            bootstrap,
+            *(
+                str(path)
+                for path in (args.context, args.model_dir, args.dataset, args.output, args.config)
+            ),
+        ],
+        timeout=config.max_seconds,
+    )
+    result = AutoResearchEvaluationEvidence.model_validate_json(
+        _read_file(args.output, MAX_AUTORESEARCH_EVALUATION_BYTES)
+    )
     summary = result.slice_metrics["coding_benchmark"]
     if not summary["complete"]:
         return 2

@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import signal
+import subprocess
 import sys
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -35,6 +37,7 @@ def inputs(tmp_path):
         device="cpu",
         seed=7,
         completion_protocol="raw",
+        max_seconds=60,
     )
     rows = [
         dict(
@@ -232,6 +235,12 @@ def test_existing_worker_cli_abi_uses_mandatory_pinned_config(
     config["scope"] = scope
     inputs["config_path"].write_text(json.dumps(config))
     seen = []
+
+    def execute_inline(argv, *, timeout):
+        assert timeout == config["max_seconds"]
+        runner._run_child(*argv[3:])
+
+    monkeypatch.setattr(runner, "run_evaluation_process", execute_inline)
     monkeypatch.setattr(runner, "LocalCompletion", lambda *args: lambda prompt: "    return a+b\n")
     monkeypatch.setattr(
         runner, "evaluate_task", lambda *args: seen.append(args[0].task_id) or "passed"
@@ -254,6 +263,9 @@ def test_existing_worker_cli_abi_uses_mandatory_pinned_config(
 
 
 def test_incomplete_cli_run_is_nonzero_and_not_adoptable(inputs, monkeypatch):
+    monkeypatch.setattr(
+        runner, "run_evaluation_process", lambda argv, **kwargs: runner._run_child(*argv[3:])
+    )
     monkeypatch.setattr(runner, "LocalCompletion", lambda *args: lambda prompt: "completion")
     monkeypatch.setattr(runner, "evaluate_task", lambda *args: "infrastructure_error")
     args = []
@@ -266,6 +278,78 @@ def test_incomplete_cli_run_is_nonzero_and_not_adoptable(inputs, monkeypatch):
     ):
         args += ["--" + flag, str(inputs[key])]
     assert runner.main(args) == 2
+
+
+def test_deadline_is_mandatory_and_timeout_cannot_publish_success(inputs, monkeypatch):
+    config = json.loads(inputs["config_path"].read_text())
+    config.pop("max_seconds")
+    with pytest.raises(ValueError, match="max_seconds"):
+        runner.CodingRunnerConfig.model_validate(config)
+
+    def timeout(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(runner, "run_evaluation_process", timeout)
+    args = [
+        value
+        for name, key in (
+            ("context", "context_path"),
+            ("model-dir", "model_directory"),
+            ("dataset", "dataset_path"),
+            ("output", "output_path"),
+            ("config", "config_path"),
+        )
+        for value in ("--" + name, str(inputs[key]))
+    ]
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner.main(args)
+    assert not inputs["output_path"].exists()
+
+
+def test_child_termination_runs_context_cleanup_and_restores_handlers(monkeypatch):
+    events = []
+    prior = signal.getsignal(signal.SIGTERM)
+
+    def interrupted_run(*args):
+        try:
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        finally:
+            events.append("episode_cleanup")
+
+    monkeypatch.setattr(runner, "run", interrupted_run)
+    with pytest.raises(KeyboardInterrupt, match="coding_evaluation_interrupted"):
+        runner._run_child("context", "model", "dataset", "output", "config")
+    assert events == ["episode_cleanup"]
+    assert signal.getsignal(signal.SIGTERM) == prior
+
+
+def test_evaluation_deadline_terminates_hanging_owned_subprocess(tmp_path, monkeypatch):
+    import psutil
+
+    from bashgym.campaigns import sft_runner
+
+    original = subprocess.Popen
+    owned = []
+
+    def capture(*args, **kwargs):
+        assert not kwargs.get("start_new_session", False)
+        process = original(*args, **kwargs)
+        owned.append(process)
+        return process
+
+    monkeypatch.setattr(sft_runner.subprocess, "Popen", capture)
+    script = tmp_path / "hanging_evaluation.py"
+    descendant_pid = tmp_path / "descendant.pid"
+    script.write_text(
+        "import subprocess, sys, time\nfrom pathlib import Path\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "Path(sys.argv[1]).write_text(str(child.pid))\ntime.sleep(60)\n"
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner.run_evaluation_process([sys.executable, str(script), str(descendant_pid)], timeout=2)
+    assert len(owned) == 1 and owned[0].poll() is not None
+    assert descendant_pid.exists()
+    assert not psutil.pid_exists(int(descendant_pid.read_text()))
 
 
 @pytest.mark.parametrize("status", ["passed", "failed", "test_timeout", "infrastructure_error"])

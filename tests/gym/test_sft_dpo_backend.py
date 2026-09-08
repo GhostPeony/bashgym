@@ -7,6 +7,8 @@ Mirrors test_grpo_script.py: generate the script string and assert on markers;
 import ast
 from pathlib import Path
 
+import pytest
+
 from bashgym.gym.trainer import Trainer, TrainerConfig, TrainingRun, TrainingStrategy
 
 
@@ -33,6 +35,50 @@ def _dpo(config: TrainerConfig) -> str:
 
 
 class TestSFTDispatch:
+    @pytest.mark.parametrize("backend", ["plain", "unsloth"])
+    @pytest.mark.parametrize("sequence_length", [512, 1024])
+    def test_generated_sft_config_applies_trl_sequence_limit(self, backend, sequence_length):
+        """Execute the generated config call against TRL's max_length contract.
+
+        The base test install deliberately excludes TRL and torch. This narrow
+        constructor contract checks the generated argument binding without
+        loading a model; execution-environment checks use the real SFTConfig.
+        """
+        script = _sft(
+            TrainerConfig(
+                load_in_4bit=False,
+                sft_backend=backend,
+                base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
+                max_seq_length=sequence_length,
+                max_steps=16,
+            )
+        )
+        calls = [
+            node
+            for node in ast.walk(ast.parse(script))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "SFTConfig"
+        ]
+        assert len(calls) == 1
+
+        def sft_config(*, max_length, **training_args):
+            return {"max_length": max_length, **training_args}
+
+        namespace = {
+            "SFTConfig": sft_config,
+            "max_seq_length": sequence_length,
+            "val_dataset": None,
+            "is_bfloat16_supported": lambda: True,
+        }
+        result = eval(
+            compile(ast.Expression(calls[0]), "<generated-sft-config>", "eval"), namespace
+        )
+        assert result["max_length"] == sequence_length
+        assert result["max_steps"] == 16
+        assert result["bf16"] is True
+        assert result["eval_strategy"] == "no"
+
     def test_plain_backend(self):
         s = _sft(
             TrainerConfig(

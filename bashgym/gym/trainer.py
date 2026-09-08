@@ -1834,7 +1834,7 @@ if __name__ == "__main__":
         seed=42,
         report_to="none",
         dataset_text_field="text",
-        max_seq_length={self.config.max_seq_length},
+        max_length={self.config.max_seq_length},
         use_liger_kernel={self.config.use_liger},
         eval_strategy="{self.config.eval_strategy}" if val_dataset is not None else "no",
         eval_steps={self.config.eval_steps} if val_dataset is not None else None,
@@ -2273,7 +2273,7 @@ if __name__ == "__main__":
         seed=42,
         report_to="none",
         dataset_text_field="text",
-        max_seq_length=max_seq_length,
+        max_length=max_seq_length,
         # Eval settings (active when val_dataset is available)
         eval_strategy="{self.config.eval_strategy}" if val_dataset is not None else "no",
         eval_steps={self.config.eval_steps} if val_dataset is not None else None,
@@ -2303,8 +2303,8 @@ if __name__ == "__main__":
     callbacks.append(LossPlateauStop(output_dir="{output_path}"))
 
     # Initialize trainer with the UNWRAPPED tokenizer (critical for Gemma 4 —
-    # see unwrap comment above). dataset_text_field and max_seq_length now
-    # live on SFTConfig so they're omitted here.
+    # see unwrap comment above). dataset_text_field and the max_length sequence
+    # limit live on SFTConfig, so they're omitted here.
     trainer = SFTTrainer(
         model=model,
         processing_class=sft_tokenizer,

@@ -1,4 +1,5 @@
 Studio fonts are self-hosted from the Google Fonts source repository:
+
 - Fraunces: https://github.com/google/fonts/tree/main/ofl/fraunces
 - Source Sans 3: https://github.com/google/fonts/tree/main/ofl/sourcesans3
 - IBM Plex Mono: https://github.com/google/fonts/tree/main/ofl/ibmplexmono

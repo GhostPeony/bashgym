@@ -24,6 +24,11 @@ reports the check time, connection results and missing recipe inputs separately.
 Registered model, dataset, evaluation and environment metadata appear in setup;
 discovery does not prove that a target is reachable or compatible.
 
+Use `init --api-port <port>` when the default loopback port is occupied. Repeated
+initialization reuses the saved port; a conflicting explicit port is rejected.
+Subsequent CLI commands use the saved endpoint unless `--api-base` or
+`BASHGYM_API_BASE` explicitly overrides it.
+
 For an existing approved execution environment, `research prepare --template-id`
 compiles the selected installed template and saved setup draft into the existing
 onboarding contract. Supply its reviewed `--definition-digest`, draft
@@ -103,12 +108,13 @@ output, protects verifier material and records cleanup. It never pulls images
 or falls back to a host shell. Its first NeMo integration accepts one bounded
 command-list submission; the direct model adapter supports tool feedback.
 
-The authored task runner and NeMo bundle do not yet supply the campaign's
-personal-coding evaluation executable. That integration must run the selected
-split and emit the campaign evaluation record with the exact learner, suite,
-data and evaluator identities. A cached model also needs an accepted immutable
-artifact receipt; observing its files or a working inference endpoint does not
-make it a selected training checkpoint.
+The campaign now has a [bounded coding benchmark path](training/coding-benchmarks.md)
+for pinned MBPP and HumanEval-style function completion, plus a small SFT runner
+using the existing trainer. This is separate from the authored repository-repair
+and tool-recovery tasks above; it does not yet certify a personal coding baseline.
+The evaluator emits exact campaign, learner, suite, data and evaluator identities.
+A cached model needs an accepted immutable artifact receipt; observing its files
+or a working inference endpoint does not make it a selected training checkpoint.
 
 ## Evidence and optimization
 
@@ -147,6 +153,19 @@ saved state and verifies that no second campaign or training attempt is created.
 SSH responses, OS supervisor operations and loopback health transport are
 fixture boundaries; this is not certification of a live execution target.
 
+A separate live preparation reached READY with a regular-file model receipt,
+fixed development tasks, separate SFT examples, an installed execution wheel and
+authenticated worker access. All 32 selected development reference solutions
+passed the pinned Docker grader. A model inference canary and full-example token
+checks also ran. These establish preparation and execution compatibility only;
+no campaign baseline, trained candidate or quality comparison was completed.
+
+Isolated service onboarding still has a gap: `research onboard` reconstructs
+default service registration names.
+Running the service in disposable state is therefore not equivalent to proving
+the complete clean-install service workflow. Keep these gaps visible when
+deploying alongside another installation.
+
 Real model quality, a complete SFT keep/discard campaign, live NeMo RL checkpoint
 behavior and Unsloth/Liger performance must still be certified on the selected
 execution target. They require a prepared contract and explicit Start. Service
@@ -162,9 +181,10 @@ Keep the following gates open until their evidence is recorded:
    and final confirmation suites, registered execution environment, supported
    recipe, and explicit compute limits. Do not infer missing selections from
    installed assets.
-   Complete the personal-coding campaign evaluator and its evidence integration,
-   register the required training and development-evaluation runner profiles,
-   and verify the selected local sandbox image and model artifact receipts.
+   Select either the supported function-completion benchmark or complete the
+   separate personal repository-repair evaluator. Register the required training
+   and development-evaluation runner profiles and verify the selected sandbox
+   image and model artifact receipts.
 2. **Clean setup:** use a fresh installation and the selected assets to reach
    READY through the browser or skills. Interrupt and resume preparation; verify
    the saved contract and campaign identity are unchanged. Record which service,

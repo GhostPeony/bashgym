@@ -621,12 +621,16 @@ def test_remote_headless_requires_explicit_authentication(monkeypatch) -> None:
         worker_service.run_headless_api(host="0.0.0.0", server_runner=lambda *a, **k: None)
 
 
-def test_run_headless_api_sets_mode_and_uses_one_server_worker(monkeypatch) -> None:
+def test_run_headless_api_sets_mode_and_uses_one_server_worker(monkeypatch, tmp_path) -> None:
     """Removing headless mode would accidentally attach desktop-owned runtime work."""
 
     from bashgym.api import database
 
-    monkeypatch.delenv("BASHGYM_MODE", raising=False)
+    # Register both keys for teardown before the entrypoint overwrites them.
+    # delenv does not record an absent key, so it leaked headless mode to later tests.
+    monkeypatch.setenv("BASHGYM_MODE", "desktop")
+    monkeypatch.setenv("BASHGYM_DIR", str(tmp_path / "previous-state"))
+    data_directory = tmp_path / "headless-state"
     received: dict[str, object] = {}
     database_paths: list[Path] = []
     working_directories: list[Path] = []
@@ -640,14 +644,14 @@ def test_run_headless_api_sets_mode_and_uses_one_server_worker(monkeypatch) -> N
     worker_service.run_headless_api(
         host="127.0.0.1",
         port=8123,
-        data_directory=Path("test-data"),
+        data_directory=data_directory,
         server_runner=run_server,
     )
 
     assert os.environ["BASHGYM_MODE"] == "headless"
-    assert os.environ["BASHGYM_DIR"] == str(Path("test-data").resolve())
-    assert database_paths == [Path("test-data").resolve() / "api" / "bashgym.db"]
-    assert working_directories == [Path("test-data").resolve()]
+    assert os.environ["BASHGYM_DIR"] == str(data_directory.resolve())
+    assert database_paths == [data_directory.resolve() / "api" / "bashgym.db"]
+    assert working_directories == [data_directory.resolve()]
     assert received == {
         "app": "bashgym.api.routes:app",
         "host": "127.0.0.1",

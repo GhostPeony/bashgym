@@ -59,11 +59,19 @@ def check() -> dict:
                 raise RuntimeError(f"Installed CLI failed: {result.stdout}\n{result.stderr}")
             return json.loads(result.stdout)
 
-        initial = cli("init", "--agent-host", "hermes", "--no-service")
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        base = f"http://127.0.0.1:{port}"
+        initial = cli("init", "--agent-host", "hermes", "--api-port", str(port), "--no-service")
         repeated = cli("init", "--agent-host", "hermes", "--no-service")
         assert initial["training_started"] is False
         assert repeated["replayed"] is True
         assert repeated["workspace_id"] == initial["workspace_id"]
+        assert initial["browser_url"] == repeated["browser_url"] == base
+        conflict_port = 8004 if port != 8004 else 8005
+        conflict = cli("init", "--api-port", str(conflict_port), "--no-service", expected_code=2)
+        assert conflict["error"]["code"] == "studio_profile_conflict"
         missing = cli("research", "prepare", "--template-id", "selected", expected_code=2)
         assert missing["compute_started"] is False and "stop_rules" in missing["missing_inputs"]
         skills = cli("operator", "skills", "check", "--host", "hermes")
@@ -103,10 +111,6 @@ def check() -> dict:
             "artifacts.csv",
             "comparisons.csv",
         }
-        with socket.socket() as listener:
-            listener.bind(("127.0.0.1", 0))
-            port = listener.getsockname()[1]
-        base = f"http://127.0.0.1:{port}"
         with (root / "server.log").open("w", encoding="utf-8") as log:
             server = subprocess.Popen(
                 [
@@ -143,6 +147,8 @@ def check() -> dict:
                         time.sleep(0.1)
                     assert health.json()["authentication_required"] is True
                     assert health.json()["studio_protocol"] == "bashgym.studio.v1"
+                    assert cli("api", "GET", "/api/health")["status"] == "healthy"
+                    assert cli("doctor")["ready_for_preparation"] is True
                     page = http.get("/")
                     assert page.status_code == 200
                     assets = re.findall(r'(?:src|href)="([^\"]+\.(?:js|css))"', page.text)
@@ -206,7 +212,7 @@ def check() -> dict:
                         "/api/campaigns/setup/context", params={**query, "session_id": session_id}
                     )
                     assert resumed.status_code == 200 and resumed.json()["session"] == saved
-                    agent_resume = cli("research", "prepare", "--api-base", base + "/api")
+                    agent_resume = cli("research", "prepare")
                     assert agent_resume["session"] == saved
                     assert saved["ready_for_validation"] is False
                     assert (
@@ -257,6 +263,8 @@ def check() -> dict:
                 "unauthorized_and_wrong_workspace_http",
                 "persisted_setup_steps_and_resume",
                 "browser_draft_resumed_by_separate_installed_agent_credential",
+                "explicit_init_port_and_saved_endpoint_reuse_without_overrides",
+                "conflicting_init_port_rejected",
             ],
             "optional_packages_present": {
                 name: importlib.util.find_spec(name) is not None

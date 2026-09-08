@@ -2948,11 +2948,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def _workspace_api_base(args: argparse.Namespace) -> str:
-    raw = (
-        getattr(args, "api_base", None)
-        or os.environ.get("BASHGYM_API_BASE")
-        or "http://localhost:8003/api"
-    )
+    raw = getattr(args, "api_base", None) or os.environ.get("BASHGYM_API_BASE")
+    if not raw:
+        from bashgym.config import get_bashgym_dir
+        from bashgym.studio import read_profile
+
+        profile = read_profile(get_bashgym_dir())
+        raw = profile["api_base"] if profile else "http://localhost:8003/api"
     return _normalize_api_base(raw)
 
 
@@ -3211,11 +3213,7 @@ def cmd_workspace_emit(args: argparse.Namespace) -> int:
 
 
 def _campaign_api_base(args: argparse.Namespace) -> str:
-    return (
-        getattr(args, "api_base", None)
-        or os.environ.get("BASHGYM_API_BASE")
-        or "http://localhost:8003/api"
-    ).rstrip("/")
+    return _workspace_api_base(args)
 
 
 def _campaign_client(args: argparse.Namespace):
@@ -3472,7 +3470,7 @@ def cmd_research_prepare(args: argparse.Namespace) -> int:
         profile = read_profile(get_bashgym_dir())
         if profile is not None and (
             args.credential_ref != profile["credential_ref"]
-            or str(args.api_base).rstrip("/") != str(profile["api_base"]).rstrip("/")
+            or _campaign_api_base(args) != profile["api_base"]
         ):
             raise ValueError("studio_preparation_connection_conflict")
         prepared = build_registered_preparation(
@@ -4665,6 +4663,7 @@ def cmd_studio_init(args: argparse.Namespace) -> int:
             get_bashgym_dir(),
             workspace_id=args.workspace_id,
             agent_host=args.agent_host,
+            api_port=args.api_port,
             start_service=not args.no_service,
         )
         return _emit(result, as_json=bool(args.json))
@@ -5526,6 +5525,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Agent host; resumes the saved host or defaults to Codex",
     )
     init.add_argument(
+        "--api-port",
+        type=int,
+        help="Loopback API port; resumes the saved port or defaults to 8003",
+    )
+    init.add_argument(
         "--no-service",
         action="store_true",
         help="Prepare access without installing or starting the API service",
@@ -6140,7 +6144,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign_connection.add_argument(
         "--api-base",
-        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+        help="Backend /api base URL (default: BASHGYM_API_BASE, saved studio, or localhost:8003)",
     )
     campaign_connection.add_argument(
         "--credential-ref",

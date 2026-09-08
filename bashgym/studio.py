@@ -10,8 +10,10 @@ import secrets
 import sqlite3
 import time
 from datetime import datetime, timezone
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, uuid5
 
 
@@ -80,6 +82,8 @@ def _bootstrap_setup(root: Path, profile: dict[str, Any], db_path: Path) -> None
 
 
 def read_profile(root: Path) -> dict[str, Any] | None:
+    from bashgym.api_base import normalize_api_base
+
     path = root / "studio.v1.json"
     if not path.exists():
         return None
@@ -92,7 +96,25 @@ def read_profile(root: Path) -> dict[str, Any] | None:
         or not value.get("human_credential_id")
     ):
         raise ValueError("studio_profile_invalid")
+    try:
+        value["api_base"] = normalize_api_base(value.get("api_base", ""))
+        if urlsplit(value["api_base"]).port == 0:
+            raise ValueError("invalid port")
+    except ValueError as exc:
+        raise ValueError("studio_profile_invalid") from exc
     return value
+
+
+def _local_api_address(profile: dict[str, Any] | None) -> tuple[str, int]:
+    parsed = urlsplit((profile or {}).get("api_base", "http://127.0.0.1:8003/api"))
+    host = parsed.hostname or ""
+    try:
+        loopback = host.casefold().rstrip(".") == "localhost" or ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+    if parsed.scheme != "http" or not loopback:
+        raise ValueError("studio_local_endpoint_required")
+    return host, parsed.port or 80
 
 
 def validate_installation_transition(
@@ -263,7 +285,8 @@ def finalize_installation(contract: Any) -> None:
 def _health(root: Path) -> dict[str, Any]:
     from bashgym.campaigns.worker_service import probe_api_health
 
-    return probe_api_health(expected_state_root=root)
+    host, port = _local_api_address(read_profile(root))
+    return probe_api_health(expected_state_root=root, host=host, port=port)
 
 
 def _service_action(health: dict[str, Any]) -> str | None:
@@ -365,6 +388,7 @@ def initialize(
     *,
     workspace_id: str | None = None,
     agent_host: str | None = None,
+    api_port: int | None = None,
     start_service: bool = True,
 ) -> dict[str, Any]:
     """Resume local setup without selecting a learner, data, budget or starting training."""
@@ -377,6 +401,10 @@ def initialize(
     from bashgym.secrets import set_secret
 
     profile = read_profile(root)
+    if api_port is not None and (type(api_port) is not int or not 1 <= api_port <= 65535):
+        raise ValueError("studio_api_port_invalid")
+    host, saved_port = _local_api_address(profile)
+    port = api_port if api_port is not None else saved_port
     workspace_id = workspace_id or (profile or {}).get("workspace_id", "personal")
     agent_host = agent_host or (profile or {}).get("agent_host", "codex")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", workspace_id):
@@ -385,7 +413,11 @@ def initialize(
         raise ValueError("studio_agent_host_invalid")
     root.mkdir(parents=True, exist_ok=True)
     replayed = profile is not None
-    if profile and (profile["workspace_id"] != workspace_id or profile["agent_host"] != agent_host):
+    if profile and (
+        profile["workspace_id"] != workspace_id
+        or profile["agent_host"] != agent_host
+        or port != saved_port
+    ):
         raise ValueError("studio_profile_conflict")
     repository = AutoResearchRepository(root / "campaigns" / "campaigns.sqlite3")
     repository.initialize()
@@ -413,7 +445,7 @@ def initialize(
             "agent_host": agent_host,
             "credential_ref": ref,
             "human_credential_id": human.credential_id,
-            "api_base": "http://127.0.0.1:8003/api",
+            "api_base": f"http://127.0.0.1:{port}/api",
         }
         _write_profile(root, profile)
     human = repository.get_actor_credential(profile["human_credential_id"])
@@ -434,7 +466,7 @@ def initialize(
             # An existing responder is never replaced merely to complete init.
             _wait_for_service(root, timeout_seconds=0)
         if not observed.get("healthy"):
-            definition = build_api_service_definition(data_directory=root)
+            definition = build_api_service_definition(data_directory=root, host=host, port=port)
             manager = ApiServiceManager()
             if definition.definition_path.exists():
                 if definition.definition_path.read_bytes() != definition.definition_payload:
@@ -454,7 +486,7 @@ def initialize(
         "workspace_id": workspace_id,
         "agent_host": agent_host,
         "skills": skills,
-        "browser_url": "http://127.0.0.1:8003",
+        "browser_url": profile["api_base"].removesuffix("/api"),
         "pairing_code": code,
         "pairing_expires_in_seconds": 300,
         "next_action": "research_prepare" if service_health else "start_headless_service",

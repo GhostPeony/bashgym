@@ -27,7 +27,7 @@ def test_pairing_single_use_http_only_session(client):
     )
     assert response.status_code == 200
     assert "httponly" in response.headers["set-cookie"].lower()
-    assert client.get("/api/auth/me").status_code == 200
+    assert database.get_session_user(client.cookies.get("bashgym_session")) is not None
     assert (
         client.post(
             "/api/auth/local/pair",
@@ -88,6 +88,50 @@ def test_paired_browser_campaign_scope_and_revocation(tmp_path, monkeypatch):
     assert http.get("/api/campaigns", params={"workspace_id": "workspace-b"}).status_code == 403
     http.app.state.campaign_auth_service.revoke_credential(refresh.credential_id, reason="test")
     assert http.get("/api/campaign-auth/capabilities").status_code == 401
+
+
+@pytest.mark.parametrize("change", ["revoke", "revision", "expire"])
+def test_current_user_rechecks_local_authority_and_clears_stale_session(
+    tmp_path, monkeypatch, change
+):
+    from datetime import timedelta
+
+    from bashgym.campaigns import auth as campaign_auth
+    from bashgym.campaigns.contracts import AutonomyProfile
+    from tests.api.test_campaign_routes import campaign_client
+
+    monkeypatch.setattr(database, "_DB_PATH", tmp_path / "auth.db")
+    database.init_db()
+    http, _, refresh = campaign_client(tmp_path, profile=AutonomyProfile.DESKTOP_USER)
+    http.app.include_router(router)
+    token = database.consume_local_pairing(database.issue_local_pairing(refresh.credential_id, 1))
+    http.cookies.set("bashgym_session", token)
+    assert http.get("/api/auth/me").status_code == 200
+    authority = http.app.state.campaign_auth_service
+    if change == "revoke":
+        authority.revoke_credential(refresh.credential_id, reason="test")
+    elif change == "revision":
+        authority.revise_credential_authorization(
+            refresh.credential_id,
+            autonomy_profile=AutonomyProfile.DESKTOP_USER,
+            workspace_ids=("workspace-b",),
+        )
+    else:
+        later = campaign_auth.utc_now() + timedelta(days=365)
+        monkeypatch.setattr(campaign_auth, "utc_now", lambda: later)
+    assert database.get_session_user(token) is not None
+    response = http.get("/api/auth/me")
+    assert response.status_code == 401
+    assert "max-age=0" in response.headers["set-cookie"].lower()
+    assert database.get_session_user(token) is None
+
+
+def test_current_user_retains_github_session_behavior(client):
+    user_id = database.upsert_user(github_id=123, username="fixture-user")
+    client.cookies.set("bashgym_session", database.create_session(user_id))
+    response = client.get("/api/auth/me")
+    assert response.status_code == 200
+    assert response.json()["github_id"] == 123
 
 
 def test_headless_websocket_rejects_anonymous_client(monkeypatch):

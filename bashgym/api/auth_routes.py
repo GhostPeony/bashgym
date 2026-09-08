@@ -223,14 +223,36 @@ async def get_current_user(request: Request):
     if not user:
         return JSONResponse({"error": "Session expired"}, status_code=401)
 
-    return {
-        "id": user["id"],
-        "github_id": user["github_id"],
-        "username": user["username"],
-        "display_name": user["display_name"],
-        "avatar_url": user["avatar_url"],
-        "email": user["email"],
-    }
+    if user["github_id"] == -1:
+        from bashgym.api.campaign_routes import _services
+        from bashgym.api.database import get_local_session_grant
+        from bashgym.campaigns.auth import CampaignAuthenticationError
+
+        grant = get_local_session_grant(token)
+        try:
+            if grant is None:
+                raise CampaignAuthenticationError()
+            _, authority, _ = _services(request)
+            authority.authenticate_local_session(grant)
+        except CampaignAuthenticationError:
+            delete_session(token)
+            response = JSONResponse({"error": "Session expired"}, status_code=401)
+            response.headers["Cache-Control"] = "no-store"
+            _clear_session_cookie(response)
+            return response
+
+    response = JSONResponse(
+        {
+            "id": user["id"],
+            "github_id": user["github_id"],
+            "username": user["username"],
+            "display_name": user["display_name"],
+            "avatar_url": user["avatar_url"],
+            "email": user["email"],
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.post("/logout")

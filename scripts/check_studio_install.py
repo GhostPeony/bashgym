@@ -162,6 +162,9 @@ def check() -> dict:
                     )
                     assert response.status_code == 200, response.text
                     assert "httponly" in response.headers["set-cookie"].lower()
+                    identity = http.get("/api/auth/me")
+                    assert identity.status_code == 200, identity.text
+                    assert identity.headers["Cache-Control"] == "no-store"
                     designer = http.get("/api/factory/designer/pipelines")
                     assert designer.status_code == 200, designer.text
                     readiness = designer.json()["readiness"]

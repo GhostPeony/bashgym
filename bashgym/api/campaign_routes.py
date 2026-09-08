@@ -68,6 +68,7 @@ from bashgym.campaigns.control_room import (
 from bashgym.campaigns.decision_packet import (
     build_decision_packet,
     latest_data_quality_for_outcome,
+    method_contracts_for_proposal,
     method_evidence_from_diagnostic_results,
 )
 from bashgym.campaigns.human_oversight import (
@@ -889,6 +890,14 @@ def _bearer(request: Request) -> str:
 
 def _principal(request: Request) -> ActorPrincipal:
     _repository, auth, _service = _services(request)
+    if not request.headers.get("Authorization"):
+        from bashgym.api.auth_routes import COOKIE_NAME
+        from bashgym.api.database import get_local_session_grant
+
+        cookie = request.cookies.get(COOKIE_NAME)
+        grant = get_local_session_grant(cookie) if cookie else None
+        if grant:
+            return auth.authenticate_local_session(grant)
     return auth.authenticate_access(_bearer(request))
 
 
@@ -931,6 +940,18 @@ def _desktop_worker_status(
 
 
 def _raise_api(exc: Exception) -> Never:
+    from bashgym.campaigns.reporting import CampaignReportingUnavailableError
+
+    if isinstance(exc, CampaignReportingUnavailableError):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "campaign_reporting_unavailable",
+                "message": "Install bashgym[reports] for the requested document or chart format, "
+                "or request JSON/Markdown/CSV. No export was published.",
+                "retryable": False,
+            },
+        ) from exc
     if isinstance(exc, CampaignAuthenticationError):
         raise HTTPException(
             status_code=401,
@@ -1128,7 +1149,7 @@ def exchange_campaign_refresh(request: Request):
 def campaign_capabilities(request: Request):
     try:
         repository, auth, _service = _services(request)
-        principal = auth.authenticate_access(_bearer(request))
+        principal = _principal(request)
         return {
             "actor_id": principal.actor_id,
             "autonomy_profile": principal.autonomy_profile.value,
@@ -1818,6 +1839,20 @@ def _research_state_payload(
         evaluations=evaluations,
         hypothesis_family_conclusions=family_conclusions,
     )
+    completed_proposal_ids = {item.result.proposal_id for item in outcomes}
+    pending_method_proposal_id = next(
+        (
+            item.proposal_id
+            for item in reversed(controls)
+            if item.role.value == "candidate" and item.proposal_id not in completed_proposal_ids
+        ),
+        None,
+    )
+    selected_method_proposal_id = (
+        current_work.get("proposal_id")
+        if isinstance(current_work, Mapping) and current_work.get("proposal_id")
+        else pending_method_proposal_id or state.best_proposal_id
+    )
     decision_packet = build_decision_packet(
         objective=snapshot.campaign.objective,
         spec=spec,
@@ -1830,7 +1865,12 @@ def _research_state_payload(
         current_work=current_work if isinstance(current_work, Mapping) else None,
         campaign_knowledge=campaign_knowledge,
         failure_analysis=core.failures(workspace_id, campaign_id),
-        method_evidence=method_evidence_from_diagnostic_results(diagnostic_results),
+        method_evidence=method_evidence_from_diagnostic_results(
+            diagnostic_results,
+            expected_contracts=method_contracts_for_proposal(
+                proposal_by_id.get(selected_method_proposal_id)
+            ),
+        ),
         method_thresholds=spec.method_thresholds.model_dump(mode="json", exclude_none=True),
     )
     decision_packet["diagnostic_results"] = [item.projection for item in diagnostic_results[-10:]]

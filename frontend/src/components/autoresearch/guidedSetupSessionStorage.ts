@@ -56,6 +56,15 @@ export function getOrCreateGuidedSetupSessionId(
   return created
 }
 
+export function persistGuidedSetupSessionId(
+  storage: GuidedSetupStorage,
+  workspaceId: string,
+  authoritativeSessionId: string
+): void {
+  if (!sessionId.test(authoritativeSessionId)) throw new Error('Guided setup session is invalid')
+  storage.setItem(sessionStorageKey(workspaceId), authoritativeSessionId)
+}
+
 export function readGuidedSetupSessionId(
   storage: GuidedSetupStorage,
   workspaceId: string

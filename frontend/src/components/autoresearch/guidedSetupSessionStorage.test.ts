@@ -5,6 +5,7 @@ import {
   clearGuidedSetupIdempotencyKey,
   getOrCreateGuidedSetupIdempotencyKey,
   getOrCreateGuidedSetupSessionId,
+  persistGuidedSetupSessionId,
   readGuidedSetupSessionId
 } from './guidedSetupSessionStorage'
 
@@ -56,4 +57,22 @@ test('replaces malformed persisted state and keeps one mutation key stable until
     getOrCreateGuidedSetupIdempotencyKey(storage, request, () => '1'.repeat(32)),
     `idem_${'1'.repeat(32)}`
   )
+})
+
+test('resumes the server shared draft after discovery and browser reload', () => {
+  const storage = memoryStorage()
+  const localDraft = getOrCreateGuidedSetupSessionId(storage, 'workspace-a', () => 'a'.repeat(32))
+  const sharedDraft = `setupsess_${'b'.repeat(32)}`
+  persistGuidedSetupSessionId(storage, 'workspace-a', sharedDraft)
+  assert.notEqual(sharedDraft, localDraft)
+  assert.equal(readGuidedSetupSessionId(storage, 'workspace-a'), sharedDraft)
+  assert.equal(
+    getOrCreateGuidedSetupSessionId(storage, 'workspace-a', () => {
+      throw new Error('must resume')
+    }),
+    sharedDraft
+  )
+  assert.equal(readGuidedSetupSessionId(storage, 'workspace-b'), null)
+  assert.throws(() => persistGuidedSetupSessionId(storage, 'workspace-a', 'malformed'))
+  assert.equal(readGuidedSetupSessionId(storage, 'workspace-a'), sharedDraft)
 })

@@ -88,6 +88,45 @@ def test_rejects_completed_output_without_a_publishable_jsonl(
     assert configured_hf == {}
 
 
+def test_upload_uses_exact_recorded_export_despite_other_files(configured_hf, tmp_path):
+    from bashgym.factory.example_generator import ExampleGenerator
+    from tests.api.test_personal_trace_export import _examples
+
+    selected = ExampleGenerator().export_for_nemo(_examples(), tmp_path, train_split=0.5)
+    (tmp_path / "train.jsonl").write_text("stale legacy data\n")
+    (tmp_path / "val.jsonl").write_text("stale legacy evaluation\n")
+    unselected = client.post(
+        "/api/hf/datasets", json={"local_path": str(tmp_path), "repo_name": "selected"}
+    )
+    assert unselected.status_code == 400
+    assert "export_id" in unselected.json()["detail"]
+    assert configured_hf == {}
+    response = client.post(
+        "/api/hf/datasets",
+        json={
+            "local_path": str(tmp_path),
+            "repo_name": "selected",
+            "export_id": selected["export_id"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert configured_hf["train_file"] == selected["train"]
+    assert configured_hf["val_file"] == selected["validation"]
+    assert configured_hf["metadata"]["bashgym_export_id"] == selected["export_id"]
+    configured_hf.clear()
+    selected["validation"].write_text("modified\n")
+    rejected = client.post(
+        "/api/hf/datasets",
+        json={
+            "local_path": str(tmp_path),
+            "repo_name": "selected",
+            "export_id": selected["export_id"],
+        },
+    )
+    assert rejected.status_code == 409
+    assert configured_hf == {}
+
+
 def test_manager_publishes_custom_generated_file_as_train_split(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -9,6 +9,7 @@ Module 4: Training (The "Gym")
 
 import asyncio
 import copy
+import inspect
 import json
 import logging
 import os
@@ -39,6 +40,7 @@ from bashgym.gym.terminal_rl import (
     TMAX_LIKE_DEFAULTS,
     normalize_training_profile,
 )
+from bashgym.gym.verification import run_verification
 
 # Model profile integration
 try:
@@ -670,6 +672,23 @@ class TrainerConfig:
         if self.rwml_history_window < 0:
             raise ValueError("rwml_history_window must be non-negative")
 
+    def validate_backend_recipe(self, backend: str) -> None:
+        """Reject recipe settings that the selected script cannot implement."""
+        if backend not in {"plain", "unsloth"}:
+            raise ValueError(f"unsupported generated training backend: {backend}")
+        if not self.use_lora:
+            raise ValueError(f"{backend} backend requires use_lora=True")
+        if backend == "unsloth" and self.use_liger:
+            raise ValueError("use_liger=True is supported only by the plain backend")
+        if backend == "plain":
+            if self.load_in_4bit:
+                raise ValueError(
+                    "plain backend does not support load_in_4bit=True; explicitly select "
+                    "load_in_4bit=False or a backend that supports quantization"
+                )
+            if not self.use_lora:
+                raise ValueError("plain backend requires use_lora=True")
+
     def _validate_session_distillation_settings(self) -> None:
         """Validate Session Distillation objective knobs."""
 
@@ -933,6 +952,8 @@ class Trainer:
                 }
             if run.strategy == TrainingStrategy.SESSION_DISTILLATION:
                 config_dict["session_distillation"] = self.config.session_distillation_settings()
+            if "effective_recipe" in run.training_metadata:
+                config_dict["effective_recipe"] = run.training_metadata["effective_recipe"]
 
             # Extract enrichment data from training_metadata
             meta = run.training_metadata or {}
@@ -1348,6 +1369,20 @@ class Trainer:
         except Exception as e:
             logger.warning(f"Error exporting to bashbros integration: {e}")
 
+    def _validate_dpo_dataset(self, dataset_path: Path) -> None:
+        """Enforce preference integrity while allowing ordinary TRL records."""
+        from bashgym.preferences.dpo_validation import validate_preference_pairs_file
+
+        result = validate_preference_pairs_file(dataset_path, strict=False)
+        failures = [
+            finding
+            for finding in result["findings"]
+            if finding["level"] == "fail" and finding["code"] != "missing_pair_id"
+        ]
+        if failures:
+            reasons = "; ".join(f"{finding['code']}: {finding['message']}" for finding in failures)
+            raise ValueError(f"Invalid DPO preference data: {reasons}")
+
     def train_dpo(
         self,
         dataset_path: Path,
@@ -1373,6 +1408,9 @@ class Trainer:
             TrainingRun with results
         """
         self._require_base_model()
+        self._validate_dpo_dataset(dataset_path)
+        if val_dataset_path is not None:
+            self._validate_dpo_dataset(val_dataset_path)
         run_id = run_id or self._generate_run_id()
         output_path = Path(self.config.output_dir) / run_id
 
@@ -1627,6 +1665,8 @@ class Trainer:
 
         profile = resolve_family_profile(self.config.base_model)
         backend = select_backend(profile, self.config.sft_backend)
+        self.config.validate_backend_recipe(backend)
+        self._record_effective_recipe(run, backend)
         if backend == "plain":
             return self._generate_sft_script_plain(run, profile)
         return self._generate_unsloth_sft_script(run)
@@ -1637,9 +1677,29 @@ class Trainer:
 
         profile = resolve_family_profile(self.config.base_model)
         backend = select_backend(profile, self.config.dpo_backend)
+        self.config.validate_backend_recipe(backend)
+        self._record_effective_recipe(run, backend)
         if backend == "plain":
             return self._generate_dpo_script_plain(run, profile)
         return self._generate_unsloth_dpo_script(run)
+
+    def _record_effective_recipe(self, run: TrainingRun, backend: str) -> None:
+        """Retain resolved implementation settings with the run's provenance."""
+        run.training_metadata["effective_recipe"] = {
+            "backend": backend,
+            "base_model": self.config.base_model,
+            "load_in_4bit": self.config.load_in_4bit,
+            "use_lora": True,
+            "lora_r": self.config.lora_r,
+            "lora_alpha": self.config.lora_alpha,
+            "lora_dropout": self.config.lora_dropout,
+            "use_liger": self.config.use_liger,
+            "weight_dtype": "bfloat16" if backend == "plain" else "model_native_auto",
+            "batch_size": self.config.batch_size,
+            "gradient_accumulation_steps": self.config.gradient_accumulation_steps,
+            "max_seq_length": self.config.max_seq_length,
+            "learning_rate": self.config.learning_rate,
+        }
 
     def _generate_sft_script_plain(self, run: TrainingRun, profile) -> str:
         """Generate an SFT script using plain transformers + peft (no Unsloth).
@@ -1649,6 +1709,7 @@ class Trainer:
         fused-linear-CE is enabled via ``use_liger_kernel`` when ``use_liger`` is
         set (the 262k-vocab fused-CE OOM fix).
         """
+        self.config.validate_backend_recipe("plain")
         dataset_path = str(run.dataset_path).replace("\\", "/")
         output_path = str(run.output_path).replace("\\", "/")
         val_path = str(run.val_dataset_path).replace("\\", "/") if run.val_dataset_path else ""
@@ -1824,6 +1885,7 @@ if __name__ == "__main__":
         dataset columns are passed straight to ``DPOTrainer`` (same as the Unsloth
         path). Liger fused-linear-CE via ``use_liger_kernel`` when ``use_liger``.
         """
+        self.config.validate_backend_recipe("plain")
         dataset_path = str(run.dataset_path).replace("\\", "/")
         output_path = str(run.output_path).replace("\\", "/")
 
@@ -2301,6 +2363,9 @@ if __name__ == "__main__":
         `_parse_trl_stats`, `EARLY_STOPPED` sentinel check for
         `rewards/accuracies` collapse.
         """
+        self._validate_dpo_dataset(run.dataset_path)
+        if run.val_dataset_path is not None:
+            self._validate_dpo_dataset(run.val_dataset_path)
         script_content = self._generate_dpo_script(run)
         script_path = run.output_path / "train_dpo.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
@@ -2983,6 +3048,10 @@ def encode_context_target(context, target):
     else:
         context_ids = tokenizer(context, add_special_tokens=False)["input_ids"]
     target_ids = tokenizer(target, add_special_tokens=False)["input_ids"]
+    if not target_ids or len(target_ids) >= {self.config.max_seq_length}:
+        raise ValueError("Session Distillation requires a full target plus at least one context token")
+    # Preserve the exact target span; shorten only the oldest context tokens.
+    context_ids = context_ids[-({self.config.max_seq_length} - len(target_ids)):]
     input_ids = context_ids + target_ids
     target_mask = [0] * len(context_ids) + [1] * len(target_ids)
     labels = [-100] * len(context_ids) + target_ids
@@ -2990,6 +3059,9 @@ def encode_context_target(context, target):
 
 
 def preprocess(row):
+    for field in ("target_text", "original_context", "hinted_context"):
+        if not isinstance(row.get(field), str) or not row[field].strip():
+            raise ValueError("Session Distillation requires nonempty text for " + field)
     target_text = str(row["target_text"])
     original_ids, original_target_mask, original_labels = encode_context_target(
         str(row["original_context"]),
@@ -2999,17 +3071,25 @@ def preprocess(row):
         str(row["hinted_context"]),
         target_text,
     )
+    original_context_count = len(original_ids) - sum(original_target_mask)
+    hinted_context_count = len(hinted_ids) - sum(hinted_target_mask)
+    if min(original_context_count, hinted_context_count) < 1:
+        raise ValueError("Session Distillation requires a context token before each target")
     target_token_count = sum(original_target_mask)
+    if original_labels[original_context_count:] != hinted_labels[hinted_context_count:]:
+        raise ValueError("Session Distillation contexts must have identical full target token IDs")
+    original_end = original_context_count + target_token_count
+    hinted_end = hinted_context_count + target_token_count
     return {{
-        "original_input_ids": original_ids[:{self.config.max_seq_length}],
-        "original_attention_mask": [1] * min(len(original_ids), {self.config.max_seq_length}),
-        "original_labels": original_labels[:{self.config.max_seq_length}],
-        "original_target_mask": original_target_mask[:{self.config.max_seq_length}],
-        "hinted_input_ids": hinted_ids[:{self.config.max_seq_length}],
-        "hinted_attention_mask": [1] * min(len(hinted_ids), {self.config.max_seq_length}),
-        "hinted_labels": hinted_labels[:{self.config.max_seq_length}],
-        "hinted_target_mask": hinted_target_mask[:{self.config.max_seq_length}],
-        "target_token_count": min(target_token_count, {self.config.max_seq_length}),
+        "original_input_ids": original_ids[:original_end],
+        "original_attention_mask": [1] * original_end,
+        "original_labels": original_labels[:original_end],
+        "original_target_mask": original_target_mask[:original_end],
+        "hinted_input_ids": hinted_ids[:hinted_end],
+        "hinted_attention_mask": [1] * hinted_end,
+        "hinted_labels": hinted_labels[:hinted_end],
+        "hinted_target_mask": hinted_target_mask[:hinted_end],
+        "target_token_count": target_token_count,
     }}
 
 
@@ -3056,6 +3136,17 @@ class SessionDistillationTrainer(Trainer):
         hinted_attention_mask = inputs["hinted_attention_mask"]
         hinted_target_mask = inputs["hinted_target_mask"].bool()
 
+        if MASK_POLICY != "target_span_only":
+            raise ValueError("Session Distillation only supports target_span_only masking")
+        student_counts = original_target_mask[:, 1:].sum(dim=1)
+        teacher_counts = hinted_target_mask[:, 1:].sum(dim=1)
+        if torch.any(student_counts == 0) or not torch.equal(student_counts, teacher_counts):
+            raise ValueError("Session Distillation requires nonempty aligned targets in every row")
+        student_targets = original_labels[:, 1:][original_target_mask[:, 1:]]
+        teacher_targets = inputs["hinted_labels"][:, 1:][hinted_target_mask[:, 1:]]
+        if torch.any(student_targets < 0) or not torch.equal(student_targets, teacher_targets):
+            raise ValueError("Session Distillation target token IDs must align in every row")
+
         original_outputs = model(
             input_ids=original_input_ids,
             attention_mask=original_attention_mask,
@@ -3077,17 +3168,7 @@ class SessionDistillationTrainer(Trainer):
         student_target_logits = student_shift_logits[student_shift_mask]
         teacher_target_logits = teacher_shift_logits[teacher_shift_mask]
         hard_labels = student_shift_labels[student_shift_mask]
-        token_count = min(student_target_logits.shape[0], teacher_target_logits.shape[0])
-
-        if MASK_POLICY != "target_span_only":
-            raise ValueError("Session Distillation only supports target_span_only masking")
-        if token_count == 0:
-            session_distillation_loss = student_logits.sum() * 0.0
-            return (session_distillation_loss, original_outputs) if return_outputs else session_distillation_loss
-
-        student_target_logits = student_target_logits[:token_count]
-        teacher_target_logits = teacher_target_logits[:token_count]
-        hard_labels = hard_labels[:token_count]
+        token_count = student_target_logits.shape[0]
 
         student_logprobs = F.log_softmax(student_target_logits / TEMPERATURE, dim=-1)
         hinted_probs = F.softmax(teacher_target_logits / TEMPERATURE, dim=-1)
@@ -3324,6 +3405,8 @@ print("DPO training complete!")
 
         Strategy-aware: generates the correct script based on run.strategy.
         """
+        if run.strategy == TrainingStrategy.DPO:
+            self._validate_dpo_dataset(run.dataset_path)
         from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
 
         # Use pre-resolved ssh_config from route handler, or fall back to env vars
@@ -4027,6 +4110,8 @@ class GRPOTrainer(Trainer):
 
         profile = resolve_family_profile(self.config.base_model)
         backend = select_backend(profile, self.config.grpo_backend)
+        self.config.validate_backend_recipe(backend)
+        self._record_effective_recipe(run, backend)
         if backend == "plain":
             return self._generate_grpo_script_plain(run, profile)
         return self._generate_grpo_script_unsloth(run, profile)
@@ -4120,31 +4205,7 @@ def extract_code(text):
     return text.strip()
 
 
-def run_verification(code, test_code):
-    """Write code + tests to a temp dir and run pytest. Returns (passed, total)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        solution_path = os.path.join(tmpdir, "solution.py")
-        test_path = os.path.join(tmpdir, "test_solution.py")
-        with open(solution_path, "w") as f:
-            f.write(code)
-        with open(test_path, "w") as f:
-            f.write(test_code)
-        try:
-            result = subprocess.run(
-                [sys.executable, "-m", "pytest", test_path, "-v", "--tb=no", "-q"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=tmpdir,
-            )
-            output = result.stdout + result.stderr
-            passed = len(re.findall(r" PASSED", output))
-            failed = len(re.findall(r" FAILED", output))
-            total = passed + failed
-            return passed, total
-        except Exception:
-            return 0, 1
-
+{inspect.getsource(run_verification)}
 
 # --- Reward functions ---
 
@@ -4187,12 +4248,8 @@ def verification_reward(completions, prompts, tests=None, **kwargs):
         if tests is not None and i < len(tests):
             test_code = tests[i]
         if not test_code:
-            # Fall back to syntax check if no test code
-            try:
-                ast.parse(code)
-                rewards.append(0.5)
-            except SyntaxError:
-                rewards.append(0.0)
+            # Verification rewards require actual test evidence.
+            rewards.append(0.0)
             continue
         passed, total = run_verification(code, test_code)
         rewards.append(passed / total if total > 0 else 0.0)
@@ -4210,6 +4267,7 @@ REWARD_FN = {{"syntax": syntax_reward, "execution": execution_reward, "verificat
         model-specific values (LoRA targets/excludes, attention impl) come from the
         ModelFamilyProfile.
         """
+        self.config.validate_backend_recipe("plain")
         dataset_path = str(run.dataset_path).replace("\\", "/")
         output_path = str(run.output_path).replace("\\", "/")
 
@@ -4478,31 +4536,7 @@ def extract_code(text):
     return text.strip()
 
 
-def run_verification(code, test_code):
-    """Write code + tests to a temp dir and run pytest. Returns (passed, total)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        solution_path = os.path.join(tmpdir, "solution.py")
-        test_path = os.path.join(tmpdir, "test_solution.py")
-        with open(solution_path, "w") as f:
-            f.write(code)
-        with open(test_path, "w") as f:
-            f.write(test_code)
-        try:
-            result = subprocess.run(
-                [sys.executable, "-m", "pytest", test_path, "-v", "--tb=no", "-q"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=tmpdir,
-            )
-            output = result.stdout + result.stderr
-            passed = len(re.findall(r" PASSED", output))
-            failed = len(re.findall(r" FAILED", output))
-            total = passed + failed
-            return passed, total
-        except Exception:
-            return 0, 1
-
+{inspect.getsource(run_verification)}
 
 # --- Reward functions ---
 
@@ -4545,12 +4579,8 @@ def verification_reward(completions, prompts, tests=None, **kwargs):
         if tests is not None and i < len(tests):
             test_code = tests[i]
         if not test_code:
-            # Fall back to syntax check if no test code
-            try:
-                ast.parse(code)
-                rewards.append(0.5)
-            except SyntaxError:
-                rewards.append(0.0)
+            # Verification rewards require actual test evidence.
+            rewards.append(0.0)
             continue
         passed, total = run_verification(code, test_code)
         rewards.append(passed / total if total > 0 else 0.0)

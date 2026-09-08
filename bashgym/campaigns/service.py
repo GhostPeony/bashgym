@@ -749,7 +749,7 @@ class CampaignService:
                 loss_by_attempt=losses,
                 autoresearch_history=autoresearch_history,
             )
-            export_manifest = export_campaign_evidence(snapshot, output_directory)
+            export_manifest = export_campaign_evidence(snapshot, output_directory, formats=formats)
         return self.repository.record_export(
             workspace_id,
             campaign_id,

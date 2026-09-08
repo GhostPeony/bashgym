@@ -24,6 +24,7 @@ from bashgym.campaigns.contracts import (
     TERMINAL_CAMPAIGN_STATES,
     ActionAttempt,
     ActorPrincipal,
+    AutonomyProfile,
     Campaign,
     CampaignEvent,
     CampaignKind,
@@ -1057,6 +1058,52 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             )
             for row in rows
         )
+
+    def replay_autoresearch_submission(
+        self,
+        submission: StudyProposalSubmission,
+        control: AutoResearchProposalControl,
+        *,
+        normalized_priority: int,
+        expected_version: int,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> ProposalMutation | None:
+        """Read an existing submission before mutable loop policy is evaluated."""
+        self._require_initialized()
+        # Match CampaignRepository.submit_proposal's persisted request identity.
+        request_hash = canonical_hash(
+            {
+                "submission": submission.model_dump(mode="json"),
+                "normalized_priority": normalized_priority,
+                "expected_version": expected_version,
+            }
+        )
+        with self._connection() as connection:
+            replay = self._replay_proposal(
+                connection,
+                workspace_id=submission.workspace_id,
+                actor_id=actor_id,
+                mutation_kind="campaign.proposal.submit",
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
+            if replay is None:
+                return None
+            assert isinstance(replay, ProposalMutation)
+            if replay.record.validation.valid:
+                registered = connection.execute(
+                    """SELECT control_digest FROM autoresearch_proposal_controls
+                       WHERE workspace_id=? AND campaign_id=? AND proposal_id=?""",
+                    (control.workspace_id, control.campaign_id, control.proposal_id),
+                ).fetchone()
+                if registered is None:
+                    # Do not attach newly asserted scientific control to a partial
+                    # or non-AutoResearch submission under an already-used key.
+                    raise AutoResearchConflictError("autoresearch_proposal_control_incomplete")
+                if registered["control_digest"] != control.control_digest:
+                    raise AutoResearchConflictError("autoresearch_proposal_control_conflict")
+            return replay
 
     def register_autoresearch_proposal(
         self, control: AutoResearchProposalControl
@@ -2129,6 +2176,31 @@ class AutoResearchCampaignCore:
             or submission.proposal_id != control.proposal_id
         ):
             raise AutoResearchInvariantError("autoresearch_proposal_identity_mismatch")
+        principal.require(submission.workspace_id, Capability.STUDY_PROPOSE)
+        replay = self.repository.replay_autoresearch_submission(
+            submission,
+            control,
+            normalized_priority=(
+                50
+                if principal.autonomy_profile == AutonomyProfile.HERMES_BOUNDED
+                else submission.priority
+            ),
+            expected_version=expected_version,
+            actor_id=principal.actor_id,
+            idempotency_key=idempotency_key,
+        )
+        if replay is not None:
+            if not replay.record.validation.valid:
+                raise AutoResearchInvariantError(
+                    "autoresearch_proposal_rejected:"
+                    + ",".join(replay.record.validation.reason_codes)
+                )
+            if any(
+                code_mutation_kind_for_variable(variable) is not None
+                for variable in control.changed_variables
+            ):
+                principal.require(submission.workspace_id, Capability.EXPERIMENT_CODE_MUTATE)
+            return replay
         state = self.state(submission.workspace_id, submission.campaign_id)
         expected_action = (
             AutoResearchNextAction.SUBMIT_BASELINE

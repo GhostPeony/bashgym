@@ -27,13 +27,24 @@ def _write_trace(directory: Path, name: str, trace: dict) -> Path:
 def _make_trace(repo_name: str, prompt: str, tool_steps: list[str], success: bool) -> dict:
     """Create a minimal trace dict."""
     steps = [
-        {"tool_name": tool, "command": f"{tool.lower()} cmd", "output": "ok", "success": success}
+        {
+            "tool_name": tool,
+            "command": f"{tool.lower()} {'fixed' if success else 'broken'} cmd",
+            "output": "ok",
+            "success": success,
+        }
         for tool in tool_steps
     ]
     return {
         "metadata": {
             "primary_repo": {"name": repo_name},
             "user_initial_prompt": prompt,
+            "verification_passed": success,
+            "preference_context": {
+                "task_id": prompt,
+                "snapshot_digest": "a" * 64,
+                "tools_digest": "b" * 64,
+            },
         },
         "trace": steps,
     }
@@ -60,7 +71,7 @@ class TestHelpers:
 
     def test_extract_prompt_fallback(self):
         trace = {"trace": [{"command": "git status"}]}
-        assert "git status" in _extract_prompt(trace)
+        assert _extract_prompt(trace) == ""
 
     def test_serialize_trace_response_messages(self):
         trace = {
@@ -111,7 +122,7 @@ class TestPairFailuresForDpo:
 
             _write_trace(gold_dir, "g1.json", _make_trace("repo-a", "Fix A", ["Bash"], True))
             _write_trace(gold_dir, "g2.json", _make_trace("repo-b", "Fix B", ["Read"], True))
-            _write_trace(failed_dir, "f1.json", _make_trace("repo-b", "Fix B v2", ["Read"], False))
+            _write_trace(failed_dir, "f1.json", _make_trace("repo-b", "Fix B", ["Read"], False))
 
             pairs = pair_failures_for_dpo(gold_dir, failed_dir, similarity_threshold=0.5)
 

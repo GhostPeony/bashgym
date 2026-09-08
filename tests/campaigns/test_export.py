@@ -90,6 +90,64 @@ def test_smoke_export_is_hash_reconciled_but_never_claims_quality_findings(tmp_p
     ).read_text(encoding="utf-8")
 
 
+def test_basic_export_does_not_invoke_optional_renderers(tmp_path, monkeypatch):
+    def unavailable(*args, **kwargs):
+        pytest.fail("Unrequested reporting dependencies must not be used")
+
+    for name in ("write_campaign_docx", "write_campaign_pdf", "write_loss_png"):
+        monkeypatch.setattr(f"bashgym.campaigns.export.{name}", unavailable)
+    manifest = export_campaign_evidence(
+        snapshot(), tmp_path / "basic", formats=("json", "markdown", "csv")
+    )
+    assert manifest["formats"] == ["csv", "json", "markdown"]
+    assert {f["name"] for f in manifest["files"]} == {
+        "campaign_evidence.json",
+        "campaign_report.md",
+        "attempts.csv",
+        "artifacts.csv",
+        "comparisons.csv",
+    }
+    assert (tmp_path / "basic" / "export_manifest.json").is_file()
+
+
+def test_failed_optional_export_can_retry_same_destination(tmp_path, monkeypatch):
+    from bashgym.campaigns.reporting import CampaignReportingUnavailableError
+
+    destination = tmp_path / "export"
+    original = __import__("bashgym.campaigns.export", fromlist=["write_campaign_docx"])
+    renderer = original.write_campaign_docx
+
+    def unavailable(*args, **kwargs):
+        raise CampaignReportingUnavailableError("Install bashgym[reports]")
+
+    monkeypatch.setattr(original, "write_campaign_docx", unavailable)
+    with pytest.raises(CampaignReportingUnavailableError):
+        export_campaign_evidence(snapshot(), destination, formats=("docx",))
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".campaign-export-*"))
+    monkeypatch.setattr(original, "write_campaign_docx", renderer)
+    manifest = export_campaign_evidence(snapshot(), destination, formats=("docx",))
+    assert {f["name"] for f in manifest["files"]} == {
+        "campaign_evidence.json",
+        "campaign_report.docx",
+        "training_loss.png",
+    }
+
+
+def test_export_preserves_nonempty_destination_and_rejects_invalid_formats(tmp_path):
+    destination = tmp_path / "export"
+    destination.mkdir()
+    marker = destination / "existing.txt"
+    marker.write_text("preserve")
+    with pytest.raises(CampaignExportError, match="directory_not_empty"):
+        export_campaign_evidence(snapshot(), destination, formats=("json",))
+    assert marker.read_text() == "preserve"
+    for formats in [(), ("json", "json"), ("unknown",)]:
+        with pytest.raises(CampaignExportError, match="formats_invalid"):
+            export_campaign_evidence(snapshot(), tmp_path / "invalid", formats=formats)
+    assert not (tmp_path / "invalid").exists()
+
+
 def test_full_run_plus_comparison_enables_quality_findings_and_is_deterministic(tmp_path):
     first = export_campaign_evidence(snapshot(full=True), tmp_path / "first")
     second = export_campaign_evidence(snapshot(full=True), tmp_path / "second")

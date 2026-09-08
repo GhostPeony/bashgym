@@ -615,6 +615,12 @@ def test_background_service_restarts_a_crashed_child_and_prevents_duplicates(
         worker_service.stop_background_service(definition_path)
 
 
+def test_remote_headless_requires_explicit_authentication(monkeypatch) -> None:
+    monkeypatch.delenv("BASHGYM_API_KEY", raising=False)
+    with pytest.raises(worker_service.WorkerServiceError, match="requires_authenticated"):
+        worker_service.run_headless_api(host="0.0.0.0", server_runner=lambda *a, **k: None)
+
+
 def test_run_headless_api_sets_mode_and_uses_one_server_worker(monkeypatch) -> None:
     """Removing headless mode would accidentally attach desktop-owned runtime work."""
 

@@ -131,7 +131,81 @@ export function GuidedAutoResearchSetup({
           pinned revision. Need something that isn't listed? Register it first, or ask your agent to
           set it up.
         </p>
+        <p className="mt-2 max-w-2xl text-xs leading-5 text-text-secondary">
+          Your research agent runs in its own host with its own provider configuration. The learner
+          model, training data, evaluation and execution environment below are separate choices.
+          Preparation ends at READY; Start is a later human decision.
+        </p>
+        <details className="mt-3 text-xs leading-5 text-text-secondary">
+          <summary className="cursor-pointer font-semibold text-text-primary">
+            Prepare with your agent or CLI
+          </summary>
+          <p className="mt-2">
+            Ask your agent to resume preparation for workspace{' '}
+            <code>{context?.workspace_id || 'the current project'}</code>, inspect existing assets,
+            and register the selected inputs. Ask only for missing choices, then present the exact
+            READY contract for a later Start decision.
+          </p>
+          <p className="mt-1">
+            To inspect the supported preparation commands, run{' '}
+            <code>bashgym research prepare --help</code> in the same installation. Return here and
+            refresh registrations to resume the saved choices.
+          </p>
+        </details>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={!live || pending}
+            onClick={onRetry}
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Refresh registrations
+          </Button>
+          <a href="#resources" className="text-xs text-accent-dark underline">
+            Inspect resources and optional Data Designer
+          </a>
+        </div>
       </header>
+
+      {context?.preparation_inventory ? (
+        <aside
+          aria-label="Existing workspace assets"
+          className="mt-3 border-b border-border-subtle pb-3 text-xs text-text-secondary"
+        >
+          <p className="font-semibold text-text-primary">Existing workspace assets</p>
+          <ul className="mt-1 grid gap-1 sm:grid-cols-2">
+            {(['models', 'data', 'evaluation', 'compute'] as const).map((kind) => {
+              const assets = context.preparation_inventory!.candidates[kind]
+              return (
+                <li key={kind}>
+                  {kind === 'models' ? 'Models' : labels[kind]}: {assets.length}
+                  {assets.length
+                    ? `: ${assets
+                        .slice(0, 3)
+                        .map((asset) => asset.label)
+                        .join(', ')}${assets.length > 3 ? ', ...' : ''}`
+                    : ''}
+                </li>
+              )
+            })}
+          </ul>
+          <p className="mt-2">
+            These records describe existing assets. Each choice still needs an approved installation
+            binding before it can be selected.
+          </p>
+          <p className="mt-1">
+            Inventory checked{' '}
+            <time dateTime={context.preparation_inventory.checked_at}>
+              {context.preparation_inventory.checked_at}
+            </time>
+            . Metadata only; execution and recipe readiness still need verification.
+          </p>
+          {context.preparation_inventory.truncated ? (
+            <p className="mt-1">Showing a bounded inventory.</p>
+          ) : null}
+        </aside>
+      ) : null}
 
       {!live ? (
         <div
@@ -232,10 +306,19 @@ export function GuidedAutoResearchSetup({
                             {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Save
                             choice
                           </Button>
-                          {(view?.options.length ?? 0) === 0 ? (
+                          {selectedOption?.reasonCodes.length ? (
+                            <p className="text-xs text-status-warning sm:col-span-2" role="status">
+                              {selectedOption.reasonCodes.map(reason).join(', ')}.
+                              {step === 'installation'
+                                ? ' Saving this installation does not verify its recipe inputs.'
+                                : ' Resolve these blockers before saving this choice.'}
+                            </p>
+                          ) : null}
+                          {!view?.options.some((option) => option.selectable) ? (
                             <p className="text-xs text-status-warning sm:col-span-2">
                               No matching reachable registration is available for this contract.
-                              Register it locally, then refresh.
+                              Resume preparation with your agent or CLI using the guidance above,
+                              then refresh registrations. Your saved choices are preserved.
                             </p>
                           ) : null}
                         </div>

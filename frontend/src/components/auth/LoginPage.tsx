@@ -1,47 +1,84 @@
-import { Github } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { ArrowRight, Flower2, KeyRound } from 'lucide-react'
+import { useAuthStore } from '../../stores/authStore'
+import '../../styles/studio.css'
 
 export function LoginPage() {
-  const handleLogin = () => {
-    window.location.href = '/api/auth/github'
+  const [code, setCode] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const pair = useAuthStore((state) => state.pair)
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    if (!code.trim() || pending) return
+    setPending(true)
+    setError(null)
+    try {
+      await pair(code.trim())
+      setCode('')
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Pairing failed. Please retry.')
+    } finally {
+      setPending(false)
+    }
   }
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div
-        className="w-full max-w-sm border-2 border-border bg-background-card relative"
-        style={{ boxShadow: '4px 4px 0 var(--border)' }}
-      >
-        {/* Header */}
-        <div className="p-8 pb-4 text-center">
-          <img
-            src="./bashgym-peony.png"
-            alt="BashGym"
-            className="w-20 h-20 mx-auto mb-4 object-contain"
-          />
-          <h1 className="font-brand text-2xl mb-1">
-            <span className="text-accent">/</span>
-            <span className="text-text-primary">BashGym</span>
-          </h1>
-        </div>
-
-        {/* Divider */}
-        <div className="border-t border-border mx-6" />
-
-        {/* Login Action */}
-        <div className="p-8 pt-6">
-          <button
-            onClick={handleLogin}
-            className="btn-primary w-full flex items-center justify-center gap-3 py-3 font-mono text-sm uppercase tracking-wider"
-          >
-            <Github className="w-5 h-5" />
-            Sign in with GitHub
-          </button>
-
-          <p className="text-text-muted text-xs text-center mt-4 font-mono">
-            Authentication via GitHub OAuth
-          </p>
-        </div>
+    <main className="research-studio studio-pairing">
+      <div className="studio-pairing-intro">
+        <span className="studio-wordmark">
+          <Flower2 aria-hidden="true" /> BashGym
+        </span>
+        <p className="studio-eyebrow">A quiet research studio</p>
+        <h1>
+          Make room for
+          <br />
+          the next idea.
+        </h1>
+        <p>One hypothesis. One considered change. Evidence you can come back to.</p>
+        <ol className="studio-loop" aria-label="Research loop">
+          {['Evaluate', 'Experiment', 'Compare', 'Decide'].map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
       </div>
-    </div>
+      <form className="studio-pairing-card" onSubmit={submit}>
+        <span className="studio-icon-tile">
+          <KeyRound aria-hidden="true" />
+        </span>
+        <h2>Connect your studio</h2>
+        <p>Enter the local pairing code shown by your research service to open your projects.</p>
+        <label htmlFor="pairing-code">Pairing code</label>
+        <input
+          id="pairing-code"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          required
+          aria-describedby={error ? 'pairing-error' : 'pairing-help'}
+          disabled={pending}
+        />
+        <p id="pairing-help" className="studio-caption">
+          Your session stays in a secure browser cookie.
+        </p>
+        <p className="studio-caption">
+          Run <code>bashgym init</code> in your terminal to get a pairing code.
+        </p>
+        {error && (
+          <p id="pairing-error" className="studio-notice" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="studio-primary" disabled={pending || !code.trim()} type="submit">
+          {pending ? 'Connecting…' : 'Open studio'}
+          <ArrowRight size={17} aria-hidden="true" />
+        </button>
+        <details className="studio-alternate-auth">
+          <summary>Other sign-in options</summary>
+          <a href="/api/auth/github">Sign in with GitHub</a>
+        </details>
+      </form>
+    </main>
   )
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -17,13 +18,14 @@ from bashgym.campaigns.diagnostic_actions import (
     MAX_AUTORESEARCH_DIAGNOSTIC_BYTES,
     AutoResearchDiagnosticEvidence,
     AutoResearchDiagnosticRequest,
+    DiagnosticInputBinding,
     DiagnosticMeasurementResult,
 )
 from bashgym.campaigns.remote import DiagnosticCapability, DiagnosticStageContract
 from bashgym.campaigns.reward_integrity import AutoResearchRewardIntegrityEvidence
 
 FIRST_PARTY_DIAGNOSTIC_RUNNER_ID = "bashgym-scientific-diagnostics"
-FIRST_PARTY_DIAGNOSTIC_RUNNER_VERSION = "1"
+FIRST_PARTY_DIAGNOSTIC_RUNNER_VERSION = "2"
 FIRST_PARTY_DIAGNOSTIC_SOURCE_FILENAME = "autoresearch_diagnostic_sources.json"
 FIRST_PARTY_DIAGNOSTIC_SOURCE_SCHEMA = "bashgym.autoresearch_first_party_diagnostic_sources.v1"
 
@@ -45,6 +47,7 @@ class PlasticityProbeSummary(FrozenContractModel):
     dataset_revision_count: int = Field(ge=1)
     parent_model_digest: HexDigest
     candidate_model_digest: HexDigest
+    probe_recipe_digest: HexDigest | None = None
 
     @field_validator("initial_probe_metric", "final_probe_metric", "retention_delta")
     @classmethod
@@ -143,6 +146,9 @@ class SessionRecoveryProbeSummary(FrozenContractModel):
     baseline_only_success: int = Field(ge=0, le=10_000)
     hinted_only_success: int = Field(ge=0, le=10_000)
     both_succeeded: int = Field(ge=0, le=10_000)
+    sampling_unit: Literal["independent_paired_case"] | None = None
+    independent_case_count: int | None = Field(default=None, ge=1, le=10_000)
+    sampling_design_digest: HexDigest | None = None
 
     @model_validator(mode="after")
     def consistent_counts(self) -> SessionRecoveryProbeSummary:
@@ -305,6 +311,14 @@ def _plasticity_values(
     source: PlasticityProbeSummary,
 ) -> dict[str, tuple[float, int]]:
     parameters = request.recipe.parameters
+    binding = request.input_binding
+    if binding is None or (
+        source.parent_model_digest != binding.parent_model_digest
+        or source.candidate_model_digest != binding.candidate_model_digest
+        or (source.data_scope_id,) != binding.data_scope_ids
+        or source.probe_recipe_digest != binding.recipe_digest
+    ):
+        raise ValueError("plasticity source input binding mismatch")
     if (
         source.metric_direction != parameters["metric_direction"]
         or source.fixed_step_budget != parameters["fixed_step_budget"]
@@ -419,6 +433,12 @@ def _session_recovery_values(
         + source.both_succeeded
     )
     if (
+        source.sampling_unit != "independent_paired_case"
+        or source.independent_case_count != paired_cases
+        or source.sampling_design_digest is None
+    ):
+        raise ValueError("recovery requires independent paired cases and a pinned sampling design")
+    if (
         source.recovery_dataset_digest != parameters["recovery_dataset_digest"]
         or source.reader_contract_digest != parameters["reader_contract_digest"]
         or source.confidence_level != parameters["confidence_level"]
@@ -427,11 +447,14 @@ def _session_recovery_values(
     ):
         raise ValueError("session recovery source does not match the diagnostic recipe")
     lift = (source.hinted_only_success - source.baseline_only_success) / paired_cases
-    discordant_rate = (source.hinted_only_success + source.baseline_only_success) / paired_cases
-    variance = max(0.0, discordant_rate - lift * lift)
+    # For independent paired differences in [-1, 1], Hoeffding gives
+    # P(mean - expectation >= epsilon) <= exp(-n * epsilon**2 / 2).
+    # Unlike a plug-in normal interval this remains conservative at n=1
+    # and when every observed pair has the same outcome.
+    margin = math.sqrt(2 * math.log(1 / (1 - source.confidence_level)) / paired_cases)
     lower_bound = max(
         -1.0,
-        min(1.0, lift - 1.959963984540054 * math.sqrt(variance / paired_cases)),
+        min(1.0, lift - margin),
     )
     return {
         "recovery_traces": (
@@ -470,6 +493,20 @@ def _completed_evidence(
         runner_id=request.runner_id,
         runner_version=request.runner_version,
         status="completed",
+        input_binding=request.input_binding,
+        statistical_method=(
+            "paired_hoeffding_one_sided"
+            if isinstance(source, SessionRecoveryProbeSummary)
+            else None
+        ),
+        sampling_unit=(
+            source.sampling_unit if isinstance(source, SessionRecoveryProbeSummary) else None
+        ),
+        sampling_design_digest=(
+            source.sampling_design_digest
+            if isinstance(source, SessionRecoveryProbeSummary)
+            else None
+        ),
         measurements=tuple(
             DiagnosticMeasurementResult(
                 name=item.name,
@@ -535,6 +572,11 @@ def run_first_party_diagnostic(
 
     request = _bounded_request(request_path)
     bundle = FirstPartyDiagnosticSourceBundle.from_file(source_path)
+    if request.input_binding is not None and (
+        hashlib.sha256(source_path.read_bytes()).hexdigest()
+        != request.input_binding.source_bundle_digest
+    ):
+        raise ValueError("diagnostic source bundle digest mismatch")
     source = _source_for(request, bundle)
     evidence = (
         _completed_evidence(request, source)
@@ -543,6 +585,43 @@ def run_first_party_diagnostic(
     )
     _atomic_write(output_path, evidence)
     return evidence
+
+
+def diagnostic_input_binding_from_executor(executor: dict) -> dict | None:
+    """Resolve identities from approved, hash-pinned executor inputs, never recipe claims."""
+    recipe = executor.get("diagnostic_recipe", {})
+    if recipe.get("probe_family") != "plasticity_probe":
+        return None
+    paths = [
+        Path(value)
+        for value in executor.get("input_files", ())
+        if Path(value).name == FIRST_PARTY_DIAGNOSTIC_SOURCE_FILENAME
+    ]
+    if len(paths) != 1:
+        raise ValueError("plasticity requires an installation-pinned source bundle")
+    path = paths[0]
+    bundle = FirstPartyDiagnosticSourceBundle.from_file(path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != executor.get("expected_input_sha256", {}).get(path.name):
+        raise ValueError("plasticity source bundle digest mismatch")
+    sources = [
+        item
+        for item in bundle.sources
+        if isinstance(item, PlasticityProbeSummary)
+        and [item.data_scope_id] == recipe.get("data_scope_ids")
+    ]
+    if len(sources) != 1:
+        raise ValueError("plasticity requires one pinned receipt for the requested scope")
+    source = sources[0]
+    if source.probe_recipe_digest != executor["recipe_digest"]:
+        raise ValueError("plasticity pinned receipt recipe mismatch")
+    return DiagnosticInputBinding(
+        parent_model_digest=source.parent_model_digest,
+        candidate_model_digest=source.candidate_model_digest,
+        source_bundle_digest=digest,
+        recipe_digest=executor["recipe_digest"],
+        data_scope_ids=tuple(recipe["data_scope_ids"]),
+    ).model_dump(mode="json")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -577,5 +656,6 @@ __all__ = [
     "SessionRecoveryProbeSummary",
     "TeacherGapProbeSummary",
     "first_party_diagnostic_contract",
+    "diagnostic_input_binding_from_executor",
     "run_first_party_diagnostic",
 ]

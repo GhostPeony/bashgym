@@ -1,22 +1,26 @@
 import { useEffect, lazy, Suspense } from 'react'
-import { MainLayout } from './components/layout/MainLayout'
-import { SettingsModal } from './components/common'
-import { OnboardingModal } from './components/onboarding/OnboardingModal'
-import { useThemeStore, useAccentStore, useAuthStore } from './stores'
-import { useGlobalHotkeys } from './hooks'
-import { wsService } from './services'
+import { useThemeStore } from './stores/themeStore'
+import { useAccentStore } from './stores/accentStore'
+import { useAuthStore } from './stores/authStore'
 import { isWeb } from './utils/platform'
 
 // Tree-shaken in Electron builds (isWeb is a compile-time constant)
 const LoginPage = isWeb
   ? lazy(() => import('./components/auth/LoginPage').then((m) => ({ default: m.LoginPage })))
   : null
+const ResearchStudio = isWeb
+  ? lazy(() =>
+      import('./components/studio/ResearchStudio').then((m) => ({ default: m.ResearchStudio }))
+    )
+  : null
+const DesktopShell = isWeb
+  ? null
+  : lazy(() =>
+      import('./components/layout/DesktopShell').then((m) => ({ default: m.DesktopShell }))
+    )
 
-// The GitHub login gate only applies to a real deployed web build (the dormant
-// web MVP). Local dev runs the backend in desktop mode with no auth enforced
-// (see bashgym/api/auth.py — BASHGYM_MODE != 'web' passes everything through),
-// so bypass the gate to keep the browser app usable without signing in.
-const requireWebAuth = isWeb && !import.meta.env.DEV
+// Browser sessions pair with the local research service before loading data.
+const requireWebAuth = isWeb
 
 function App() {
   const { theme } = useThemeStore()
@@ -25,7 +29,7 @@ function App() {
 
   // Apply theme on mount
   useEffect(() => {
-    if (theme === 'dark') {
+    if (theme === 'dark' && !isWeb) {
       document.documentElement.classList.add('dark')
     } else {
       document.documentElement.classList.remove('dark')
@@ -48,20 +52,23 @@ function App() {
   useEffect(() => {
     if (requireWebAuth && !isAuthenticated) return
 
+    let disposed = false
+    let disconnect: (() => void) | undefined
     const timer = setTimeout(() => {
-      console.log('App: Initiating WebSocket connection...')
-      wsService.connect()
+      void import('./services/websocket').then(({ wsService }) => {
+        if (disposed) return
+        wsService.connect()
+        disconnect = () => wsService.disconnect()
+      })
     }, 100)
     return () => {
+      disposed = true
       clearTimeout(timer)
-      wsService.disconnect()
+      disconnect?.()
     }
   }, [isAuthenticated])
 
-  // Global keyboard shortcuts
-  useGlobalHotkeys()
-
-  // Web mode: show login page if not authenticated (skipped in local dev)
+  // Browser mode requires a verified session in both development and production.
   if (requireWebAuth) {
     if (isLoading) {
       return (
@@ -83,9 +90,15 @@ function App() {
 
   return (
     <>
-      <MainLayout />
-      <SettingsModal />
-      <OnboardingModal />
+      {ResearchStudio ? (
+        <Suspense fallback={null}>
+          <ResearchStudio />
+        </Suspense>
+      ) : DesktopShell ? (
+        <Suspense fallback={null}>
+          <DesktopShell />
+        </Suspense>
+      ) : null}
     </>
   )
 }

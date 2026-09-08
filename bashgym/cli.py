@@ -2112,6 +2112,11 @@ def cmd_manifest(args: argparse.Namespace) -> int:
         "title": "BashGym Agent Manifest",
         "ok": True,
         "commands": {
+            "init": "Initialize or resume local service access, pairing and agent skills.",
+            "doctor": "Report tested service facts and preparation readiness.",
+            "environments build-coding": "Build versioned authored coding and recovery task fixtures.",
+            "environments inspect-coding": "Verify task provenance and train/dev/confirmation splits.",
+            "environments export-nemo": "Package the coding tasks for a pinned NeMo Gym and Docker target.",
             "manifest": "Show agent-readable command and docs map.",
             "workspace context": "Read the live sanitized workspace canvas context.",
             "workspace emit": "Emit a semantic canvas intent for dynamic node creation.",
@@ -2198,6 +2203,7 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "ledger events": "Read the cursor-based GBrain/cloud sync envelope.",
             "ledger health": "Check local ledger integrity, migration, WAL, and record health.",
             "training start": "Start a tracked training run through the BashGym API.",
+            "training compare-recipes": "Compare explicitly measured optimization runs with identical contracts.",
             "designer start": "Start a tracked Data Designer generation job.",
             "designer status": "Read active or recent Data Designer jobs.",
             "training docs": "List or read training docs by topic.",
@@ -2947,6 +2953,27 @@ def _workspace_api_base(args: argparse.Namespace) -> str:
     return _normalize_api_base(raw)
 
 
+class ApiRequestError(RuntimeError):
+    """Bounded transport failure; a lost response does not prove request rejection."""
+
+    def __init__(self, code: str, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": str(self),
+            "status_code": self.status_code,
+            "outcome": "unknown",
+            "next_action": (
+                "Run bashgym doctor --json to check service access and authentication. "
+                "Read current job or campaign state before retrying a state-changing request."
+            ),
+        }
+
+
 def _workspace_http_json(
     args: argparse.Namespace,
     path: str,
@@ -2977,9 +3004,19 @@ def _workspace_http_json(
                 return json.loads(body)
             return body
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"{method} API request failed with HTTP {exc.code}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"{method} API request failed: connection unavailable") from exc
+        raise ApiRequestError(
+            "api_http_error",
+            f"{method} API request failed with HTTP {exc.code}.",
+            status_code=exc.code,
+        ) from exc
+    except TimeoutError as exc:
+        raise ApiRequestError(
+            "api_request_timeout", "The BashGym API did not respond before the request deadline."
+        ) from exc
+    except (urllib.error.URLError, ConnectionError) as exc:
+        raise ApiRequestError(
+            "api_connection_unavailable", "The BashGym API connection is unavailable."
+        ) from exc
 
 
 def _run_packaged_operator_script(script_name: str, arguments: list[str]) -> int:
@@ -3370,6 +3407,114 @@ def cmd_campaign_setup_context(args: argparse.Namespace) -> int:
     return (
         error if error is not None else _emit_campaign_result(args, response, collection="context")
     )
+
+
+def cmd_research_prepare(args: argparse.Namespace) -> int:
+    """Discover a draft or compile exact pre-registered preparation inputs."""
+    compiler_options = (
+        "template_id",
+        "definition_digest",
+        "expected_version",
+        "onboarding_id",
+        "campaign_id",
+        "campaign_title",
+        "stop_rules",
+        "controller_lease_key_ref",
+    )
+    if not any(getattr(args, name, None) is not None for name in compiler_options) and not getattr(
+        args, "write_inputs", False
+    ):
+        return cmd_campaign_setup_context(args)
+    import sqlite3
+
+    from bashgym.campaigns.autoresearch import AutoResearchStopRules
+    from bashgym.campaigns.studio_preparation import (
+        PreparationInputsRequired,
+        build_registered_preparation,
+    )
+    from bashgym.config import get_bashgym_dir
+
+    required = (
+        "template_id",
+        "expected_version",
+        "definition_digest",
+        "onboarding_id",
+        "campaign_id",
+        "campaign_title",
+        "stop_rules",
+        "controller_lease_key_ref",
+    )
+    missing = [name for name in required if getattr(args, name, None) is None]
+    if missing:
+        _emit(
+            {
+                "ok": False,
+                "missing_inputs": missing,
+                "next_action": "select_missing_inputs",
+                "compute_started": False,
+            },
+            as_json=bool(args.json),
+        )
+        return 2
+    try:
+        stop_payload = _read_campaign_json(args.stop_rules, label="stop rules")
+        missing = sorted(
+            {"max_attempts", "budget_unit", "max_total_cost", "minimum_improvement"}
+            - set(stop_payload)
+        )
+        if missing:
+            raise PreparationInputsRequired("stop_rules", "explicit_stop_limits_required")
+        from bashgym.studio import read_profile
+
+        profile = read_profile(get_bashgym_dir())
+        if profile is not None and (
+            args.credential_ref != profile["credential_ref"]
+            or str(args.api_base).rstrip("/") != str(profile["api_base"]).rstrip("/")
+        ):
+            raise ValueError("studio_preparation_connection_conflict")
+        prepared = build_registered_preparation(
+            get_bashgym_dir(),
+            workspace_id=args.workspace_id,
+            template_id=args.template_id,
+            expected_definition_digest=args.definition_digest,
+            session_id=args.session_id,
+            expected_version=args.expected_version,
+            onboarding_id=args.onboarding_id,
+            campaign_id=args.campaign_id,
+            campaign_title=args.campaign_title,
+            stop_rules=AutoResearchStopRules.model_validate(stop_payload),
+            controller_lease_key_ref=args.controller_lease_key_ref,
+        )
+        result = prepared.write_inputs() if args.write_inputs else prepared.summary()
+        return _emit({"ok": True, **result}, as_json=bool(args.json))
+    except PreparationInputsRequired as exc:
+        _emit(
+            {
+                "ok": False,
+                "missing_inputs": [{"field": exc.field, "code": exc.code}],
+                "next_action": "select_missing_inputs",
+                "compute_started": False,
+            },
+            as_json=bool(args.json),
+        )
+        return 2
+    except (ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
+        candidate = str(exc)
+        code = (
+            candidate
+            if re.fullmatch(r"[a-z][a-z0-9_:]{0,127}", candidate)
+            else "preparation_contract_invalid"
+        )
+        _emit(
+            {
+                "ok": False,
+                "conflicts": [{"code": code}],
+                "next_action": "resolve_preparation_conflict",
+                "compute_started": False,
+            },
+            as_json=bool(args.json),
+        )
+        return 2
 
 
 def cmd_campaign_setup_step(args: argparse.Namespace) -> int:
@@ -4481,6 +4626,91 @@ def cmd_research_wait(args: argparse.Namespace) -> int:
     return error if error is not None else _emit_campaign_result(args, response, collection="wait")
 
 
+def cmd_studio_init(args: argparse.Namespace) -> int:
+    from bashgym.config import get_bashgym_dir
+    from bashgym.studio import initialize
+
+    try:
+        result = initialize(
+            get_bashgym_dir(),
+            workspace_id=args.workspace_id,
+            agent_host=args.agent_host,
+            start_service=not args.no_service,
+        )
+        return _emit(result, as_json=bool(args.json))
+    except Exception as exc:
+        return _local_runtime_error(args, exc)
+
+
+def cmd_studio_doctor(args: argparse.Namespace) -> int:
+    from bashgym.config import get_bashgym_dir
+    from bashgym.studio import doctor
+
+    try:
+        return _emit(doctor(get_bashgym_dir()), as_json=bool(args.json))
+    except Exception as exc:
+        return _local_runtime_error(args, exc)
+
+
+def cmd_training_compare_recipes(args: argparse.Namespace) -> int:
+    from bashgym.gym.recipe_comparison import compare_recipe_run_files
+
+    try:
+        result = compare_recipe_run_files(args.baseline, args.candidate)
+        return _emit(result, as_json=bool(args.json))
+    except (ValueError, OSError) as exc:
+        return _local_runtime_error(args, exc)
+
+
+def cmd_coding_environments(args: argparse.Namespace) -> int:
+    from bashgym.environments.personal_coding import (
+        build_personal_coding_bundle,
+        load_personal_coding_bundle,
+    )
+
+    try:
+        if args.environments_command == "build-coding":
+            result = build_personal_coding_bundle(args.output)
+        elif args.environments_command == "inspect-coding":
+            specs = load_personal_coding_bundle(args.dataset, split=args.split)
+            result = {
+                "schema_version": "bashgym.coding_inspection.v1",
+                "valid": True,
+                "tasks": [
+                    {
+                        "id": item.id,
+                        "split": item.metadata["split"],
+                        "content_sha256": item.metadata["content_sha256"],
+                    }
+                    for item in specs
+                ],
+                "provenance": "authored_synthetic",
+            }
+        else:
+            from bashgym.environments.nemo_gym import create_nemo_gym_bundle_archive
+            from bashgym.environments.personal_coding_nemo import (
+                export_personal_coding_nemo_gym_bundle,
+            )
+
+            if args.archive and Path(args.archive).exists():
+                raise FileExistsError("Archive destination already exists")
+            result = export_personal_coding_nemo_gym_bundle(
+                args.dataset,
+                args.output,
+                nemo_gym_revision=args.nemo_gym_revision,
+                bashgym_revision=args.bashgym_revision,
+                sandbox_image=args.sandbox_image,
+            )
+            if args.archive:
+                result = {
+                    **result,
+                    "archive": create_nemo_gym_bundle_archive(args.output, args.archive),
+                }
+        return _emit({**result, "compute_started": False}, as_json=bool(args.json))
+    except (ValueError, OSError) as exc:
+        return _local_runtime_error(args, exc)
+
+
 def cmd_research_onboard(args: argparse.Namespace) -> int:
     """Plan or apply one deterministic AutoResearch preparation contract."""
 
@@ -5208,6 +5438,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    init = subparsers.add_parser(
+        "init", help="Initialize or resume the local research studio", parents=[json_parent]
+    )
+    init.add_argument(
+        "--workspace-id", help="Workspace to create; resumes the saved workspace when omitted"
+    )
+    init.add_argument(
+        "--agent-host",
+        choices=("codex", "hermes", "claude"),
+        help="Agent host; resumes the saved host or defaults to Codex",
+    )
+    init.add_argument(
+        "--no-service",
+        action="store_true",
+        help="Prepare access without installing or starting the API service",
+    )
+    init.set_defaults(func=cmd_studio_init)
+    doctor = subparsers.add_parser(
+        "doctor", help="Inspect local service and research readiness", parents=[json_parent]
+    )
+    doctor.set_defaults(func=cmd_studio_doctor)
+
+    environments = subparsers.add_parser(
+        "environments",
+        help="Prepare verifiable coding tasks without launching compute",
+        parents=[json_parent],
+    )
+    environments_sub = environments.add_subparsers(dest="environments_command", required=True)
+    coding_build = environments_sub.add_parser("build-coding", parents=[json_parent])
+    coding_build.add_argument("--output", required=True)
+    coding_build.set_defaults(func=cmd_coding_environments)
+    coding_inspect = environments_sub.add_parser("inspect-coding", parents=[json_parent])
+    coding_inspect.add_argument("--dataset", required=True)
+    coding_inspect.add_argument("--split", choices=("train", "dev", "confirmation"))
+    coding_inspect.set_defaults(func=cmd_coding_environments)
+    coding_export = environments_sub.add_parser("export-nemo", parents=[json_parent])
+    coding_export.add_argument("--dataset", required=True)
+    coding_export.add_argument("--output", required=True)
+    coding_export.add_argument("--archive")
+    coding_export.add_argument("--nemo-gym-revision", required=True)
+    coding_export.add_argument("--bashgym-revision", required=True)
+    coding_export.add_argument("--sandbox-image", required=True)
+    coding_export.set_defaults(func=cmd_coding_environments)
+
     manifest = subparsers.add_parser(
         "manifest",
         help="Show agent-readable command map",
@@ -5762,6 +6036,16 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_connection = argparse.ArgumentParser(add_help=False)
     workspace_default = os.environ.get("BASHGYM_WORKSPACE_ID")
     credential_default = os.environ.get("BASHGYM_CAMPAIGN_CREDENTIAL_REF")
+    from bashgym.config import get_bashgym_dir
+    from bashgym.studio import read_profile
+
+    try:
+        studio_profile = read_profile(get_bashgym_dir())
+    except (ValueError, OSError):
+        studio_profile = None
+    if studio_profile:
+        workspace_default = workspace_default or studio_profile["workspace_id"]
+        credential_default = credential_default or studio_profile["credential_ref"]
     campaign_connection.add_argument(
         "--workspace-id",
         default=workspace_default,
@@ -6277,7 +6561,28 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[json_parent, campaign_connection],
     )
     research_prepare.add_argument("--session-id")
-    research_prepare.set_defaults(func=cmd_campaign_setup_context)
+    research_prepare.add_argument(
+        "--template-id", help="Compile an exact installed template from approved registered inputs"
+    )
+    research_prepare.add_argument(
+        "--definition-digest", help="Exact installed template digest from setup context"
+    )
+    research_prepare.add_argument("--expected-version", type=int)
+    research_prepare.add_argument("--onboarding-id")
+    research_prepare.add_argument("--campaign-id")
+    research_prepare.add_argument("--campaign-title")
+    research_prepare.add_argument(
+        "--stop-rules", help="JSON file with explicit scientific stop limits"
+    )
+    research_prepare.add_argument(
+        "--controller-lease-key-ref", help="Existing private controller lease secret reference"
+    )
+    research_prepare.add_argument(
+        "--write-inputs",
+        action="store_true",
+        help="Save validated private inputs for later research onboard --apply",
+    )
+    research_prepare.set_defaults(func=cmd_research_prepare)
 
     research_context = research_sub.add_parser(
         "context",
@@ -6535,6 +6840,15 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[json_parent],
     )
     training_sub = training.add_subparsers(dest="training_command", required=True)
+
+    compare_recipes = training_sub.add_parser(
+        "compare-recipes",
+        help="Compare two measured optimization runs with matching input contracts",
+        parents=[json_parent],
+    )
+    compare_recipes.add_argument("--baseline", required=True, help="Baseline run record JSON")
+    compare_recipes.add_argument("--candidate", required=True, help="Candidate run record JSON")
+    compare_recipes.set_defaults(func=cmd_training_compare_recipes)
 
     training_start = training_sub.add_parser(
         "start",
@@ -7139,6 +7453,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
+    except ApiRequestError as exc:
+        print(f"{exc.code}: {exc}", file=sys.stderr)
+        _emit(
+            {"title": "BashGym API Error", "ok": False, "error": exc.as_dict()},
+            as_json=bool(getattr(args, "json", False)),
+        )
+        return 8
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         if getattr(args, "command", None) == "campaign":
             return _campaign_error(args, exc)

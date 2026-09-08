@@ -241,11 +241,19 @@ class CampaignApiClient:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             raise self._http_error(exc) from exc
-        except urllib.error.URLError as exc:
+        except TimeoutError as exc:
+            raise CampaignClientError(
+                "campaign_api_timeout",
+                "The BashGym campaign API did not respond before the request deadline. "
+                "Check bashgym doctor and read campaign state before retrying a mutation.",
+                retryable=method.upper() == "GET",
+            ) from exc
+        except (urllib.error.URLError, ConnectionError) as exc:
             raise CampaignClientError(
                 "campaign_api_unavailable",
-                "The BashGym campaign API is unavailable.",
-                retryable=True,
+                "The BashGym campaign API is unavailable. "
+                "Check bashgym doctor and read campaign state before retrying a mutation.",
+                retryable=method.upper() == "GET",
             ) from exc
         if not body:
             return {}

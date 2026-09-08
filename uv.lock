@@ -329,17 +329,19 @@ dependencies = [
     { name = "pillow" },
     { name = "psutil" },
     { name = "pydantic" },
-    { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "pyyaml" },
-    { name = "reportlab" },
     { name = "typing-extensions" },
     { name = "uvicorn" },
     { name = "watchdog" },
 ]
 
 [package.optional-dependencies]
+compat = [
+    { name = "python-docx" },
+    { name = "reportlab" },
+]
 data-designer = [
     { name = "data-designer" },
     { name = "pandas" },
@@ -357,6 +359,10 @@ dev = [
 ]
 nemo-customizer = [
     { name = "nemo-microservices" },
+]
+reports = [
+    { name = "python-docx" },
+    { name = "reportlab" },
 ]
 training = [
     { name = "accelerate" },
@@ -397,11 +403,13 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.0.0" },
-    { name = "python-docx", specifier = ">=1.1.0" },
+    { name = "python-docx", marker = "extra == 'compat'", specifier = ">=1.1.0" },
+    { name = "python-docx", marker = "extra == 'reports'", specifier = ">=1.1.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.7" },
     { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "reportlab", specifier = ">=4.0.0" },
+    { name = "reportlab", marker = "extra == 'compat'", specifier = ">=4.0.0" },
+    { name = "reportlab", marker = "extra == 'reports'", specifier = ">=4.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "torch", marker = "extra == 'training'", specifier = ">=2.1.0" },
     { name = "transformers", marker = "extra == 'training'", specifier = ">=4.36.0" },
@@ -410,7 +418,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.27.0" },
     { name = "watchdog", specifier = ">=4.0.0" },
 ]
-provides-extras = ["training", "dev", "data-designer", "training-optimized", "nemo-customizer"]
+provides-extras = ["reports", "compat", "training", "dev", "data-designer", "training-optimized", "nemo-customizer"]
 
 [[package]]
 name = "black"

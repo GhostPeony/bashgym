@@ -113,6 +113,8 @@ export interface GuidedSetupStepReceipt {
   previous_receipt_digest: string | null
   created_at: string
   receipt_digest: string
+  actor_id?: string
+  authority_scope?: 'workspace'
 }
 
 export interface GuidedSetupSession {
@@ -132,7 +134,27 @@ export interface GuidedSetupSession {
   updated_at: string
 }
 
+export interface PreparationInventory {
+  schema_version: 'bashgym.preparation_inventory.v1'
+  workspace_id: string
+  checked_at: string
+  candidates: Record<
+    'models' | 'data' | 'evaluation' | 'compute',
+    Array<{
+      candidate_id: string
+      label: string
+      evidence: 'registered_metadata'
+      execution_verified: false
+    }>
+  >
+  reason_codes: string[]
+  truncated: boolean
+  training_started: false
+  execution_verified: false
+}
+
 export interface GuidedSetupContext {
+  preparation_inventory?: PreparationInventory
   schema_version: 'guided_setup_context.v1'
   workspace_id: string
   templates: GuidedSetupTemplate[]
@@ -399,21 +421,28 @@ function parseBindingChoice(value: unknown): GuidedSetupBindingChoice | null {
 }
 
 function parseStepReceipt(value: unknown): GuidedSetupStepReceipt | null {
-  const item = exact(value, [
-    'schema_version',
-    'receipt_id',
-    'session_id',
-    'version',
-    'step',
-    'selection_id',
-    'state_digest',
-    'previous_receipt_id',
-    'previous_receipt_digest',
-    'created_at',
-    'receipt_digest'
-  ])
+  const item = exact(
+    value,
+    [
+      'schema_version',
+      'receipt_id',
+      'session_id',
+      'version',
+      'step',
+      'selection_id',
+      'state_digest',
+      'previous_receipt_id',
+      'previous_receipt_digest',
+      'created_at',
+      'receipt_digest'
+    ],
+    ['actor_id', 'authority_scope']
+  )
   if (
     !item ||
+    (item.actor_id !== undefined && !safeString(item.actor_id)) ||
+    (item.authority_scope !== undefined && item.authority_scope !== 'workspace') ||
+    (item.actor_id === undefined) !== (item.authority_scope === undefined) ||
     item.schema_version !== 'guided_setup_step_receipt.v1' ||
     !safeString(item.receipt_id, stepReceiptId) ||
     !safeString(item.session_id, sessionId) ||
@@ -496,16 +525,83 @@ function parseSession(value: unknown): GuidedSetupSession | null {
   return item as unknown as GuidedSetupSession
 }
 
-export function parseGuidedSetupContext(value: unknown): GuidedSetupContext | null {
+function parsePreparationInventory(
+  value: unknown,
+  workspaceId: unknown
+): PreparationInventory | null {
   const item = exact(value, [
     'schema_version',
     'workspace_id',
-    'templates',
-    'installations',
-    'session',
+    'checked_at',
+    'candidates',
     'reason_codes',
-    'truncation'
+    'truncated',
+    'training_started',
+    'execution_verified'
   ])
+  const candidates = item
+    ? exact(item.candidates, ['models', 'data', 'evaluation', 'compute'])
+    : null
+  if (
+    !item ||
+    item.schema_version !== 'bashgym.preparation_inventory.v1' ||
+    item.workspace_id !== workspaceId ||
+    typeof item.checked_at !== 'string' ||
+    !Number.isFinite(Date.parse(item.checked_at)) ||
+    !candidates ||
+    item.training_started !== false ||
+    item.execution_verified !== false ||
+    typeof item.truncated !== 'boolean' ||
+    !safeReasonCodes(item.reason_codes)
+  )
+    return null
+  for (const kind of ['models', 'data', 'evaluation', 'compute']) {
+    const rows = candidates[kind]
+    if (
+      !Array.isArray(rows) ||
+      rows.length > 100 ||
+      rows.some((value) => {
+        const row = exact(
+          value,
+          ['candidate_id', 'label', 'evidence', 'execution_verified'],
+          ['project_id', 'record_id', 'record_digest', 'source_registry', 'next_action']
+        )
+        return (
+          !row ||
+          !safeString(row.candidate_id) ||
+          typeof row.label !== 'string' ||
+          row.label.length < 1 ||
+          row.label.length > 160 ||
+          (row.project_id !== undefined && !safeString(row.project_id)) ||
+          (row.record_id !== undefined && !safeString(row.record_id)) ||
+          (row.record_digest !== undefined && !safeString(row.record_digest, hexDigest, 64)) ||
+          (row.source_registry !== undefined && row.source_registry !== 'experiment_ledger') ||
+          (row.next_action !== undefined && row.next_action !== 'validate_registered_binding') ||
+          privateLabelCanary.test(row.label) ||
+          row.evidence !== 'registered_metadata' ||
+          row.execution_verified !== false
+        )
+      })
+    )
+      return null
+  }
+  return item as unknown as PreparationInventory
+}
+
+export function parseGuidedSetupContext(value: unknown): GuidedSetupContext | null {
+  const item = exact(
+    value,
+    [
+      'schema_version',
+      'workspace_id',
+      'templates',
+      'installations',
+      'session',
+      'reason_codes',
+      'truncation'
+    ],
+    ['preparation_inventory']
+  )
   if (
     !item ||
     item.schema_version !== 'guided_setup_context.v1' ||
@@ -515,6 +611,11 @@ export function parseGuidedSetupContext(value: unknown): GuidedSetupContext | nu
     !Array.isArray(item.installations) ||
     item.installations.length > guidedSetupLimit ||
     !safeReasonCodes(item.reason_codes)
+  )
+    return null
+  if (
+    item.preparation_inventory !== undefined &&
+    !parsePreparationInventory(item.preparation_inventory, item.workspace_id)
   )
     return null
   const templates = item.templates.map((value): GuidedSetupTemplate | null => {
@@ -801,8 +902,10 @@ export function buildGuidedSetupView(context: GuidedSetupContext): GuidedSetupVi
     options = context.installations.map((item) => ({
       id: item.installation_id,
       label: item.installation_id,
-      detail: 'Registered local/private installation',
-      selectable: item.ready,
+      detail: item.ready ? 'Registered installation' : 'Registered installation · bindings needed',
+      // Registration can be selected before its recipe inputs are bound. The
+      // doctor and validation gate still require every selected binding.
+      selectable: true,
       reasonCodes: item.reason_codes
     }))
   } else if (bindingKinds.includes(currentStep as GuidedBindingKind) && installation && template) {

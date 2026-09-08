@@ -16,6 +16,36 @@ or the user asks for them. Use plain technical language; do not invent slogans.
 
 ## Drive the experiment loop
 
+For a new personal installation, run `bashgym init --agent-host codex` (or
+`hermes` / `claude`) and `bashgym doctor --json`. Initialization installs the
+reviewed skills and prepares scoped access to the existing campaign service;
+it does not choose a learner or start training. The local profile supplies the
+workspace and credential reference to subsequent CLI commands. A browser is
+optional: exchange the short-lived pairing code in its login form, never a URL.
+The research agent's provider and the learner's model are separate choices.
+Resume with `bashgym research prepare --json` and the existing guided setup
+draft. Inspect readiness findings; package presence alone is not recipe proof.
+
+For an already approved execution environment, compile its exact registered
+inputs with `research prepare --template-id`. Read `research prepare --help` and
+supply the reviewed definition digest, saved draft version, campaign identity,
+title, explicit stop rules and existing controller lease secret reference.
+Resolve reported missing inputs without substituting assets. The default call
+only plans; `--write-inputs` saves the private contract and pinned inputs for the
+existing `research onboard` coordinator. Review that contract and apply only
+preparation. Shared browser and agent drafts retain their session identity.
+Changed approvals or selections require reconciliation before preparation can
+continue. This path neither acquires models nor configures an unregistered
+execution environment. Present the resulting READY contract and stop until
+the user gives a later explicit Start.
+
+Data generation is an experiment intervention. When available, use the existing
+NeMo Data Designer integration for agent-authored generation recipes, validators,
+and traceable datasets. Keep it optional in the local controller install. Bind
+generated data and its split/provenance to the proposal and evaluate the trained
+candidate on the fixed held-out suite. A generation success is not evidence of
+model improvement.
+
 1. Read `bashgym research state` and put its objective, fixed evaluation,
    latest comparison, stop conditions, and next action into the host's goal and
    plan.

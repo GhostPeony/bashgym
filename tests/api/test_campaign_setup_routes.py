@@ -2,6 +2,8 @@
 
 import sqlite3
 
+import pytest
+
 from bashgym.api.campaign_setup_routes import campaign_setup_router
 from bashgym.api.routes import create_app
 from bashgym.campaigns.artifacts import ArtifactSealer
@@ -464,3 +466,193 @@ def test_context_with_session_fails_closed_without_seal_authority(tmp_path, monk
 
     assert resumed.status_code >= 400
     assert "PRIVATE-SEAL-CANARY" not in resumed.text
+
+
+@pytest.mark.parametrize("first_surface", ["browser", "agent"])
+def test_paired_browser_and_scoped_agent_share_verified_draft(
+    tmp_path,
+    monkeypatch,
+    first_surface,
+):
+    from fastapi.testclient import TestClient
+
+    from bashgym.api import database
+    from bashgym.api.auth import AuthMiddleware
+    from bashgym.api.auth_routes import router as auth_router
+    from bashgym.campaigns.contracts import AutonomyProfile
+
+    monkeypatch.setenv("BASHGYM_MODE", "headless")
+    monkeypatch.setattr(database, "_DB_PATH", tmp_path / "auth.db")
+    database.init_db()
+    browser, repository, _refresh = campaign_client(tmp_path)
+    _recovery, definition, draft = _register_setup(browser, repository)
+    auth = browser.app.state.campaign_auth_service
+    human = auth.issue_refresh_credential(
+        actor_id="local-operator",
+        autonomy_profile=AutonomyProfile.DESKTOP_USER,
+        workspace_ids=("workspace-a",),
+    )
+    agent_grant = auth.issue_refresh_credential(
+        actor_id="studio-codex",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-a",),
+    )
+    browser.app.include_router(auth_router)
+    browser.app.add_middleware(AuthMiddleware)
+    browser.headers.update({"X-Requested-With": "XMLHttpRequest"})
+    paired = browser.post(
+        "/api/auth/local/pair",
+        json={"code": database.issue_local_pairing(human.credential_id, 1)},
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert paired.status_code == 200, paired.text
+    agent = TestClient(browser.app)
+    agent.headers.update(bearer(exchange(agent, agent_grant.raw_token)))
+    assert not agent.cookies
+    clients = {"browser": browser, "agent": agent}
+    actors = {"browser": "local-operator", "agent": "studio-codex"}
+    second_surface = "agent" if first_surface == "browser" else "browser"
+    session_id = "setupsess_77777777777777777777777777777777"
+    steps = [
+        ("template", definition.template_id),
+        ("installation", INSTALLATION_ID),
+        *draft["bindings"].items(),
+    ]
+    for version, (step, selection_id) in enumerate(steps):
+        surface = first_surface if version % 2 == 0 else second_surface
+        client = clients[surface]
+        context = client.get(
+            "/api/campaigns/setup/context",
+            params={"workspace_id": "workspace-a"},
+        )
+        assert context.status_code == 200, context.text
+        if version:
+            assert context.json()["session"]["session_id"] == session_id
+            assert context.json()["session"]["version"] == version
+        body = dict(
+            workspace_id="workspace-a",
+            session_id=session_id,
+            expected_version=version,
+            step=step,
+            selection_id=selection_id,
+        )
+        headers = {"Idempotency-Key": f"shared-step-{version}"}
+        advanced = client.post("/api/campaigns/setup/session", json=body, headers=headers)
+        assert advanced.status_code == 200, advanced.text
+        assert advanced.json()["receipt"]["actor_id"] == actors[surface]
+        replay = client.post("/api/campaigns/setup/session", json=body, headers=headers)
+        assert replay.status_code == 200
+        assert replay.json() == advanced.json()
+        assert replay.headers["X-BashGym-Replayed"] == "true"
+        other = clients[second_surface if surface == first_surface else first_surface]
+        # Another writer cannot inherit the original actor's idempotent mutation.
+        collision = other.post("/api/campaigns/setup/session", json=body, headers=headers)
+        assert collision.status_code == 409
+        stale = other.post(
+            "/api/campaigns/setup/session",
+            json=body,
+            headers={"Idempotency-Key": f"stale-{version}"},
+        )
+        assert stale.status_code == 409
+        resumed = other.get(
+            "/api/campaigns/setup/context",
+            params={"workspace_id": "workspace-a", "session_id": session_id},
+        )
+        assert resumed.status_code == 200, resumed.text
+        assert resumed.json()["session"] == advanced.json()["session"]
+    assert resumed.json()["session"]["ready_for_validation"] is True
+    for client in clients.values():
+        assert (
+            client.get(
+                "/api/campaigns/setup/context",
+                params={"workspace_id": "workspace-b", "session_id": session_id},
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                "/api/campaigns/setup/session",
+                json={**body, "workspace_id": "workspace-b"},
+                headers={"Idempotency-Key": "wrong-workspace"},
+            ).status_code
+            == 403
+        )
+    with sqlite3.connect(repository.db_path) as connection:
+        assert (
+            connection.execute("SELECT COUNT(*) FROM campaign_guided_setup_sessions").fetchone()[0]
+            == 1
+        )
+        assert connection.execute("SELECT COUNT(*) FROM campaigns").fetchone()[0] == 0
+
+
+def test_shared_setup_still_requires_read_and_create_capabilities(tmp_path, monkeypatch):
+    import bashgym.campaigns.auth as auth_module
+    from bashgym.campaigns.contracts import Capability
+
+    http, repository, refresh = campaign_client(tmp_path)
+    _recovery, definition, _draft = _register_setup(http, repository)
+    token = exchange(http, refresh.raw_token)
+    monkeypatch.setattr(
+        auth_module, "capabilities_for", lambda _profile: frozenset({Capability.CAMPAIGN_READ})
+    )
+    assert (
+        http.get(
+            "/api/campaigns/setup/context",
+            params={"workspace_id": "workspace-a"},
+            headers=bearer(token),
+        ).status_code
+        == 200
+    )
+    assert (
+        http.post(
+            "/api/campaigns/setup/session",
+            json=dict(
+                workspace_id="workspace-a",
+                session_id="setupsess_88888888888888888888888888888888",
+                expected_version=0,
+                step="template",
+                selection_id=definition.template_id,
+            ),
+            headers={**bearer(token), "Idempotency-Key": "read-only-denied"},
+        ).status_code
+        == 403
+    )
+    monkeypatch.setattr(auth_module, "capabilities_for", lambda _profile: frozenset())
+    assert (
+        http.get(
+            "/api/campaigns/setup/context",
+            params={"workspace_id": "workspace-a"},
+            headers=bearer(token),
+        ).status_code
+        == 403
+    )
+
+
+def test_setup_inventory_uses_authenticated_workspace_and_repository_root(tmp_path, monkeypatch):
+    http, repository, refresh = campaign_client(tmp_path)
+    _register_setup(http, repository)
+    token = exchange(http, refresh.raw_token)
+    calls = []
+
+    def inventory(root, workspace_id):
+        calls.append((root, workspace_id))
+        return {"workspace_id": workspace_id, "execution_verified": False}
+
+    monkeypatch.setattr("bashgym.campaigns.preparation_inventory.preparation_inventory", inventory)
+    response = http.get(
+        "/api/campaigns/setup/context",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(token),
+    )
+    assert response.status_code == 200, response.text
+    assert calls == [(repository.db_path.parent.parent, "workspace-a")]
+    assert response.json()["preparation_inventory"]["execution_verified"] is False
+    assert (
+        http.get(
+            "/api/campaigns/setup/context",
+            params={"workspace_id": "workspace-b"},
+            headers=bearer(token),
+        ).status_code
+        == 403
+    )
+    assert len(calls) == 1

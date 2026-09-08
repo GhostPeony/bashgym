@@ -36,6 +36,7 @@ docs/assets/*
 !docs/assets/autoresearch-architecture.png
 !docs/FRONTEND_DESIGN_GUIDELINES.md
 !docs/GETTING_STARTED.md
+!docs/RESEARCH_STUDIO.md
 !docs/PLATFORM_OVERVIEW.md
 !docs/TRAINING_DATA_GUIDE.md
 !docs/training/

@@ -589,7 +589,11 @@ class GuidedSetupRepository:
         response = self._verify_receipt_chain(connection, receipt)
         state = json.loads(str(row["state_json"]))
         if (
-            int(row["version"]) != int(receipt["version"])
+            any(
+                str(row[key]) != str(receipt[key]) or str(state[key]) != str(row[key])
+                for key in ("workspace_id", "actor_id", "session_id")
+            )
+            or int(row["version"]) != int(receipt["version"])
             or str(row["state_digest"]) != str(receipt["state_digest"])
             or canonical_hash(state) != str(row["state_digest"])
             or state != json.loads(str(receipt["state_json"]))
@@ -669,6 +673,53 @@ class GuidedSetupRepository:
             "updated_at": str(state["updated_at"]),
         }
 
+    def _session_row(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        workspace_id: str,
+        actor_id: str,
+        session_id: str | None,
+        workspace_shared: bool,
+    ) -> sqlite3.Row | None:
+        # The authenticated API explicitly opts into workspace draft authority.
+        # Legacy drafts remain private until their owner advances them through
+        # that boundary. The marker is part of the sealed state, never authority
+        # supplied by a client. Callers must verify the returned state before use.
+        if not self._session_tables_available(connection):
+            return None
+        query = "SELECT * FROM campaign_guided_setup_sessions WHERE workspace_id=?"
+        args: list[Any] = [workspace_id]
+        if workspace_shared:
+            query += (
+                " AND (actor_id=? OR json_extract(state_json, '$.authority_scope')='workspace')"
+            )
+        else:
+            query += " AND actor_id=?"
+        args.append(actor_id)
+        if session_id is not None:
+            query += " AND session_id=?"
+            args.append(session_id)
+        query += " ORDER BY updated_at DESC, session_id DESC, actor_id LIMIT 2"
+        rows = connection.execute(query, args).fetchall()
+        if session_id is not None and len(rows) > 1:
+            raise GuidedSetupConflictError("guided setup session identity is ambiguous")
+        return rows[0] if rows else None
+
+    def has_resumable_session(self, *, workspace_id: str, actor_id: str) -> bool:
+        """Check whether discovery needs a sealer, without creating schema or keys."""
+        with self._connection() as connection:
+            return (
+                self._session_row(
+                    connection,
+                    workspace_id=workspace_id,
+                    actor_id=actor_id,
+                    session_id=None,
+                    workspace_shared=True,
+                )
+                is not None
+            )
+
     def context(
         self,
         *,
@@ -676,6 +727,7 @@ class GuidedSetupRepository:
         actor_id: str,
         definitions: dict[str, AutoResearchTemplateDefinition],
         session_id: str | None = None,
+        workspace_shared: bool = False,
     ) -> dict[str, Any]:
         """Project public discovery and an optional verified resumable session."""
 
@@ -691,25 +743,25 @@ class GuidedSetupRepository:
             templates, templates_truncated = self.bounded_template_summaries(definitions)
             session = None
             reason_codes = ["setup_session_not_started"]
-            if session_id is not None:
-                reason_codes = ["setup_session_not_found"]
-                if self._session_tables_available(connection):
-                    row = connection.execute(
-                        """
-                        SELECT * FROM campaign_guided_setup_sessions
-                        WHERE workspace_id=? AND actor_id=? AND session_id=?
-                        """,
-                        (workspace_id, actor_id, session_id),
-                    ).fetchone()
-                    if row is not None:
-                        state, response = self._verified_session_state(connection, row)
-                        session = self._project_session(
-                            connection,
-                            state,
-                            definitions,
-                            response["receipt"],
-                        )
-                        reason_codes = list(session["reason_codes"])
+            if session_id is not None or workspace_shared:
+                if session_id is not None:
+                    reason_codes = ["setup_session_not_found"]
+                row = self._session_row(
+                    connection,
+                    workspace_id=workspace_id,
+                    actor_id=actor_id,
+                    session_id=session_id,
+                    workspace_shared=workspace_shared,
+                )
+                if row is not None:
+                    state, response = self._verified_session_state(connection, row)
+                    session = self._project_session(
+                        connection,
+                        state,
+                        definitions,
+                        response["receipt"],
+                    )
+                    reason_codes = list(session["reason_codes"])
             truncation_reasons = []
             if bindings_truncated:
                 truncation_reasons.append("bindings_truncated")
@@ -747,8 +799,9 @@ class GuidedSetupRepository:
         definitions: dict[str, AutoResearchTemplateDefinition],
         idempotency_key: str,
         now: datetime | None = None,
+        workspace_shared: bool = False,
     ) -> tuple[dict[str, Any], bool]:
-        """Persist one exact, ordered setup choice and its sealed receipt."""
+        """Persist one exact choice; workspace sharing must be authorized by the caller."""
 
         self._require_initialized()
         if (
@@ -772,25 +825,39 @@ class GuidedSetupRepository:
             }
         )
         with self._connection(immediate=True) as connection:
+            current = self._session_row(
+                connection,
+                workspace_id=workspace_id,
+                actor_id=actor_id,
+                session_id=session_id,
+                workspace_shared=workspace_shared,
+            )
+            # Keep the original storage owner to preserve legacy seals and FKs.
+            # The actual writer is sealed into each new shared receipt's state.
+            owner_actor_id = str(current["actor_id"]) if current is not None else actor_id
+            if current is not None:
+                self._verified_session_state(connection, current)
+            elif (
+                workspace_shared
+                and connection.execute(
+                    "SELECT 1 FROM campaign_guided_setup_sessions WHERE workspace_id=? AND session_id=?",
+                    (workspace_id, session_id),
+                ).fetchone()
+                is not None
+            ):
+                raise GuidedSetupConflictError("guided setup session identity is already private")
             replay = connection.execute(
                 """
                 SELECT * FROM campaign_guided_setup_step_receipts
                 WHERE workspace_id=? AND actor_id=? AND idempotency_key=?
                 """,
-                (workspace_id, actor_id, idempotency_key),
+                (workspace_id, owner_actor_id, idempotency_key),
             ).fetchone()
             if replay is not None:
                 if not hmac.compare_digest(str(replay["request_hash"]), request_hash):
                     raise GuidedSetupConflictError("guided setup step idempotency conflict")
                 return self._verify_step_receipt(replay), True
 
-            current = connection.execute(
-                """
-                SELECT * FROM campaign_guided_setup_sessions
-                WHERE workspace_id=? AND actor_id=? AND session_id=?
-                """,
-                (workspace_id, actor_id, session_id),
-            ).fetchone()
             previous_receipt_id: str | None = None
             previous_receipt_digest: str | None = None
             if current is None:
@@ -860,6 +927,10 @@ class GuidedSetupRepository:
 
             version = expected_version + 1
             created_at = _wire_time(now or datetime.now(UTC))
+            shared_state = workspace_shared or state.get("authority_scope") == "workspace"
+            if shared_state:
+                state["authority_scope"] = "workspace"
+                state["writer_actor_id"] = actor_id
             state["version"] = version
             state["completed_steps"] = list(_SESSION_STEPS[:version])
             state["updated_at"] = created_at
@@ -883,6 +954,9 @@ class GuidedSetupRepository:
                 "previous_receipt_digest": previous_receipt_digest,
                 "created_at": created_at,
             }
+            if shared_state:
+                receipt_base["actor_id"] = actor_id
+                receipt_base["authority_scope"] = "workspace"
             session_projection = self._project_session(connection, state, definitions, receipt_base)
             response_base = {
                 "schema_version": "guided_setup_session_mutation.v1",
@@ -892,7 +966,7 @@ class GuidedSetupRepository:
             authority = {
                 "receipt_id": receipt_id,
                 "workspace_id": workspace_id,
-                "actor_id": actor_id,
+                "actor_id": owner_actor_id,
                 "session_id": session_id,
                 "version": version,
                 "step": step,
@@ -925,7 +999,7 @@ class GuidedSetupRepository:
                 """,
                 (
                     workspace_id,
-                    actor_id,
+                    owner_actor_id,
                     session_id,
                     version,
                     state_json,
@@ -947,7 +1021,7 @@ class GuidedSetupRepository:
                 (
                     receipt_id,
                     workspace_id,
-                    actor_id,
+                    owner_actor_id,
                     session_id,
                     version,
                     step,

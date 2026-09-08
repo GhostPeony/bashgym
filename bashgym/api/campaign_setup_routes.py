@@ -235,18 +235,28 @@ def get_guided_setup_context(request: Request):
         campaigns, _auth, _service = _services(request)
         principal = _principal(request)
         principal.require(workspace_id, Capability.CAMPAIGN_READ)
-        authority = None
-        if session_id is not None:
+        setup = GuidedSetupRepository.open_binding_registry(campaigns.db_path)
+        if session_id is not None or setup.has_resumable_session(
+            workspace_id=workspace_id,
+            actor_id=principal.actor_id,
+        ):
             from bashgym.api.campaign_routes import _campaign_authority_sealer
 
-            authority = _campaign_authority_sealer(request)
-        setup = GuidedSetupRepository.open_binding_registry(campaigns.db_path, sealer=authority)
-        return setup.context(
+            setup.sealer = _campaign_authority_sealer(request)
+        result = setup.context(
             workspace_id=workspace_id,
             actor_id=principal.actor_id,
             session_id=session_id,
+            workspace_shared=True,
             definitions=_autoresearch_definitions(request),
         )
+        from bashgym.campaigns.preparation_inventory import preparation_inventory
+
+        result["preparation_inventory"] = preparation_inventory(
+            campaigns.db_path.parent.parent,
+            workspace_id,
+        )
+        return result
     except Exception as exc:
         _raise_setup_api(exc)
 
@@ -265,6 +275,7 @@ async def advance_guided_setup_session(request: Request, response: Response):
             actor_id=principal.actor_id,
             session_id=body.session_id,
             expected_version=body.expected_version,
+            workspace_shared=True,
             step=body.step,
             selection_id=body.selection_id,
             definitions=_autoresearch_definitions(request),

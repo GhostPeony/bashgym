@@ -59,6 +59,13 @@ def _result(
             "schema_version": "bashgym.research_diagnostic_result.v1",
             "probe_family": "plasticity_probe",
             "status": "completed",
+            "input_binding": {
+                "parent_model_digest": "b" * 64,
+                "candidate_model_digest": "c" * 64,
+                "source_bundle_digest": "d" * 64,
+                "recipe_digest": recipe_digest,
+                "data_scope_ids": ["probe-split-v1"],
+            },
             "comparison_contract": {
                 "metric_direction": "maximize",
                 "fixed_step_budget": 20,
@@ -97,6 +104,41 @@ def _controls() -> tuple[AutoResearchProposalControl, ...]:
         _control("probe-one", ExperimentRole.DIAGNOSTIC, "candidate-one"),
         _control("probe-two", ExperimentRole.DIAGNOSTIC, "candidate-two"),
     )
+
+
+def test_legacy_unbound_plasticity_history_is_readable_but_ineligible():
+    result = _result(
+        "probe-one",
+        initial=0.2,
+        final=0.6,
+        retention_delta=0,
+        cumulative_steps=160,
+        recorded_at=NOW,
+    )
+    legacy_projection = dict(result.projection)
+    legacy_projection.pop("input_binding")
+    legacy = result.model_copy(update={"projection": legacy_projection})
+    serialized = legacy.model_dump_json()
+    restored = AutoResearchDiagnosticResult.model_validate_json(serialized)
+    second = _result(
+        "probe-two",
+        initial=0.2,
+        final=0.4,
+        retention_delta=0,
+        cumulative_steps=240,
+        recorded_at=NOW + timedelta(minutes=1),
+    )
+    assert (
+        build_plasticity_comparison(diagnostic_results=(result, second), controls=_controls())[
+            "status"
+        ]
+        == "comparable"
+    )
+    comparison = build_plasticity_comparison(
+        diagnostic_results=(restored, second), controls=_controls()
+    )
+    assert comparison["status"] == "insufficient_comparable_probes"
+    assert restored.model_dump_json() == serialized
 
 
 def test_comparable_probes_distinguish_plasticity_loss_from_retention() -> None:

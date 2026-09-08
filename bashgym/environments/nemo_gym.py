@@ -396,12 +396,19 @@ def _validated_bundle_members(archive_path: Path) -> tuple[dict[str, bytes], dic
         raise ValueError("NeMo Gym bundle file inventory must be sorted and unique")
     if set(members) != {"bundle_manifest.json", *expected_paths}:
         raise ValueError("NeMo Gym bundle archive contains unbound files")
+    server_id = manifest.get("resources_server_id", "bashgym_star_count")
+    if server_id == "bashgym_star_count":
+        required_splits = ("train", "validation")
+    elif server_id == "bashgym_personal_coding":
+        required_splits = ("train", "dev", "confirmation")
+    else:
+        raise ValueError("unsupported NeMo Gym resources server")
+    resource_root = PurePosixPath("resources_servers") / server_id
     required = {
         "environment_contract.json",
-        (_RESOURCE_ROOT / "app.py").as_posix(),
-        (_RESOURCE_ROOT / "configs/bashgym_star_count.yaml").as_posix(),
-        (_RESOURCE_ROOT / "data/train.jsonl").as_posix(),
-        (_RESOURCE_ROOT / "data/validation.jsonl").as_posix(),
+        (resource_root / "app.py").as_posix(),
+        (resource_root / f"configs/{server_id}.yaml").as_posix(),
+        *((resource_root / f"data/{split}.jsonl").as_posix() for split in required_splits),
     }
     if not required.issubset(members):
         raise ValueError("NeMo Gym bundle archive is missing required runtime files")

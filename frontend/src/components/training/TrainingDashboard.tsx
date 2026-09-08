@@ -68,6 +68,7 @@ export function TrainingDashboard() {
   const [exportResult, setExportResult] = useState<{
     train: number
     val: number
+    exportId: string
     trainPath?: string
   } | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -103,6 +104,14 @@ export function TrainingDashboard() {
     }
   }, [currentRun, isRefreshing, updateMetrics])
 
+  const handleDownloadExport = useCallback(async (split: 'train' | 'val', exportId: string) => {
+    setExportError(null)
+    const response = await trainingApi.downloadExport(split, exportId)
+    if (!response.ok) {
+      setExportError(response.error || `The ${split} export could not be downloaded`)
+    }
+  }, [])
+
   const handleExportAndDownload = useCallback(async () => {
     setExporting(true)
     setExportResult(null)
@@ -110,25 +119,35 @@ export function TrainingDashboard() {
     setHubResult(null)
     setHubError(null)
 
-    const exportResp = await trainingApi.exportExamples()
-    if (!exportResp.ok || !exportResp.data?.success) {
-      setExportError(exportResp.data?.message || exportResp.error || 'Export failed')
+    try {
+      const exportResp = await trainingApi.exportExamples()
+      if (!exportResp.ok || !exportResp.data?.success) {
+        setExportError(exportResp.data?.message || exportResp.error || 'Export failed')
+        return
+      }
+      const exportId = exportResp.data.export_id
+      if (typeof exportId !== 'string' || !/^[0-9a-f]{64}$/.test(exportId)) {
+        setExportError(
+          'The export response did not identify a valid dataset. Export again before downloading or uploading.'
+        )
+        return
+      }
+
+      // Keep the exact immutable export identity for both downloads and upload.
+      const trainPath = exportResp.data.train_path
+      setExportResult({
+        train: exportResp.data.train_count,
+        val: exportResp.data.val_count,
+        exportId,
+        trainPath: trainPath ? trainPath.replace(/[/\\][^/\\]+$/, '') : undefined
+      })
+      await handleDownloadExport('train', exportId)
+    } catch {
+      setExportError('The export could not be completed. Try again.')
+    } finally {
       setExporting(false)
-      return
     }
-
-    // Extract directory from train_path for HF upload
-    const trainPath = exportResp.data.train_path
-    setExportResult({
-      train: exportResp.data.train_count,
-      val: exportResp.data.val_count,
-      trainPath: trainPath ? trainPath.replace(/[/\\][^/\\]+$/, '') : undefined
-    })
-
-    // Trigger browser download of train split
-    await trainingApi.downloadExport('train')
-    setExporting(false)
-  }, [])
+  }, [handleDownloadExport])
 
   const handlePushToHub = useCallback(async () => {
     if (!exportResult?.trainPath) return
@@ -139,6 +158,7 @@ export function TrainingDashboard() {
 
     const resp = await hfApi.uploadDataset({
       local_path: exportResult.trainPath,
+      export_id: exportResult.exportId,
       repo_name: 'bashgym-training-data',
       private: true
     })
@@ -657,7 +677,7 @@ export function TrainingDashboard() {
                     </button>
                     {exportResult && (
                       <button
-                        onClick={() => trainingApi.downloadExport('val')}
+                        onClick={() => handleDownloadExport('val', exportResult.exportId)}
                         className="btn-secondary flex items-center gap-2"
                       >
                         <Download className="w-4 h-4" />

@@ -140,6 +140,7 @@ class DatasetUploadRequest(BaseModel):
     repo_name: str = Field(description="Name for the dataset repo")
     private: bool = Field(default=True)
     metadata: dict[str, Any] | None = None
+    export_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class DatasetResponse(BaseModel):
@@ -940,7 +941,18 @@ async def upload_dataset(request: DatasetUploadRequest):
             detail="Path must be within the workspace, data directory, or BashGym home",
         )
 
-    if resolved.is_file():
+    if request.export_id is not None:
+        from bashgym.factory.export_artifacts import resolve_training_export
+
+        if not resolved.is_dir():
+            raise HTTPException(status_code=400, detail="An export identity requires its directory")
+        local_path = resolved
+        try:
+            train_file = resolve_training_export(local_path, "train", request.export_id)
+            val_file = resolve_training_export(local_path, "val", request.export_id)
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    elif resolved.is_file():
         if resolved.suffix.lower() != ".jsonl":
             raise HTTPException(status_code=400, detail="Dataset source must be a JSONL file")
         local_path = resolved.parent
@@ -948,6 +960,10 @@ async def upload_dataset(request: DatasetUploadRequest):
         val_file = None
     else:
         local_path = resolved
+        if next(local_path.glob("personal_*_manifest.json"), None) is not None:
+            raise HTTPException(
+                status_code=400, detail="Select an export_id to upload a recorded personal dataset"
+            )
         train_file = next(
             (
                 candidate
@@ -979,6 +995,8 @@ async def upload_dataset(request: DatasetUploadRequest):
             **(request.metadata or {}),
             "bashgym_source_file": train_file.name,
         }
+        if request.export_id is not None:
+            metadata["bashgym_export_id"] = request.export_id
         url = await asyncio.to_thread(
             manager.upload_training_data,
             local_path=local_path,

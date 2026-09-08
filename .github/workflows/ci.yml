@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
       - uses: astral-sh/setup-uv@v8.3.2
         with:
@@ -58,23 +58,23 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: Linux
-            python: "3.10"
+            python: '3.10'
             full_suite: false
           - os: ubuntu-latest
             platform: Linux
-            python: "3.11"
+            python: '3.11'
             full_suite: false
           - os: ubuntu-latest
             platform: Linux
-            python: "3.12"
+            python: '3.12'
             full_suite: true
           - os: windows-latest
             platform: Windows
-            python: "3.12"
+            python: '3.12'
             full_suite: false
           - os: macos-latest
             platform: macOS
-            python: "3.12"
+            python: '3.12'
             full_suite: false
     steps:
       - uses: actions/checkout@v7
@@ -89,19 +89,19 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install locked test environment
-        run: uv sync --frozen --extra dev
+        run: uv sync --frozen --extra dev --extra compat
 
       # This runs first on every supported interpreter/OS. It builds the public
       # wheel and proves its installed CLI/skills work outside the checkout.
       - name: Packaging and installed-wheel tests
         env:
-          OLLAMA_ENABLED: "false"
+          OLLAMA_ENABLED: 'false'
         run: uv run --with pip --with setuptools --with wheel pytest tests/packaging -m "not network and not integration and not slow" -x -v --tb=short --timeout=300
 
       - name: Remaining non-network tests
         if: matrix.full_suite
         env:
-          OLLAMA_ENABLED: "false"
+          OLLAMA_ENABLED: 'false'
         # The retired February multi-agent Orchestrator is quarantined until its
         # separately planned removal; it is not part of AutoResearch or the
         # supported contributor loop.
@@ -141,6 +141,66 @@ jobs:
       - name: Build web application
         run: npm run web:build
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v8.3.2
+
+      - name: Build and verify browser release wheel
+        working-directory: .
+        run: |
+          uv build --wheel
+          python scripts/check_web_wheel.py dist/bashgym-*.whl
+
+      - name: Upload browser release wheel
+        uses: actions/upload-artifact@v7
+        with:
+          name: bashgym-studio-wheel
+          path: dist/bashgym-*.whl
+          if-no-files-found: error
+
+  studio-installed-release:
+    name: Installed Studio / ${{ matrix.os }}
+    needs: frontend-quality
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: .studio-proof/bin/python
+          - os: windows-latest
+            python: .studio-proof/Scripts/python.exe
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: actions/download-artifact@v7
+        with:
+          name: bashgym-studio-wheel
+          path: studio-wheel
+      - name: Install base release without training extras
+        shell: bash
+        run: |
+          uv venv .studio-proof --python 3.12
+          uv pip install --python "${{ matrix.python }}" studio-wheel/bashgym-*.whl
+      - name: Verify installed CLI, pairing, setup, and browser assets
+        shell: bash
+        run: '"${{ matrix.python }}" -I scripts/check_studio_install.py --output studio-install-proof.json'
+      - name: Verify isolated Windows supervisor lifecycle
+        if: runner.os == 'Windows'
+        shell: bash
+        run: '"${{ matrix.python }}" -I scripts/check_studio_supervisor.py --output studio-supervisor-proof.json'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: studio-install-proof-${{ matrix.os }}
+          path: studio-*-proof.json
+          if-no-files-found: error
+
   electron-native-build:
     name: Electron Unpacked / ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
@@ -164,7 +224,7 @@ jobs:
     env:
       # Produce unsigned CI artifacts; release signing belongs in a separate,
       # secret-bearing release workflow.
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v7
 

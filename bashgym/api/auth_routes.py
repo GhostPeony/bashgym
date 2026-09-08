@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel, Field
 
 from bashgym.api.database import (
     SESSION_MAX_AGE_DAYS,
@@ -31,6 +32,32 @@ GITHUB_USER_URL = "https://api.github.com/user"
 GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
 
 COOKIE_NAME = "bashgym_session"
+
+
+class LocalPairRequest(BaseModel):
+    code: str = Field(min_length=16, max_length=128)
+
+
+@router.post("/local/pair")
+async def pair_local_browser(body: LocalPairRequest, request: Request):
+    """Exchange a locally issued code; no authority is accepted from the browser."""
+    from bashgym.api.database import consume_local_pairing
+
+    origin = request.headers.get("origin")
+    expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+    if request.headers.get("X-Requested-With") != "XMLHttpRequest" or (
+        origin and origin != expected_origin
+    ):
+        return JSONResponse({"error": "Same-origin pairing required"}, status_code=403)
+    token = consume_local_pairing(body.code)
+    if token is None:
+        return JSONResponse({"error": "Pairing code is invalid or expired"}, status_code=401)
+    response = JSONResponse({"ok": True})
+    response.headers["Cache-Control"] = "no-store"
+    _set_session_cookie(response, token, request)
+    return response
+
+
 # In-memory store for OAuth state tokens (short-lived, CSRF protection)
 _oauth_states: dict[str, float] = {}
 _MAX_PENDING_STATES = 100  # cap to prevent memory DoS from spamming /api/auth/github

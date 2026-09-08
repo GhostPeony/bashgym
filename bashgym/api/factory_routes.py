@@ -645,26 +645,55 @@ async def designer_job_status(job_id: str):
 
 @router.get("/designer/pipelines")
 async def list_designer_pipelines():
-    """List available DataDesigner pipelines with their column DAGs."""
+    """Inspect backend imports and pipeline metadata, without invoking a provider."""
+    import os
+
+    readiness = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "scope": "backend_process_imports",
+        "data_designer_importable": False,
+        "pandas_importable": False,
+        "pipeline_builders_importable": False,
+        "browser_provider": "nvidia",
+        "credential_configured": bool(os.environ.get("NVIDIA_API_KEY", "").strip()),
+        "provider_verified": False,
+        "generation_verified": False,
+        "recipe_verified": False,
+    }
     try:
-        from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
-        from bashgym.factory.designer_pipelines import PIPELINES
+        from bashgym.factory import data_designer, designer_pipelines
     except ImportError:
-        return {"pipelines": [], "available": False}
+        return {"pipelines": [], "available": False, "readiness": readiness}
+
+    readiness.update(
+        data_designer_importable=data_designer.DATA_DESIGNER_AVAILABLE,
+        pandas_importable=data_designer.PANDAS_AVAILABLE,
+        pipeline_builders_importable=designer_pipelines.DATA_DESIGNER_AVAILABLE,
+    )
+    available = all(
+        readiness[key]
+        for key in ("data_designer_importable", "pandas_importable", "pipeline_builders_importable")
+    )
+    if not available:
+        return {"pipelines": [], "available": False, "readiness": readiness}
 
     pipelines = []
-    for name, builder_fn in PIPELINES.items():
+    for name, builder_fn in designer_pipelines.PIPELINES.items():
         doc = builder_fn.__doc__ or ""
         first_line = doc.strip().split("\n")[0] if doc.strip() else name
         columns: list[str] = []
         try:
-            builder = builder_fn(PipelineConfig(pipeline=name))
-            columns = DataDesignerPipeline._builder_column_names(builder)
+            builder = builder_fn(data_designer.PipelineConfig(pipeline=name))
+            columns = data_designer.DataDesignerPipeline._builder_column_names(builder)
         except Exception as e:  # introspection is best-effort
             logger.debug("column introspection failed for %s: %s", name, e)
         pipelines.append(DesignerPipelineInfo(name=name, description=first_line, columns=columns))
 
-    return {"pipelines": [p.model_dump() for p in pipelines], "available": True}
+    return {
+        "pipelines": [p.model_dump() for p in pipelines],
+        "available": True,
+        "readiness": readiness,
+    }
 
 
 @router.get("/designer/models")

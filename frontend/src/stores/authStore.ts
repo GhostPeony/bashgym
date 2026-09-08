@@ -14,6 +14,7 @@ interface AuthState {
   isAuthenticated: boolean
   isLoading: boolean
   checkAuth: () => Promise<void>
+  pair: (code: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -21,6 +22,28 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
   isLoading: true,
+
+  pair: async (code) => {
+    const response = await fetch('/api/auth/local/pair', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ code })
+    })
+    if (!response.ok) {
+      throw new Error(
+        response.status === 401 || response.status === 403
+          ? 'That pairing code was not accepted. Use a fresh code from your research service.'
+          : 'The research service could not complete pairing. Check the connection and retry.'
+      )
+    }
+    await useAuthStore.getState().checkAuth()
+    if (!useAuthStore.getState().isAuthenticated) {
+      throw new Error(
+        'Pairing finished, but the session could not be verified. Check that cookies are enabled and retry.'
+      )
+    }
+  },
 
   checkAuth: async () => {
     try {

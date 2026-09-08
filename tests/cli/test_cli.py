@@ -398,6 +398,7 @@ def test_activate_autoresearch_plan_binds_remote_heldout_without_ssh_or_local_ro
     assert first_party_stage.input_files == (source_bundle.resolve(),)
     assert first_party_stage.script_args == ()
     assert first_party_stage.diagnostic_contract.runner_id == ("bashgym-scientific-diagnostics")
+    assert first_party_stage.diagnostic_contract.runner_version == "2"
 
 
 def test_canvas_action_commands_send_origin_and_runtime_metadata(monkeypatch, capsys):
@@ -2659,6 +2660,13 @@ def test_training_dpo_pairs_cli_validates_strict_metadata(tmp_path, capsys):
                     "chosen_trace_id": "gold-1",
                     "rejected_trace_id": "failed-1",
                     "pair_generation_method": "trace_pair",
+                    "conditioning_verified": True,
+                    "preference_context": {
+                        "task_id": "test-fix",
+                        "snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "tools_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    },
+                    "conditioning_digest": "5dce4ab1e8f56ca96bcc26bbfc12127a6daa8f0b03b903018b436b04d37cdfa2",
                     "label_strength": "verified_success_vs_failure",
                     "label_source": "trace_verifier",
                     "chosen_quality_score": 0.95,
@@ -2991,6 +2999,13 @@ def test_training_runcard_cli_requires_strict_dpo_pair_evidence(tmp_path, capsys
                     "chosen_trace_id": "gold-1",
                     "rejected_trace_id": "failed-1",
                     "pair_generation_method": "trace_pair",
+                    "conditioning_verified": True,
+                    "preference_context": {
+                        "task_id": "test-fix",
+                        "snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "tools_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    },
+                    "conditioning_digest": "5dce4ab1e8f56ca96bcc26bbfc12127a6daa8f0b03b903018b436b04d37cdfa2",
                     "label_strength": "verified_success_vs_failure",
                     "label_source": "trace_verifier",
                     "chosen_quality_score": 0.95,

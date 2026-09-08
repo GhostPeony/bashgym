@@ -42,6 +42,45 @@ _AGENT_ACTIONS = frozenset(
     }
 )
 
+_METHOD_CONTRACT_KEYS = {
+    "reward_integrity_probe": ("reward_spec_digest", "canary_suite_id"),
+    "preference_integrity_probe": ("preference_dataset_digest", "labeling_contract_digest"),
+    "teacher_gap_probe": (
+        "evaluation_suite_id",
+        "metric_direction",
+        "teacher_model_digest",
+        "student_model_digest",
+        "output_validation_contract_digest",
+    ),
+    "recovery_trace_probe": (
+        "recovery_dataset_digest",
+        "reader_contract_digest",
+        "confidence_level",
+    ),
+}
+
+
+def method_contracts_for_proposal(proposal: StudyProposal | None) -> dict[str, dict[str, Any]]:
+    """Read selected scientific inputs from the persisted proposal, not probe history."""
+    if proposal is None:
+        return {}
+    values: dict[str, Any] = {}
+    conflicts: set[str] = set()
+    for recipe in (proposal.dataset_recipe, proposal.training_recipe, proposal.evaluation_recipe):
+        parameters = recipe.get("parameters", {})
+        for key, value in {
+            **recipe,
+            **(parameters if isinstance(parameters, Mapping) else {}),
+        }.items():
+            if key in values and values[key] != value:
+                conflicts.add(key)
+            values[key] = value
+    return {
+        family: {key: deepcopy(values[key]) for key in (*keys, "data_scope_ids")}
+        for family, keys in _METHOD_CONTRACT_KEYS.items()
+        if all(key in values and key not in conflicts for key in (*keys, "data_scope_ids"))
+    }
+
 
 def latest_data_quality_for_outcome(
     dataset_versions: Sequence[Mapping[str, Any]],
@@ -175,7 +214,9 @@ def _typed_runner_methods(proposal: StudyProposal | None) -> tuple[str, ...]:
 
 def method_evidence_from_diagnostic_results(
     diagnostic_results: Sequence[Mapping[str, Any] | Any],
-) -> dict[str, bool | float]:
+    *,
+    expected_contracts: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Return latest complete contract-bound measurements for method readiness."""
 
     probe_contracts = {
@@ -234,7 +275,8 @@ def method_evidence_from_diagnostic_results(
             and contract.get("confidence_level") == 0.95
         )
 
-    latest_by_probe: dict[str, dict[str, bool | float]] = {}
+    latest_by_probe: dict[str, dict[str, Any]] = {}
+    matched_contracts: dict[str, dict[str, Any]] = {}
     for result in diagnostic_results:
         value = getattr(result, "projection", result)
         if not isinstance(value, Mapping):
@@ -245,6 +287,20 @@ def method_evidence_from_diagnostic_results(
             continue
         contract = value.get("comparison_contract")
         if not isinstance(contract, Mapping) or not valid_contract(str(probe_family), contract):
+            continue
+        expected = (expected_contracts or {}).get(str(probe_family))
+        keys = (*_METHOD_CONTRACT_KEYS[str(probe_family)], "data_scope_ids")
+        if expected is None or any(
+            key not in expected or key not in contract or contract[key] != expected[key]
+            for key in keys
+        ):
+            continue
+        if probe_family == "recovery_trace_probe" and (
+            contract.get("statistical_method") != "paired_hoeffding_one_sided"
+            or contract.get("sampling_unit") != "independent_paired_case"
+            or re.fullmatch(r"[0-9a-f]{64}", str(contract.get("sampling_design_digest") or ""))
+            is None
+        ):
             continue
         required = probe_contract["measurements"]
         measurements = value.get("measurements")
@@ -263,13 +319,16 @@ def method_evidence_from_diagnostic_results(
             if math.isfinite(numeric):
                 observed[str(item["name"])] = numeric
         if set(observed) == required:
+            matched_contracts[str(probe_family)] = deepcopy(dict(contract))
             verified_key = probe_contract["verified_key"]
             latest_by_probe[str(probe_family)] = (
                 {str(verified_key): True, **observed} if verified_key else observed
             )
-    combined: dict[str, bool | float] = {}
+    combined: dict[str, Any] = {}
     for probe_family in probe_contracts:
         combined.update(latest_by_probe.get(probe_family, {}))
+    if combined:
+        combined["comparison_contracts"] = matched_contracts
     return combined
 
 
@@ -309,6 +368,15 @@ def build_decision_packet(
         selection_evidence.update(latest_data_quality)
     if latest_outcome is not None:
         selection_evidence.update(latest_outcome.result.metrics)
+    # Historical quality/metric rows do not carry the selected input contract.
+    # These readiness gates must come from the scoped diagnostic projection.
+    for key in (
+        "reward_spec_verified",
+        "preference_contract_verified",
+        "teacher_metric_gap",
+        "recovery_lift_lower_bound",
+    ):
+        selection_evidence.pop(key, None)
     if method_evidence is not None:
         selection_evidence.update(method_evidence)
     packet = {
@@ -375,11 +443,15 @@ def build_decision_packet(
     }
     if latest_data_quality is not None:
         packet["data_quality"] = deepcopy(dict(latest_data_quality))
+    packet["method_selection"]["comparison_contracts"] = deepcopy(
+        dict((method_evidence or {}).get("comparison_contracts", {}))
+    )
     return packet
 
 
 __all__ = [
     "build_decision_packet",
     "latest_data_quality_for_outcome",
+    "method_contracts_for_proposal",
     "method_evidence_from_diagnostic_results",
 ]

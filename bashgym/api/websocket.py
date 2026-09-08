@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field
 
 from bashgym._compat import UTC
@@ -183,6 +183,35 @@ class WSMessage:
         return json.dumps(asdict(self))
 
 
+def _web_session_authorized(websocket: WebSocket) -> bool:
+    """Recheck cookie expiry and local parent authority at every delivery boundary."""
+    if os.environ.get("BASHGYM_MODE", "").lower() not in {"web", "headless"}:
+        return True
+    from bashgym.api.auth_routes import COOKIE_NAME
+    from bashgym.api.database import get_local_session_grant, get_session_user
+
+    token = websocket.cookies.get(COOKIE_NAME)
+    user = get_session_user(token) if token else None
+    if user is None:
+        return False
+    if user["github_id"] != -1:
+        return True
+    from bashgym.api.campaign_routes import _services
+    from bashgym.campaigns.auth import CampaignAuthenticationError, CampaignAuthService
+
+    grant = get_local_session_grant(token)
+    if grant is None:
+        return False
+    try:
+        auth = getattr(websocket.app.state, "campaign_auth_service", None)
+        if not isinstance(auth, CampaignAuthService):
+            _repository, auth, _service = _services(websocket)
+        auth.authenticate_local_session(grant)
+    except (CampaignAuthenticationError, HTTPException):
+        return False
+    return True
+
+
 class ConnectionManager:
     """
     Manages WebSocket connections and broadcasts.
@@ -219,7 +248,7 @@ class ConnectionManager:
         welcome = WSMessage(
             type="connected", payload={"message": "Connected to Bash Gym WebSocket"}
         )
-        await websocket.send_text(welcome.to_json())
+        await self._send_authorized(websocket, welcome)
 
     def disconnect(self, websocket: WebSocket) -> None:
         """Remove a connection."""
@@ -254,9 +283,19 @@ class ConnectionManager:
     async def send_personal(self, websocket: WebSocket, message: WSMessage) -> None:
         """Send a message to a specific connection."""
         try:
-            await websocket.send_text(message.to_json())
+            await self._send_authorized(websocket, message)
         except Exception:
             self.disconnect(websocket)
+
+    async def _send_authorized(self, websocket: WebSocket, message: WSMessage) -> bool:
+        if not _web_session_authorized(websocket):
+            try:
+                await websocket.close(code=4401, reason="Authentication required")
+            finally:
+                self.disconnect(websocket)
+            return False
+        await websocket.send_text(message.to_json())
+        return True
 
     async def broadcast(self, message: WSMessage) -> None:
         """Broadcast a message to all connections + optional Discord webhook."""
@@ -271,9 +310,9 @@ class ConnectionManager:
             )
             disconnected = set()
 
-            for connection in self.active_connections:
+            for connection in tuple(self.active_connections):
                 try:
-                    await connection.send_text(message.to_json())
+                    await self._send_authorized(connection, message)
                 except Exception as e:
                     logger.warning(f"[WebSocket] Failed to send to connection: {e}")
                     disconnected.add(connection)
@@ -352,9 +391,9 @@ class ConnectionManager:
 
         disconnected = set()
 
-        for connection in self.subscriptions[topic]:
+        for connection in tuple(self.subscriptions[topic]):
             try:
-                await connection.send_text(message.to_json())
+                await self._send_authorized(connection, message)
             except Exception:
                 disconnected.add(connection)
 
@@ -536,12 +575,14 @@ class ConnectionManager:
                         continue
                     hint = build_campaign_hint(source)
                     try:
-                        await websocket.send_text(
+                        if not await self._send_authorized(
+                            websocket,
                             WSMessage(
                                 type=MessageType.CAMPAIGN_HINT,
                                 payload=hint.model_dump(mode="json"),
-                            ).to_json()
-                        )
+                            ),
+                        ):
+                            break
                     except Exception:
                         self.disconnect(websocket)
                         break
@@ -1201,12 +1242,12 @@ async def handle_websocket(websocket: WebSocket) -> None:
     - Incoming messages
     """
     # In web mode, verify session cookie before accepting connection
-    if os.environ.get("BASHGYM_MODE", "").lower() == "web":
-        from bashgym.api.auth_routes import COOKIE_NAME
-        from bashgym.api.database import get_session_user
-
-        token = websocket.cookies.get(COOKIE_NAME)
-        if not token or not get_session_user(token):
+    if os.environ.get("BASHGYM_MODE", "").lower() in {"web", "headless"}:
+        origin = websocket.headers.get("origin")
+        if origin and origin.split("://", 1)[-1] != websocket.headers.get("host"):
+            await websocket.close(code=1008)
+            return
+        if not _web_session_authorized(websocket):
             await websocket.close(code=4401, reason="Authentication required")
             return
 

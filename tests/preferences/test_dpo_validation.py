@@ -4,7 +4,7 @@ from bashgym.preferences import validate_preference_pair_records, validate_prefe
 
 
 def _strict_record():
-    return {
+    record = {
         "id": "pair-1",
         "prompt": "Fix the failing test",
         "chosen_response": "Run pytest, inspect the failure, patch the function.",
@@ -25,6 +25,15 @@ def _strict_record():
             "decontamination_status": "checked",
         },
     }
+    from bashgym.preferences.conditioning import conditioning_binding
+
+    context = {"task_id": "test-fix", "snapshot_digest": "a" * 64, "tools_digest": "b" * 64}
+    record["metadata"].update(
+        preference_context=context,
+        conditioning_verified=True,
+        conditioning_digest=conditioning_binding(record["prompt"], context),
+    )
+    return record
 
 
 def test_strict_preference_pair_validation_accepts_full_metadata():

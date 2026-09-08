@@ -1,8 +1,8 @@
 """Authentication middleware supporting desktop (no-auth) and web (cookie/API key) modes.
 
 Modes:
-- Desktop / dev (BASHGYM_MODE != 'web'): all requests pass through, no auth required
-- Web (BASHGYM_MODE == 'web'): API routes require a valid session cookie or X-API-Key header
+- Desktop / dev: requests pass through for the existing desktop transport.
+- Web / headless: API routes require a valid session or scoped API credentials.
 """
 
 import hmac
@@ -32,7 +32,7 @@ PROTECTED_NON_API_PATHS = {
 
 
 def _is_web_mode() -> bool:
-    return os.environ.get("BASHGYM_MODE", "").lower() == "web"
+    return os.environ.get("BASHGYM_MODE", "").lower() in {"web", "headless"}
 
 
 def _requires_auth(path: str) -> bool:
@@ -61,7 +61,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """Dual-mode auth middleware.
 
     Desktop/dev: pass-through (no auth enforced).
-    Web: session cookie or API key required for /api/* routes.
+    Web/headless: session cookie or API key required for /api/* routes.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -80,16 +80,32 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not _requires_auth(path):
             return await call_next(request)
 
+        # These routes perform their own refresh/access credential validation.
+        # Cookie-authenticated campaign requests continue through the checks below.
+        if path == "/api/campaign-auth/exchange":
+            return await call_next(request)
+        if path.startswith("/api/campaign-agent/") and request.headers.get("Authorization"):
+            # Attachment tokens have their own scoped verifier at every route.
+            return await call_next(request)
+        if path.startswith(("/api/campaigns", "/api/campaign-auth/")) and request.headers.get(
+            "Authorization"
+        ):
+            from bashgym.api.campaign_routes import _principal
+            from bashgym.campaigns.auth import CampaignAuthenticationError
+
+            try:
+                _principal(request)
+            except CampaignAuthenticationError:
+                return JSONResponse({"detail": "Authentication required"}, status_code=401)
+            return await call_next(request)
+
         # CSRF protection for state-changing requests
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             if request.headers.get("X-Requested-With") != "XMLHttpRequest":
-                # Allow multipart form uploads (they set their own content type)
-                content_type = request.headers.get("content-type", "")
-                if "multipart/form-data" not in content_type:
-                    return JSONResponse(
-                        {"detail": "Missing CSRF header"},
-                        status_code=403,
-                    )
+                return JSONResponse(
+                    {"detail": "Missing CSRF header"},
+                    status_code=403,
+                )
 
         # --- Authenticate ---
 
@@ -105,6 +121,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if token:
             user = get_session_user(token)
             if user:
+                if user["github_id"] == -1:
+                    from bashgym.api.campaign_routes import _principal
+                    from bashgym.campaigns.auth import CampaignAuthenticationError
+
+                    try:
+                        _principal(request)
+                    except CampaignAuthenticationError:
+                        return JSONResponse({"detail": "Authentication required"}, status_code=401)
                 request.state.user = user
                 return await call_next(request)
 

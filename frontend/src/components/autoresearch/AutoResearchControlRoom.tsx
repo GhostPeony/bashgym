@@ -14,6 +14,9 @@ import {
 import { clsx } from 'clsx'
 
 import { campaignApi } from '../../services/api'
+import { ExperimentJournal } from '../studio/ExperimentJournal'
+import { ProposalEditor } from '../studio/ProposalEditor'
+import type { StudioView } from '../studio/studioNavigation'
 import { wsService } from '../../services/websocket'
 import type {
   CampaignArtifact,
@@ -78,6 +81,7 @@ import {
   clearGuidedSetupIdempotencyKey,
   getOrCreateGuidedSetupIdempotencyKey,
   getOrCreateGuidedSetupSessionId,
+  persistGuidedSetupSessionId,
   readGuidedSetupSessionId
 } from './guidedSetupSessionStorage'
 
@@ -93,6 +97,8 @@ const CANCELLABLE_STATUSES = new Set([
 ])
 
 export interface ControlRoomContentProps {
+  studioView?: StudioView
+  journal?: ReactNode
   model: ControlRoomViewModel
   campaigns: CampaignRecord[]
   selectedCampaignId: string | null
@@ -1021,9 +1027,11 @@ function ActivityPanel({
   events,
   pages,
   onLoadEvents,
-  onInspect
+  onInspect,
+  standalone = false
 }: Pick<ControlRoomContentProps, 'events' | 'pages' | 'onLoadEvents'> & {
   onInspect: (selection: CampaignEvidenceSelection) => void
+  standalone?: boolean
 }) {
   const orderedEvents = [...events].sort(
     (left, right) =>
@@ -1032,7 +1040,7 @@ function ActivityPanel({
   return (
     <FixedPanel
       title="Campaign log"
-      heightClass="h-[240px] lg:absolute lg:inset-0 lg:h-auto"
+      heightClass={standalone ? 'h-[300px]' : 'h-[240px] lg:absolute lg:inset-0 lg:h-auto'}
       sectionId="activity"
       action={
         pages.eventsError || pages.eventsHasMore ? (
@@ -1101,6 +1109,116 @@ function SnapshotControlRoom(props: ControlRoomContentProps & { model: SnapshotV
   const handleOpenRecovery = useCallback(() => {
     recoveryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [])
+  if (props.studioView) {
+    return (
+      <div className="studio-control-room">
+        <CommandStrip
+          model={model}
+          campaigns={props.campaigns}
+          selectedCampaignId={props.selectedCampaignId}
+          onSelect={props.onSelect}
+          onTransition={props.onTransition}
+          onRefresh={props.onRetry}
+          onOpenRecovery={handleOpenRecovery}
+          onArchive={props.onArchive}
+          transitionPending={props.transitionPending}
+          closeoutPending={props.outcome?.lifecycleLabel === 'Closeout pending'}
+          library={props.campaignLibrary}
+        />
+        <NeedsYouLine model={model} />
+        {props.studioView === 'home' ? (
+          <>
+            <section className="studio-objective">
+              <p className="studio-eyebrow">Current objective</p>
+              <h2>{model.snapshot.campaign.objective}</h2>
+              <a className="studio-text-link" href="#experiments">
+                Open the experiment journal →
+              </a>
+            </section>
+            <div className="studio-home-grid">
+              <section className="studio-paper">
+                <p className="studio-eyebrow">Latest result</p>
+                <h2>{props.outcome?.verdictLabel || 'Evidence is taking shape'}</h2>
+                <p>
+                  {props.outcome?.lifecycleReason ||
+                    'Verified evaluation results will appear here as the campaign progresses.'}
+                </p>
+              </section>
+              <section className="studio-paper studio-next">
+                <p className="studio-eyebrow">Next step</p>
+                <h2>
+                  {model.needsYou
+                    ? 'Your attention is needed'
+                    : model.snapshot.campaign.status === 'ready'
+                      ? 'Review the contract, then Start'
+                      : 'Follow the current experiment'}
+                </h2>
+                <p>
+                  {model.needsYou?.sentence ||
+                    'Open the journal to inspect progress, compare results, and review the recorded decision.'}
+                </p>
+                <a className="studio-text-link" href="#experiments">
+                  Review evidence →
+                </a>
+              </section>
+            </div>
+            <JourneyStepper model={model} />
+          </>
+        ) : props.studioView === 'resources' ? (
+          <div className="studio-content-grid">
+            <ConfigPanel model={model} />
+            <EvidenceMetricsPanel
+              model={model}
+              artifacts={props.artifacts}
+              pages={props.pages}
+              onLoadArtifacts={props.onLoadArtifacts}
+              onInspect={setEvidenceSelection}
+              outcome={props.outcome}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="studio-content-grid">
+              {props.journal}
+              <aside className="studio-evidence" aria-label="Evidence panel">
+                <h2>Evidence &amp; context</h2>
+                <ActiveWorkIndicator model={model} />
+                <EvidenceMetricsPanel
+                  model={model}
+                  artifacts={props.artifacts}
+                  pages={props.pages}
+                  onLoadArtifacts={props.onLoadArtifacts}
+                  onInspect={setEvidenceSelection}
+                  outcome={props.outcome}
+                />
+                <ActivityPanel
+                  standalone
+                  events={props.events}
+                  pages={props.pages}
+                  onLoadEvents={props.onLoadEvents}
+                  onInspect={setEvidenceSelection}
+                />
+              </aside>
+            </div>
+            <section className="studio-paper" aria-label="Human review">
+              <h2>Human review</h2>
+              {props.humanOversight}
+            </section>
+          </>
+        )}
+        <div ref={recoveryRef}>
+          <details className="studio-recovery">
+            <summary>Campaign recovery</summary>
+            {props.campaignRecovery}
+          </details>
+        </div>
+        <CampaignEvidenceDialog
+          selection={evidenceSelection}
+          onClose={() => setEvidenceSelection(null)}
+        />
+      </div>
+    )
+  }
   return (
     <div className="space-y-3">
       <ControlRoomHeader
@@ -1178,6 +1296,60 @@ function SnapshotControlRoom(props: ControlRoomContentProps & { model: SnapshotV
 
 export function ControlRoomContent(props: ControlRoomContentProps) {
   const { model, campaigns } = props
+  if (props.studioView === 'setup') return <div className="studio-setup">{props.guidedSetup}</div>
+  if (props.studioView && model.kind !== 'snapshot')
+    return (
+      <div className="studio-empty-state">
+        <section className="studio-objective">
+          <p className="studio-eyebrow">
+            {model.kind === 'empty' ? 'A fresh page' : 'Connection status'}
+          </p>
+          <h2>
+            {model.kind === 'empty'
+              ? 'Your next experiment begins with a question.'
+              : model.kind === 'loading'
+                ? 'Opening your research journal…'
+                : 'Your research service needs attention.'}
+          </h2>
+          <p role={model.kind === 'error' || model.kind === 'offline' ? 'alert' : 'status'}>
+            {model.message}
+          </p>
+          {model.kind === 'empty' ? (
+            <a className="studio-primary" href="#setup">
+              Prepare an experiment →
+            </a>
+          ) : (
+            <button
+              className="studio-primary"
+              onClick={props.onRetry}
+              disabled={model.kind === 'loading'}
+            >
+              Retry connection
+            </button>
+          )}
+        </section>
+        {campaigns.length > 0 && (
+          <CampaignSelector
+            campaigns={campaigns}
+            selectedCampaignId={props.selectedCampaignId}
+            onSelect={props.onSelect}
+          />
+        )}
+        {props.campaignLibrary}
+        <ol className="studio-loop" aria-label="Experiment sequence">
+          {['Hypothesis', 'Change', 'Run history', 'Comparison', 'Decision'].map((label, index) => (
+            <li key={label}>
+              <span>0{index + 1}</span>
+              {label}
+            </li>
+          ))}
+        </ol>
+        <p className="studio-caption">
+          A fixed evaluation suite makes every experiment comparable. Prepare the campaign, review
+          its contract, then explicitly Start when you are ready.
+        </p>
+      </div>
+    )
   if (model.kind !== 'snapshot') {
     const displayModel =
       campaigns.length === 0 && model.kind === 'empty'
@@ -1352,7 +1524,7 @@ function guidedSetupDraft(context: GuidedSetupContext, stopRules: AutoResearchSt
   }
 }
 
-export function AutoResearchControlRoom() {
+export function AutoResearchControlRoom({ studioView }: { studioView?: StudioView } = {}) {
   const [transitionPending, setTransitionPending] = useState<LifecycleAction | null>(null)
   const [humanQueue, setHumanQueue] = useState<ParsedHumanWorkQueuePublicV1 | null>(null)
   const [humanQueueError, setHumanQueueError] = useState<string | null>(null)
@@ -1418,7 +1590,7 @@ export function AutoResearchControlRoom() {
   const activeCampaignStatus = detail?.snapshot?.campaign.status ?? null
   const humanSnapshotCursor = detail?.snapshot?.latest_event_cursor ?? null
   const shouldLoadGuidedSetup = Boolean(
-    workspace && !workspace.loading && workspace.campaigns.length === 0
+    workspace && !workspace.loading && (workspace.campaigns.length === 0 || studioView === 'setup')
   )
   const archivedCampaignIds = useCampaignArchiveStore((state) =>
     selectArchivedIds(state, workspaceId)
@@ -1512,11 +1684,27 @@ export function AutoResearchControlRoom() {
           response.code === 'campaign_desktop_bridge_required' ? 'offline' : 'error'
         )
         setSetupError(
-          `Setup is read-only — the desktop connection isn't available. Changes unlock when it reconnects.${response.code ? ` (${response.code})` : ''}`
+          `Setup is read-only because the research service could not load this project's registrations. Retry the connection to resume your saved choices.${response.code ? ` (${response.code})` : ''}`
         )
         return
       }
       setSetupContext(response.data)
+      if (response.data.session) {
+        try {
+          persistGuidedSetupSessionId(
+            window.localStorage,
+            workspaceId,
+            response.data.session.session_id
+          )
+          setSetupSessionId(response.data.session.session_id)
+        } catch {
+          setSetupConnection('error')
+          setSetupError(
+            'This browser could not persist the shared setup session. Durable writes remain disabled.'
+          )
+          return
+        }
+      }
       setSetupConnection('live')
       setSetupError(null)
     },
@@ -1802,6 +1990,7 @@ export function AutoResearchControlRoom() {
     let activeSessionId: string
     try {
       activeSessionId =
+        setupContext.session?.session_id ??
         setupSessionId ??
         getOrCreateGuidedSetupSessionId(window.localStorage, workspaceId, randomAuthorityHex)
       if (!setupSessionId) setSetupSessionId(activeSessionId)
@@ -2266,6 +2455,30 @@ export function AutoResearchControlRoom() {
     <div className="h-full overflow-auto p-4">
       <div className="mx-auto max-w-[1240px]">
         <ControlRoomContent
+          studioView={studioView}
+          journal={
+            <div className="studio-journal">
+              {selectedCampaignId && detail && (
+                <ProposalEditor
+                  key={`${workspaceId}:${selectedCampaignId}`}
+                  workspaceId={workspaceId}
+                  campaignId={selectedCampaignId}
+                  version={detail.campaign.version}
+                  authoritative={model.kind === 'snapshot' && model.authoritative}
+                  latest={
+                    [...detail.proposals].sort((a, b) =>
+                      b.updated_at.localeCompare(a.updated_at)
+                    )[0]
+                  }
+                  onSubmitted={async () => {
+                    await refresh(workspaceId, selectedCampaignId)
+                    await loadLegacyDetail(workspaceId, selectedCampaignId)
+                  }}
+                />
+              )}
+              <ExperimentJournal detail={detail} outcome={outcome} />
+            </div>
+          }
           model={model}
           campaigns={visibleCampaigns}
           selectedCampaignId={selectedCampaignId || null}

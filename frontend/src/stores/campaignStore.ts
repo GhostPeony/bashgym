@@ -400,6 +400,7 @@ interface CampaignWorkspaceState {
   details: Record<string, CampaignDetailState>
   freshness: ControlRoomFreshness
   loadGeneration: number
+  campaignListLoaded: boolean
   loading: boolean
   error: string | null
   liveRefs: number
@@ -445,6 +446,7 @@ const emptyWorkspace = (): CampaignWorkspaceState => ({
   details: {},
   freshness: 'reconciling',
   loadGeneration: 0,
+  campaignListLoaded: false,
   loading: false,
   error: null,
   liveRefs: 0,
@@ -672,9 +674,10 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
           [workspaceId]: {
             ...workspace,
             campaigns,
+            campaignListLoaded: true,
             controller: responseData.controller,
             selectedCampaignId,
-            freshness: workspace.subscribed ? 'reconciling' : 'stale',
+            freshness: workspace.subscribed ? (campaigns.length ? 'reconciling' : 'live') : 'stale',
             loading: false,
             error: null
           }
@@ -1619,7 +1622,14 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
             connected: true,
             subscribed,
             connectionGeneration,
-            freshness: subscribed ? 'reconciling' : 'error',
+            freshness: subscribed
+              ? workspace.campaignListLoaded &&
+                !workspace.loading &&
+                !workspace.error &&
+                workspace.campaigns.length === 0
+                ? 'live'
+                : 'reconciling'
+              : 'error',
             details: Object.fromEntries(
               Object.entries(workspace.details).map(([campaignId, detail]) => {
                 const reconciliation = subscribed

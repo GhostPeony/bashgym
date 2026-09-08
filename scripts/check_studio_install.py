@@ -93,9 +93,10 @@ def check() -> dict:
         ]
         exported = generator.export_for_nemo(rows, root / "exports", train_split=0.5)
         assert exported["train_count"] == exported["val_count"] == 1
-        assert (
-            resolve_training_export(root / "exports", "train", exported["export_id"])
-            == exported["train"]
+        # Windows temporary directories can use an 8.3 alias while the resolver
+        # returns the canonical path. Verify file identity, not path spelling.
+        assert resolve_training_export(root / "exports", "train", exported["export_id"]).samefile(
+            exported["train"]
         )
         from bashgym.campaigns.export import CampaignExportSnapshot, export_campaign_evidence
 
